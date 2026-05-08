@@ -14,22 +14,24 @@ from core.tool_results import ToolResults
 from providers.lmstudio import LMStudioProvider
 
 
-
 # Create the app objects, wire them together, and run one coding task.
 def main() -> None:
     repo_root = Path(".").resolve()
     task = input("Task: ")
 
     session = Session(repo_root=repo_root)
+
     provider = LMStudioProvider(
         base_url=os.getenv("CODE_SQUID_BASE_URL", "http://127.0.0.1:1234/v1"),
         api_key=os.getenv("CODE_SQUID_API_KEY", "lm-studio"),
     )
+
     model_adapter = ModelAdapter(
         provider=provider,
         model_name=os.getenv("CODE_SQUID_MODEL", "qwen3.5-9b"),
     )
-    tool_executor = ToolExecutor(repo_root=repo_root)
+
+    tool_executor = ToolExecutor(repo_root=repo_root, session=session)
     tool_results = ToolResults()
     agent = CodingAgent(task=task)
 
@@ -40,8 +42,17 @@ def main() -> None:
         tool_results=tool_results,
         agent=agent,
     )
+
     loop.run()
 
+    # Print a small status line so it is obvious the loop stopped normally.
+    print("-> loop stopped")
+
+    # Print the tracked files so it is easy to see what the agent read and wrote.
+    print(f"files read: {sorted(session.files_read)}")
+    print(f"files written: {sorted(session.files_written)}")
+
+    # Print the full transcript after the run completes.
     for message in session.messages:
         print(f"\n[{message['role']}]")
         print(message["content"])
