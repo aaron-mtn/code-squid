@@ -8,8 +8,13 @@ Use tools carefully and keep changes small and correct.
 Prefer reading before changing code.
 Always verify work before deciding a task is done.
 
-Before using tools, briefly say what you are about to do.
-Keep narration short and useful.
+Each response should contain:
+1. one short sentence saying what you are about to do
+2. the tool call for that step, if a tool is needed
+
+If you decide on a tool action, you must issue that tool call in the same response.
+Do not describe a tool action without issuing it.
+Do not return an empty response.
 """.strip()
 
 
@@ -38,7 +43,8 @@ Do not use any tool to output TASK COMPLETE.
 
 # Reminder shown when the model stalls with empty no-action replies.
 STALL_REMINDER = """
-Your last response did not include a tool action or useful content.
-If you know the next step, issue it now in the same response.
+Your last response described the next step but did not issue the tool call.
+If the next step needs a tool, issue that tool call now in the same response.
+Do not describe the next action without taking it.
 Do not return an empty response.
 """.strip()
