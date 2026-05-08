@@ -6,12 +6,15 @@ class AgentLoop:
     # Store the parts needed to run the loop.
     # The loop depends on the session, model adapter, tool executor,
     # tool result formatter, and the coding agent behavior.
+    # It also keeps a small counter for repeated empty no-action turns
+    # so the loop can recover when the model stalls.
     def __init__(self, session, model_adapter, tool_executor, tool_results, agent) -> None:
         self.session = session
         self.model_adapter = model_adapter
         self.tool_executor = tool_executor
         self.tool_results = tool_results
         self.agent = agent
+        self.empty_turns = 0
 
     # Run the agent loop until the agent says it should stop.
     # Each loop iteration:
@@ -19,10 +22,12 @@ class AgentLoop:
     # 2. stores the assistant reply in the session
     # 3. prints the assistant reply for debugging
     # 4. prints the normalized action list for debugging
-    # 5. executes each tool action
-    # 6. prints each tool result for debugging
-    # 7. converts tool results into transcript messages
-    # 8. stores those result messages in the session
+    # 5. checks for repeated empty no-action turns
+    # 6. injects a reminder message if the model stalls
+    # 7. executes each tool action
+    # 8. prints each tool result for debugging
+    # 9. converts tool results into transcript messages
+    # 10. stores those result messages in the session
     def run(self) -> None:
         self.session.add_messages(*self.agent.initial_messages())
 
@@ -46,6 +51,22 @@ class AgentLoop:
             # returned no tool calls or when the parsed actions look wrong.
             print(f"actions: {reply['actions']}")
 
+            # Track repeated empty no-action turns.
+            # If the model returns no useful text and no actions, count that as
+            # a stalled turn. Otherwise reset the stall counter.
+            if self._is_empty_turn(reply):
+                self.empty_turns += 1
+            else:
+                self.empty_turns = 0
+
+            # If the model stalls for multiple turns in a row, inject a small
+            # reminder message to nudge it back into taking an action.
+            if self.empty_turns >= 2:
+                print("-> injecting stall reminder")
+                self.session.add_message(self.agent.stall_message())
+                self.empty_turns = 0
+                continue
+
             # Execute each requested tool action and collect the raw results.
             results = []
             for action in reply["actions"]:
@@ -61,3 +82,10 @@ class AgentLoop:
             # Convert tool results into transcript messages and store them.
             result_messages = self.tool_results.messages_from_results(results)
             self.session.add_messages(*result_messages)
+
+    # Return True when the model produced neither useful text nor tool actions.
+    # This is used to detect stalled turns so the loop can recover.
+    def _is_empty_turn(self, reply: dict) -> bool:
+        content = reply["message"]["content"].strip()
+        actions = reply["actions"]
+        return not content and not actions

@@ -1,5 +1,5 @@
 # agent/coding.py
-from agent.prompts import SYSTEM_PROMPT, task_prompt
+from agent.prompts import SYSTEM_PROMPT, STALL_REMINDER, task_prompt
 from tools import TOOLS
 
 
@@ -33,3 +33,10 @@ class CodingAgent:
             return "TASK COMPLETE" in content
 
         return False
+    
+    # Return the reminder message used when the model stalls.
+    def stall_message(self) -> dict:
+        return {
+            "role": "user",
+            "content": STALL_REMINDER,
+        }
