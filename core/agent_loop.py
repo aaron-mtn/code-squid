@@ -19,14 +19,17 @@ class AgentLoop:
     # 2. stores the assistant reply in the session
     # 3. prints the assistant reply for debugging
     # 4. prints the normalized action list for debugging
-    # 5. immediately injects a reminder if the model takes a non-final no-tool turn
-    # 6. executes each tool action
-    # 7. prints each tool result for debugging
-    # 8. converts tool results into transcript messages
-    # 9. stores those result messages in the session
+    # 5. injects a stall reminder if the model takes a non-final no-tool turn
+    # 6. avoids stacking the exact same reminder repeatedly
+    # 7. executes each tool action
+    # 8. prints each tool result for debugging
+    # 9. converts tool results into transcript messages
+    # 10. stores those result messages in the session
     def run(self) -> None:
+        # Start the transcript with the agent's initial system and user messages.
         self.session.add_messages(*self.agent.initial_messages())
 
+        # Keep going until the agent says the task is complete.
         while not self.agent.should_stop(self.session):
             # Ask the model for the next assistant reply and any tool actions.
             print("-> asking model")
@@ -48,10 +51,17 @@ class AgentLoop:
             print(f"actions: {reply['actions']}")
 
             # If the model did not issue any actions and the task is not done,
-            # inject the reminder immediately instead of allowing a free dead turn.
+            # inject the stall reminder immediately instead of allowing a free
+            # dead turn. Avoid appending the exact same reminder twice in a row,
+            # since repeated identical reminders just add transcript noise.
             if not reply["actions"] and not self.agent.should_stop(self.session):
-                print("-> injecting stall reminder")
-                self.session.add_message(self.agent.stall_message())
+                stall_message = self.agent.stall_message()
+                last_message = self.session.messages[-1] if self.session.messages else None
+
+                if last_message != stall_message:
+                    print("-> injecting stall reminder")
+                    self.session.add_message(stall_message)
+
                 continue
 
             # Execute each requested tool action and collect the raw results.

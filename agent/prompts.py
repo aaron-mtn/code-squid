@@ -15,14 +15,6 @@ Do not split them across separate turns.
 Do not describe a tool action without issuing it in the same response.
 Do not return an empty response.
 
-Example of a correct non-final response:
-- "I'm reading the calculator implementation to inspect the bug."
-- tool call: read_file(path="/repo/calculator.py")
-
-Example of an incorrect response:
-- "Now I'll read the calculator implementation."
-- no tool call
-
 If the task is complete, reply with exactly: TASK COMPLETE
 """.strip()
 
@@ -43,7 +35,7 @@ Use run_command when you need shell behavior, program execution, or verification
 
 Before the task is complete, every response must contain:
 1. one or two short sentences describing exactly what you are doing next
-2. exactly one tool call for that same step
+2. exactly one tool call in that same response
 
 The description and the tool call must be in the same response.
 Do not split them across separate turns.
