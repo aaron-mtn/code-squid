@@ -16,15 +16,13 @@ class AgentLoop:
     # Run the agent loop until the agent says it should stop.
     # Each loop iteration:
     # 1. asks the model for the next reply and tool actions
-    # 2. stores the assistant reply in the session
-    # 3. prints the assistant reply for debugging
-    # 4. prints the normalized action list for debugging
-    # 5. injects a stall reminder if the model takes a non-final no-tool turn
-    # 6. avoids stacking the exact same reminder repeatedly
-    # 7. executes each tool action
-    # 8. prints each tool result for debugging
-    # 9. converts tool results into transcript messages
-    # 10. stores those result messages in the session
+    # 2. validates whether that reply counts as a real agent turn
+    # 3. rejects invalid non-final no-tool replies before they enter history
+    # 4. stores valid assistant replies in the session
+    # 5. executes each tool action
+    # 6. prints each tool result for debugging
+    # 7. converts tool results into transcript messages
+    # 8. stores those result messages in the session
     def run(self) -> None:
         # Start the transcript with the agent's initial system and user messages.
         self.session.add_messages(*self.agent.initial_messages())
@@ -38,31 +36,27 @@ class AgentLoop:
                 tool_definitions=self.agent.tool_definitions(),
             )
 
-            # Store the assistant message in the session transcript.
-            print("-> model replied")
-            self.session.add_message(reply["message"])
-
             # Print the assistant message content so it is easier to debug
             # what the model is thinking and whether it is close to stopping.
+            print("-> model replied")
             print(f"assistant: {reply['message']['content']}")
-
-            # Print the normalized action list so it is obvious when the model
-            # returned no tool calls or when the parsed actions look wrong.
             print(f"actions: {reply['actions']}")
 
-            # If the model did not issue any actions and the task is not done,
-            # inject the stall reminder immediately instead of allowing a free
-            # dead turn. Avoid appending the exact same reminder twice in a row,
-            # since repeated identical reminders just add transcript noise.
-            if not reply["actions"] and not self.agent.should_stop(self.session):
-                stall_message = self.agent.stall_message()
-                last_message = self.session.messages[-1] if self.session.messages else None
+            # Ask the coding agent whether this reply counts as a valid turn.
+            # Invalid replies are usually narration-only responses that should
+            # have included a tool call but did not.
+            validation = self.agent.validate_reply(reply)
 
-                if last_message != stall_message:
-                    print("-> injecting stall reminder")
-                    self.session.add_message(stall_message)
-
+            # If the reply is invalid, do not store the assistant message in
+            # the transcript. Instead inject the stall reminder and retry.
+            if not validation["ok"]:
+                print(f"-> rejected reply: {validation['reason']}")
+                print("-> injecting stall reminder")
+                self.session.add_message(self.agent.stall_message())
                 continue
+
+            # Only valid assistant replies are added to normal transcript history.
+            self.session.add_message(reply["message"])
 
             # Execute each requested tool action and collect the raw results.
             results = []

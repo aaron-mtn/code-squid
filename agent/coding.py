@@ -1,4 +1,5 @@
 # agent/coding.py
+
 from agent.prompts import SYSTEM_PROMPT, STALL_REMINDER, task_prompt
 from tools import TOOLS
 
@@ -33,7 +34,38 @@ class CodingAgent:
             return "TASK COMPLETE" in content
 
         return False
-    
+
+    # Validate whether a normalized model reply counts as a real coding-agent turn.
+    #
+    # Rules:
+    # 1. Any reply with one or more tool actions is valid.
+    # 2. A reply with no actions is also valid if it is the final completion reply.
+    # 3. Any other no-action reply is invalid and should be corrected without being
+    #    added to normal assistant history.
+    #
+    # This keeps the validation policy with the coding agent instead of pushing
+    # coding-specific rules into the generic loop or provider adapter.
+    def validate_reply(self, reply: dict) -> dict:
+        actions = reply["actions"]
+        content = reply["message"]["content"].strip().upper()
+
+        if actions:
+            return {
+                "ok": True,
+                "reason": "",
+            }
+
+        if "TASK COMPLETE" in content:
+            return {
+                "ok": True,
+                "reason": "",
+            }
+
+        return {
+            "ok": False,
+            "reason": "non_final_no_tool_reply",
+        }
+
     # Return the reminder message used when the model stalls.
     def stall_message(self) -> dict:
         return {
