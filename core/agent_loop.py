@@ -48,11 +48,11 @@ class AgentLoop:
             validation = self.agent.validate_reply(reply)
 
             # If the reply is invalid, do not store the assistant message in
-            # the transcript. Instead inject the stall reminder and retry.
+            # the transcript. Instead inject a reason-specific correction and retry.
             if not validation["ok"]:
                 print(f"-> rejected reply: {validation['reason']}")
-                print("-> injecting stall reminder")
-                self.session.add_message(self.agent.stall_message())
+                print("-> injecting correction message")
+                self.session.add_message(self.agent.correction_message_for(validation["reason"]))
                 continue
 
             # Only valid assistant replies are added to normal transcript history.

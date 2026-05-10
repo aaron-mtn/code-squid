@@ -47,9 +47,9 @@ Do not use any tool to output TASK COMPLETE.
 """.strip()
 
 
-# Reminder shown when the model stalls with a no-tool reply.
-STALL_REMINDER = """
-Your last response described the next step but did not issue the required tool call.
+CORRECTION_MESSAGES = {
+    "non_final_no_tool_reply": """
+Your last response was invalid because it described the next step without issuing the required tool call.
 
 Before the task is complete, every response must contain:
 1. one or two short sentences describing exactly what you are doing next
@@ -57,6 +57,53 @@ Before the task is complete, every response must contain:
 
 The description and the tool call must be in the same response.
 Do not split them across separate turns.
+Do not restate the plan without acting.
 Issue the tool call now.
+""".strip(),
+    "non_final_wrong_tool_count": """
+Your last response was invalid because it used the wrong number of tool calls.
+
+Before the task is complete, every response must contain:
+1. one or two short sentences describing exactly what you are doing next
+2. exactly one tool call for that same step
+
+The description and the tool call must be in the same response.
+Do not split them across separate turns.
+Reply again with exactly one tool call.
+""".strip(),
+    "empty_non_final_reply": """
+Your last response was invalid because it was empty.
+
+Before the task is complete, every response must contain:
+1. one or two short sentences describing exactly what you are doing next
+2. exactly one tool call for that same step
+
+The description and the tool call must be in the same response.
 Do not return an empty response.
-""".strip()
+Issue the tool call now.
+""".strip(),
+    "final_with_tool_call": """
+Your last response was invalid because final completion cannot include a tool call.
+
+If the task is complete, reply with exactly: TASK COMPLETE
+If the task is not complete, reply with:
+1. one or two short sentences describing exactly what you are doing next
+2. exactly one tool call for that same step
+""".strip(),
+}
+
+
+def correction_message(reason: str) -> str:
+    return CORRECTION_MESSAGES.get(
+        reason,
+        """
+Your last response was invalid.
+
+Before the task is complete, every response must contain:
+1. one or two short sentences describing exactly what you are doing next
+2. exactly one tool call for that same step
+
+The description and the tool call must be in the same response.
+Issue the tool call now.
+""".strip(),
+    )
