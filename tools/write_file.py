@@ -34,11 +34,12 @@ def tool_definition() -> dict:
 # Write the full contents of a file and return the result in a consistent shape.
 def execute(repo_root: Path, path: str, content: str) -> dict:
     file_path = repo_root / path
-    file_path.write_text(content, encoding="utf-8")
+    characters_written = file_path.write_text(content, encoding="utf-8")
 
     return {
         "ok": True,
         "tool": TOOL_NAME,
         "path": path,
-        "content": content,
+        "summary": f"Wrote {characters_written} characters",
+        "characters_written": characters_written,
     }
