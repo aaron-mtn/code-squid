@@ -24,7 +24,10 @@ class CodingAgent:
 
     # Decide whether the loop should stop.
     # Look backward through the transcript for the most recent assistant message.
-    # If that message is exactly "TASK COMPLETE", stop the loop.
+    # If that message contains TASK COMPLETE anywhere, stop the loop.
+    #
+    # This stays intentionally tolerant for now because weaker models often
+    # include a short summary before or around TASK COMPLETE.
     def should_stop(self, session) -> bool:
         for message in reversed(session.messages):
             if message["role"] != "assistant":
@@ -39,13 +42,14 @@ class CodingAgent:
     #
     # Valid reply shapes:
     # 1. A non-final reply with non-empty assistant content and exactly one tool action
-    # 2. A final reply with content exactly equal to "TASK COMPLETE" and no tool actions
+    # 2. A final reply with TASK COMPLETE in the content and no tool actions
     #
     # Invalid reply shapes:
-    # 1. A non-final reply with no tool action
-    # 2. A non-final reply with the wrong number of tool actions
-    # 3. An empty non-final reply
-    # 4. A final reply that also includes tool actions
+    # 1. A reply that carried a format_error from the model adapter
+    # 2. A non-final reply with no tool action
+    # 3. A non-final reply with the wrong number of tool actions
+    # 4. An empty non-final reply
+    # 5. A final reply that also includes tool actions
     #
     # This keeps the response-shape contract strict and obvious, closer to the
     # parser mindset used by mini-swe, while keeping the policy inside the
@@ -54,6 +58,15 @@ class CodingAgent:
         actions = reply["actions"]
         content = reply["message"]["content"].strip()
         normalized_content = content.upper()
+        format_error = reply.get("format_error", "").strip()
+
+        # Reject malformed tool-call output from the model adapter before it
+        # reaches the normal assistant-turn path.
+        if format_error:
+            return {
+                "ok": False,
+                "reason": "malformed_tool_call",
+            }
 
         # Final completion is valid when it contains TASK COMPLETE and does not
         # also try to issue tool actions.
@@ -69,12 +82,14 @@ class CodingAgent:
                 "reason": "",
             }
 
+        # Non-final replies must not be empty.
         if not content:
             return {
                 "ok": False,
                 "reason": "empty_non_final_reply",
             }
 
+        # Non-final replies must include exactly one tool action.
         if len(actions) == 0:
             return {
                 "ok": False,
@@ -94,7 +109,7 @@ class CodingAgent:
 
     # Return a correction message for a specific invalid-reply reason.
     # This lets the coding agent keep correction policy close to its validation
-    # rules, instead of hard-coding one generic stall reminder in the loop.
+    # rules, instead of hard-coding one generic reminder in the loop.
     def correction_message_for(self, reason: str) -> dict:
         return {
             "role": "user",

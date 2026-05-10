@@ -17,7 +17,7 @@ class AgentLoop:
     # Each loop iteration:
     # 1. asks the model for the next reply and tool actions
     # 2. validates whether that reply counts as a real agent turn
-    # 3. rejects invalid non-final no-tool replies before they enter history
+    # 3. rejects invalid replies before they enter assistant history
     # 4. stores valid assistant replies in the session
     # 5. executes each tool action
     # 6. prints each tool result for debugging
@@ -41,10 +41,12 @@ class AgentLoop:
             print("-> model replied")
             print(f"assistant: {reply['message']['content']}")
             print(f"actions: {reply['actions']}")
+            if reply.get("format_error"):
+                print(f"format_error: {reply['format_error']}")
 
             # Ask the coding agent whether this reply counts as a valid turn.
-            # Invalid replies are usually narration-only responses that should
-            # have included a tool call but did not.
+            # Invalid replies include narration-only turns, malformed tool calls,
+            # wrong tool counts, empty non-final replies, and invalid finals.
             validation = self.agent.validate_reply(reply)
 
             # If the reply is invalid, do not store the assistant message in
