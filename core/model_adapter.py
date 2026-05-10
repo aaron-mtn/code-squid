@@ -44,6 +44,11 @@ class ModelAdapter:
     # - one assistant message dict
     # - a list of normalized tool actions
     # - an optional format_error field when parsing fails upstream
+    #
+    # Important:
+    # We preserve the assistant tool_calls metadata on the transcript message
+    # so stricter model templates can reconstruct valid assistant/tool turns
+    # on later requests.
     def _normalize_response(self, raw_response) -> dict:
         message = {
             "role": "assistant",
@@ -52,6 +57,7 @@ class ModelAdapter:
         actions = []
 
         assistant_message = raw_response.choices[0].message
+        raw_tool_calls = assistant_message.tool_calls or []
 
         if assistant_message.content:
             message["content"] = assistant_message.content
@@ -59,17 +65,36 @@ class ModelAdapter:
         # Parse and validate each provider tool call before accepting it as a
         # real internal action. This keeps malformed tool output from slipping
         # into the loop as if it were valid.
-        for tool_call in assistant_message.tool_calls or []:
+        for tool_call in raw_tool_calls:
             tool_name = tool_call.function.name
-            args = self._parse_args(tool_call.function.arguments)
+            raw_arguments = tool_call.function.arguments
+            args = self._parse_args(raw_arguments)
             self._validate_tool_action(tool_name, args)
 
             actions.append(
                 {
                     "tool": tool_name,
                     "args": args,
+                    "tool_call_id": tool_call.id,
+                    "raw_arguments": raw_arguments,
                 }
             )
+
+        # Preserve the provider tool_calls structure on the assistant message.
+        # This is important for replaying transcript history in a format that
+        # stricter OpenAI-compatible model templates accept.
+        if raw_tool_calls:
+            message["tool_calls"] = [
+                {
+                    "id": tool_call.id,
+                    "type": "function",
+                    "function": {
+                        "name": tool_call.function.name,
+                        "arguments": tool_call.function.arguments,
+                    },
+                }
+                for tool_call in raw_tool_calls
+            ]
 
         # If the model returned tool calls but no visible assistant text,
         # create a short fallback narration so the transcript still shows

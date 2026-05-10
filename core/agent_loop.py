@@ -46,7 +46,7 @@ class AgentLoop:
 
             # Ask the coding agent whether this reply counts as a valid turn.
             # Invalid replies include narration-only turns, malformed tool calls,
-            # wrong tool counts, empty non-final replies, and invalid finals.
+            # wrong tool counts, and invalid finals.
             validation = self.agent.validate_reply(reply)
 
             # If the reply is invalid, do not store the assistant message in
@@ -73,5 +73,8 @@ class AgentLoop:
                 results.append(result)
 
             # Convert tool results into transcript messages and store them.
-            result_messages = self.tool_results.messages_from_results(results)
+            result_messages = self.tool_results.messages_from_action_results(
+                reply["actions"],
+                results,
+            )
             self.session.add_messages(*result_messages)

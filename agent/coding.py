@@ -41,19 +41,18 @@ class CodingAgent:
     # Validate whether a normalized model reply counts as a real coding-agent turn.
     #
     # Valid reply shapes:
-    # 1. A non-final reply with non-empty assistant content and exactly one tool action
+    # 1. A non-final reply with exactly one tool action
     # 2. A final reply with TASK COMPLETE in the content and no tool actions
     #
     # Invalid reply shapes:
     # 1. A reply that carried a format_error from the model adapter
     # 2. A non-final reply with no tool action
     # 3. A non-final reply with the wrong number of tool actions
-    # 4. An empty non-final reply
-    # 5. A final reply that also includes tool actions
+    # 4. A final reply that also includes tool actions
     #
-    # This keeps the response-shape contract strict and obvious, closer to the
-    # parser mindset used by mini-swe, while keeping the policy inside the
-    # coding agent instead of the generic loop or model adapter.
+    # Non-final assistant text is optional. The selected tool action is the
+    # hard contract. If text is missing, the runtime can still proceed and
+    # render progress from the selected action.
     def validate_reply(self, reply: dict) -> dict:
         actions = reply["actions"]
         content = reply["message"]["content"].strip()
@@ -80,13 +79,6 @@ class CodingAgent:
             return {
                 "ok": True,
                 "reason": "",
-            }
-
-        # Non-final replies must not be empty.
-        if not content:
-            return {
-                "ok": False,
-                "reason": "empty_non_final_reply",
             }
 
         # Non-final replies must include exactly one tool action.
