@@ -177,6 +177,13 @@ Format error: a final completion response cannot include a tool call.
 
 If the task is not complete, reply with exactly one real tool call for the immediate next step.
 """.strip(),
+    "final_missing_required_sections": f"""
+Format error: your final completion response is missing one or more required summary sections.
+
+{FINAL_SUMMARY_REQUIREMENTS}
+
+Please reply again with all required sections and no tool call.
+""".strip(),
     "malformed_tool_call": """
 Format error: your last response included an invalid tool call.
 

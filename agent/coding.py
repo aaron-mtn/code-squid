@@ -3,6 +3,15 @@
 from agent.prompts import SYSTEM_PROMPT, correction_message, task_prompt
 from tools import TOOLS
 
+# Final summary for task completion must include all these phrases for finalization to be valid. 
+# The agent can use any wording it wants, as long as these phrases are present and the final non-empty line is "TASK COMPLETE".
+REQUIRED_FINAL_LABELS = [
+    "Files changed:",
+    "What changed:",
+    "Verification run:",
+    "Remaining risks:",
+]
+
 
 class CodingAgent:
     """Owns coding-agent behavior, allowed tools, and completion rules; must not own low-level loop machinery, provider transport, or tool implementation."""
@@ -27,6 +36,10 @@ class CodingAgent:
         lines = [line.strip() for line in content.splitlines() if line.strip()]
         return bool(lines) and lines[-1].upper() == "TASK COMPLETE"
 
+    # Return any required final-summary labels that are missing from content.
+    def missing_final_labels(self, content: str) -> list[str]:
+        return [label for label in REQUIRED_FINAL_LABELS if label not in content]
+
     # Decide whether the loop should stop.
     # Look backward through the transcript for the most recent assistant message.
     # If that message has no tool calls and ends with TASK COMPLETE, stop the loop.
@@ -35,7 +48,11 @@ class CodingAgent:
             if message["role"] != "assistant":
                 continue
 
-            return not message.get("tool_calls") and self.is_final_content(message["content"])
+            return (
+                not message.get("tool_calls")
+                and self.is_final_content(message["content"])
+                and not self.missing_final_labels(message["content"])
+            )
 
         return False
 
@@ -74,6 +91,12 @@ class CodingAgent:
                 return {
                     "ok": False,
                     "reason": "final_with_tool_call",
+                }
+
+            if self.missing_final_labels(content):
+                return {
+                    "ok": False,
+                    "reason": "final_missing_required_sections",
                 }
 
             return {
