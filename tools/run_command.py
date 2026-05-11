@@ -5,6 +5,8 @@
 import subprocess
 from pathlib import Path
 
+from ._truncation import truncate_head_tail
+
 
 TOOL_NAME = "run_command"
 DEFAULT_TIMEOUT_SECONDS = 10
@@ -47,20 +49,29 @@ def execute(repo_root: Path, command: str) -> dict:
         output = exc.stdout or ""
         if isinstance(output, bytes):
             output = output.decode(errors="replace")
+        output, output_metadata = truncate_head_tail(output)
 
         return {
             "ok": False,
             "tool": TOOL_NAME,
             "command": command,
             "output": output,
+            "output_truncated": output_metadata["truncated"],
+            "output_original_chars": output_metadata["original_chars"],
+            "output_returned_chars": output_metadata["returned_chars"],
             "returncode": -1,
             "timed_out": True,
         }
+
+    output, output_metadata = truncate_head_tail(result.stdout)
 
     return {
         "ok": result.returncode == 0,
         "tool": TOOL_NAME,
         "command": command,
-        "output": result.stdout,
+        "output": output,
+        "output_truncated": output_metadata["truncated"],
+        "output_original_chars": output_metadata["original_chars"],
+        "output_returned_chars": output_metadata["returned_chars"],
         "returncode": result.returncode,
     }

@@ -30,6 +30,16 @@ Rules:
 - do not issue more than one tool call in a response before the task is complete
 
 If the task is complete, reply with a short human-readable summary and no tool call.
+
+Your final summary must include all of these:
+- Files changed
+- What changed
+- Verification run
+- Remaining risks
+
+If there are no remaining risks, say:
+Remaining risks: none
+
 The final non-empty line must be exactly:
 
 TASK COMPLETE
@@ -51,7 +61,10 @@ Valid non-final response:
 I am running the tests to verify the fix.
 
 Valid final response:
-Updated the parser to accept a short final summary and verified the tests pass.
+Files changed: parser.py
+What changed: accepted the final summary format and preserved the existing tool-call contract
+Verification run: `python -m pytest tests/test_parser.py -v`
+Remaining risks: none
 TASK COMPLETE
 
 ## Invalid examples
@@ -103,6 +116,16 @@ Rules:
 - do not issue more than one tool call in a response before the task is complete
 
 If the task is complete, reply with a short human-readable summary and no tool call.
+
+Your final summary must include all of these:
+- Files changed
+- What changed
+- Verification run
+- Remaining risks
+
+If there are no remaining risks, say:
+Remaining risks: none
+
 The final non-empty line must be exactly:
 
 TASK COMPLETE
@@ -121,7 +144,10 @@ Valid non-final response:
 I am verifying the fix now.
 
 Valid final response:
-Applied the smallest fix and verified it with the relevant test command.
+Files changed: mathlib.py
+What changed: changed `return lower` to `return upper` in `clamp` when `value > upper`
+Verification run: `python -m pytest test_mathlib.py -v` (3 passed)
+Remaining risks: none
 TASK COMPLETE
 """.strip()
 
@@ -146,6 +172,16 @@ Reply again now with exactly one tool call.
 Format error: a final completion response cannot include a tool call.
 
 If the task is complete, reply with a short human-readable summary and no tool call.
+
+Your final summary must include all of these:
+- Files changed
+- What changed
+- Verification run
+- Remaining risks
+
+If there are no remaining risks, say:
+Remaining risks: none
+
 The final non-empty line must be exactly:
 
 TASK COMPLETE
