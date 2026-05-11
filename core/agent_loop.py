@@ -1,5 +1,30 @@
 # core/agent_loop.py
 
+MAX_CONSECUTIVE_INVALID_REPLIES = 3
+
+INVALID_REPLY_EXPLANATIONS = {
+    "non_final_no_tool_reply": "the model replied without the required tool call",
+    "non_final_wrong_tool_count": "the model used the wrong number of tool calls",
+    "final_with_tool_call": "the model tried to finalize while still issuing a tool call",
+    "final_missing_required_sections": "the model tried to finalize without the required summary sections",
+    "malformed_tool_call": "the model produced an invalid tool call payload",
+}
+
+
+def invalid_reply_failure_message(reason: str) -> dict:
+    explanation = INVALID_REPLY_EXPLANATIONS.get(
+        reason,
+        "the model produced repeated invalid replies",
+    )
+    return {
+        "role": "assistant",
+        "content": (
+            "Code Squid stopped after 3 consecutive invalid replies.\n"
+            f"Last invalid reply reason: {reason}\n"
+            f"Explanation: {explanation}"
+        ),
+    }
+
 class AgentLoop:
     """Owns the generic agent loop and transcript turn flow; must not own coding-specific policy, prompts, or tool definitions."""
 
@@ -26,6 +51,7 @@ class AgentLoop:
     def run(self) -> None:
         # Start the transcript with the agent's initial system and user messages.
         self.session.add_messages(*self.agent.initial_messages())
+        consecutive_invalid_replies = 0
 
         # Keep going until the agent says the task is complete.
         while not self.agent.should_stop(self.session):
@@ -52,12 +78,19 @@ class AgentLoop:
             # If the reply is invalid, do not store the assistant message in
             # the transcript. Instead inject a reason-specific correction and retry.
             if not validation["ok"]:
+                consecutive_invalid_replies += 1
                 print(f"-> rejected reply: {validation['reason']}")
+                if consecutive_invalid_replies == MAX_CONSECUTIVE_INVALID_REPLIES:
+                    print("-> stopping after repeated invalid replies")
+                    self.session.add_message(invalid_reply_failure_message(validation["reason"]))
+                    break
+
                 print("-> injecting correction message")
                 self.session.add_message(self.agent.correction_message_for(validation["reason"]))
                 continue
 
             # Only valid assistant replies are added to normal transcript history.
+            consecutive_invalid_replies = 0
             self.session.add_message(reply["message"])
 
             # Execute each requested tool action and collect the raw results.
