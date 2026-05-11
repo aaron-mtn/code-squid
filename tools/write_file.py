@@ -18,7 +18,7 @@ def tool_definition() -> dict:
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path to the file relative to the repo root",
+                        "description": "Absolute path to the file",
                     },
                     "content": {
                         "type": "string",
@@ -33,7 +33,15 @@ def tool_definition() -> dict:
 
 # Write the full contents of a file and return the result in a consistent shape.
 def execute(repo_root: Path, path: str, content: str) -> dict:
-    file_path = repo_root / path
+    file_path = Path(path)
+    if not file_path.is_absolute():
+        return {
+            "ok": False,
+            "tool": TOOL_NAME,
+            "path": path,
+            "error": "write_file requires an absolute path",
+        }
+
     characters_written = file_path.write_text(content, encoding="utf-8")
 
     return {

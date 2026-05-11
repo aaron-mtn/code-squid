@@ -15,6 +15,8 @@ You have tools for:
 - writing files
 - running commands
 
+Always use absolute paths with read_file and write_file.
+
 ## Required response format
 
 Before the task is complete, every response must include exactly one real tool call for the immediate next step.
@@ -99,6 +101,7 @@ Work step by step:
 
 Use tools when needed, and avoid broad unnecessary changes.
 Prefer write_file for replacing full file contents.
+Always use absolute paths with read_file and write_file.
 Use run_command for shell behavior, program execution, and verification.
 
 ## Required response format
