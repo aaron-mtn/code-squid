@@ -29,11 +29,12 @@ Rules:
 - do not split narration and tool use across separate turns
 - do not issue more than one tool call in a response before the task is complete
 
-If the task is complete, reply with exactly:
+If the task is complete, reply with a short human-readable summary and no tool call.
+The final non-empty line must be exactly:
 
 TASK COMPLETE
 
-Do not include a tool call when replying with TASK COMPLETE.
+Do not include a tool call in the final response.
 
 ## Valid examples
 
@@ -50,6 +51,7 @@ Valid non-final response:
 I am running the tests to verify the fix.
 
 Valid final response:
+Updated the parser to accept a short final summary and verified the tests pass.
 TASK COMPLETE
 
 ## Invalid examples
@@ -100,11 +102,12 @@ Rules:
 - do not split narration and tool use across separate turns
 - do not issue more than one tool call in a response before the task is complete
 
-If the task is complete, reply with exactly:
+If the task is complete, reply with a short human-readable summary and no tool call.
+The final non-empty line must be exactly:
 
 TASK COMPLETE
 
-Do not use any tool to output TASK COMPLETE.
+Do not use any tool in the final response.
 Do not keep working once the task is complete.
 
 ## Valid examples
@@ -118,6 +121,7 @@ Valid non-final response:
 I am verifying the fix now.
 
 Valid final response:
+Applied the smallest fix and verified it with the relevant test command.
 TASK COMPLETE
 """.strip()
 
@@ -141,7 +145,8 @@ Reply again now with exactly one tool call.
     "final_with_tool_call": """
 Format error: a final completion response cannot include a tool call.
 
-If the task is complete, reply with exactly:
+If the task is complete, reply with a short human-readable summary and no tool call.
+The final non-empty line must be exactly:
 
 TASK COMPLETE
 

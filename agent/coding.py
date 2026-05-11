@@ -22,19 +22,20 @@ class CodingAgent:
     def tool_definitions(self) -> list[dict]:
         return [tool["definition"]() for tool in TOOLS.values()]
 
+    # Return true only when the final non-empty line is the completion marker.
+    def is_final_content(self, content: str) -> bool:
+        lines = [line.strip() for line in content.splitlines() if line.strip()]
+        return bool(lines) and lines[-1].upper() == "TASK COMPLETE"
+
     # Decide whether the loop should stop.
     # Look backward through the transcript for the most recent assistant message.
-    # If that message contains TASK COMPLETE anywhere, stop the loop.
-    #
-    # This stays intentionally tolerant for now because weaker models often
-    # include a short summary before or around TASK COMPLETE.
+    # If that message has no tool calls and ends with TASK COMPLETE, stop the loop.
     def should_stop(self, session) -> bool:
         for message in reversed(session.messages):
             if message["role"] != "assistant":
                 continue
 
-            content = message["content"].strip().upper()
-            return "TASK COMPLETE" in content
+            return not message.get("tool_calls") and self.is_final_content(message["content"])
 
         return False
 
@@ -42,7 +43,7 @@ class CodingAgent:
     #
     # Valid reply shapes:
     # 1. A non-final reply with exactly one tool action
-    # 2. A final reply with TASK COMPLETE in the content and no tool actions
+    # 2. A final reply with TASK COMPLETE on the last non-empty line and no tool actions
     #
     # Invalid reply shapes:
     # 1. A reply that carried a format_error from the model adapter
@@ -56,7 +57,6 @@ class CodingAgent:
     def validate_reply(self, reply: dict) -> dict:
         actions = reply["actions"]
         content = reply["message"]["content"].strip()
-        normalized_content = content.upper()
         format_error = reply.get("format_error", "").strip()
 
         # Reject malformed tool-call output from the model adapter before it
@@ -67,9 +67,9 @@ class CodingAgent:
                 "reason": "malformed_tool_call",
             }
 
-        # Final completion is valid when it contains TASK COMPLETE and does not
-        # also try to issue tool actions.
-        if "TASK COMPLETE" in normalized_content:
+        # Final completion is valid when it ends with TASK COMPLETE and does
+        # not also try to issue tool actions.
+        if self.is_final_content(content):
             if actions:
                 return {
                     "ok": False,
