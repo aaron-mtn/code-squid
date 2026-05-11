@@ -9,8 +9,8 @@ class ToolExecutor:
     """Owns dispatching tool actions, normalizing raw tool outputs, and recording simple tool side effects; must not own prompts, policy, or provider logic."""
 
     # Store the repo root and session used during tool execution.
-    # The executor uses repo_root to run tools in the correct place,
-    # and uses session only for simple factual tracking like files read/written.
+    # repo_root is the default working directory for run_command;
+    # read_file and write_file use absolute paths directly.
     def __init__(self, repo_root: Path, session) -> None:
         self.repo_root = repo_root
         self.session = session

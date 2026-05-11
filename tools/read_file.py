@@ -30,7 +30,7 @@ def tool_definition() -> dict:
 
 
 # Read a file and return the result in a consistent shape.
-def execute(repo_root: Path, path: str) -> dict:
+def execute(_repo_root: Path, path: str) -> dict:
     file_path = Path(path)
     if not file_path.is_absolute():
         return {

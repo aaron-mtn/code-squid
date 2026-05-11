@@ -1,5 +1,7 @@
 # tools/write_file.py
 
+"""Owns the write_file tool schema and file-writing behavior; must not own agent policy, loop control, or message formatting."""
+
 from pathlib import Path
 
 
@@ -32,7 +34,7 @@ def tool_definition() -> dict:
 
 
 # Write the full contents of a file and return the result in a consistent shape.
-def execute(repo_root: Path, path: str, content: str) -> dict:
+def execute(_repo_root: Path, path: str, content: str) -> dict:
     file_path = Path(path)
     if not file_path.is_absolute():
         return {
