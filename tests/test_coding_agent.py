@@ -88,3 +88,21 @@ def test_should_stop_rejects_marker_when_not_on_last_non_empty_line() -> None:
 
     assert agent.is_final_content(session.messages[-1]["content"]) is False
     assert agent.should_stop(session) is False
+
+
+def test_failure_message_for_invalid_replies_includes_reason_and_explanation() -> None:
+    agent = CodingAgent("demo task")
+
+    message = agent.failure_message_for_invalid_replies(
+        "final_missing_required_sections",
+        3,
+    )
+
+    assert message == {
+        "role": "assistant",
+        "content": (
+            "Code Squid stopped after 3 consecutive invalid replies.\n"
+            "Last invalid reply reason: final_missing_required_sections\n"
+            "Explanation: the model tried to finalize without the required summary sections"
+        ),
+    }

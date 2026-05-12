@@ -2,29 +2,6 @@
 
 MAX_CONSECUTIVE_INVALID_REPLIES = 3
 
-INVALID_REPLY_EXPLANATIONS = {
-    "non_final_no_tool_reply": "the model replied without the required tool call",
-    "non_final_wrong_tool_count": "the model used the wrong number of tool calls",
-    "final_with_tool_call": "the model tried to finalize while still issuing a tool call",
-    "final_missing_required_sections": "the model tried to finalize without the required summary sections",
-    "malformed_tool_call": "the model produced an invalid tool call payload",
-}
-
-
-def invalid_reply_failure_message(reason: str) -> dict:
-    explanation = INVALID_REPLY_EXPLANATIONS.get(
-        reason,
-        "the model produced repeated invalid replies",
-    )
-    return {
-        "role": "assistant",
-        "content": (
-            "Code Squid stopped after 3 consecutive invalid replies.\n"
-            f"Last invalid reply reason: {reason}\n"
-            f"Explanation: {explanation}"
-        ),
-    }
-
 class AgentLoop:
     """Owns the generic agent loop and transcript turn flow; must not own coding-specific policy, prompts, or tool definitions."""
 
@@ -82,7 +59,12 @@ class AgentLoop:
                 print(f"-> rejected reply: {validation['reason']}")
                 if consecutive_invalid_replies == MAX_CONSECUTIVE_INVALID_REPLIES:
                     print("-> stopping after repeated invalid replies")
-                    self.session.add_message(invalid_reply_failure_message(validation["reason"]))
+                    self.session.add_message(
+                        self.agent.failure_message_for_invalid_replies(
+                            validation["reason"],
+                            consecutive_invalid_replies,
+                        )
+                    )
                     break
 
                 print("-> injecting correction message")

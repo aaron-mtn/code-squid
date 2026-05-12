@@ -12,6 +12,14 @@ REQUIRED_FINAL_LABELS = [
     "Remaining risks:",
 ]
 
+INVALID_REPLY_EXPLANATIONS = {
+    "non_final_no_tool_reply": "the model replied without the required tool call",
+    "non_final_wrong_tool_count": "the model used the wrong number of tool calls",
+    "final_with_tool_call": "the model tried to finalize while still issuing a tool call",
+    "final_missing_required_sections": "the model tried to finalize without the required summary sections",
+    "malformed_tool_call": "the model produced an invalid tool call payload",
+}
+
 
 class CodingAgent:
     """Owns coding-agent behavior, allowed tools, and completion rules; must not own low-level loop machinery, provider transport, or tool implementation."""
@@ -129,4 +137,18 @@ class CodingAgent:
         return {
             "role": "user",
             "content": correction_message(reason),
+        }
+
+    def failure_message_for_invalid_replies(self, reason: str, count: int) -> dict:
+        explanation = INVALID_REPLY_EXPLANATIONS.get(
+            reason,
+            "the model produced repeated invalid replies",
+        )
+        return {
+            "role": "assistant",
+            "content": (
+                f"Code Squid stopped after {count} consecutive invalid replies.\n"
+                f"Last invalid reply reason: {reason}\n"
+                f"Explanation: {explanation}"
+            ),
         }

@@ -23,6 +23,16 @@ class FakeAgent:
     def correction_message_for(self, reason: str) -> dict:
         return {"role": "user", "content": f"correction:{reason}"}
 
+    def failure_message_for_invalid_replies(self, reason: str, count: int) -> dict:
+        return {
+            "role": "assistant",
+            "content": (
+                f"Code Squid stopped after {count} consecutive invalid replies.\n"
+                f"Last invalid reply reason: {reason}\n"
+                "Explanation: the model tried to finalize without the required summary sections"
+            ),
+        }
+
 
 class FakeModelAdapter:
     def __init__(self, replies: list[dict]) -> None:
