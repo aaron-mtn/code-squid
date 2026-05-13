@@ -2,8 +2,6 @@
 
 import json
 
-from tools import TOOLS
-
 
 class ModelAdapter:
     """Owns provider communication and tool-call normalization; must not own loop control, session storage, or coding-agent policy."""
@@ -21,6 +19,7 @@ class ModelAdapter:
     # If the provider returns malformed tool-call output, convert that into
     # a controlled format_error reply instead of crashing the loop.
     def respond(self, messages: list[dict], tool_definitions: list[dict]) -> dict:
+        tool_metadata = self._tool_metadata_from_definitions(tool_definitions)
         raw_response = self.provider.create_response(
             model=self.model_name,
             messages=messages,
@@ -28,7 +27,7 @@ class ModelAdapter:
         )
 
         try:
-            return self._normalize_response(raw_response)
+            return self._normalize_response(raw_response, tool_metadata)
         except ValueError as e:
             return {
                 "message": {
@@ -38,6 +37,18 @@ class ModelAdapter:
                 "actions": [],
                 "format_error": str(e),
             }
+
+    # Build the tiny metadata map the adapter needs for validation from the
+    # active tool definitions passed into this request.
+    def _tool_metadata_from_definitions(self, tool_definitions: list[dict]) -> dict:
+        metadata = {}
+        for definition in tool_definitions:
+            function = definition["function"]
+            parameters = function.get("parameters", {})
+            metadata[function["name"]] = {
+                "required": parameters.get("required", []),
+            }
+        return metadata
 
     # Convert the raw provider response into a consistent internal format.
     # The result contains:
@@ -49,7 +60,7 @@ class ModelAdapter:
     # We preserve the assistant tool_calls metadata on the transcript message
     # so stricter model templates can reconstruct valid assistant/tool turns
     # on later requests.
-    def _normalize_response(self, raw_response) -> dict:
+    def _normalize_response(self, raw_response, tool_metadata: dict) -> dict:
         message = {
             "role": "assistant",
             "content": "",
@@ -69,7 +80,7 @@ class ModelAdapter:
             tool_name = tool_call.function.name
             raw_arguments = tool_call.function.arguments
             args = self._parse_args(raw_arguments)
-            self._validate_tool_action(tool_name, args)
+            self._validate_tool_action(tool_name, args, tool_metadata)
 
             actions.append(
                 {
@@ -133,23 +144,15 @@ class ModelAdapter:
     #
     # That gets us much closer to mini-swe's parser mindset without adding
     # a bunch of schema machinery too early.
-    def _validate_tool_action(self, tool_name: str, args: dict) -> None:
-        tool = TOOLS.get(tool_name)
-        if tool is None:
+    def _validate_tool_action(self, tool_name: str, args: dict, tool_metadata: dict) -> None:
+        if tool_name not in tool_metadata:
             raise ValueError(f"Unknown tool: {tool_name}")
 
-        required_args = self._required_args_for_tool(tool_name)
+        required_args = tool_metadata[tool_name]["required"]
         missing_args = [name for name in required_args if name not in args]
         if missing_args:
             missing = ", ".join(missing_args)
             raise ValueError(f"Missing required arguments for {tool_name}: {missing}")
-
-    # Read the required argument names directly from the tool definition so
-    # the adapter stays aligned with the actual registered tool schema.
-    def _required_args_for_tool(self, tool_name: str) -> list[str]:
-        definition = TOOLS[tool_name]["definition"]()
-        parameters = definition["function"].get("parameters", {})
-        return parameters.get("required", [])
 
     # Create a short assistant message when the model uses tools without
     # returning visible narration text.

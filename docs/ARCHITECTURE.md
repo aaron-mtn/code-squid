@@ -117,16 +117,26 @@ A valid final assistant reply must:
 
 - include no tool calls
 - have `TASK COMPLETE` as the final non-empty line
+- include these exact required labels:
+  - `Files changed:`
+  - `What changed:`
+  - `Verification run:`
+  - `Remaining risks:`
 
-The prompt asks the model to include:
+These labels are runtime-enforced, not prompt-only guidance.
 
-- `Files changed`
-- `What changed`
-- `Verification run`
-- `Remaining risks`
+The prompt still provides the expected formatting, but the loop now rejects
+final replies that omit the required summary sections.
 
-The current runtime does not parse or enforce those final-summary fields. It only
-checks the absence of tool calls and final-marker placement.
+## Invalid Reply Budget
+
+The loop tracks consecutive invalid replies and stops after 3 consecutive
+invalid replies.
+
+- A valid reply resets the counter.
+- `AgentLoop` owns the counter and the stop decision.
+- `CodingAgent` owns the human-readable failure message via
+  `failure_message_for_invalid_replies(...)`.
 
 ### Transcript Contract
 
@@ -196,7 +206,9 @@ Runtime enforcement is narrower:
 - it enforces the number of tool actions before completion
 - it enforces no tool action in the final response
 - it enforces final-marker placement
+- it enforces the required final-summary labels
 - it rejects malformed tool calls before they enter assistant history
+- it rejects invalid assistant replies before they enter normal assistant history
 
 It does not enforce tone, brevity, whether the model read enough context before
 writing, whether verification was actually run, or whether final-summary claims
@@ -234,13 +246,15 @@ Concrete assumptions in the current code:
 - Provider transport is separated from provider-response normalization.
 - Tool execution is separated from tool-result transcript formatting.
 - The non-final tool-count contract is runtime-enforced.
-- Final-marker placement and final-with-tool-call rejection are
-  runtime-enforced.
+- Final-marker placement, required final-summary labels, and final-with-tool-call
+  rejection are runtime-enforced.
 - Provider tool-call metadata and matching tool-result IDs are preserved.
 - Tool outputs use consistent dictionaries rather than free-form observations.
 - `run_command` has timeout handling and output truncation.
 - The small static tool set keeps the model's action space simple.
 - invalid assistant replies are rejected before entering normal transcript history
+- repeated invalid replies have a deterministic stop path
+- final missing-section cases are covered by tests
 
 ## Current Constraints and Known Limitations
 
@@ -252,7 +266,9 @@ Concrete assumptions in the current code:
 - There is no structured planner, multi-agent coordination, or background task
   execution.
 - There is no runtime check that the agent verified its work before finalizing.
-- There is no runtime check that final-summary fields are present or truthful.
+- There is no runtime check that final-summary claims are truthful.
+- There is no runtime check that verification actually happened before
+  finalizing.
 - There is no runtime check that narration matches the chosen tool.
 - Tool argument validation is shallow and based on required field presence.
 - `read_file` returns whole files without truncation.
@@ -287,25 +303,30 @@ packages.
 
 Current tests cover:
 
+- `CodingAgent.validate_reply(...)` rejects final replies missing required
+  summary sections.
+- `CodingAgent.validate_reply(...)` accepts complete final summaries.
 - `CodingAgent.is_final_content(...)` accepts `TASK COMPLETE` on the final
   non-empty line.
-- `CodingAgent.should_stop(...)` stops on a final assistant message with no tool
-  calls.
+- `CodingAgent.should_stop(...)` accepts complete final summaries and rejects
+  incomplete ones.
 - final marker text is rejected when it is not the final non-empty line.
 - `read_file` rejects relative paths and succeeds with absolute paths.
 - `write_file` rejects relative paths, succeeds with absolute paths, writes the
   expected content, and does not echo content in the result.
 - `run_command` timeout handling returns a normalized failure result.
+- `AgentLoop` resets the invalid-reply counter after a valid reply.
+- `AgentLoop` stops after 3 consecutive invalid replies.
+- `CodingAgent.failure_message_for_invalid_replies(...)` includes the invalid
+  reason and explanation.
 
 Important gaps:
 
-- no tests for `AgentLoop` correction-message flow
 - no tests for `ModelAdapter` malformed JSON, unknown tools, missing arguments,
   or tool-call preservation
 - no tests for `ToolResults` `tool_call_id` formatting
 - no tests for `ToolExecutor` unknown-tool or exception normalization
 - no tests for `run_command` successful execution or output truncation
-- no tests enforcing final-summary fields
 - no tests proving verification happened before finalization
 - no live provider integration tests
 
