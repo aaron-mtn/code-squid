@@ -7,9 +7,12 @@ TOOL_USAGE_GUIDANCE = """
 
 - Prefer read_file for reading known files.
 - Use run_command for discovery, verification, and shell behavior.
+- Early in a task, check for repo guidance when it may affect how to work or verify.
+- Look for obvious guidance with bounded discovery, such as AGENTS.md, README.md, CONTRIBUTING.md, pyproject.toml, pytest.ini, Makefile, or scripts/.
+- If repo guidance provides a canonical verification command, use that command for final verification.
 - When using run_command for discovery, prefer focused commands with bounded output, such as `find ... | head -20`.
 - Avoid broad commands that dump unnecessary output when a narrower command will do.
-- If repo guidance provides a canonical verification command, use that command for final verification.
+- Do not over-explore guidance files when the task is already clear and no repo-specific guidance appears relevant.
 - Once the fix is verified and the task is complete, do not keep exploring or re-running unnecessary commands.
 - Do not run extra manual checks after a relevant test command already passed, unless a concrete unresolved issue remains.
 """.strip()
