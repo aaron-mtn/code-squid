@@ -1,0 +1,141 @@
+# ui/terminal.py
+
+"""Small terminal display layer for Code Squid."""
+
+from pathlib import Path
+import re
+
+
+class TerminalDisplay:
+    """Owns terminal formatting for the agent loop."""
+
+    def __init__(self, debug: bool = False) -> None:
+        self.debug = debug
+
+    def start(self) -> None:
+        print("🦑 Code Squid")
+        print()
+
+    def thinking(self) -> None:
+        print("🧠 Thinking...")
+
+    def assistant_message(self, content: str) -> None:
+        content = content.strip()
+        if self.debug:
+            print("-> model replied")
+            print(f"assistant: {content}")
+            return
+
+        if not content or self._is_boring_tool_narration(content):
+            return
+
+        print(content)
+
+    def action_started(self, action: dict) -> None:
+        tool_name = action.get("tool", "")
+        args = action.get("args", {})
+
+        if tool_name == "read_file":
+            print(f"📖 Reading: {self._basename(args.get('path', ''))}")
+            return
+
+        if tool_name == "write_file":
+            print(f"✍️ Writing: {self._basename(args.get('path', ''))}")
+            return
+
+        if tool_name == "run_command":
+            print(f"💿 Running: {args.get('command', '')}")
+            return
+
+        print(f"🔧 Running: {tool_name}")
+
+    def tool_result(self, action: dict, result: dict) -> None:
+        if self.debug:
+            print(f"tool result: {result}")
+
+        tool_name = action.get("tool")
+        if tool_name == "run_command":
+            self._run_command_result(result)
+            return
+
+        if result.get("ok", False):
+            return
+
+        error = result.get("error", "unknown error")
+        print(f"❌ {tool_name} failed: {error}")
+
+    def reply_rejected(self, reason: str) -> None:
+        print(f"⚠️ Reply rejected: {reason}")
+
+    def repeated_invalid_replies(self, reason: str, count: int) -> None:
+        print(f"⚠️ Stopping after {count} invalid replies: {reason}")
+
+    def loop_finished(self, session) -> None:
+        print()
+
+        self._print_file_list("📚 Files read", session.files_read)
+        print()
+        self._print_file_list("✍️ Files written", session.files_written)
+
+        if not self.debug:
+            return
+
+        print()
+        print("Full transcript:")
+        for message in session.messages:
+            print(f"\n[{message['role']}]")
+            print(message["content"])
+
+    def debug_reply(self, reply: dict) -> None:
+        if not self.debug:
+            return
+
+        print(f"actions: {reply.get('actions', [])}")
+        if reply.get("format_error"):
+            print(f"format_error: {reply['format_error']}")
+
+    def _run_command_result(self, result: dict) -> None:
+        if result.get("timed_out"):
+            print("⏰ Command timed out")
+            return
+
+        if not result.get("ok", False):
+            returncode = result.get("returncode", "unknown")
+            print(f"❌ Command failed: exit {returncode}")
+            return
+
+        summary = self._pytest_summary(result.get("output", ""))
+        if summary:
+            if "failed" in summary:
+                print(f"❌ Tests failed: {summary}")
+            else:
+                print(f"✅ Tests passed: {summary}")
+            return
+
+        print("✅ Command passed")
+
+    def _pytest_summary(self, output: str) -> str:
+        matches = re.findall(
+            r"\d+\s+failed,\s+\d+\s+passed|\d+\s+passed|\d+\s+failed",
+            output,
+        )
+        return matches[-1] if matches else ""
+
+    def _print_file_list(self, title: str, paths: set[str]) -> None:
+        print(f"{title}:")
+        if not paths:
+            print("  - none")
+            return
+
+        for path in sorted(paths):
+            display_path = path if self.debug else self._basename(path)
+            print(f"  - {display_path}")
+
+    def _basename(self, path: str) -> str:
+        return Path(path).name if path else ""
+
+    def _is_boring_tool_narration(self, content: str) -> bool:
+        if content in {"Using read_file.", "Using write_file.", "Using run_command."}:
+            return True
+
+        return content.startswith("Using tools: ")

@@ -59,6 +59,29 @@ class FakeToolResults:
         return [{"role": "tool", "content": result["tool"]} for result in results]
 
 
+class NullDisplay:
+    def thinking(self) -> None:
+        pass
+
+    def assistant_message(self, content: str) -> None:
+        pass
+
+    def debug_reply(self, reply: dict) -> None:
+        pass
+
+    def reply_rejected(self, reason: str) -> None:
+        pass
+
+    def repeated_invalid_replies(self, reason: str, count: int) -> None:
+        pass
+
+    def action_started(self, action: dict) -> None:
+        pass
+
+    def tool_result(self, action: dict, result: dict) -> None:
+        pass
+
+
 def reply(content: str, actions: list[dict] | None = None, reason: str = "") -> dict:
     return {
         "message": {"role": "assistant", "content": content},
@@ -76,6 +99,7 @@ def run_loop(replies: list[dict]) -> tuple[Session, FakeToolExecutor]:
         tool_executor=tool_executor,
         tool_results=FakeToolResults(),
         agent=FakeAgent(),
+        display=NullDisplay(),
     )
 
     loop.run()

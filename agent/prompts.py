@@ -40,7 +40,8 @@ REQUIRED_RESPONSE_FORMAT = """
 Before the task is complete, every response must include exactly one real tool call for the immediate next step.
 
 Choose the tool call first.
-Then, if you include narration, keep it to one or two short sentences describing that same chosen step.
+Include narration. Keep it to two or three sentences describing that same chosen step.
+When narrating progress, briefly summarize what you learned from the last observation and what you are doing next.
 
 Rules:
 - exactly one tool call before the task is complete

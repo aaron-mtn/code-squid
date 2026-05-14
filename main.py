@@ -12,6 +12,7 @@ from core.session import Session
 from core.tool_executor import ToolExecutor
 from core.tool_results import ToolResults
 from providers.lmstudio import LMStudioProvider
+from ui.terminal import TerminalDisplay
 
 
 # Create the app objects, wire them together, and run one coding task.
@@ -34,6 +35,8 @@ def main() -> None:
     tool_executor = ToolExecutor(repo_root=repo_root, session=session)
     tool_results = ToolResults()
     agent = CodingAgent(task=task)
+    debug = os.getenv("CODE_SQUID_DEBUG") == "1"
+    display = TerminalDisplay(debug=debug)
 
     loop = AgentLoop(
         session=session,
@@ -41,21 +44,12 @@ def main() -> None:
         tool_executor=tool_executor,
         tool_results=tool_results,
         agent=agent,
+        display=display,
     )
 
+    display.start()
     loop.run()
-
-    # Print a small status line so it is obvious the loop stopped normally.
-    print("-> loop stopped")
-
-    # Print the tracked files so it is easy to see what the agent read and wrote.
-    print(f"files read: {sorted(session.files_read)}")
-    print(f"files written: {sorted(session.files_written)}")
-
-    # Print the full transcript after the run completes.
-    for message in session.messages:
-        print(f"\n[{message['role']}]")
-        print(message["content"])
+    display.loop_finished(session)
 
 
 # Run the app when this file is executed directly.
