@@ -20,6 +20,12 @@ class ToolResults:
     # Convert multiple executed tool actions and results into transcript
     # messages in order.
     def messages_from_action_results(self, actions: list[dict], results: list[dict]) -> list[dict]:
+        if len(actions) != len(results):
+            raise ValueError(
+                "Tool action/result length mismatch: "
+                f"{len(actions)} actions, {len(results)} results"
+            )
+
         return [
             self.message_from_action_result(action, result)
             for action, result in zip(actions, results)

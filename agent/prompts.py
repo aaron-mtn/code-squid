@@ -157,9 +157,15 @@ Remaining risks: none
 TASK COMPLETE
 """.strip()
 
-
 def follow_up_prompt(task: str) -> str:
-    return f"Continue this saved session with this follow-up task: {task}"
+    return f"""
+Continue this saved Code Squid session with this follow-up task: {task}
+
+Use the existing transcript as context.
+If the answer is already available from prior messages or tool results, answer from that context without running extra commands.
+If the follow-up requires fresh state, use exactly one tool call for the immediate next step.
+If the user asks not to edit files, do not use write_file.
+""".strip()
 
 
 CORRECTION_MESSAGES = {
