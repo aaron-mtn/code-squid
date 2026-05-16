@@ -109,12 +109,15 @@ def test_failure_message_for_invalid_replies_includes_reason_and_explanation() -
 
 
 def test_follow_up_message_returns_user_message() -> None:
-    agent = CodingAgent("demo task")
+    agent = CodingAgent("original task")
 
-    assert agent.follow_up_message("fix the next thing") == {
-        "role": "user",
-        "content": "Continue this saved session with this follow-up task: fix the next thing",
-    }
+    message = agent.follow_up_message("show me what changed")
+
+    assert message["role"] == "user"
+    assert "show me what changed" in message["content"]
+    assert "existing transcript" in message["content"]
+    assert "without running extra commands" in message["content"]
+    assert "do not use write_file" in message["content"]
 
 
 def test_should_stop_does_not_stop_after_newer_user_follow_up() -> None:
