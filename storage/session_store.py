@@ -12,7 +12,7 @@ from typing import Any
 
 # Status values allowed in metadata.json.
 # Keep this list small until the app has real UX that needs more states.
-ALLOWED_STATUSES = {"active", "complete", "failed", "abandoned"}
+ALLOWED_STATUSES = {"active", "complete", "failed", "abandoned", "interrupted"}
 
 
 class SessionStore:
@@ -66,6 +66,19 @@ class SessionStore:
         store = cls(session_dir)
         store._write_metadata(metadata)
         store.jsonl_path.write_text("", encoding="utf-8")
+        return store
+
+    # Open an existing session folder without creating or modifying files.
+    @classmethod
+    def open(cls, session_dir: Path) -> "SessionStore":
+        store = cls(session_dir)
+
+        if not store.metadata_path.is_file():
+            raise FileNotFoundError(f"Missing session metadata: {store.metadata_path}")
+
+        if not store.jsonl_path.is_file():
+            raise FileNotFoundError(f"Missing session transcript: {store.jsonl_path}")
+
         return store
 
     # Append one transcript message as a JSONL entry.

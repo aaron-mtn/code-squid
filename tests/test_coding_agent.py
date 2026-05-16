@@ -106,3 +106,35 @@ def test_failure_message_for_invalid_replies_includes_reason_and_explanation() -
             "Explanation: the model tried to finalize without the required summary sections"
         ),
     }
+
+
+def test_follow_up_message_returns_user_message() -> None:
+    agent = CodingAgent("demo task")
+
+    assert agent.follow_up_message("fix the next thing") == {
+        "role": "user",
+        "content": "Continue this saved session with this follow-up task: fix the next thing",
+    }
+
+
+def test_should_stop_does_not_stop_after_newer_user_follow_up() -> None:
+    agent = CodingAgent("demo task")
+    session = Session(repo_root=None)
+    session.messages = [
+        {
+            "role": "assistant",
+            "content": (
+                "Files changed: a.py\n"
+                "What changed: fixed the bug\n"
+                "Verification run: pytest\n"
+                "Remaining risks: none\n"
+                "TASK COMPLETE"
+            ),
+        },
+        {
+            "role": "user",
+            "content": "Continue this saved session with this follow-up task: more",
+        },
+    ]
+
+    assert agent.should_stop(session) is False

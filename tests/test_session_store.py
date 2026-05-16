@@ -79,10 +79,40 @@ def test_load_messages_returns_message_dicts_in_order(tmp_path: Path) -> None:
     assert store.load_messages() == messages
 
 
+def test_open_returns_store_for_existing_session(tmp_path: Path) -> None:
+    created = SessionStore.create(tmp_path, "open existing")
+
+    opened = SessionStore.open(created.session_dir)
+
+    assert opened.session_dir == created.session_dir
+    assert opened.metadata_path == created.metadata_path
+    assert opened.jsonl_path == created.jsonl_path
+    assert read_metadata(opened) == read_metadata(created)
+
+
+def test_open_raises_file_not_found_error_for_missing_session_files(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        SessionStore.open(tmp_path / "missing")
+
+    missing_jsonl = tmp_path / "missing-jsonl"
+    missing_jsonl.mkdir()
+    (missing_jsonl / "metadata.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError):
+        SessionStore.open(missing_jsonl)
+
+    missing_metadata = tmp_path / "missing-metadata"
+    missing_metadata.mkdir()
+    (missing_metadata / "session.jsonl").write_text("", encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError):
+        SessionStore.open(missing_metadata)
+
+
 def test_update_status_accepts_known_terminal_statuses(tmp_path: Path) -> None:
     store = SessionStore.create(tmp_path, "status")
 
-    for status in ["complete", "failed", "abandoned"]:
+    for status in ["complete", "failed", "abandoned", "interrupted"]:
         store.update_status(status)
         assert read_metadata(store)["status"] == status
 

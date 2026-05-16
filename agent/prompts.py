@@ -158,6 +158,10 @@ TASK COMPLETE
 """.strip()
 
 
+def follow_up_prompt(task: str) -> str:
+    return f"Continue this saved session with this follow-up task: {task}"
+
+
 CORRECTION_MESSAGES = {
     "non_final_no_tool_reply": """
 Format error: your last response did not include the required tool call.

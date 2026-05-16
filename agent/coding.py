@@ -1,6 +1,6 @@
 # agent/coding.py
 
-from agent.prompts import SYSTEM_PROMPT, correction_message, task_prompt
+from agent.prompts import SYSTEM_PROMPT, correction_message, follow_up_prompt, task_prompt
 from tools import TOOLS
 
 # Final summary for task completion must include all these phrases for finalization to be valid. 
@@ -35,6 +35,10 @@ class CodingAgent:
             {"role": "user", "content": task_prompt(self.task)},
         ]
 
+    # Return the user message that continues an existing saved session.
+    def follow_up_message(self, task: str) -> dict:
+        return {"role": "user", "content": follow_up_prompt(task)}
+
     # Return the tool definitions available to this agent.
     def tool_definitions(self) -> list[dict]:
         return [tool["definition"]() for tool in TOOLS.values()]
@@ -53,6 +57,9 @@ class CodingAgent:
     # If that message has no tool calls and ends with TASK COMPLETE, stop the loop.
     def should_stop(self, session) -> bool:
         for message in reversed(session.messages):
+            if message["role"] == "user":
+                return False
+
             if message["role"] != "assistant":
                 continue
 
