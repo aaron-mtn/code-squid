@@ -3,10 +3,14 @@
 
 # Python cache files
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
+
+# Code Squid local runtime state
+.code-squid/
+
+# Environment files
+.env
 
 # OS/editor junk
 .DS_Store
-
-# env
-.env

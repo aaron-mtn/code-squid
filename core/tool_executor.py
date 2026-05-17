@@ -11,9 +11,10 @@ class ToolExecutor:
     # Store the repo root and session used during tool execution.
     # repo_root is the default working directory for run_command;
     # read_file and write_file use absolute paths directly.
-    def __init__(self, repo_root: Path, session) -> None:
+    def __init__(self, repo_root: Path, session, undo_store=None) -> None:
         self.repo_root = repo_root
         self.session = session
+        self.undo_store = undo_store
 
     # Execute one tool action by looking up the tool and calling its execute function.
     # If the tool runs successfully, record any simple side effects in the session.
@@ -30,6 +31,11 @@ class ToolExecutor:
             }
 
         try:
+            if self.undo_store is not None and tool_name == "write_file":
+                path = args.get("path")
+                if isinstance(path, str):
+                    self.undo_store.snapshot_file(path)
+
             result = tool["execute"](self.repo_root, **args)
             self._record_tool_effects(tool_name, result)
             return result

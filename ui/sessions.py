@@ -12,7 +12,7 @@ from storage.session_index import (
 
 USAGE = (
     "Usage: python main.py "
-    "[sessions | show latest | show <session_id> | resume latest | resume <session_id>]"
+    "[sessions | show latest | show <session_id> | resume latest | resume <session_id> | undo]"
 )
 
 

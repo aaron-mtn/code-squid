@@ -44,6 +44,12 @@ def test_session_id_uses_sortable_24_hour_timestamp_and_task_slug(tmp_path: Path
     )
 
 
+def test_session_id_property_returns_metadata_session_id(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path, "property")
+
+    assert store.session_id == read_metadata(store)["session_id"]
+
+
 def test_append_message_writes_jsonl_entries_and_updates_active_leaf(tmp_path: Path) -> None:
     store = SessionStore.create(tmp_path, "append messages")
 

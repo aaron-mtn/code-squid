@@ -15,6 +15,7 @@ from core.tool_results import ToolResults
 from providers.lmstudio import LMStudioProvider
 from storage.session_index import latest_session_id, session_dir_for
 from storage.session_store import SessionStore
+from storage.undo_store import UndoStore
 from ui.sessions import USAGE, handle_session_viewer
 from ui.terminal import TerminalDisplay
 
@@ -36,6 +37,7 @@ def _build_loop(
     session: Session,
     session_store: SessionStore,
     agent: CodingAgent,
+    undo_store: UndoStore,
 ) -> tuple[AgentLoop, TerminalDisplay]:
     provider = LMStudioProvider(
         base_url=os.getenv("CODE_SQUID_BASE_URL", "http://127.0.0.1:1234/v1"),
@@ -47,7 +49,11 @@ def _build_loop(
         model_name=os.getenv("CODE_SQUID_MODEL", "qwen3.5-9b"),
     )
 
-    tool_executor = ToolExecutor(repo_root=repo_root, session=session)
+    tool_executor = ToolExecutor(
+        repo_root=repo_root,
+        session=session,
+        undo_store=undo_store,
+    )
     tool_results = ToolResults()
     debug = os.getenv("CODE_SQUID_DEBUG") == "1"
     display = TerminalDisplay(debug=debug)
@@ -86,8 +92,9 @@ def _run_new_session(repo_root: Path) -> None:
 
     session = Session(repo_root=repo_root)
     session_store = SessionStore.create(repo_root=repo_root, task=task)
+    undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
     agent = CodingAgent(task=task)
-    loop, display = _build_loop(repo_root, session, session_store, agent)
+    loop, display = _build_loop(repo_root, session, session_store, agent, undo_store)
 
     _run_loop(loop, display, session, session_store)
 
@@ -108,14 +115,31 @@ def _resume_session(repo_root: Path, session_id: str) -> None:
     session_store.append_message(follow_up_message)
     session_store.update_status("active")
 
-    loop, display = _build_loop(repo_root, session, session_store, agent)
+    undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
+    loop, display = _build_loop(repo_root, session, session_store, agent, undo_store)
     _run_loop(loop, display, session, session_store)
+
+
+def _undo(repo_root: Path) -> None:
+    try:
+        results = UndoStore.open(repo_root).restore()
+    except FileNotFoundError as error:
+        print(error)
+        return
+
+    restored = sum(1 for result in results if result["restored"])
+    deleted = sum(1 for result in results if result["deleted"])
+    print(f"↩️ Undo complete: restored {restored}, deleted {deleted}")
 
 
 # Create the app objects, wire them together, and run one coding task.
 def main() -> None:
     repo_root = Path(".").resolve()
     args = sys.argv[1:]
+
+    if args == ["undo"]:
+        _undo(repo_root)
+        return
 
     if handle_session_viewer(repo_root, args):
         return

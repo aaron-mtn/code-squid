@@ -146,6 +146,10 @@ class SessionStore:
         metadata["updated_at"] = _utc_now()
         self._write_metadata(metadata)
 
+    @property
+    def session_id(self) -> str:
+        return self._read_metadata()["session_id"]
+
     # Return the next linear entry number for session.jsonl.
     #
     # This scans the JSONL file for now because it is simple and reliable.
