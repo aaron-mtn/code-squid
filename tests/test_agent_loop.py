@@ -72,6 +72,9 @@ class FakeSessionStore:
 
 
 class NullDisplay:
+    def __init__(self) -> None:
+        self.step_limits_reached = []
+
     def thinking(self) -> None:
         pass
 
@@ -86,6 +89,9 @@ class NullDisplay:
 
     def repeated_invalid_replies(self, reason: str, count: int) -> None:
         pass
+
+    def step_limit_reached(self, max_tool_steps: int) -> None:
+        self.step_limits_reached.append(max_tool_steps)
 
     def action_started(self, action: dict) -> None:
         pass
@@ -102,44 +108,56 @@ def reply(content: str, actions: list[dict] | None = None, reason: str = "") -> 
     }
 
 
-def run_loop(replies: list[dict]) -> tuple[Session, FakeToolExecutor]:
+def run_loop(
+    replies: list[dict],
+    max_tool_steps: int | None = None,
+) -> tuple[Session, FakeToolExecutor, FakeModelAdapter, NullDisplay]:
     session = Session(repo_root=None)
     tool_executor = FakeToolExecutor()
+    model_adapter = FakeModelAdapter(replies)
+    display = NullDisplay()
     loop = AgentLoop(
         session=session,
-        model_adapter=FakeModelAdapter(replies),
+        model_adapter=model_adapter,
         tool_executor=tool_executor,
         tool_results=FakeToolResults(),
         agent=FakeAgent(),
-        display=NullDisplay(),
+        display=display,
+        max_tool_steps=max_tool_steps,
     )
 
     loop.run()
 
-    return session, tool_executor
+    return session, tool_executor, model_adapter, display
 
 
-def run_loop_with_store(replies: list[dict]) -> tuple[Session, FakeToolExecutor, FakeSessionStore]:
+def run_loop_with_store(
+    replies: list[dict],
+    max_tool_steps: int | None = None,
+) -> tuple[Session, FakeToolExecutor, FakeSessionStore, FakeModelAdapter, NullDisplay]:
     session = Session(repo_root=None)
     tool_executor = FakeToolExecutor()
     session_store = FakeSessionStore()
+    model_adapter = FakeModelAdapter(replies)
+    display = NullDisplay()
     loop = AgentLoop(
         session=session,
-        model_adapter=FakeModelAdapter(replies),
+        model_adapter=model_adapter,
         tool_executor=tool_executor,
         tool_results=FakeToolResults(),
         agent=FakeAgent(),
-        display=NullDisplay(),
+        display=display,
         session_store=session_store,
+        max_tool_steps=max_tool_steps,
     )
 
     loop.run()
 
-    return session, tool_executor, session_store
+    return session, tool_executor, session_store, model_adapter, display
 
 
 def test_valid_reply_resets_consecutive_invalid_reply_counter() -> None:
-    session, tool_executor = run_loop(
+    session, tool_executor, _, _ = run_loop(
         [
             reply("bad 1", reason="non_final_no_tool_reply"),
             reply("bad 2", reason="non_final_no_tool_reply"),
@@ -158,7 +176,7 @@ def test_valid_reply_resets_consecutive_invalid_reply_counter() -> None:
 
 
 def test_invalid_replies_get_normal_correction_before_limit() -> None:
-    session, _ = run_loop(
+    session, _, _, _ = run_loop(
         [
             reply("bad 1", reason="non_final_no_tool_reply"),
             reply("bad 2", reason="non_final_wrong_tool_count"),
@@ -171,7 +189,7 @@ def test_invalid_replies_get_normal_correction_before_limit() -> None:
 
 
 def test_loop_stops_after_three_consecutive_invalid_replies() -> None:
-    session, _ = run_loop(
+    session, _, _, _ = run_loop(
         [
             reply("bad 1", reason="non_final_no_tool_reply"),
             reply("bad 2", reason="non_final_wrong_tool_count"),
@@ -191,7 +209,7 @@ def test_loop_stops_after_three_consecutive_invalid_replies() -> None:
 
 
 def test_initial_and_valid_assistant_messages_are_persisted() -> None:
-    _, _, session_store = run_loop_with_store([reply("TASK COMPLETE")])
+    _, _, session_store, _, _ = run_loop_with_store([reply("TASK COMPLETE")])
 
     assert [entry["message"] for entry in session_store.messages] == [
         {"role": "system", "content": "system"},
@@ -229,7 +247,7 @@ def test_preloaded_session_does_not_get_duplicate_initial_messages() -> None:
 
 
 def test_correction_messages_are_persisted_and_rejected_invalid_replies_are_not() -> None:
-    _, _, session_store = run_loop_with_store(
+    _, _, session_store, _, _ = run_loop_with_store(
         [
             reply("bad 1", reason="non_final_no_tool_reply"),
             reply("TASK COMPLETE"),
@@ -243,7 +261,7 @@ def test_correction_messages_are_persisted_and_rejected_invalid_replies_are_not(
 
 
 def test_failure_message_is_persisted_after_repeated_invalid_replies() -> None:
-    _, _, session_store = run_loop_with_store(
+    _, _, session_store, _, _ = run_loop_with_store(
         [
             reply("bad 1", reason="non_final_no_tool_reply"),
             reply("bad 2", reason="non_final_wrong_tool_count"),
@@ -265,7 +283,7 @@ def test_failure_message_is_persisted_after_repeated_invalid_replies() -> None:
 
 
 def test_tool_result_messages_are_persisted() -> None:
-    _, _, session_store = run_loop_with_store(
+    _, _, session_store, _, _ = run_loop_with_store(
         [
             reply("valid", actions=[{"tool": "read_file"}]),
             reply("TASK COMPLETE"),
@@ -278,13 +296,13 @@ def test_tool_result_messages_are_persisted() -> None:
 
 
 def test_complete_status_is_written_on_normal_completion() -> None:
-    _, _, session_store = run_loop_with_store([reply("TASK COMPLETE")])
+    _, _, session_store, _, _ = run_loop_with_store([reply("TASK COMPLETE")])
 
     assert session_store.statuses == ["complete"]
 
 
 def test_failed_status_is_written_after_repeated_invalid_replies() -> None:
-    _, _, session_store = run_loop_with_store(
+    _, _, session_store, _, _ = run_loop_with_store(
         [
             reply("bad 1", reason="non_final_no_tool_reply"),
             reply("bad 2", reason="non_final_wrong_tool_count"),
@@ -293,3 +311,63 @@ def test_failed_status_is_written_after_repeated_invalid_replies() -> None:
     )
 
     assert session_store.statuses == ["failed"]
+
+
+def test_default_max_tool_steps_does_not_stop_normal_behavior() -> None:
+    session, tool_executor, model_adapter, display = run_loop(
+        [
+            reply("valid", actions=[{"tool": "read_file"}]),
+            reply("TASK COMPLETE"),
+        ]
+    )
+
+    assert session.messages[-1]["content"] == "TASK COMPLETE"
+    assert tool_executor.actions == [{"tool": "read_file"}]
+    assert model_adapter.index == 2
+    assert display.step_limits_reached == []
+
+
+def test_max_tool_steps_one_stops_before_next_model_reply() -> None:
+    session, tool_executor, session_store, model_adapter, display = run_loop_with_store(
+        [
+            reply("valid", actions=[{"tool": "read_file"}]),
+            reply("TASK COMPLETE"),
+        ],
+        max_tool_steps=1,
+    )
+
+    assert tool_executor.actions == [{"tool": "read_file"}]
+    assert {"role": "tool", "content": "read_file"} in session.messages
+    assert model_adapter.index == 1
+    assert session.messages[-1] == {"role": "tool", "content": "read_file"}
+    assert session_store.statuses == ["failed"]
+    assert display.step_limits_reached == [1]
+
+
+def test_invalid_rejected_replies_do_not_count_toward_tool_step_limit() -> None:
+    session, tool_executor, _, model_adapter, display = run_loop_with_store(
+        [
+            reply("bad 1", reason="non_final_no_tool_reply"),
+            reply("valid", actions=[{"tool": "read_file"}]),
+            reply("TASK COMPLETE"),
+        ],
+        max_tool_steps=1,
+    )
+
+    assert {"role": "user", "content": "correction:non_final_no_tool_reply"} in session.messages
+    assert tool_executor.actions == [{"tool": "read_file"}]
+    assert model_adapter.index == 2
+    assert display.step_limits_reached == [1]
+
+
+def test_final_reply_without_tool_actions_does_not_count_toward_tool_step_limit() -> None:
+    session, tool_executor, session_store, model_adapter, display = run_loop_with_store(
+        [reply("TASK COMPLETE")],
+        max_tool_steps=1,
+    )
+
+    assert session.messages[-1]["content"] == "TASK COMPLETE"
+    assert tool_executor.actions == []
+    assert model_adapter.index == 1
+    assert session_store.statuses == ["complete"]
+    assert display.step_limits_reached == []

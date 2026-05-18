@@ -17,7 +17,7 @@ class TerminalDisplay:
         print()
 
     def thinking(self) -> None:
-        print("🧠 Thinking...")
+        print("🦑 Working...")
 
     def assistant_message(self, content: str) -> None:
         content = content.strip()
@@ -69,6 +69,9 @@ class TerminalDisplay:
 
     def repeated_invalid_replies(self, reason: str, count: int) -> None:
         print(f"⚠️ Stopping after {count} invalid replies: {reason}")
+
+    def step_limit_reached(self, max_tool_steps: int) -> None:
+        print(f"⚠️ Stopping after reaching tool step limit: {max_tool_steps}")
 
     def loop_finished(self, session) -> None:
         print()

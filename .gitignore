@@ -9,6 +9,10 @@ __pycache__/
 # Code Squid local runtime state
 .code-squid/
 
+# Generated local reference files
+**/filetree.md
+**/FILETREE.md
+
 # Environment files
 .env
 

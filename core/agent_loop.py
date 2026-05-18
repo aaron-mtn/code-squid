@@ -22,6 +22,7 @@ class AgentLoop:
         agent,
         display,
         session_store=None,
+        max_tool_steps: int | None = None,
     ) -> None:
         self.session = session
         self.model_adapter = model_adapter
@@ -30,6 +31,7 @@ class AgentLoop:
         self.agent = agent
         self.display = display
         self.session_store = session_store
+        self.max_tool_steps = max_tool_steps
 
     # Add one accepted transcript message to memory and optional disk storage.
     #
@@ -82,9 +84,20 @@ class AgentLoop:
 
         consecutive_invalid_replies = 0
         stopped_after_repeated_invalid_replies = False
+        stopped_after_step_limit = False
+        tool_steps_used = 0
 
         # Keep going until the agent says the task is complete.
         while not self.agent.should_stop(self.session):
+            if (
+                self.max_tool_steps is not None
+                and tool_steps_used >= self.max_tool_steps
+            ):
+                self.display.step_limit_reached(self.max_tool_steps)
+                self._update_status("failed")
+                stopped_after_step_limit = True
+                break
+
             # Ask the model for the next assistant reply and any tool actions.
             self.display.thinking()
             reply = self.model_adapter.respond(
@@ -143,5 +156,8 @@ class AgentLoop:
             )
             self._add_messages(*result_messages)
 
-        if not stopped_after_repeated_invalid_replies:
+            if reply["actions"]:
+                tool_steps_used += 1
+
+        if not stopped_after_repeated_invalid_replies and not stopped_after_step_limit:
             self._update_status("complete")
