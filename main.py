@@ -2,11 +2,11 @@
 
 """Owns thin application wiring for standalone Code Squid; must not own core architecture, agent policy, or tool logic."""
 
-import os
 import sys
 from pathlib import Path
 
 from agent.coding import CodingAgent
+from config.settings import Settings, load_settings
 from core.agent_loop import AgentLoop
 from core.model_adapter import ModelAdapter
 from core.session import Session
@@ -38,15 +38,16 @@ def _build_loop(
     session_store: SessionStore,
     agent: CodingAgent,
     undo_store: UndoStore,
+    settings: Settings,
 ) -> tuple[AgentLoop, TerminalDisplay]:
     provider = LMStudioProvider(
-        base_url=os.getenv("CODE_SQUID_BASE_URL", "http://127.0.0.1:1234/v1"),
-        api_key=os.getenv("CODE_SQUID_API_KEY", "lm-studio"),
+        base_url=settings.model.base_url,
+        api_key=settings.model.api_key,
     )
 
     model_adapter = ModelAdapter(
         provider=provider,
-        model_name=os.getenv("CODE_SQUID_MODEL", "qwen3.5-9b"),
+        model_name=settings.model.name,
     )
 
     tool_executor = ToolExecutor(
@@ -55,8 +56,7 @@ def _build_loop(
         undo_store=undo_store,
     )
     tool_results = ToolResults()
-    debug = os.getenv("CODE_SQUID_DEBUG") == "1"
-    display = TerminalDisplay(debug=debug)
+    display = TerminalDisplay(debug=settings.display.debug)
 
     loop = AgentLoop(
         session=session,
@@ -88,18 +88,20 @@ def _run_loop(
 
 
 def _run_new_session(repo_root: Path) -> None:
+    settings = load_settings(repo_root)
     task = input("Task: ")
 
     session = Session(repo_root=repo_root)
     session_store = SessionStore.create(repo_root=repo_root, task=task)
     undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
     agent = CodingAgent(task=task)
-    loop, display = _build_loop(repo_root, session, session_store, agent, undo_store)
+    loop, display = _build_loop(repo_root, session, session_store, agent, undo_store, settings)
 
     _run_loop(loop, display, session, session_store)
 
 
 def _resume_session(repo_root: Path, session_id: str) -> None:
+    settings = load_settings(repo_root)
     session_dir = _session_dir_for_resume(repo_root, session_id)
     if session_dir is None:
         return
@@ -116,7 +118,7 @@ def _resume_session(repo_root: Path, session_id: str) -> None:
     session_store.update_status("active")
 
     undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
-    loop, display = _build_loop(repo_root, session, session_store, agent, undo_store)
+    loop, display = _build_loop(repo_root, session, session_store, agent, undo_store, settings)
     _run_loop(loop, display, session, session_store)
 
 

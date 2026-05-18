@@ -6,6 +6,7 @@ TOOL_USAGE_GUIDANCE = """
 ## Tool usage guidance
 
 - Prefer read_file for reading known files.
+- For direct file creation or full-file replacement, prefer write_file. Do not use run_command for simple file writes unless the user specifically asks for shell behavior.
 - Use run_command for discovery, verification, and shell behavior.
 - Early in a task, check for repo guidance when it may affect how to work or verify.
 - Look for obvious guidance with bounded discovery, such as AGENTS.md, README.md, CONTRIBUTING.md, pyproject.toml, pytest.ini, Makefile, or scripts/.
@@ -119,11 +120,11 @@ def task_prompt(task: str) -> str:
 Solve this coding task: {task}
 
 Work step by step:
-1. Read the failing test and relevant implementation
-2. Understand the bug
-3. Make the smallest correct change
-4. Verify the result
-5. Finish only when the task is complete
+1. Inspect relevant files, tests, or repo guidance only when the task requires it.
+2. Understand the requested change.
+3. Make the smallest clean change.
+4. Run the strongest practical verification.
+5. Finish only when the task is complete.
 
 Use tools when needed, and avoid broad unnecessary changes.
 Prefer write_file for replacing full file contents.
