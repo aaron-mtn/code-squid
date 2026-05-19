@@ -66,6 +66,7 @@ def _build_loop(
         agent=agent,
         display=display,
         session_store=session_store,
+        max_tool_steps=settings.runtime.max_tool_steps,
     )
 
     return loop, display
