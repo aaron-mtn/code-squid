@@ -19,6 +19,23 @@ def test_validate_reply_rejects_final_summary_missing_required_sections() -> Non
     }
 
 
+def test_validate_reply_rejects_no_tool_reply_without_final_marker() -> None:
+    agent = CodingAgent("demo task")
+    reply = {
+        "message": {
+            "content": "I checked the files and need to keep working.",
+        },
+        "actions": [],
+    }
+
+    validation = agent.validate_reply(reply)
+
+    assert validation == {
+        "ok": False,
+        "reason": "non_final_no_tool_reply",
+    }
+
+
 def test_validate_reply_accepts_final_summary_with_all_required_sections() -> None:
     agent = CodingAgent("demo task")
     reply = {
