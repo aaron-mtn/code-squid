@@ -6,6 +6,7 @@ import pytest
 
 from tools.read_file import execute as read_file
 from tools.read_file import tool_definition as read_file_definition
+from tools._truncation import truncate_head_tail
 from tools.run_command import execute as run_command
 from tools.write_file import execute as write_file
 
@@ -31,6 +32,9 @@ def test_read_file_rejects_relative_path_and_succeeds_with_absolute_path(tmp_pat
         "tool": "read_file",
         "path": str(file_path),
         "content": "hello",
+        "content_truncated": False,
+        "content_original_chars": 5,
+        "content_returned_chars": 5,
         "start_line": 1,
         "end_line": 1,
         "total_lines": 1,
@@ -49,6 +53,9 @@ def test_read_file_supports_start_and_end_line_range(tmp_path: Path) -> None:
         "tool": "read_file",
         "path": str(file_path),
         "content": "two\nthree\n",
+        "content_truncated": False,
+        "content_original_chars": 10,
+        "content_returned_chars": 10,
         "start_line": 2,
         "end_line": 3,
         "total_lines": 4,
@@ -67,6 +74,9 @@ def test_read_file_supports_start_line_without_end_line(tmp_path: Path) -> None:
     assert result["end_line"] == 3
     assert result["total_lines"] == 3
     assert result["ranged"] is True
+    assert result["content_truncated"] is False
+    assert result["content_original_chars"] == len(result["content"])
+    assert result["content_returned_chars"] == len(result["content"])
 
 
 def test_read_file_supports_end_line_without_start_line(tmp_path: Path) -> None:
@@ -80,6 +90,36 @@ def test_read_file_supports_end_line_without_start_line(tmp_path: Path) -> None:
     assert result["end_line"] == 2
     assert result["total_lines"] == 3
     assert result["ranged"] is True
+    assert result["content_truncated"] is False
+    assert result["content_original_chars"] == len(result["content"])
+    assert result["content_returned_chars"] == len(result["content"])
+
+
+def test_read_file_truncates_large_full_read_with_shared_helper(tmp_path: Path) -> None:
+    file_path = tmp_path / "large.txt"
+    original_content = "a" * 7000 + "\nmiddle\n" + "z" * 7000
+    file_path.write_text(original_content, encoding="utf-8")
+
+    result = read_file(tmp_path, str(file_path))
+    expected_content, expected_metadata = truncate_head_tail(original_content)
+
+    assert result["content"] == expected_content
+    assert result["content_truncated"] is True
+    assert result["content_original_chars"] == expected_metadata["original_chars"]
+    assert result["content_returned_chars"] == expected_metadata["returned_chars"]
+
+
+def test_read_file_does_not_truncate_large_ranged_read(tmp_path: Path) -> None:
+    file_path = tmp_path / "large-range.txt"
+    ranged_content = "x" * 13000 + "\n"
+    file_path.write_text(f"before\n{ranged_content}after\n", encoding="utf-8")
+
+    result = read_file(tmp_path, str(file_path), start_line=2, end_line=2)
+
+    assert result["content"] == ranged_content
+    assert result["content_truncated"] is False
+    assert result["content_original_chars"] == len(ranged_content)
+    assert result["content_returned_chars"] == len(ranged_content)
 
 
 @pytest.mark.parametrize(
@@ -115,6 +155,9 @@ def test_read_file_range_past_eof_is_empty_and_sets_empty_range_end_line(tmp_pat
         "tool": "read_file",
         "path": str(file_path),
         "content": "",
+        "content_truncated": False,
+        "content_original_chars": 0,
+        "content_returned_chars": 0,
         "start_line": 5,
         "end_line": 4,
         "total_lines": 2,

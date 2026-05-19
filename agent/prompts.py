@@ -4,7 +4,9 @@ TOOL_USAGE_GUIDANCE = """
 ## Tool usage guidance
 
 - Prefer read_file for reading known files.
-- For large files, prefer reading a focused line range with read_file instead of reading the whole file.
+- For normal-sized files, read the whole file first.
+- If read_file returns content_truncated true, use start_line and end_line to inspect the relevant section.
+- For obviously large files, prefer reading a focused line range with read_file instead of reading the whole file.
 - For direct file creation or full-file replacement, prefer write_file. Do not use run_command for simple file writes unless the user specifically asks for shell behavior.
 - Use run_command for discovery, verification, and shell behavior.
 - Early in a task, check for repo guidance when it may affect how to work or verify.

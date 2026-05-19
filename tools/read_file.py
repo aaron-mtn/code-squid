@@ -4,6 +4,8 @@
 
 from pathlib import Path
 
+from ._truncation import truncate_head_tail
+
 
 TOOL_NAME = "read_file"
 
@@ -14,7 +16,7 @@ def tool_definition() -> dict:
         "type": "function",
         "function": {
             "name": TOOL_NAME,
-            "description": "Read the contents of a file",
+            "description": "Read the contents of a file, optionally limited to a 1-based inclusive line range",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -74,11 +76,23 @@ def execute(_repo_root: Path, path: str, start_line: int | None = None, end_line
     if ranged and actual_start <= total_lines:
         content = "".join(lines[actual_start - 1 : actual_end])
 
+    if ranged:
+        content_metadata = {
+            "truncated": False,
+            "original_chars": len(content),
+            "returned_chars": len(content),
+        }
+    else:
+        content, content_metadata = truncate_head_tail(content)
+
     return {
         "ok": True,
         "tool": TOOL_NAME,
         "path": path,
         "content": content,
+        "content_truncated": content_metadata["truncated"],
+        "content_original_chars": content_metadata["original_chars"],
+        "content_returned_chars": content_metadata["returned_chars"],
         "start_line": actual_start,
         "end_line": actual_end,
         "total_lines": total_lines,
