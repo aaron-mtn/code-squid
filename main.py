@@ -89,7 +89,7 @@ def _run_loop(
         loop.run()
     except KeyboardInterrupt:
         session_store.update_status("interrupted")
-        print("⏹️ Interrupted")
+        display.interrupted()
     finally:
         display.loop_finished(session)
 
