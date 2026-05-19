@@ -3,6 +3,8 @@
 from pathlib import Path
 import re
 
+from core.approval import USER_DENIED_TOOL_ACTION
+
 
 class TerminalDisplay:
     """Owns terminal formatting for the agent loop."""
@@ -36,26 +38,36 @@ class TerminalDisplay:
         print()
 
     def action_started(self, action: dict) -> None:
+        print(self._action_text(action))
+
+    def approve_action(self, action: dict) -> bool:
+        print("Approve tool action?")
+        print(self._action_text(action))
+        response = input("[y/N] ")
+        return response.strip().lower() in {"y", "yes"}
+
+    def _action_text(self, action: dict) -> str:
         tool_name = action.get("tool", "")
         args = action.get("args", {})
 
         if tool_name == "read_file":
-            print(f"📖 Reading: {self._basename(args.get('path', ''))}")
-            return
+            return f"📖 Reading: {self._basename(args.get('path', ''))}"
 
         if tool_name == "write_file":
-            print(f"📝 Writing: {self._basename(args.get('path', ''))}")
-            return
+            return f"📝 Writing: {self._basename(args.get('path', ''))}"
 
         if tool_name == "run_command":
-            print(f"💿 Running: {args.get('command', '')}")
-            return
+            return f"💿 Running: {args.get('command', '')}"
 
-        print(f"🔧 Running: {tool_name}")
+        return f"🔧 Running: {tool_name}"
 
     def tool_result(self, action: dict, result: dict) -> None:
         if self.debug:
             print(f"tool result: {result}")
+
+        if result.get("error") == USER_DENIED_TOOL_ACTION:
+            print("🚫 Action denied")
+            return
 
         tool_name = action.get("tool")
         if tool_name == "run_command":

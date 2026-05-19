@@ -8,6 +8,7 @@ from pathlib import Path
 from agent.coding import CodingAgent
 from config.settings import Settings, load_settings
 from core.agent_loop import AgentLoop
+from core.approval import ApprovalPolicy
 from core.model_adapter import ModelAdapter
 from core.session import Session
 from core.tool_executor import ToolExecutor
@@ -57,6 +58,10 @@ def _build_loop(
     )
     tool_results = ToolResults()
     display = TerminalDisplay(debug=settings.display.debug)
+    approval_policy = ApprovalPolicy(
+        mode=settings.runtime.approval_mode,
+        prompter=display,
+    )
 
     loop = AgentLoop(
         session=session,
@@ -67,6 +72,7 @@ def _build_loop(
         display=display,
         session_store=session_store,
         max_tool_steps=settings.runtime.max_tool_steps,
+        approval_policy=approval_policy,
     )
 
     return loop, display

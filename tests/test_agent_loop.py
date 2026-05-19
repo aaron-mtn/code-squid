@@ -1,5 +1,9 @@
+import json
+
 from core.agent_loop import AgentLoop
+from core.approval import ApprovalPolicy
 from core.session import Session
+from core.tool_results import ToolResults
 
 
 class FakeAgent:
@@ -59,6 +63,14 @@ class FakeToolResults:
         return [{"role": "tool", "content": result["tool"]} for result in results]
 
 
+class FakePrompter:
+    def __init__(self, approved: bool) -> None:
+        self.approved = approved
+
+    def approve_action(self, action: dict) -> bool:
+        return self.approved
+
+
 class FakeSessionStore:
     def __init__(self) -> None:
         self.messages = []
@@ -111,6 +123,7 @@ def reply(content: str, actions: list[dict] | None = None, reason: str = "") -> 
 def run_loop(
     replies: list[dict],
     max_tool_steps: int | None = None,
+    approval_policy: ApprovalPolicy | None = None,
 ) -> tuple[Session, FakeToolExecutor, FakeModelAdapter, NullDisplay]:
     session = Session(repo_root=None)
     tool_executor = FakeToolExecutor()
@@ -124,6 +137,7 @@ def run_loop(
         agent=FakeAgent(),
         display=display,
         max_tool_steps=max_tool_steps,
+        approval_policy=approval_policy,
     )
 
     loop.run()
@@ -293,6 +307,55 @@ def test_tool_result_messages_are_persisted() -> None:
     assert {"role": "tool", "content": "read_file"} in [
         entry["message"] for entry in session_store.messages
     ]
+
+
+def test_approval_denial_does_not_execute_tool_action() -> None:
+    session, tool_executor, _, _ = run_loop(
+        [
+            reply(
+                "valid",
+                actions=[{"tool": "read_file", "tool_call_id": "call_1"}],
+            ),
+            reply("TASK COMPLETE"),
+        ],
+        approval_policy=ApprovalPolicy("always", prompter=FakePrompter(approved=False)),
+    )
+
+    assert tool_executor.actions == []
+    assert session.messages[-1]["content"] == "TASK COMPLETE"
+
+
+def test_approval_denial_appends_normal_denied_tool_result_message() -> None:
+    session = Session(repo_root=None)
+    tool_executor = FakeToolExecutor()
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter(
+            [
+                reply(
+                    "valid",
+                    actions=[{"tool": "read_file", "tool_call_id": "call_1"}],
+                ),
+                reply("TASK COMPLETE"),
+            ]
+        ),
+        tool_executor=tool_executor,
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        approval_policy=ApprovalPolicy("always", prompter=FakePrompter(approved=False)),
+    )
+
+    loop.run()
+
+    tool_messages = [message for message in session.messages if message["role"] == "tool"]
+    assert len(tool_messages) == 1
+    assert tool_messages[0]["tool_call_id"] == "call_1"
+    assert json.loads(tool_messages[0]["content"]) == {
+        "ok": False,
+        "tool": "read_file",
+        "error": "user denied tool action",
+    }
 
 
 def test_complete_status_is_written_on_normal_completion() -> None:

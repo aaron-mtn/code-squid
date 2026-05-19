@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from core.approval import ApprovalPolicy, denied_result
+
 
 MAX_CONSECUTIVE_INVALID_REPLIES = 3
 
@@ -23,6 +25,7 @@ class AgentLoop:
         display,
         session_store=None,
         max_tool_steps: int | None = None,
+        approval_policy: ApprovalPolicy | None = None,
     ) -> None:
         self.session = session
         self.model_adapter = model_adapter
@@ -32,6 +35,7 @@ class AgentLoop:
         self.display = display
         self.session_store = session_store
         self.max_tool_steps = max_tool_steps
+        self.approval_policy = approval_policy or ApprovalPolicy("never")
 
     # Add one accepted transcript message to memory and optional disk storage.
     #
@@ -144,8 +148,12 @@ class AgentLoop:
             # Execute each requested tool action and collect the raw results.
             results = []
             for action in reply["actions"]:
-                self.display.action_started(action)
-                result = self.tool_executor.execute(action)
+                decision = self.approval_policy.check(action)
+                if decision.approved:
+                    self.display.action_started(action)
+                    result = self.tool_executor.execute(action)
+                else:
+                    result = denied_result(action, decision.reason)
                 self.display.tool_result(action, result)
                 results.append(result)
 
