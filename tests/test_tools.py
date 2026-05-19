@@ -5,6 +5,7 @@ from subprocess import TimeoutExpired
 import pytest
 
 from tools.read_file import execute as read_file
+from tools.read_file import tool_definition as read_file_definition
 from tools.run_command import execute as run_command
 from tools.write_file import execute as write_file
 
@@ -30,7 +31,103 @@ def test_read_file_rejects_relative_path_and_succeeds_with_absolute_path(tmp_pat
         "tool": "read_file",
         "path": str(file_path),
         "content": "hello",
+        "start_line": 1,
+        "end_line": 1,
+        "total_lines": 1,
+        "ranged": False,
     }
+
+
+def test_read_file_supports_start_and_end_line_range(tmp_path: Path) -> None:
+    file_path = tmp_path / "input.txt"
+    file_path.write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+
+    result = read_file(tmp_path, str(file_path), start_line=2, end_line=3)
+
+    assert result == {
+        "ok": True,
+        "tool": "read_file",
+        "path": str(file_path),
+        "content": "two\nthree\n",
+        "start_line": 2,
+        "end_line": 3,
+        "total_lines": 4,
+        "ranged": True,
+    }
+
+
+def test_read_file_supports_start_line_without_end_line(tmp_path: Path) -> None:
+    file_path = tmp_path / "input.txt"
+    file_path.write_text("one\ntwo\nthree\n", encoding="utf-8")
+
+    result = read_file(tmp_path, str(file_path), start_line=2)
+
+    assert result["content"] == "two\nthree\n"
+    assert result["start_line"] == 2
+    assert result["end_line"] == 3
+    assert result["total_lines"] == 3
+    assert result["ranged"] is True
+
+
+def test_read_file_supports_end_line_without_start_line(tmp_path: Path) -> None:
+    file_path = tmp_path / "input.txt"
+    file_path.write_text("one\ntwo\nthree\n", encoding="utf-8")
+
+    result = read_file(tmp_path, str(file_path), end_line=2)
+
+    assert result["content"] == "one\ntwo\n"
+    assert result["start_line"] == 1
+    assert result["end_line"] == 2
+    assert result["total_lines"] == 3
+    assert result["ranged"] is True
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "error"),
+    [
+        ({"start_line": 0}, "start_line must be >= 1"),
+        ({"end_line": 0}, "end_line must be >= 1"),
+        ({"start_line": 3, "end_line": 2}, "end_line must be >= start_line"),
+    ],
+)
+def test_read_file_rejects_invalid_ranges(tmp_path: Path, kwargs: dict, error: str) -> None:
+    file_path = tmp_path / "input.txt"
+    file_path.write_text("one\ntwo\nthree\n", encoding="utf-8")
+
+    result = read_file(tmp_path, str(file_path), **kwargs)
+
+    assert result == {
+        "ok": False,
+        "tool": "read_file",
+        "path": str(file_path),
+        "error": error,
+    }
+
+
+def test_read_file_range_past_eof_is_empty_and_sets_empty_range_end_line(tmp_path: Path) -> None:
+    file_path = tmp_path / "input.txt"
+    file_path.write_text("one\ntwo\n", encoding="utf-8")
+
+    result = read_file(tmp_path, str(file_path), start_line=5, end_line=8)
+
+    assert result == {
+        "ok": True,
+        "tool": "read_file",
+        "path": str(file_path),
+        "content": "",
+        "start_line": 5,
+        "end_line": 4,
+        "total_lines": 2,
+        "ranged": True,
+    }
+
+
+def test_read_file_definition_accepts_optional_line_range_arguments() -> None:
+    parameters = read_file_definition()["function"]["parameters"]
+
+    assert parameters["required"] == ["path"]
+    assert parameters["properties"]["start_line"]["type"] == "integer"
+    assert parameters["properties"]["end_line"]["type"] == "integer"
 
 
 def test_write_file_rejects_relative_path_succeeds_with_absolute_path_and_is_compact(tmp_path: Path) -> None:
