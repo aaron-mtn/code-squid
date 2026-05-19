@@ -1,12 +1,14 @@
-# providers/lmstudio.py
+# providers/openai_compatible.py
+
+"""OpenAI-compatible chat-completions provider transport."""
 
 from openai import OpenAI
 
 from .base import BaseProvider
 
 
-class LMStudioProvider(BaseProvider):
-    """Owns raw LM Studio API calls; must not own response normalization, agent policy, or tool execution."""
+class OpenAICompatibleProvider(BaseProvider):
+    """Owns raw OpenAI-compatible API calls; must not own response normalization, agent policy, or tool execution."""
 
     def __init__(self, base_url: str, api_key: str | None = None) -> None:
         self.client = OpenAI(

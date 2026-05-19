@@ -1,5 +1,3 @@
-# ui/terminal.py
-
 """Small terminal display layer for Code Squid."""
 
 from pathlib import Path
@@ -11,13 +9,18 @@ class TerminalDisplay:
 
     def __init__(self, debug: bool = False) -> None:
         self.debug = debug
+        self._printed_working = False
 
     def start(self) -> None:
         print("🦑 Code Squid")
         print()
 
     def thinking(self) -> None:
+        if not self.debug and self._printed_working:
+            print()
+
         print("🦑 Working...")
+        self._printed_working = True
 
     def assistant_message(self, content: str) -> None:
         content = content.strip()
@@ -29,7 +32,8 @@ class TerminalDisplay:
         if not content or self._is_boring_tool_narration(content):
             return
 
-        print(content)
+        print(self._format_assistant_content(content))
+        print()
 
     def action_started(self, action: dict) -> None:
         tool_name = action.get("tool", "")
@@ -40,7 +44,7 @@ class TerminalDisplay:
             return
 
         if tool_name == "write_file":
-            print(f"✍️ Writing: {self._basename(args.get('path', ''))}")
+            print(f"📝 Writing: {self._basename(args.get('path', ''))}")
             return
 
         if tool_name == "run_command":
@@ -76,9 +80,9 @@ class TerminalDisplay:
     def loop_finished(self, session) -> None:
         print()
 
-        self._print_file_list("📚 Files read", session.files_read)
+        self._print_file_list("📖 Files read", session.files_read)
         print()
-        self._print_file_list("✍️ Files written", session.files_written)
+        self._print_file_list("📝 Files written", session.files_written)
 
         if not self.debug:
             return
@@ -99,23 +103,49 @@ class TerminalDisplay:
 
     def _run_command_result(self, result: dict) -> None:
         if result.get("timed_out"):
-            print("⏰ Command timed out")
-            return
-
-        if not result.get("ok", False):
-            returncode = result.get("returncode", "unknown")
-            print(f"❌ Command failed: exit {returncode}")
+            print("⌛️ Command timed out")
             return
 
         summary = self._pytest_summary(result.get("output", ""))
         if summary:
             if "failed" in summary:
-                print(f"❌ Tests failed: {summary}")
+                print(f"🔎 Tests need review: {summary}")
             else:
-                print(f"✅ Tests passed: {summary}")
+                print(f"🧪 Tests passed: {summary}")
             return
 
-        print("✅ Command passed")
+        if not result.get("ok", False):
+            print("🕵️ Review output")
+            return
+
+        print("🟢 Success")
+
+    def _format_assistant_content(self, content: str) -> str:
+        if "TASK COMPLETE" not in content:
+            return content
+
+        return self._format_final_summary(content)
+
+    def _format_final_summary(self, content: str) -> str:
+        summary_prefixes = (
+            "Files changed:",
+            "What changed:",
+            "Verification run:",
+            "Remaining risks:",
+            "TASK COMPLETE",
+        )
+        formatted_lines: list[str] = []
+
+        for line in content.splitlines():
+            stripped = line.strip()
+            should_space = stripped.startswith(summary_prefixes)
+
+            if should_space and formatted_lines and formatted_lines[-1] != "":
+                formatted_lines.append("")
+
+            formatted_lines.append(line)
+
+        return "\n".join(formatted_lines)
 
     def _pytest_summary(self, output: str) -> str:
         matches = re.findall(

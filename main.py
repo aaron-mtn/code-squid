@@ -12,7 +12,7 @@ from core.model_adapter import ModelAdapter
 from core.session import Session
 from core.tool_executor import ToolExecutor
 from core.tool_results import ToolResults
-from providers.lmstudio import LMStudioProvider
+from providers.openai_compatible import OpenAICompatibleProvider
 from storage.session_index import latest_session_id, session_dir_for
 from storage.session_store import SessionStore
 from storage.undo_store import UndoStore
@@ -40,7 +40,7 @@ def _build_loop(
     undo_store: UndoStore,
     settings: Settings,
 ) -> tuple[AgentLoop, TerminalDisplay]:
-    provider = LMStudioProvider(
+    provider = OpenAICompatibleProvider(
         base_url=settings.model.base_url,
         api_key=settings.model.api_key,
     )

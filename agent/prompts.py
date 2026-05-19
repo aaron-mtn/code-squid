@@ -1,5 +1,3 @@
-# agent/prompts.py
-
 """Owns coding-agent prompt text and tool-usage guidance; must not own loop mechanics, provider logic, or tool implementation."""
 
 TOOL_USAGE_GUIDANCE = """
@@ -16,19 +14,25 @@ TOOL_USAGE_GUIDANCE = """
 - Do not over-explore guidance files when the task is already clear and no repo-specific guidance appears relevant.
 - Once the fix is verified and the task is complete, do not keep exploring or re-running unnecessary commands.
 - Do not run extra manual checks after a relevant test command already passed, unless a concrete unresolved issue remains.
+- If verification does not directly exercise the changed behavior, say so under Remaining risks.
+- For browser/UI work, do not claim visual layout or interactive behavior was fully verified unless it was actually run or manually checked.
 """.strip()
 
 FINAL_SUMMARY_REQUIREMENTS = """
 If the task is complete, reply with a short human-readable summary and no tool call.
 
-Your final summary must include all of these:
-- Files changed
-- What changed
-- Verification run
-- Remaining risks
+Start the final response directly with the required summary labels. Do not introduce the summary with phrases like "Here is the summary" or "Let me provide a final summary."
 
-If there are no remaining risks, say:
+Your final summary must include these exact labels, including the colon:
+- Files changed:
+- What changed:
+- Verification run:
+- Remaining risks:
+
+If there are no remaining risks, say exactly:
 Remaining risks: none
+
+Do not claim Remaining risks: none unless the verification directly covered the requested behavior. If only syntax, static checks, or partial checks were run, describe the unverified behavior under Remaining risks.
 
 The final non-empty line must be exactly:
 
@@ -111,6 +115,16 @@ I am reading the test file and then I will update the implementation.
 Why invalid:
 Only one tool call is allowed before the task is complete.
 
+Invalid final response:
+Files changed/created: app.js
+What changed: created the app
+Verification run: `node --check app.js`
+Remaining risks: none
+TASK COMPLETE
+
+Why invalid:
+The final labels must match exactly, including the colon. Use `Files changed:`, not `Files changed/created:`.
+
 Failure to follow this format will cause your response to be rejected.
 """.strip()
 
@@ -157,6 +171,7 @@ Verification run: `python -m pytest test_mathlib.py -v` (3 passed)
 Remaining risks: none
 TASK COMPLETE
 """.strip()
+
 
 def follow_up_prompt(task: str) -> str:
     return f"""

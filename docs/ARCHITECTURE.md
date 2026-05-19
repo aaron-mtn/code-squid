@@ -128,8 +128,9 @@ Each tool module owns its own schema and behavior. The registry in
 `ui/terminal.py` owns live terminal display. `ui/sessions.py` owns saved-session
 viewer display.
 
-`providers/lmstudio.py` owns only the raw `chat.completions.create(...)` call. It
-does not normalize responses or apply agent policy.
+`providers/openai_compatible.py` owns only the raw OpenAI-compatible
+`chat.completions.create(...)` call. It does not normalize responses or apply
+agent policy.
 
 ## Core Contracts
 
