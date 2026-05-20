@@ -3,6 +3,10 @@
 import json
 
 
+class ModelRequestError(RuntimeError):
+    """Raised when the configured model provider request fails."""
+
+
 class ModelAdapter:
     """Owns provider communication and tool-call normalization; must not own loop control, session storage, or coding-agent policy."""
 
@@ -20,11 +24,17 @@ class ModelAdapter:
     # a controlled format_error reply instead of crashing the loop.
     def respond(self, messages: list[dict], tool_definitions: list[dict]) -> dict:
         tool_metadata = self._tool_metadata_from_definitions(tool_definitions)
-        raw_response = self.provider.create_response(
-            model=self.model_name,
-            messages=messages,
-            tools=tool_definitions,
-        )
+        try:
+            raw_response = self.provider.create_response(
+                model=self.model_name,
+                messages=messages,
+                tools=tool_definitions,
+            )
+        except Exception as exc:
+            # Provider-specific failures are wrapped at this boundary so the
+            # CLI can handle request failures without hiding Code Squid bugs
+            # from normalization, validation, or the rest of the app.
+            raise ModelRequestError("Model request failed") from exc
 
         try:
             return self._normalize_response(raw_response, tool_metadata)

@@ -148,6 +148,16 @@ class TerminalDisplay:
         self._interrupted = True
         self._print_visible_line("⏹️ Interrupted")
 
+    def model_request_failed(self, log_path: Path) -> None:
+        self._stop_spinner()
+        # Normal CLI users need a clear failure and the saved details path,
+        # not a raw traceback from whichever provider happened to fail.
+        self._print_leading_blank_if_needed()
+        print("🚫 Model request failed")
+        print()
+        print("Code Squid could not get a response from the configured model provider.")
+        print(f"Details saved to: {log_path}")
+
     def loop_finished(self, session) -> None:
         self._stop_spinner()
         if self._needs_leading_blank:

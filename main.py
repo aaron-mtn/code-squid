@@ -9,11 +9,12 @@ from agent.coding import CodingAgent
 from config.settings import Settings, load_settings
 from core.agent_loop import AgentLoop
 from core.approval import ApprovalPolicy
-from core.model_adapter import ModelAdapter
+from core.model_adapter import ModelAdapter, ModelRequestError
 from core.session import Session
 from core.tool_executor import ToolExecutor
 from core.tool_results import ToolResults
 from providers.openai_compatible import OpenAICompatibleProvider
+from storage.error_log import write_error_log
 from storage.session_index import latest_session_id, session_dir_for
 from storage.session_store import SessionStore
 from storage.undo_store import UndoStore
@@ -79,22 +80,35 @@ def _build_loop(
 
 
 def _run_loop(
+    repo_root: Path,
     loop: AgentLoop,
     display: TerminalDisplay,
     session: Session,
     session_store: SessionStore,
-) -> None:
+) -> int:
     display.start()
     try:
         loop.run()
     except KeyboardInterrupt:
         session_store.update_status("interrupted")
         display.interrupted()
-    finally:
         display.loop_finished(session)
+        return 0
+    except ModelRequestError as error:
+        session_store.update_status("failed")
+        log_path = write_error_log(repo_root / ".code-squid", error)
+        try:
+            display_path = log_path.resolve().relative_to(repo_root.resolve())
+        except ValueError:
+            display_path = log_path
+        display.model_request_failed(display_path)
+        return 1
+
+    display.loop_finished(session)
+    return 0
 
 
-def _run_new_session(repo_root: Path) -> None:
+def _run_new_session(repo_root: Path) -> int:
     settings = load_settings(repo_root)
     task = input("Task: ")
 
@@ -104,14 +118,14 @@ def _run_new_session(repo_root: Path) -> None:
     agent = CodingAgent(task=task)
     loop, display = _build_loop(repo_root, session, session_store, agent, undo_store, settings)
 
-    _run_loop(loop, display, session, session_store)
+    return _run_loop(repo_root, loop, display, session, session_store)
 
 
-def _resume_session(repo_root: Path, session_id: str) -> None:
+def _resume_session(repo_root: Path, session_id: str) -> int:
     settings = load_settings(repo_root)
     session_dir = _session_dir_for_resume(repo_root, session_id)
     if session_dir is None:
-        return
+        return 0
 
     session_store = SessionStore.open(session_dir)
     session = Session(repo_root=repo_root)
@@ -126,7 +140,7 @@ def _resume_session(repo_root: Path, session_id: str) -> None:
 
     undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
     loop, display = _build_loop(repo_root, session, session_store, agent, undo_store, settings)
-    _run_loop(loop, display, session, session_store)
+    return _run_loop(repo_root, loop, display, session, session_store)
 
 
 def _undo(repo_root: Path) -> None:
@@ -142,31 +156,31 @@ def _undo(repo_root: Path) -> None:
 
 
 # Create the app objects, wire them together, and run one coding task.
-def main() -> None:
+def main() -> int:
     repo_root = Path(".").resolve()
     args = sys.argv[1:]
 
     if args == ["undo"]:
         _undo(repo_root)
-        return
+        return 0
 
     if handle_session_viewer(repo_root, args):
-        return
+        return 0
 
     if len(args) == 2 and args[0] == "resume":
         try:
-            _resume_session(repo_root, args[1])
+            return _resume_session(repo_root, args[1])
         except FileNotFoundError as error:
             print(error)
-        return
+        return 0
 
     if args:
         print(USAGE)
-        return
+        return 0
 
-    _run_new_session(repo_root)
+    return _run_new_session(repo_root)
 
 
 # Run the app when this file is executed directly.
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

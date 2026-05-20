@@ -129,6 +129,19 @@ def test_first_thinking_after_header_does_not_print_extra_blank(
     assert capsys.readouterr().out == ""
 
 
+def test_model_request_failed_prints_short_message_with_log_path(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay().model_request_failed(Path(".code-squid/logs/latest.log"))
+
+    assert capsys.readouterr().out == (
+        "🚫 Model request failed\n"
+        "\n"
+        "Code Squid could not get a response from the configured model provider.\n"
+        "Details saved to: .code-squid/logs/latest.log\n"
+    )
+
+
 def test_action_started_prints_in_debug_mode(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

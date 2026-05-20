@@ -1,4 +1,6 @@
-from core.model_adapter import ModelAdapter
+import pytest
+
+from core.model_adapter import ModelAdapter, ModelRequestError
 
 
 class FakeFunction:
@@ -43,6 +45,14 @@ class FakeProvider:
             }
         )
         return self.response
+
+
+class FailingProvider:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    def create_response(self, model: str, messages: list[dict], tools: list[dict]) -> FakeResponse:
+        raise self.error
 
 
 def tool_definition(name: str, required: list[str]) -> dict:
@@ -130,3 +140,14 @@ def test_assistant_tool_calls_metadata_is_preserved_on_normalized_message() -> N
             },
         }
     ]
+
+
+def test_provider_exception_is_wrapped_as_model_request_error() -> None:
+    provider_error = RuntimeError("provider unavailable")
+    adapter = ModelAdapter(provider=FailingProvider(provider_error), model_name="test-model")
+
+    with pytest.raises(ModelRequestError) as exc_info:
+        adapter.respond(messages=[{"role": "user", "content": "hi"}], tool_definitions=[])
+
+    assert str(exc_info.value) == "Model request failed"
+    assert exc_info.value.__cause__ is provider_error
