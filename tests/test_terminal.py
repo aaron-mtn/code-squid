@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from core.approval import USER_DENIED_TOOL_ACTION
-from ui.terminal import TerminalDisplay
+from ui.terminal import CODE_SQUID_BANNER, RUN_STARTED_DIVIDER, TerminalDisplay
 
 
 class FakeSpinner:
@@ -120,13 +120,21 @@ def test_first_thinking_after_header_does_not_print_extra_blank(
     display = TerminalDisplay(_spinner=spinner)
 
     display.start()
-    assert capsys.readouterr().out == "🦑 Code Squid\n\n"
+    assert capsys.readouterr().out == f"{CODE_SQUID_BANNER}\n\n"
 
     display.thinking()
 
     assert spinner.starts == 1
     assert spinner.stops == 1
     assert capsys.readouterr().out == ""
+
+
+def test_run_started_prints_starting_run_divider(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay().run_started()
+
+    assert capsys.readouterr().out == f"\n{RUN_STARTED_DIVIDER}\n\n"
 
 
 def test_model_request_failed_prints_short_message_with_log_path(
@@ -313,7 +321,7 @@ def test_first_visible_output_after_header_has_no_extra_leading_blank(
     )
 
     assert capsys.readouterr().out == (
-        "🦑 Code Squid\n"
+        f"{CODE_SQUID_BANNER}\n"
         "\n"
         "🔎 Listed files\n"
     )

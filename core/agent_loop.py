@@ -109,7 +109,6 @@ class AgentLoop:
                 tool_definitions=self.agent.tool_definitions(),
             )
 
-            self.display.assistant_message(reply["message"]["content"])
             self.display.debug_reply(reply)
 
             # Ask the coding agent whether this reply counts as a valid turn.
@@ -121,6 +120,8 @@ class AgentLoop:
             # the transcript. Instead inject a reason-specific correction and retry.
             if not validation["ok"]:
                 consecutive_invalid_replies += 1
+                if getattr(self.display, "debug", False):
+                    self.display.assistant_message(reply["message"]["content"])
                 self.display.reply_rejected(validation["reason"])
 
                 if consecutive_invalid_replies == MAX_CONSECUTIVE_INVALID_REPLIES:
@@ -143,6 +144,7 @@ class AgentLoop:
 
             # Only valid assistant replies are added to normal transcript history.
             consecutive_invalid_replies = 0
+            self.display.assistant_message(reply["message"]["content"])
             self._add_message(reply["message"], usage=reply.get("usage"))
 
             # Execute each requested tool action and collect the raw results.

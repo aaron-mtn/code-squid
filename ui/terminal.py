@@ -11,6 +11,18 @@ from ui.spinner import TerminalSpinner
 PATH_LABEL_MAX = 56
 COMMAND_LABEL_MAX = 80
 APPROVAL_COMMAND_LABEL_MAX = 120
+CODE_SQUID_BANNER = """\
+╭────────────────────────────────────────────────────────────────────────────╮
+│  ██████╗ ██████╗ ██████╗ ███████╗    ███████╗ ██████╗ ██╗   ██╗██╗██████╗  │
+│ ██╔════╝██╔═══██╗██╔══██╗██╔════╝    ██╔════╝██╔═══██╗██║   ██║██║██╔══██╗ │
+│ ██║     ██║   ██║██║  ██║█████╗      ███████╗██║   ██║██║   ██║██║██║  ██║ │
+│ ██║     ██║   ██║██║  ██║██╔══╝      ╚════██║██║▄▄ ██║██║   ██║██║██║  ██║ │
+│ ╚██████╗╚██████╔╝██████╔╝███████╗    ███████║╚██████╔╝╚██████╔╝██║██████╔╝ │
+│  ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝    ╚══════╝ ╚══▀▀═╝  ╚═════╝ ╚═╝╚═════╝  │
+│                                                                            │
+│                 🦑 A small coding agent with tentacles.                    │
+╰────────────────────────────────────────────────────────────────────────────╯"""
+RUN_STARTED_DIVIDER = "╰─ starting run ─────────────────────────────────────────────"
 
 
 class TerminalDisplay:
@@ -24,7 +36,13 @@ class TerminalDisplay:
 
     def start(self) -> None:
         self._stop_spinner()
-        print("🦑 Code Squid")
+        self._print_startup_banner()
+        self._needs_leading_blank = False
+
+    def run_started(self) -> None:
+        self._stop_spinner()
+        print()
+        print(RUN_STARTED_DIVIDER)
         print()
         self._needs_leading_blank = False
 
@@ -193,6 +211,10 @@ class TerminalDisplay:
         # The spinner is UI-only. Clear it before ordinary prints so redirected
         # logs and terminal output contain complete lines instead of animation.
         self._spinner.stop()
+
+    def _print_startup_banner(self) -> None:
+        print(CODE_SQUID_BANNER)
+        print()
 
     def _print_leading_blank_if_needed(self) -> None:
         # Tool results are one-line event blocks; separate the next visible

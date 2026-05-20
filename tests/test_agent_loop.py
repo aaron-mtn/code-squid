@@ -86,18 +86,22 @@ class FakeSessionStore:
 class NullDisplay:
     def __init__(self) -> None:
         self.step_limits_reached = []
+        self.assistant_messages = []
+        self.debug_replies = []
+        self.rejected_replies = []
+        self.debug = False
 
     def thinking(self) -> None:
         pass
 
     def assistant_message(self, content: str) -> None:
-        pass
+        self.assistant_messages.append(content)
 
     def debug_reply(self, reply: dict) -> None:
-        pass
+        self.debug_replies.append(reply)
 
     def reply_rejected(self, reason: str) -> None:
-        pass
+        self.rejected_replies.append(reason)
 
     def repeated_invalid_replies(self, reason: str, count: int) -> None:
         pass
@@ -272,6 +276,43 @@ def test_correction_messages_are_persisted_and_rejected_invalid_replies_are_not(
 
     assert {"role": "user", "content": "correction:non_final_no_tool_reply"} in persisted_messages
     assert {"role": "assistant", "content": "bad 1"} not in persisted_messages
+
+
+def test_invalid_assistant_reply_is_not_displayed_in_normal_mode() -> None:
+    _, _, _, display = run_loop(
+        [
+            reply("bad 1", reason="non_final_no_tool_reply"),
+            reply("TASK COMPLETE"),
+        ]
+    )
+
+    assert display.assistant_messages == ["TASK COMPLETE"]
+    assert display.rejected_replies == ["non_final_no_tool_reply"]
+    assert display.debug_replies[0]["message"]["content"] == "bad 1"
+
+
+def test_invalid_assistant_reply_is_displayed_in_debug_mode() -> None:
+    session = Session(repo_root=None)
+    display = NullDisplay()
+    display.debug = True
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter(
+            [
+                reply("bad 1", reason="non_final_no_tool_reply"),
+                reply("TASK COMPLETE"),
+            ]
+        ),
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=display,
+    )
+
+    loop.run()
+
+    assert display.assistant_messages == ["bad 1", "TASK COMPLETE"]
+    assert display.rejected_replies == ["non_final_no_tool_reply"]
 
 
 def test_failure_message_is_persisted_after_repeated_invalid_replies() -> None:

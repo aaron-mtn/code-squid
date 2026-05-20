@@ -41,7 +41,8 @@ def _build_loop(
     agent: CodingAgent,
     undo_store: UndoStore,
     settings: Settings,
-) -> tuple[AgentLoop, TerminalDisplay]:
+    display: TerminalDisplay,
+) -> AgentLoop:
     provider = OpenAICompatibleProvider(
         base_url=settings.model.base_url,
         api_key=settings.model.api_key,
@@ -58,7 +59,6 @@ def _build_loop(
         undo_store=undo_store,
     )
     tool_results = ToolResults()
-    display = TerminalDisplay(debug=settings.display.debug)
     approval_policy = ApprovalPolicy(
         mode=settings.runtime.approval_mode,
         prompter=display,
@@ -76,7 +76,7 @@ def _build_loop(
         approval_policy=approval_policy,
     )
 
-    return loop, display
+    return loop
 
 
 def _run_loop(
@@ -86,7 +86,6 @@ def _run_loop(
     session: Session,
     session_store: SessionStore,
 ) -> int:
-    display.start()
     try:
         loop.run()
     except KeyboardInterrupt:
@@ -110,13 +109,16 @@ def _run_loop(
 
 def _run_new_session(repo_root: Path) -> int:
     settings = load_settings(repo_root)
+    display = TerminalDisplay(debug=settings.display.debug)
+    display.start()
     task = input("Task: ")
+    display.run_started()
 
     session = Session(repo_root=repo_root)
     session_store = SessionStore.create(repo_root=repo_root, task=task)
     undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
     agent = CodingAgent(task=task)
-    loop, display = _build_loop(repo_root, session, session_store, agent, undo_store, settings)
+    loop = _build_loop(repo_root, session, session_store, agent, undo_store, settings, display)
 
     return _run_loop(repo_root, loop, display, session, session_store)
 
@@ -131,7 +133,10 @@ def _resume_session(repo_root: Path, session_id: str) -> int:
     session = Session(repo_root=repo_root)
     session.add_messages(*session_store.load_messages())
 
+    display = TerminalDisplay(debug=settings.display.debug)
+    display.start()
     follow_up_task = input("Follow-up task: ")
+    display.run_started()
     agent = CodingAgent(task=follow_up_task)
     follow_up_message = agent.follow_up_message(follow_up_task)
     session.add_message(follow_up_message)
@@ -139,7 +144,7 @@ def _resume_session(repo_root: Path, session_id: str) -> int:
     session_store.update_status("active")
 
     undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
-    loop, display = _build_loop(repo_root, session, session_store, agent, undo_store, settings)
+    loop = _build_loop(repo_root, session, session_store, agent, undo_store, settings, display)
     return _run_loop(repo_root, loop, display, session, session_store)
 
 
