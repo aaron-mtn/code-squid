@@ -48,11 +48,18 @@ REQUIRED_RESPONSE_FORMAT = """
 Before the task is complete, every response must include exactly one real tool call for the immediate next step.
 
 Choose the tool call first.
-Include narration. Keep it to two or three sentences describing that same chosen step.
-When narrating progress, briefly summarize what you learned from the last observation and what you are doing next.
+Include narration for that same chosen step.
+The narration should usually be 2 to 4 descriptive sentences.
+
+Good narration should explain:
+- what you learned from the last observation, if applicable
+- why the next step follows from that observation
+- what you are checking, changing, or verifying
+- what tool action you are taking now
 
 Rules:
 - exactly one tool call before the task is complete
+- make sure to include enough narration to explain the reasoning behind your chosen step
 - narration must match the chosen tool call
 - do not describe a step unless you are issuing the tool call for that same step
 - do not split narration and tool use across separate turns

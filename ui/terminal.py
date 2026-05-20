@@ -48,13 +48,12 @@ class TerminalDisplay:
         if not content or self._is_boring_tool_narration(content):
             return
 
-        formatted = self._format_assistant_content(content)
-        if not formatted:
+        if "TASK COMPLETE" in content:
+            self._print_final_summary(content)
             return
 
         self._print_leading_blank_if_needed()
-        print(formatted)
-        print()
+        self._print_assistant_narration(content)
         self._needs_leading_blank = False
 
     def action_started(self, action: dict) -> None:
@@ -207,6 +206,25 @@ class TerminalDisplay:
         print(line)
         self._needs_leading_blank = True
 
+    def _print_assistant_narration(self, content: str) -> None:
+        lines = content.splitlines() or [""]
+        print(f"🦑 {lines[0]}")
+        for line in lines[1:]:
+            print(f"   {line}" if line else "")
+        print()
+
+    def _print_final_summary(self, content: str) -> None:
+        formatted = self._format_final_summary(content)
+        if not formatted:
+            return
+
+        self._print_leading_blank_if_needed()
+        print("📋 Final summary")
+        print()
+        print(formatted)
+        print()
+        self._needs_leading_blank = False
+
     def _run_command_result(self, action: dict, result: dict) -> None:
         if result.get("timed_out"):
             self._print_visible_line("⌛️ Command timed out")
@@ -226,12 +244,6 @@ class TerminalDisplay:
 
         self._print_visible_line(self._action_label(action, "success"))
 
-    def _format_assistant_content(self, content: str) -> str:
-        if "TASK COMPLETE" not in content:
-            return content
-
-        return self._format_final_summary(content)
-
     def _format_final_summary(self, content: str) -> str:
         summary_prefixes = (
             "Files changed:",
@@ -240,6 +252,7 @@ class TerminalDisplay:
             "Remaining risks:",
         )
         formatted_lines: list[str] = []
+        found_summary = False
 
         for line in content.splitlines():
             stripped = line.strip()
@@ -249,6 +262,10 @@ class TerminalDisplay:
                 continue
 
             should_space = stripped.startswith(summary_prefixes)
+            if not found_summary:
+                if not should_space:
+                    continue
+                found_summary = True
 
             if should_space and formatted_lines and formatted_lines[-1] != "":
                 formatted_lines.append("")

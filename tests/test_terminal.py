@@ -278,7 +278,7 @@ def test_tool_result_followed_by_assistant_message_has_one_blank_line(
     assert capsys.readouterr().out == (
         "🔎 Listed files\n"
         "\n"
-        "The directory doesn't exist yet.\n"
+        "🦑 The directory doesn't exist yet.\n"
         "\n"
     )
 
@@ -295,7 +295,7 @@ def test_assistant_message_followed_by_tool_result_has_one_blank_line(
     )
 
     assert capsys.readouterr().out == (
-        "Directory created.\n"
+        "🦑 Directory created.\n"
         "\n"
         "📝 Wrote: kanban_toy2/index.html\n"
     )
@@ -363,7 +363,30 @@ def test_assistant_message_stops_spinner_before_printing_content(
 
     assert spinner.starts == 1
     assert spinner.stops == 1
-    assert capsys.readouterr().out == "The directory doesn't exist yet.\n\n"
+    assert capsys.readouterr().out == "🦑 The directory doesn't exist yet.\n\n"
+
+
+def test_normal_assistant_message_uses_squid_marker(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay().assistant_message("The directory doesn't exist yet.")
+
+    assert capsys.readouterr().out == "🦑 The directory doesn't exist yet.\n\n"
+
+
+def test_multiline_assistant_message_indents_continuation_lines(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay().assistant_message(
+        "The directory doesn't exist yet.\n"
+        "I need to create it and then build the Kanban board."
+    )
+
+    assert capsys.readouterr().out == (
+        "🦑 The directory doesn't exist yet.\n"
+        "   I need to create it and then build the Kanban board.\n"
+        "\n"
+    )
 
 
 def test_tool_result_stops_spinner_before_printing_result(
@@ -437,7 +460,7 @@ def test_normal_completion_prints_session_complete(
     assert capsys.readouterr().out.endswith("✅ Session complete\n")
 
 
-def test_normal_assistant_final_summary_hides_task_complete(
+def test_normal_assistant_final_summary_uses_report_heading(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     TerminalDisplay().assistant_message(
@@ -447,9 +470,29 @@ def test_normal_assistant_final_summary_hides_task_complete(
     )
 
     output = capsys.readouterr().out
+    assert output.startswith("📋 Final summary\n\n")
     assert "Files changed: ui/terminal.py" in output
     assert "What changed: polished display" in output
+    assert "🦑" not in output
     assert "TASK COMPLETE" not in output
+
+
+def test_normal_assistant_final_summary_hides_preamble(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay().assistant_message(
+        "All tests pass now. Let me provide the final summary.\n"
+        "Files changed: ui/terminal.py\n"
+        "What changed: polished display\n"
+        "Verification run: `pytest tests/test_terminal.py`\n"
+        "Remaining risks: none\n"
+        "TASK COMPLETE"
+    )
+
+    output = capsys.readouterr().out
+    assert "All tests pass now" not in output
+    assert "Files changed: ui/terminal.py" in output
+    assert "Verification run: `pytest tests/test_terminal.py`" in output
 
 
 def test_normal_assistant_message_with_only_task_complete_is_hidden(
