@@ -382,6 +382,14 @@ def test_normal_assistant_message_uses_squid_marker(
     assert capsys.readouterr().out == "🦑 The directory doesn't exist yet.\n\n"
 
 
+def test_assistant_message_does_not_hide_fallback_like_narration(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay().assistant_message("Using read_file.")
+
+    assert capsys.readouterr().out == "🦑 Using read_file.\n\n"
+
+
 def test_multiline_assistant_message_indents_continuation_lines(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

@@ -69,8 +69,12 @@ def tool_definition(name: str, required: list[str]) -> dict:
     }
 
 
-def adapter_response(tool_call: FakeToolCall, tool_definitions: list[dict]) -> dict:
-    provider = FakeProvider(FakeResponse(FakeMessage(content=None, tool_calls=[tool_call])))
+def adapter_response(
+    tool_call: FakeToolCall,
+    tool_definitions: list[dict],
+    content: str | None = None,
+) -> dict:
+    provider = FakeProvider(FakeResponse(FakeMessage(content=content, tool_calls=[tool_call])))
     adapter = ModelAdapter(provider=provider, model_name="test-model")
 
     return adapter.respond(messages=[{"role": "user", "content": "hi"}], tool_definitions=tool_definitions)
@@ -83,7 +87,7 @@ def test_valid_tool_call_succeeds_when_tool_is_passed_in_definitions() -> None:
     )
 
     assert reply["format_error"] == ""
-    assert reply["message"]["content"] == "Using local_tool."
+    assert reply["message"]["content"] == ""
     assert reply["actions"] == [
         {
             "tool": "local_tool",
@@ -92,6 +96,28 @@ def test_valid_tool_call_succeeds_when_tool_is_passed_in_definitions() -> None:
             "raw_arguments": '{"path": "/tmp/input.txt"}',
         }
     ]
+
+
+def test_tool_only_reply_does_not_get_fallback_narration() -> None:
+    reply = adapter_response(
+        FakeToolCall("call_1", "read_file", '{"path": "/tmp/input.txt"}'),
+        [tool_definition("read_file", ["path"])],
+    )
+
+    assert reply["format_error"] == ""
+    assert reply["message"]["content"] == ""
+    assert reply["message"]["content"] != "Using read_file."
+
+
+def test_provider_narration_is_preserved_with_tool_call() -> None:
+    reply = adapter_response(
+        FakeToolCall("call_1", "local_tool", '{"path": "/tmp/input.txt"}'),
+        [tool_definition("local_tool", ["path"])],
+        content="I need to inspect the input file first.",
+    )
+
+    assert reply["format_error"] == ""
+    assert reply["message"]["content"] == "I need to inspect the input file first."
 
 
 def test_unknown_tool_call_is_rejected_when_not_passed_in_definitions() -> None:

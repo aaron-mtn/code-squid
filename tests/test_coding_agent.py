@@ -1,4 +1,5 @@
 from agent.coding import CodingAgent
+from agent.prompts import correction_message
 from core.session import Session
 
 
@@ -33,6 +34,60 @@ def test_validate_reply_rejects_no_tool_reply_without_final_marker() -> None:
     assert validation == {
         "ok": False,
         "reason": "non_final_no_tool_reply",
+    }
+
+
+def test_validate_reply_rejects_non_final_tool_reply_with_empty_content() -> None:
+    agent = CodingAgent("demo task")
+    reply = {
+        "message": {
+            "content": "   \n",
+        },
+        "actions": [
+            {
+                "tool": "read_file",
+                "args": {"path": "a.py"},
+                "tool_call_id": "call_1",
+            }
+        ],
+    }
+
+    validation = agent.validate_reply(reply)
+
+    assert validation == {
+        "ok": False,
+        "reason": "non_final_missing_narration",
+    }
+
+
+def test_correction_message_for_missing_narration_is_specific() -> None:
+    message = correction_message("non_final_missing_narration")
+
+    assert "tool call but no visible assistant narration" in message
+    assert "brief visible narration plus exactly one real tool call" in message
+    assert "same immediate step" in message
+
+
+def test_validate_reply_accepts_non_final_narration_with_one_tool_call() -> None:
+    agent = CodingAgent("demo task")
+    reply = {
+        "message": {
+            "content": "I need to inspect a.py before editing.",
+        },
+        "actions": [
+            {
+                "tool": "read_file",
+                "args": {"path": "a.py"},
+                "tool_call_id": "call_1",
+            }
+        ],
+    }
+
+    validation = agent.validate_reply(reply)
+
+    assert validation == {
+        "ok": True,
+        "reason": "",
     }
 
 

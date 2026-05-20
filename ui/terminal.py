@@ -63,7 +63,7 @@ class TerminalDisplay:
             print(f"assistant: {content}")
             return
 
-        if not content or self._is_boring_tool_narration(content):
+        if not content:
             return
 
         if "TASK COMPLETE" in content:
@@ -411,9 +411,3 @@ class TerminalDisplay:
             return ""
 
         return f"node --check {self._short_path(tokens[2])}"
-
-    def _is_boring_tool_narration(self, content: str) -> bool:
-        if content in {"Using read_file.", "Using write_file.", "Using run_command."}:
-            return True
-
-        return content.startswith("Using tools: ")

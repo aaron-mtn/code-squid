@@ -210,6 +210,12 @@ Format error: your last response used the wrong number of tool calls.
 Before the task is complete, every response must include exactly one real tool call for the immediate next step.
 Reply again now with exactly one tool call.
 """.strip(),
+    "non_final_missing_narration": """
+Format error: your last response included a tool call but no visible assistant narration.
+
+Before the task is complete, every response must include brief visible narration plus exactly one real tool call for the immediate next step.
+Reply now with brief narration and exactly one tool call for that same immediate step.
+""".strip(),
     "final_with_tool_call": f"""
 Format error: a final completion response cannot include a tool call.
 

@@ -233,6 +233,7 @@ The runtime enforces:
 - missing required tool arguments are rejected during model-adapter validation
 - non-final replies with zero tool actions are rejected
 - non-final replies with more than one tool action are rejected
+- non-final replies with a tool action but no visible narration are rejected
 - final replies that also include tool actions are rejected
 
 The runtime does not enforce that narration accurately describes the tool call.
@@ -487,10 +488,10 @@ match the transcript, or whether narration matches the chosen tool. Those are
 prompt-level expectations and testable workflow conventions, not hard runtime
 guarantees.
 
-The terminal UI is intentionally small. In normal mode it hides boring fallback
-tool narration, formats final summaries, summarizes common pytest output, and
-prints compact file/action labels. In debug mode it prints rawer model replies,
-actions, tool results, transcript content, and disables spinner animation.
+The terminal UI is intentionally small. In normal mode it formats final
+summaries, summarizes common pytest output, and prints compact file/action
+labels. In debug mode it prints rawer model replies, actions, tool results,
+transcript content, and disables spinner animation.
 
 ## Platform Assumptions
 

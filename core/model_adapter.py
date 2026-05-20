@@ -117,12 +117,6 @@ class ModelAdapter:
                 for tool_call in raw_tool_calls
             ]
 
-        # If the model returned tool calls but no visible assistant text,
-        # create a short fallback narration so the transcript still shows
-        # what the agent is doing.
-        if not message["content"] and actions:
-            message["content"] = self._fallback_message(actions)
-
         return {
             "message": message,
             "actions": actions,
@@ -163,13 +157,3 @@ class ModelAdapter:
         if missing_args:
             missing = ", ".join(missing_args)
             raise ValueError(f"Missing required arguments for {tool_name}: {missing}")
-
-    # Create a short assistant message when the model uses tools without
-    # returning visible narration text.
-    def _fallback_message(self, actions: list[dict]) -> str:
-        if len(actions) == 1:
-            tool_name = actions[0]["tool"]
-            return f"Using {tool_name}."
-
-        tool_names = ", ".join(action["tool"] for action in actions)
-        return f"Using tools: {tool_names}."
