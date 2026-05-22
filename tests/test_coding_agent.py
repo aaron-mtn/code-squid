@@ -1,5 +1,4 @@
 from agent.coding import CodingAgent
-from agent.prompts import correction_message
 from core.session import Session
 
 
@@ -37,7 +36,24 @@ def test_validate_reply_rejects_no_tool_reply_without_final_marker() -> None:
     }
 
 
-def test_validate_reply_rejects_non_final_tool_reply_with_empty_content() -> None:
+def test_validate_reply_rejects_non_final_blank_content_with_no_tool_call() -> None:
+    agent = CodingAgent("demo task")
+    reply = {
+        "message": {
+            "content": "   \n",
+        },
+        "actions": [],
+    }
+
+    validation = agent.validate_reply(reply)
+
+    assert validation == {
+        "ok": False,
+        "reason": "non_final_no_tool_reply",
+    }
+
+
+def test_validate_reply_accepts_non_final_one_tool_call_with_blank_content() -> None:
     agent = CodingAgent("demo task")
     reply = {
         "message": {
@@ -55,17 +71,37 @@ def test_validate_reply_rejects_non_final_tool_reply_with_empty_content() -> Non
     validation = agent.validate_reply(reply)
 
     assert validation == {
-        "ok": False,
-        "reason": "non_final_missing_narration",
+        "ok": True,
+        "reason": "",
     }
 
 
-def test_correction_message_for_missing_narration_is_specific() -> None:
-    message = correction_message("non_final_missing_narration")
+def test_validate_reply_rejects_non_final_multiple_tool_calls() -> None:
+    agent = CodingAgent("demo task")
+    reply = {
+        "message": {
+            "content": "I need to inspect both files.",
+        },
+        "actions": [
+            {
+                "tool": "read_file",
+                "args": {"path": "a.py"},
+                "tool_call_id": "call_1",
+            },
+            {
+                "tool": "read_file",
+                "args": {"path": "b.py"},
+                "tool_call_id": "call_2",
+            },
+        ],
+    }
 
-    assert "tool call but no visible assistant narration" in message
-    assert "brief visible narration plus exactly one real tool call" in message
-    assert "same immediate step" in message
+    validation = agent.validate_reply(reply)
+
+    assert validation == {
+        "ok": False,
+        "reason": "non_final_wrong_tool_count",
+    }
 
 
 def test_validate_reply_accepts_non_final_narration_with_one_tool_call() -> None:
@@ -111,6 +147,35 @@ def test_validate_reply_accepts_final_summary_with_all_required_sections() -> No
     assert validation == {
         "ok": True,
         "reason": "",
+    }
+
+
+def test_validate_reply_rejects_final_summary_with_tool_call() -> None:
+    agent = CodingAgent("demo task")
+    reply = {
+        "message": {
+            "content": (
+                "Files changed: a.py\n"
+                "What changed: fixed the bug\n"
+                "Verification run: pytest\n"
+                "Remaining risks: none\n"
+                "TASK COMPLETE"
+            ),
+        },
+        "actions": [
+            {
+                "tool": "read_file",
+                "args": {"path": "a.py"},
+                "tool_call_id": "call_1",
+            }
+        ],
+    }
+
+    validation = agent.validate_reply(reply)
+
+    assert validation == {
+        "ok": False,
+        "reason": "final_with_tool_call",
     }
 
 

@@ -23,6 +23,7 @@ CODE_SQUID_BANNER = """\
 │                 🦑 A small coding agent with tentacles.                    │
 ╰────────────────────────────────────────────────────────────────────────────╯"""
 RUN_STARTED_DIVIDER = "╰─ starting run ─────────────────────────────────────────────"
+FINAL_REPORT_DIVIDER = "────────────────────────────────────────"
 
 
 class TerminalDisplay:
@@ -182,6 +183,7 @@ class TerminalDisplay:
         else:
             print()
 
+        print(FINAL_REPORT_DIVIDER)
         self._print_file_list("📖 Files read", session.files_read)
         print()
         self._print_file_list("📝 Files written", session.files_written)
@@ -241,10 +243,10 @@ class TerminalDisplay:
             return
 
         self._print_leading_blank_if_needed()
+        print(FINAL_REPORT_DIVIDER)
         print("📋 Final summary")
         print()
         print(formatted)
-        print()
         self._needs_leading_blank = False
 
     def _run_command_result(self, action: dict, result: dict) -> None:

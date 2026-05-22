@@ -15,7 +15,6 @@ REQUIRED_FINAL_LABELS = [
 INVALID_REPLY_EXPLANATIONS = {
     "non_final_no_tool_reply": "the model replied without the required tool call",
     "non_final_wrong_tool_count": "the model used the wrong number of tool calls",
-    "non_final_missing_narration": "the model used a tool call without visible narration",
     "final_with_tool_call": "the model tried to finalize while still issuing a tool call",
     "final_missing_required_sections": "the model tried to finalize without the required summary sections",
     "malformed_tool_call": "the model produced an invalid tool call payload",
@@ -82,8 +81,7 @@ class CodingAgent:
     # 1. A reply that carried a format_error from the model adapter
     # 2. A non-final reply with no tool action
     # 3. A non-final reply with the wrong number of tool actions
-    # 4. A non-final reply with a tool action but no visible narration
-    # 5. A final reply that also includes tool actions
+    # 4. A final reply that also includes tool actions
     def validate_reply(self, reply: dict) -> dict:
         actions = reply["actions"]
         content = reply["message"]["content"].strip()
@@ -128,12 +126,6 @@ class CodingAgent:
             return {
                 "ok": False,
                 "reason": "non_final_wrong_tool_count",
-            }
-
-        if not content:
-            return {
-                "ok": False,
-                "reason": "non_final_missing_narration",
             }
 
         return {

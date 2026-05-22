@@ -5,7 +5,12 @@ from types import SimpleNamespace
 import pytest
 
 from core.approval import USER_DENIED_TOOL_ACTION
-from ui.terminal import CODE_SQUID_BANNER, RUN_STARTED_DIVIDER, TerminalDisplay
+from ui.terminal import (
+    CODE_SQUID_BANNER,
+    FINAL_REPORT_DIVIDER,
+    RUN_STARTED_DIVIDER,
+    TerminalDisplay,
+)
 
 
 class FakeSpinner:
@@ -476,6 +481,30 @@ def test_normal_completion_prints_session_complete(
     assert capsys.readouterr().out.endswith("✅ Session complete\n")
 
 
+def test_loop_finished_prints_divider_before_file_report(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    session = SimpleNamespace(
+        files_read={"app.py"},
+        files_written={"app.py"},
+        messages=[],
+    )
+
+    TerminalDisplay().loop_finished(session)
+
+    assert capsys.readouterr().out == (
+        "\n"
+        f"{FINAL_REPORT_DIVIDER}\n"
+        "📖 Files read:\n"
+        "  - app.py\n"
+        "\n"
+        "📝 Files written:\n"
+        "  - app.py\n"
+        "\n"
+        "✅ Session complete\n"
+    )
+
+
 def test_normal_assistant_final_summary_uses_report_heading(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -486,7 +515,7 @@ def test_normal_assistant_final_summary_uses_report_heading(
     )
 
     output = capsys.readouterr().out
-    assert output.startswith("📋 Final summary\n\n")
+    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n📋 Final summary\n\n")
     assert "Files changed: ui/terminal.py" in output
     assert "What changed: polished display" in output
     assert "🦑" not in output
