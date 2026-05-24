@@ -61,3 +61,19 @@ def test_no_tools_omits_parallel_tool_calls() -> None:
     provider.create_response(model="test-model", messages=[], tools=[])
 
     assert "parallel_tool_calls" not in client.chat.completions.payloads[0]
+
+
+def test_tool_choice_is_forwarded_when_supplied() -> None:
+    provider, client = provider_with_fake_client()
+
+    provider.create_response(
+        model="test-model",
+        messages=[],
+        tools=[],
+        tool_choice={"type": "function", "function": {"name": "read_file"}},
+    )
+
+    assert client.chat.completions.payloads[0]["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "read_file"},
+    }

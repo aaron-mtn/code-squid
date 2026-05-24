@@ -45,24 +45,24 @@ TASK COMPLETE
 REQUIRED_RESPONSE_FORMAT = """
 ## Required response format
 
-Before the task is complete, every response must include exactly one real tool call for the immediate next step.
+Before the task is complete, every response must include:
+1. one short visible narration sentence
+2. exactly one real tool call for the immediate next step
 
-Choose the tool call first.
-Include a THOUGHT section where you explain your reasoning process.
-Include narration for that same chosen step.
-The narration should usually be 2 to 4 descriptive sentences.
+Write the narration first, then issue the tool call in the same response.
+The narration and tool call must describe the same immediate action.
 
-Good narration should explain:
+Good narration should briefly explain:
 - what you learned from the last observation, if applicable
-- why the next step follows from that observation
-- what you are checking, changing, or verifying
-- what tool action you are taking now
+- why the next tool action follows
+- what you are checking, changing, or verifying now
 
 Rules:
 - exactly one tool call before the task is complete
-- make sure to include enough narration to explain the reasoning behind your chosen step
+- visible narration must not be empty when using a tool
+- narration must come before the tool call
 - narration must match the chosen tool call
-- do not describe a step unless you are issuing the tool call for that same step
+- do not describe later planned steps
 - do not split narration and tool use across separate turns
 - do not issue more than one tool call in a response before the task is complete
 """.strip()
@@ -93,16 +93,16 @@ Do not include a tool call in the final response.
 ## Valid examples
 
 Valid non-final response:
-[one real tool call to read the failing test]
 I am reading the failing test to inspect the expected behavior.
+[one real tool call to read the failing test]
 
 Valid non-final response:
-[one real tool call to write the fix]
 I found the bug and I am applying the smallest correct change now.
+[one real tool call to write the fix]
 
 Valid non-final response:
-[one real tool call to run verification]
 I am running the tests to verify the fix.
+[one real tool call to run verification]
 
 Valid final response:
 Files changed: parser.py
@@ -125,6 +125,12 @@ I am reading the test file and then I will update the implementation.
 
 Why invalid:
 Only one tool call is allowed before the task is complete.
+
+Invalid:
+[one real tool call to read the failing test]
+
+Why invalid:
+A non-final response should include visible narration before the tool call.
 
 Invalid final response:
 Files changed/created: app.js
@@ -168,12 +174,12 @@ Do not keep working once the task is complete.
 ## Valid examples
 
 Valid non-final response:
-[one real tool call to read the implementation file]
 I am reading the implementation to inspect the current behavior.
+[one real tool call to read the implementation file]
 
 Valid non-final response:
-[one real tool call to run tests]
 I am verifying the fix now.
+[one real tool call to run tests]
 
 Valid final response:
 Files changed: mathlib.py

@@ -168,6 +168,90 @@ def test_assistant_tool_calls_metadata_is_preserved_on_normalized_message() -> N
     ]
 
 
+def test_default_tool_call_replay_mode_sends_empty_content() -> None:
+    provider = FakeProvider(FakeResponse(FakeMessage(content="", tool_calls=[])))
+    adapter = ModelAdapter(provider=provider, model_name="test-model")
+
+    adapter.respond(
+        messages=[
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "call_1"}],
+            }
+        ],
+        tool_definitions=[],
+    )
+
+    assert provider.requests[0]["messages"][0]["content"] == ""
+
+
+def test_null_tool_call_replay_mode_sends_null_content() -> None:
+    provider = FakeProvider(FakeResponse(FakeMessage(content="", tool_calls=[])))
+    adapter = ModelAdapter(
+        provider=provider,
+        model_name="test-model",
+        tool_call_content_mode="null",
+    )
+
+    adapter.respond(
+        messages=[
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "call_1"}],
+            }
+        ],
+        tool_definitions=[],
+    )
+
+    assert provider.requests[0]["messages"][0]["content"] is None
+
+
+def test_omit_tool_call_replay_mode_removes_blank_content() -> None:
+    provider = FakeProvider(FakeResponse(FakeMessage(content="", tool_calls=[])))
+    adapter = ModelAdapter(
+        provider=provider,
+        model_name="test-model",
+        tool_call_content_mode="omit",
+    )
+
+    adapter.respond(
+        messages=[
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "call_1"}],
+            }
+        ],
+        tool_definitions=[],
+    )
+
+    assert "content" not in provider.requests[0]["messages"][0]
+
+
+def test_non_empty_tool_call_replay_content_is_preserved() -> None:
+    provider = FakeProvider(FakeResponse(FakeMessage(content="", tool_calls=[])))
+    adapter = ModelAdapter(
+        provider=provider,
+        model_name="test-model",
+        tool_call_content_mode="null",
+    )
+
+    adapter.respond(
+        messages=[
+            {
+                "role": "assistant",
+                "content": "I need to inspect the file.",
+                "tool_calls": [{"id": "call_1"}],
+            }
+        ],
+        tool_definitions=[],
+    )
+
+    assert provider.requests[0]["messages"][0]["content"] == "I need to inspect the file."
+
+
 def test_provider_exception_is_wrapped_as_model_request_error() -> None:
     provider_error = RuntimeError("provider unavailable")
     adapter = ModelAdapter(provider=FailingProvider(provider_error), model_name="test-model")

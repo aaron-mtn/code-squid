@@ -18,6 +18,7 @@ DEFAULT_BASE_URL = "http://127.0.0.1:1234/v1"
 DEFAULT_API_KEY = "lm-studio"
 DEFAULT_MODEL_NAME = "qwen3.5-9b"
 DEFAULT_PROVIDER = "openai_compatible"
+VALID_PROVIDERS = {"openai_compatible", "ollama", "openrouter"}
 DEFAULT_DEBUG = False
 DEFAULT_TEMPERATURE = None
 
@@ -165,6 +166,17 @@ def _temperature(model_settings: dict[str, Any], settings_path: Path) -> float |
         ) from error
 
 
+def _provider(model_settings: dict[str, Any], settings_path: Path) -> str:
+    provider = os.getenv("CODE_SQUID_PROVIDER", model_settings.get("provider", DEFAULT_PROVIDER))
+    if provider not in VALID_PROVIDERS:
+        valid_providers = ", ".join(sorted(VALID_PROVIDERS))
+        raise ValueError(
+            f"Invalid settings JSON in {settings_path}: model.provider must be one of {valid_providers}"
+        )
+
+    return provider
+
+
 def load_settings(repo_root: Path) -> Settings:
     settings_path = repo_root / ".code-squid" / "settings.json"
     raw_settings = _read_settings_file(settings_path)
@@ -175,7 +187,7 @@ def load_settings(repo_root: Path) -> Settings:
     base_url = os.getenv("CODE_SQUID_BASE_URL", model_settings.get("base_url", DEFAULT_BASE_URL))
     api_key, api_key_env = _resolve_api_key(model_settings, settings_path)
     model_name = os.getenv("CODE_SQUID_MODEL", model_settings.get("name", DEFAULT_MODEL_NAME))
-    provider = os.getenv("CODE_SQUID_PROVIDER", model_settings.get("provider", DEFAULT_PROVIDER))
+    provider = _provider(model_settings, settings_path)
     temperature = _temperature(model_settings, settings_path)
     debug = display_settings.get("debug", DEFAULT_DEBUG)
     approval_mode = _approval_mode(runtime_settings, settings_path)

@@ -49,6 +49,7 @@ def _build_loop(
     model_adapter = ModelAdapter(
         provider=provider,
         model_name=settings.model.name,
+        tool_call_content_mode=_tool_call_content_mode(settings),
     )
 
     tool_executor = ToolExecutor(
@@ -91,6 +92,12 @@ def _build_provider(settings: Settings):
         api_key=settings.model.api_key,
         temperature=settings.model.temperature,
     )
+
+
+def _tool_call_content_mode(settings: Settings) -> str:
+    if settings.model.provider == "openrouter":
+        return "null"
+    return "empty"
 
 
 def _run_loop(

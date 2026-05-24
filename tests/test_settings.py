@@ -126,6 +126,24 @@ def test_env_vars_override_settings_file(tmp_path: Path, monkeypatch: pytest.Mon
     assert settings.model.temperature == 0.4
 
 
+def test_code_squid_provider_openrouter_is_accepted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CODE_SQUID_PROVIDER", "openrouter")
+
+    settings = load_settings(tmp_path)
+
+    assert settings.model.provider == "openrouter"
+
+
+def test_invalid_provider_settings_raise(tmp_path: Path) -> None:
+    write_settings(tmp_path, {"model": {"provider": "not-a-provider"}})
+
+    with pytest.raises(ValueError, match="model\\.provider"):
+        load_settings(tmp_path)
+
+
 def test_empty_temperature_env_var_unsets_temperature(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

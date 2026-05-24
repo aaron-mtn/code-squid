@@ -3,7 +3,7 @@ import json
 import pytest
 
 from config.settings import ModelSettings, RuntimeSettings, Settings, DisplaySettings
-from main import _build_provider
+from main import _build_provider, _tool_call_content_mode
 from providers.ollama import OllamaProvider, adapt_response, convert_messages
 from providers.openai_compatible import OpenAICompatibleProvider
 
@@ -216,6 +216,39 @@ def test_provider_selection_threads_temperature() -> None:
 
     assert isinstance(provider, OpenAICompatibleProvider)
     assert provider.temperature == 0
+
+
+def test_provider_selection_uses_openai_compatible_for_openrouter() -> None:
+    settings = Settings(
+        model=ModelSettings(provider="openrouter", temperature=0),
+        display=DisplaySettings(),
+        runtime=RuntimeSettings(),
+    )
+
+    provider = _build_provider(settings)
+
+    assert isinstance(provider, OpenAICompatibleProvider)
+    assert provider.temperature == 0
+
+
+def test_openrouter_uses_null_tool_call_content_mode() -> None:
+    settings = Settings(
+        model=ModelSettings(provider="openrouter"),
+        display=DisplaySettings(),
+        runtime=RuntimeSettings(),
+    )
+
+    assert _tool_call_content_mode(settings) == "null"
+
+
+def test_openai_compatible_preserves_default_tool_call_content_mode() -> None:
+    settings = Settings(
+        model=ModelSettings(provider="openai_compatible"),
+        display=DisplaySettings(),
+        runtime=RuntimeSettings(),
+    )
+
+    assert _tool_call_content_mode(settings) == "empty"
 
 
 def test_provider_selection_threads_temperature_to_ollama() -> None:

@@ -22,7 +22,13 @@ class OpenAICompatibleProvider(BaseProvider):
             api_key=api_key or "lm-studio",
         )
 
-    def create_response(self, model: str, messages: list[dict], tools: list[dict]) -> object:
+    def create_response(
+        self,
+        model: str,
+        messages: list[dict],
+        tools: list[dict],
+        tool_choice=None,
+    ) -> object:
         payload = {
             "model": model,
             "messages": messages,
@@ -32,5 +38,7 @@ class OpenAICompatibleProvider(BaseProvider):
             payload["temperature"] = self.temperature
         if tools:
             payload["parallel_tool_calls"] = False
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
 
         return self.client.chat.completions.create(**payload)

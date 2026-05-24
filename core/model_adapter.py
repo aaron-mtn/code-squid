@@ -2,6 +2,8 @@
 
 import json
 
+TOOL_CALL_CONTENT_MODES = {"omit", "empty", "null"}
+
 
 class ModelRequestError(RuntimeError):
     """Raised when the configured model provider request fails."""
@@ -13,9 +15,14 @@ class ModelAdapter:
     # Store the provider and model name used for requests.
     # The provider handles the raw API call, while this adapter normalizes
     # provider output into the small internal reply shape used by the loop.
-    def __init__(self, provider, model_name: str) -> None:
+    def __init__(self, provider, model_name: str, tool_call_content_mode: str = "empty") -> None:
+        if tool_call_content_mode not in TOOL_CALL_CONTENT_MODES:
+            valid_modes = ", ".join(sorted(TOOL_CALL_CONTENT_MODES))
+            raise ValueError(f"tool_call_content_mode must be one of {valid_modes}")
+
         self.provider = provider
         self.model_name = model_name
+        self.tool_call_content_mode = tool_call_content_mode
 
     # Send transcript messages and tool definitions to the provider,
     # then normalize the raw provider response into the internal reply shape.
@@ -27,7 +34,7 @@ class ModelAdapter:
         try:
             raw_response = self.provider.create_response(
                 model=self.model_name,
-                messages=messages,
+                messages=self._messages_for_provider(messages),
                 tools=tool_definitions,
             )
         except Exception as exc:
@@ -59,6 +66,26 @@ class ModelAdapter:
                 "required": parameters.get("required", []),
             }
         return metadata
+
+    def _messages_for_provider(self, messages: list[dict]) -> list[dict]:
+        provider_messages = []
+        for message in messages:
+            provider_message = dict(message)
+            if (
+                provider_message.get("role") == "assistant"
+                and provider_message.get("tool_calls")
+                and not provider_message.get("content")
+            ):
+                if self.tool_call_content_mode == "omit":
+                    provider_message.pop("content", None)
+                elif self.tool_call_content_mode == "empty":
+                    provider_message["content"] = ""
+                elif self.tool_call_content_mode == "null":
+                    provider_message["content"] = None
+
+            provider_messages.append(provider_message)
+
+        return provider_messages
 
     # Convert the raw provider response into a consistent internal format.
     # The result contains:
