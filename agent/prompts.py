@@ -48,6 +48,7 @@ REQUIRED_RESPONSE_FORMAT = """
 Before the task is complete, every response must include exactly one real tool call for the immediate next step.
 
 Choose the tool call first.
+Include a THOUGHT section where you explain your reasoning process.
 Include narration for that same chosen step.
 The narration should usually be 2 to 4 descriptive sentences.
 

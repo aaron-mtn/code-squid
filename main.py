@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from agent.coding import CodingAgent
-from config.settings import Settings, load_settings
+from config.settings import DEFAULT_BASE_URL, Settings, load_settings
 from core.agent_loop import AgentLoop
 from core.approval import ApprovalPolicy
 from core.model_adapter import ModelAdapter, ModelRequestError
@@ -14,6 +14,7 @@ from core.session import Session
 from core.tool_executor import ToolExecutor
 from core.tool_results import ToolResults
 from providers.openai_compatible import OpenAICompatibleProvider
+from providers.ollama import OllamaProvider
 from storage.error_log import write_error_log
 from storage.session_index import latest_session_id, session_dir_for
 from storage.session_store import SessionStore
@@ -43,10 +44,7 @@ def _build_loop(
     settings: Settings,
     display: TerminalDisplay,
 ) -> AgentLoop:
-    provider = OpenAICompatibleProvider(
-        base_url=settings.model.base_url,
-        api_key=settings.model.api_key,
-    )
+    provider = _build_provider(settings)
 
     model_adapter = ModelAdapter(
         provider=provider,
@@ -77,6 +75,22 @@ def _build_loop(
     )
 
     return loop
+
+
+def _build_provider(settings: Settings):
+    if settings.model.provider == "ollama":
+        if settings.model.base_url == DEFAULT_BASE_URL:
+            return OllamaProvider(temperature=settings.model.temperature)
+        return OllamaProvider(
+            base_url=settings.model.base_url,
+            temperature=settings.model.temperature,
+        )
+
+    return OpenAICompatibleProvider(
+        base_url=settings.model.base_url,
+        api_key=settings.model.api_key,
+        temperature=settings.model.temperature,
+    )
 
 
 def _run_loop(

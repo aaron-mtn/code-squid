@@ -17,7 +17,9 @@ from typing import Any
 DEFAULT_BASE_URL = "http://127.0.0.1:1234/v1"
 DEFAULT_API_KEY = "lm-studio"
 DEFAULT_MODEL_NAME = "qwen3.5-9b"
+DEFAULT_PROVIDER = "openai_compatible"
 DEFAULT_DEBUG = False
+DEFAULT_TEMPERATURE = None
 
 # Approval mode is parsed here, but enforcement belongs in the runtime/tool
 # execution path. "never" is the current trusted-local behavior.
@@ -35,6 +37,8 @@ class ModelSettings:
     api_key: str = DEFAULT_API_KEY
     api_key_env: str | None = None
     name: str = DEFAULT_MODEL_NAME
+    provider: str = DEFAULT_PROVIDER
+    temperature: float | int | None = DEFAULT_TEMPERATURE
 
 
 @dataclass(frozen=True)
@@ -128,6 +132,39 @@ def _max_tool_steps(runtime_settings: dict[str, Any], settings_path: Path) -> in
     return max_tool_steps
 
 
+def _validate_temperature(value: Any, source: str) -> float | int | None:
+    if value is None:
+        return None
+
+    if isinstance(value, bool) or not isinstance(value, int | float) or not 0 <= value <= 2:
+        raise ValueError(f"Invalid {source}: model.temperature must be null or a number from 0 through 2")
+
+    return value
+
+
+def _temperature(model_settings: dict[str, Any], settings_path: Path) -> float | int | None:
+    temperature = _validate_temperature(
+        model_settings.get("temperature", DEFAULT_TEMPERATURE),
+        f"settings JSON in {settings_path}",
+    )
+
+    temperature_env = os.getenv("CODE_SQUID_TEMPERATURE")
+    if temperature_env is None:
+        return temperature
+
+    if temperature_env == "":
+        return None
+
+    try:
+        return _validate_temperature(float(temperature_env), "CODE_SQUID_TEMPERATURE")
+    except ValueError as error:
+        if str(error).startswith("Invalid CODE_SQUID_TEMPERATURE"):
+            raise
+        raise ValueError(
+            "Invalid CODE_SQUID_TEMPERATURE: model.temperature must be null or a number from 0 through 2"
+        ) from error
+
+
 def load_settings(repo_root: Path) -> Settings:
     settings_path = repo_root / ".code-squid" / "settings.json"
     raw_settings = _read_settings_file(settings_path)
@@ -138,6 +175,8 @@ def load_settings(repo_root: Path) -> Settings:
     base_url = os.getenv("CODE_SQUID_BASE_URL", model_settings.get("base_url", DEFAULT_BASE_URL))
     api_key, api_key_env = _resolve_api_key(model_settings, settings_path)
     model_name = os.getenv("CODE_SQUID_MODEL", model_settings.get("name", DEFAULT_MODEL_NAME))
+    provider = os.getenv("CODE_SQUID_PROVIDER", model_settings.get("provider", DEFAULT_PROVIDER))
+    temperature = _temperature(model_settings, settings_path)
     debug = display_settings.get("debug", DEFAULT_DEBUG)
     approval_mode = _approval_mode(runtime_settings, settings_path)
     max_tool_steps = _max_tool_steps(runtime_settings, settings_path)
@@ -152,6 +191,8 @@ def load_settings(repo_root: Path) -> Settings:
             api_key=api_key,
             api_key_env=api_key_env,
             name=model_name,
+            provider=provider,
+            temperature=temperature,
         ),
         display=DisplaySettings(debug=bool(debug)),
         runtime=RuntimeSettings(

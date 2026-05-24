@@ -10,6 +10,8 @@ ENV_VARS = [
     "CODE_SQUID_BASE_URL",
     "CODE_SQUID_API_KEY",
     "CODE_SQUID_MODEL",
+    "CODE_SQUID_PROVIDER",
+    "CODE_SQUID_TEMPERATURE",
     "CODE_SQUID_DEBUG",
 ]
 
@@ -33,6 +35,8 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert settings.model.api_key == "lm-studio"
     assert settings.model.api_key_env is None
     assert settings.model.name == "qwen3.5-9b"
+    assert settings.model.provider == "openai_compatible"
+    assert settings.model.temperature is None
     assert settings.display.debug is False
     assert settings.runtime.approval_mode == "never"
     assert settings.runtime.max_tool_steps is None
@@ -46,6 +50,8 @@ def test_settings_file_overrides_defaults(tmp_path: Path) -> None:
                 "base_url": "http://localhost:9999/v1",
                 "api_key": "local-key",
                 "name": "local-model",
+                "provider": "ollama",
+                "temperature": 0.2,
             },
             "display": {
                 "debug": True,
@@ -63,9 +69,27 @@ def test_settings_file_overrides_defaults(tmp_path: Path) -> None:
     assert settings.model.api_key == "local-key"
     assert settings.model.api_key_env is None
     assert settings.model.name == "local-model"
+    assert settings.model.provider == "ollama"
+    assert settings.model.temperature == 0.2
     assert settings.display.debug is True
     assert settings.runtime.approval_mode == "always"
     assert settings.runtime.max_tool_steps == 3
+
+
+def test_settings_file_can_set_zero_temperature(tmp_path: Path) -> None:
+    write_settings(tmp_path, {"model": {"temperature": 0}})
+
+    settings = load_settings(tmp_path)
+
+    assert settings.model.temperature == 0
+
+
+def test_settings_file_can_set_decimal_temperature(tmp_path: Path) -> None:
+    write_settings(tmp_path, {"model": {"temperature": 0.2}})
+
+    settings = load_settings(tmp_path)
+
+    assert settings.model.temperature == 0.2
 
 
 def test_settings_file_allows_null_max_tool_steps(tmp_path: Path) -> None:
@@ -90,12 +114,54 @@ def test_env_vars_override_settings_file(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setenv("CODE_SQUID_BASE_URL", "http://env-host:1234/v1")
     monkeypatch.setenv("CODE_SQUID_API_KEY", "env-key")
     monkeypatch.setenv("CODE_SQUID_MODEL", "env-model")
+    monkeypatch.setenv("CODE_SQUID_PROVIDER", "ollama")
+    monkeypatch.setenv("CODE_SQUID_TEMPERATURE", "0.4")
 
     settings = load_settings(tmp_path)
 
     assert settings.model.base_url == "http://env-host:1234/v1"
     assert settings.model.api_key == "env-key"
     assert settings.model.name == "env-model"
+    assert settings.model.provider == "ollama"
+    assert settings.model.temperature == 0.4
+
+
+def test_empty_temperature_env_var_unsets_temperature(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    write_settings(tmp_path, {"model": {"temperature": 0.2}})
+    monkeypatch.setenv("CODE_SQUID_TEMPERATURE", "")
+
+    settings = load_settings(tmp_path)
+
+    assert settings.model.temperature is None
+
+
+def test_null_temperature_preserves_none(tmp_path: Path) -> None:
+    write_settings(tmp_path, {"model": {"temperature": None}})
+
+    settings = load_settings(tmp_path)
+
+    assert settings.model.temperature is None
+
+
+def test_invalid_temperature_env_var_raises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CODE_SQUID_TEMPERATURE", "warm")
+
+    with pytest.raises(ValueError, match="CODE_SQUID_TEMPERATURE"):
+        load_settings(tmp_path)
+
+
+@pytest.mark.parametrize("temperature", [-0.1, 2.1, True, False])
+def test_invalid_temperature_settings_raise(tmp_path: Path, temperature: object) -> None:
+    write_settings(tmp_path, {"model": {"temperature": temperature}})
+
+    with pytest.raises(ValueError, match="model\\.temperature"):
+        load_settings(tmp_path)
 
 
 def test_debug_env_var_enables_debug(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
