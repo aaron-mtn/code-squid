@@ -91,6 +91,7 @@ def _build_provider(settings: Settings):
         base_url=settings.model.base_url,
         api_key=settings.model.api_key,
         temperature=settings.model.temperature,
+        debug=settings.display.debug,
     )
 
 

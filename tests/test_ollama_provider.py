@@ -221,7 +221,7 @@ def test_provider_selection_threads_temperature() -> None:
 def test_provider_selection_uses_openai_compatible_for_openrouter() -> None:
     settings = Settings(
         model=ModelSettings(provider="openrouter", temperature=0),
-        display=DisplaySettings(),
+        display=DisplaySettings(debug=True),
         runtime=RuntimeSettings(),
     )
 
@@ -229,6 +229,7 @@ def test_provider_selection_uses_openai_compatible_for_openrouter() -> None:
 
     assert isinstance(provider, OpenAICompatibleProvider)
     assert provider.temperature == 0
+    assert provider.debug is True
 
 
 def test_openrouter_uses_null_tool_call_content_mode() -> None:

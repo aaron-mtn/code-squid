@@ -20,9 +20,13 @@ class FakeClient:
         self.chat = FakeChat()
 
 
-def provider_with_fake_client(temperature=None) -> tuple[OpenAICompatibleProvider, FakeClient]:
+def provider_with_fake_client(
+    temperature=None,
+    debug: bool = False,
+) -> tuple[OpenAICompatibleProvider, FakeClient]:
     provider = OpenAICompatibleProvider.__new__(OpenAICompatibleProvider)
     provider.temperature = temperature
+    provider.debug = debug
     provider.client = FakeClient()
     return provider, provider.client
 
@@ -77,3 +81,43 @@ def test_tool_choice_is_forwarded_when_supplied() -> None:
         "type": "function",
         "function": {"name": "read_file"},
     }
+
+
+def test_debug_off_does_not_print_request_summary(capsys) -> None:
+    provider, _client = provider_with_fake_client(debug=False)
+
+    provider.create_response(
+        model="test-model",
+        messages=[{"role": "user", "content": "secret task"}],
+        tools=[{"type": "function", "function": {"name": "read_file"}}],
+    )
+
+    assert capsys.readouterr().out == ""
+
+
+def test_debug_on_prints_parallel_tool_calls_false_without_message_contents(capsys) -> None:
+    provider, _client = provider_with_fake_client(debug=True)
+
+    provider.create_response(
+        model="test-model",
+        messages=[
+            {"role": "system"},
+            {"role": "user", "content": "secret task"},
+            {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1"}]},
+            {"role": "tool", "content": ""},
+        ],
+        tools=[{"type": "function", "function": {"name": "read_file"}}],
+    )
+
+    output = capsys.readouterr().out
+    assert "parallel_tool_calls=False" in output
+    assert "tools_count=1" in output
+    assert "temperature=<missing>" in output
+    assert "tool_choice=<missing>" in output
+    assert "message_count=4" in output
+    assert "'role': 'user'" in output
+    assert "'content': 'non-empty'" in output
+    assert "'content': 'None'" in output
+    assert "'content': 'empty'" in output
+    assert "'tool_calls': 1" in output
+    assert "secret task" not in output
