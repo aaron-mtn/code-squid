@@ -31,6 +31,10 @@ VALID_APPROVAL_MODES = {"never", "always"}
 # a loop guard for smaller or less reliable models.
 DEFAULT_MAX_TOOL_STEPS = None
 
+DEFAULT_COMPACTION_ENABLED = True
+DEFAULT_COMPACTION_TRIGGER_INPUT_TOKENS = 48000
+DEFAULT_COMPACTION_KEEP_RECENT_TURNS = 8
+
 
 @dataclass(frozen=True)
 class ModelSettings:
@@ -54,10 +58,18 @@ class RuntimeSettings:
 
 
 @dataclass(frozen=True)
+class CompactionSettings:
+    enabled: bool = DEFAULT_COMPACTION_ENABLED
+    trigger_input_tokens: int = DEFAULT_COMPACTION_TRIGGER_INPUT_TOKENS
+    keep_recent_turns: int = DEFAULT_COMPACTION_KEEP_RECENT_TURNS
+
+
+@dataclass(frozen=True)
 class Settings:
     model: ModelSettings
     display: DisplaySettings
     runtime: RuntimeSettings
+    compaction: CompactionSettings
 
 
 def _read_settings_file(settings_path: Path) -> dict[str, Any]:
@@ -133,6 +145,46 @@ def _max_tool_steps(runtime_settings: dict[str, Any], settings_path: Path) -> in
     return max_tool_steps
 
 
+def _positive_int(value: Any, field_path: str, settings_path: Path) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(
+            f"Invalid settings JSON in {settings_path}: {field_path} must be a positive integer"
+        )
+
+    return value
+
+
+def _compaction_settings(
+    compaction_settings: dict[str, Any],
+    settings_path: Path,
+) -> CompactionSettings:
+    enabled = compaction_settings.get("enabled", DEFAULT_COMPACTION_ENABLED)
+    if not isinstance(enabled, bool):
+        raise ValueError(
+            f"Invalid settings JSON in {settings_path}: compaction.enabled must be a boolean"
+        )
+
+    trigger_input_tokens = _positive_int(
+        compaction_settings.get(
+            "trigger_input_tokens",
+            DEFAULT_COMPACTION_TRIGGER_INPUT_TOKENS,
+        ),
+        "compaction.trigger_input_tokens",
+        settings_path,
+    )
+    keep_recent_turns = _positive_int(
+        compaction_settings.get("keep_recent_turns", DEFAULT_COMPACTION_KEEP_RECENT_TURNS),
+        "compaction.keep_recent_turns",
+        settings_path,
+    )
+
+    return CompactionSettings(
+        enabled=enabled,
+        trigger_input_tokens=trigger_input_tokens,
+        keep_recent_turns=keep_recent_turns,
+    )
+
+
 def _validate_temperature(value: Any, source: str) -> float | int | None:
     if value is None:
         return None
@@ -183,6 +235,7 @@ def load_settings(repo_root: Path) -> Settings:
     model_settings = _section(raw_settings, "model", settings_path)
     display_settings = _section(raw_settings, "display", settings_path)
     runtime_settings = _section(raw_settings, "runtime", settings_path)
+    compaction_settings = _section(raw_settings, "compaction", settings_path)
 
     base_url = os.getenv("CODE_SQUID_BASE_URL", model_settings.get("base_url", DEFAULT_BASE_URL))
     api_key, api_key_env = _resolve_api_key(model_settings, settings_path)
@@ -192,6 +245,7 @@ def load_settings(repo_root: Path) -> Settings:
     debug = display_settings.get("debug", DEFAULT_DEBUG)
     approval_mode = _approval_mode(runtime_settings, settings_path)
     max_tool_steps = _max_tool_steps(runtime_settings, settings_path)
+    compaction = _compaction_settings(compaction_settings, settings_path)
 
     debug_env = os.getenv("CODE_SQUID_DEBUG")
     if debug_env is not None:
@@ -211,4 +265,5 @@ def load_settings(repo_root: Path) -> Settings:
             approval_mode=approval_mode,
             max_tool_steps=max_tool_steps,
         ),
+        compaction=compaction,
     )

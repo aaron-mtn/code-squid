@@ -40,6 +40,9 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert settings.display.debug is False
     assert settings.runtime.approval_mode == "never"
     assert settings.runtime.max_tool_steps is None
+    assert settings.compaction.enabled is True
+    assert settings.compaction.trigger_input_tokens == 48000
+    assert settings.compaction.keep_recent_turns == 8
 
 
 def test_settings_file_overrides_defaults(tmp_path: Path) -> None:
@@ -60,6 +63,11 @@ def test_settings_file_overrides_defaults(tmp_path: Path) -> None:
                 "approval_mode": "always",
                 "max_tool_steps": 3,
             },
+            "compaction": {
+                "enabled": False,
+                "trigger_input_tokens": 24000,
+                "keep_recent_turns": 4,
+            },
         },
     )
 
@@ -74,6 +82,9 @@ def test_settings_file_overrides_defaults(tmp_path: Path) -> None:
     assert settings.display.debug is True
     assert settings.runtime.approval_mode == "always"
     assert settings.runtime.max_tool_steps == 3
+    assert settings.compaction.enabled is False
+    assert settings.compaction.trigger_input_tokens == 24000
+    assert settings.compaction.keep_recent_turns == 4
 
 
 def test_settings_file_can_set_zero_temperature(tmp_path: Path) -> None:
@@ -211,6 +222,36 @@ def test_invalid_max_tool_steps_raises(tmp_path: Path, max_tool_steps: object) -
     write_settings(tmp_path, {"runtime": {"max_tool_steps": max_tool_steps}})
 
     with pytest.raises(ValueError, match="runtime\\.max_tool_steps"):
+        load_settings(tmp_path)
+
+
+@pytest.mark.parametrize("enabled", [None, 1, 0, "true"])
+def test_invalid_compaction_enabled_raises(tmp_path: Path, enabled: object) -> None:
+    write_settings(tmp_path, {"compaction": {"enabled": enabled}})
+
+    with pytest.raises(ValueError, match="compaction\\.enabled"):
+        load_settings(tmp_path)
+
+
+@pytest.mark.parametrize("trigger_input_tokens", [0, -1, True, False, "48000"])
+def test_invalid_compaction_trigger_input_tokens_raises(
+    tmp_path: Path,
+    trigger_input_tokens: object,
+) -> None:
+    write_settings(tmp_path, {"compaction": {"trigger_input_tokens": trigger_input_tokens}})
+
+    with pytest.raises(ValueError, match="compaction\\.trigger_input_tokens"):
+        load_settings(tmp_path)
+
+
+@pytest.mark.parametrize("keep_recent_turns", [0, -1, True, False, "8"])
+def test_invalid_compaction_keep_recent_turns_raises(
+    tmp_path: Path,
+    keep_recent_turns: object,
+) -> None:
+    write_settings(tmp_path, {"compaction": {"keep_recent_turns": keep_recent_turns}})
+
+    with pytest.raises(ValueError, match="compaction\\.keep_recent_turns"):
         load_settings(tmp_path)
 
 
