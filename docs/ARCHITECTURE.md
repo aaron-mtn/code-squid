@@ -4,10 +4,10 @@
 
 Code Squid is a minimal standalone coding agent for repository work.
 
-It runs interactive coding tasks from the command line, sends the transcript to
-an OpenAI-compatible chat-completions provider, accepts model tool calls,
-executes a small local tool set, persists the session, and keeps looping until
-the coding agent accepts a final assistant message.
+It runs interactive coding tasks from the command line, sends a replayable
+transcript to a model provider, accepts model tool calls, executes a small local
+tool set, persists the session, and keeps looping until the coding-agent policy
+accepts a final assistant message.
 
 The codebase is intentionally narrow. It is not a general agent framework, a
 multi-agent system, a hardened sandbox, or a polished TUI. The main value of the
@@ -17,7 +17,7 @@ boundaries are small enough to inspect directly.
 The runtime shape is:
 
 ```text
-settings -> provider -> model adapter -> coding agent policy -> agent loop -> approval -> tools -> transcript/session storage
+settings -> provider -> model adapter -> coding-agent policy -> agent loop -> approval -> tools -> transcript/session storage
 ```
 
 `.code-squid/` is local runtime state and should be gitignored.
@@ -27,61 +27,97 @@ settings -> provider -> model adapter -> coding agent policy -> agent loop -> ap
 - `main.py`
   - Thin CLI entry point, object wiring, and small command dispatch.
   - Uses the current directory as `repo_root`.
-  - Loads settings, creates provider, model adapter, session state, session
-    storage, undo storage, tool executor, tool result formatter, terminal
-    display, approval policy, coding agent, and loop.
-  - Dispatches new runs, session listing/showing, resume, and undo.
-  - Catches `ModelRequestError`, records a failed session status, writes a
-    diagnostic error log, and prints a short friendly CLI failure.
+  - Loads settings and wires provider, model adapter, compactor, session state,
+    session storage, undo storage, tool executor, tool-result formatter,
+    terminal display, approval policy, coding agent, and loop.
+  - Dispatches new runs, saved-session listing/showing, resume, and undo.
+  - Catches `KeyboardInterrupt`, marks the session interrupted, and prints the
+    final session display.
+  - Catches `ModelRequestError`, marks the session failed, writes a diagnostic
+    error log, and prints a short CLI failure.
+
+- `agent/`
+  - Coding-agent policy and prompt text.
+  - `coding.py` owns initial messages, follow-up messages, exposed tool
+    definitions, reply validation, completion detection, correction messages,
+    and repeated-invalid-reply failure messages.
+  - `prompts.py` owns prompt text, tool-use guidance, final-summary
+    requirements, correction prompts, and compaction-summary prompting.
+  - Prompt guidance is not the same as runtime enforcement.
 
 - `config/`
   - Runtime settings loading.
   - `settings.py` reads `.code-squid/settings.json`, validates supported
-    settings, applies environment overrides, and returns typed settings objects.
+    settings, applies supported environment overrides, and returns typed
+    settings objects.
 
 - `core/`
   - Generic runtime machinery.
-  - Owns the loop, transcript/session state, model response normalization,
-    approval decisions, tool dispatch, side-effect tracking, pre-write undo
-    snapshot coordination, and tool-result message formatting.
-  - Should not contain coding-task prompt text.
-
-- `agent/`
-  - Coding-agent policy and prompt text.
-  - Owns initial messages, follow-up messages, tool definitions exposed to the
-    model, reply validation, completion detection, correction messages, and
-    repeated-invalid-reply failure messaging.
-
-- `tools/`
-  - Local tool schemas and implementations.
-  - Currently contains `read_file`, `write_file`, `run_command`, shared output
-    truncation, and a static registry.
+  - `agent_loop.py` owns turn flow, invalid-reply retry handling, compaction
+    hooks, approval gating, tool execution sequencing, transcript writes, and
+    session status updates.
+  - `session.py` owns in-memory transcript state and lightweight read/write
+    side-effect tracking.
+  - `model_adapter.py` owns provider response normalization, tool-call parsing,
+    shallow tool-call validation, provider replay message shaping, usage
+    normalization, and `ModelRequestError`.
+  - `approval.py` owns UI-agnostic approval decisions and denied tool results.
+  - `compaction.py` owns pre-request transcript compaction.
+  - `token_estimate.py` owns rough transcript token estimates.
+  - `tool_executor.py` owns tool dispatch, exception-to-result conversion,
+    successful read/write side-effect tracking, and pre-write undo snapshots.
+  - `tool_results.py` owns conversion of action results into model-visible
+    `role: "tool"` messages.
 
 - `providers/`
   - Raw provider transport.
-  - `openai_compatible.py` owns the OpenAI-compatible
-    `chat.completions.create(...)` call through the OpenAI Python client.
-  - Provider transport does not normalize responses or apply agent policy.
+  - `openai_compatible.py` owns OpenAI-compatible chat-completions calls through
+    the OpenAI Python client.
+  - `ollama.py` owns native Ollama `/api/chat` calls and adapts native Ollama
+    responses to the OpenAI-like shape expected by `ModelAdapter`.
+  - Provider transport does not own loop control, coding-agent policy, tool
+    execution, or final reply validation.
 
 - `storage/`
   - Local runtime persistence.
-  - `session_store.py` owns one session folder.
-  - `session_index.py` owns listing, finding, and loading saved sessions.
+  - `session_store.py` owns one session folder, `metadata.json`, append-only
+    `session.jsonl` entries, message loading, status updates, and compaction
+    event logging.
+  - `session_index.py` owns saved-session discovery, newest-session lookup,
+    exact session directory lookup, and raw JSONL entry loading.
   - `undo_store.py` owns the latest-only undo buffer.
-  - `error_log.py` owns narrow diagnostic traceback logging for app/provider
+  - `error_log.py` owns narrow diagnostic traceback logging for model request
     failures.
+
+- `tools/`
+  - Local tool schemas and implementations.
+  - Current active tools are `read_file`, `write_file`, and `run_command`.
+  - `_truncation.py` owns shared head/tail truncation for large file and command
+    outputs.
+  - `tools/__init__.py` owns the static tool registry.
 
 - `ui/`
   - Small terminal display helpers.
   - `terminal.py` owns display flow, formatting, approval prompts, debug output,
-    and friendly error messages.
-  - `spinner.py` owns only the TTY spinner animation mechanics.
+    tool-event display, final-summary display, and friendly error messages.
   - `sessions.py` owns saved-session viewer display.
+  - `spinner.py` owns only TTY spinner animation mechanics.
+
+- `scripts/`
+  - Small repo-maintenance helpers.
+  - `update_filetree.py` generates `docs/filetree.md` from the current
+    repository tree and Python docstrings.
 
 - `tests/`
   - Focused pytest coverage for settings, approval, completion rules, loop
-    behavior, model adaptation, tool behavior, session storage, undo, error
-    logging, spinner, terminal display, and CLI dispatch.
+    behavior, model adaptation, provider transport adapters, tool behavior,
+    compaction, token estimates, session storage/indexing, undo, error logging,
+    spinner, terminal display, and CLI dispatch.
+
+- Top-level support files
+  - `README.md` is the user-facing overview and basic usage entry point.
+  - `requirements.txt` is the Python dependency list for the CLI/test
+    environment.
 
 ## Settings
 
@@ -92,38 +128,56 @@ Code Squid reads settings from:
 ```
 
 Missing settings are allowed. Defaults keep the CLI usable with a local
-OpenAI-compatible server:
+OpenAI-compatible server, especially LM Studio:
 
 - model base URL: `http://127.0.0.1:1234/v1`
 - API key: `lm-studio`
 - model name: `qwen3.5-9b`
+- provider: `openai_compatible`
+- temperature: `null`
 - display debug: `false`
 - approval mode: `never`
 - max tool steps: unlimited
+- compaction: enabled at an estimated 48,000 input tokens, keeping 8 recent
+  chunks verbatim
 
-Supported settings sections are:
+Supported settings sections and fields:
 
 - `model.base_url`
 - `model.api_key`
 - `model.api_key_env`
 - `model.name`
+- `model.provider`
+- `model.temperature`
 - `display.debug`
 - `runtime.approval_mode`
 - `runtime.max_tool_steps`
+- `compaction.enabled`
+- `compaction.trigger_input_tokens`
+- `compaction.keep_recent_turns`
 
-Environment overrides:
+Supported provider values are `openai_compatible`, `openrouter`, and `ollama`.
+Supported approval modes are `never` and `always`. `runtime.max_tool_steps` is
+either `null` or a positive integer. `model.temperature` is `null` or a number
+from 0 through 2.
+
+Environment overrides exist for current model/debug/temperature/provider-related
+settings:
 
 - `CODE_SQUID_BASE_URL`
 - `CODE_SQUID_API_KEY`
 - `CODE_SQUID_MODEL`
+- `CODE_SQUID_PROVIDER`
+- `CODE_SQUID_TEMPERATURE`
 - `CODE_SQUID_DEBUG`
 
 `CODE_SQUID_API_KEY` wins over `model.api_key_env`, which wins over
-`model.api_key`. `runtime.approval_mode` currently supports only `never` and
-`always`. `runtime.max_tool_steps` is either `null` or a positive integer.
+`model.api_key`. There are no compaction environment overrides in the current
+code.
 
-Invalid settings JSON, invalid section shapes, unknown approval modes, missing
-configured API-key environment variables, and invalid step limits fail during
+Invalid settings JSON, invalid section shapes, invalid provider names, unknown
+approval modes, missing configured API-key environment variables, invalid
+temperatures, invalid compaction settings, and invalid step limits fail during
 settings loading.
 
 ## CLI Commands
@@ -144,87 +198,39 @@ Running with no arguments starts a new interactive task. Resume loads a saved
 session, appends a follow-up user message, marks the session active, creates a
 fresh latest-only undo buffer, and continues the same saved session.
 
-## Ownership Boundaries
+## Provider Model
 
-`main.py` owns wiring and command dispatch. It should stay thin and should not
-grow agent policy, tool behavior, provider-specific response parsing, session
-storage internals, approval logic, undo mechanics, or terminal formatting.
+LM Studio or another generic OpenAI-compatible server is the recommended default
+path. `openai_compatible` uses `providers/openai_compatible.py` and sends
+chat-completions requests through the OpenAI Python client.
 
-`config/settings.py` owns local settings parsing and environment overrides. It
-does not decide how settings are enforced.
+OpenRouter is supported through the OpenAI-compatible provider path by setting
+`model.provider` or `CODE_SQUID_PROVIDER` to `openrouter`. It still uses
+`OpenAICompatibleProvider`, but `main.py` configures assistant tool-call replay
+with `content: null` for assistant messages that have `tool_calls` and no
+content. This provider-specific behavior is handled before messages are sent to
+the provider.
 
-`core/agent_loop.py` owns generic turn flow. It initializes the transcript when
-needed, asks the adapter for a reply, validates the reply through the active
-agent, rejects invalid replies by injecting correction user messages, stores
-valid assistant messages, checks approval for each action, executes approved
-tool actions, formats tool results, appends those results to the transcript,
-tracks invalid replies and tool-step limits, and persists session status.
+The OpenAI-compatible provider sends `parallel_tool_calls: false` whenever tools
+are present. OpenRouter may still return multiple tool calls. Code Squid handles
+that by rejecting invalid multi-tool replies before they enter normal assistant
+history and retrying with correction messages.
 
-`AgentLoop` avoids adding initial messages again when the in-memory session
-already has messages. This is what allows resume to continue an existing
-transcript instead of replaying a fresh system/user prefix.
+The native Ollama provider exists and is experimental. `providers/ollama.py`
+uses Ollama `/api/chat`, converts replayed messages into Ollama's expected
+shape, omits `parallel_tool_calls`, and adapts the response back to the
+OpenAI-like shape consumed by `ModelAdapter`.
 
-`core/approval.py` owns approval-mode decisions without depending on a concrete
-UI. In `never` mode all tool actions are approved. In `always` mode the policy
-asks an approval prompter, currently `TerminalDisplay`. Denied actions are
-returned to the model as failed tool results; they are not executed.
+Provider request failures are wrapped at the model-adapter boundary as
+`ModelRequestError`. `main.py` catches that error, marks the session failed, and
+writes diagnostic traceback details to `.code-squid/logs/latest.log`.
 
-`core/session.py` owns in-memory transcript state and side-effect tracking:
-`messages`, `files_read`, and `files_written`. It does not persist state and
-does not interpret the task.
+## Runtime Contracts
 
-`core/model_adapter.py` owns provider response normalization. It converts raw
-chat-completion responses into the internal reply shape:
-
-- `message`: assistant message suitable for transcript storage
-- `actions`: normalized tool actions
-- `format_error`: empty string or a controlled parsing/validation error
-- `usage`: optional provider usage data when present
-
-The adapter validates known tool names and required argument presence. It does
-not perform full JSON Schema validation.
-
-`ModelRequestError` is the boundary for provider request failures. Exceptions
-raised by `provider.create_response(...)` are wrapped as `ModelRequestError` so
-the CLI can report model/provider failures cleanly without hiding bugs in later
-normalization, validation, or runtime code.
-
-`core/tool_executor.py` owns mechanical tool dispatch. It looks up tools in the
-registry, snapshots `write_file` targets before mutation when undo is wired,
-calls the implementation, catches exceptions, returns normalized failure
-dictionaries, and records successful read/write side effects in the session.
-
-`core/tool_results.py` owns conversion of executed tool results into
-model-visible `role: "tool"` messages. It also guards against action/result
-length mismatches so malformed executor output does not silently create a bad
-assistant/tool chain.
-
-`agent/coding.py` owns coding-agent rules. It decides which tools are exposed,
-what initial and follow-up messages are used, which replies are valid, when the
-loop should stop, which correction messages are sent, and what failure message
-is used after repeated invalid replies.
-
-`agent/prompts.py` owns prompt text. Prompt guidance should not be mistaken for
-runtime enforcement.
-
-Each tool module owns its own schema and behavior. The registry in
-`tools/__init__.py` is static and intentionally small.
-
-`storage/session_store.py` owns the files for one session folder.
-`storage/session_index.py` owns discovery and loading across saved sessions.
-`storage/undo_store.py` owns the latest undo buffer.
-`storage/error_log.py` owns provider/app failure traceback logging.
-
-`ui/terminal.py` owns live terminal display and approval prompting.
-`ui/spinner.py` owns only spinner animation. The spinner is enabled only for
-TTY output and is disabled in debug display mode. It is UI-only behavior and
-does not affect transcript state, tool actions, or model-visible messages.
-`ui/sessions.py` owns saved-session viewer display.
-
-## Turn And Finalization Contracts
+### Turn Contract
 
 Before completion, a valid assistant reply must include exactly one normalized
-tool action.
+tool action. Visible narration is expected before the tool call.
 
 The runtime enforces:
 
@@ -233,52 +239,160 @@ The runtime enforces:
 - missing required tool arguments are rejected during model-adapter validation
 - non-final replies with zero tool actions are rejected
 - non-final replies with more than one tool action are rejected
-- non-final replies with a tool action but no visible narration are rejected
 - final replies that also include tool actions are rejected
+- final replies missing required labels are rejected
 
-The runtime does not enforce that narration accurately describes the tool call.
-That is prompt-enforced guidance only.
+Invalid replies are rejected before entering normal assistant history. The loop
+stores a correction user message instead. A valid reply resets the invalid-reply
+counter. Repeated invalid replies stop after the configured hard-coded loop
+limit, currently 3 consecutive invalid replies.
 
-A valid final assistant reply must:
+The prompts require non-final visible narration. Current runtime validation does
+not independently reject a one-tool non-final reply solely because the assistant
+content is empty.
 
-- include no tool calls
-- have `TASK COMPLETE` as the final non-empty line
-- include these exact required labels:
-  - `Files changed:`
-  - `What changed:`
-  - `Verification run:`
-  - `Remaining risks:`
+If `runtime.max_tool_steps` is set, reaching the limit records a failed session
+status and stops the loop.
 
-These labels are runtime-enforced, not prompt-only guidance. The terminal
-display hides the `TASK COMPLETE` marker in normal display, but the marker
-remains part of the stored assistant message.
+### Final Contract
 
-The loop tracks consecutive invalid replies and stops after 3 consecutive
-invalid replies.
+A valid final assistant reply must include no tool calls and must have
+`TASK COMPLETE` as the final non-empty line.
 
-- A valid reply resets the counter.
-- `AgentLoop` owns the counter and stop decision.
-- `CodingAgent` owns the human-readable failure message via
-  `failure_message_for_invalid_replies(...)`.
-- Repeated invalid replies record a failed session status.
+It must include these exact labels:
 
-If `runtime.max_tool_steps` is set, reaching the limit also records a failed
-session status and stops the loop.
+- `Files changed:`
+- `What changed:`
+- `Verification run:`
+- `Remaining risks:`
 
-## Transcript Contract
+These labels are runtime-enforced. The terminal display hides the
+`TASK COMPLETE` marker in normal display, but the marker remains part of the
+stored assistant message.
+
+### Tool Transcript Contract
 
 Assistant messages that used tools preserve provider `tool_calls` metadata.
 Tool-result messages include the matching `tool_call_id`.
 
-This matters because stricter OpenAI-compatible model templates expect
-assistant/tool/result chains to be replayable in that shape.
+Assistant tool-call/result pairs must stay replayable. This matters for strict
+OpenAI-compatible model templates and for provider adapters that need to
+reconstruct prior tool turns.
 
-`session.jsonl` stores append-only transcript entries with `id`, `parent_id`,
+`core/tool_results.py` guards against action/result length mismatches. Invalid
+assistant replies are excluded from normal assistant history; correction
+messages and repeated-invalid failure messages are the durable record of that
+path.
+
+## Approval
+
+Approval is a runtime gate in the tool execution path, not a prompt convention.
+
+Current modes:
+
+- `approval_mode = "never"` means trusted/yolo mode; all tool actions are
+  approved.
+- `approval_mode = "always"` asks before every tool action.
+
+The policy is UI-agnostic and receives normalized tool actions before
+execution. `TerminalDisplay` is the current prompter used by the CLI.
+
+If a user denies an action, the action is not executed. Denial returns a normal
+failed tool result to the model with `user denied tool action`.
+
+Approval is not a sandbox. In `always` mode the user can decline a proposed
+action, but approved `run_command` actions still execute through the shell and
+approved file tools still use absolute paths.
+
+## Compaction
+
+Compaction runs before model calls inside `AgentLoop`.
+
+`core/compaction.py` asks `core/token_estimate.py` for a rough estimate of the
+current transcript size. The estimate serializes messages to JSON/text and uses
+simple length math; it is not an exact model tokenizer.
+
+Compaction triggers when:
+
+- `settings.compaction.enabled` is true
+- estimated input tokens are at least
+  `settings.compaction.trigger_input_tokens`
+- there are older chunks available beyond the configured recent chunks
+
+When triggered, compaction:
+
+- preserves the initial system message and initial user task message
+- chunks the remaining transcript
+- never splits an assistant message with `tool_calls` from its following
+  `role: "tool"` result messages
+- summarizes older chunks with `ModelAdapter.complete_text(...)`
+- replaces those older chunks with one user message headed
+  `# Compacted Prior Context`
+- keeps recent chunks verbatim according to
+  `settings.compaction.keep_recent_turns`
+
+If persistence is wired in, `AgentLoop` logs compaction metadata to
+`session.jsonl` through `SessionStore.append_compaction(...)`. `load_messages()`
+ignores compaction events and loads only transcript message entries.
+
+Compaction is transcript compression for continuation context. It is not durable
+workspace memory and should stay separate from any future workspace memory
+feature.
+
+## Sessions, Resume, Undo, And Interruption
+
+Saved sessions live under:
+
+```text
+.code-squid/sessions/<session_id>/
+```
+
+Each session folder contains:
+
+- `metadata.json`
+- `session.jsonl`
+
+`metadata.json` stores run-level metadata: session id, timestamps, repo root,
+task, status, and active leaf id. `session.jsonl` stores append-only entries for
+messages and compaction events. Message entries include `id`, `parent_id`,
 `type`, `timestamp`, `message`, and optional `usage`.
 
-Invalid assistant replies are not stored as assistant turns. The loop stores a
-correction user message instead. After repeated invalid replies, the failure
-assistant message is stored.
+Current session statuses are:
+
+- `active`
+- `complete`
+- `failed`
+- `abandoned`
+- `interrupted`
+
+Resume can load saved messages with `SessionStore.load_messages()`, append a
+follow-up user message, mark the session active, create a fresh undo buffer, and
+continue the same saved session. `latest` resolves through
+`storage/session_index.py`.
+
+The saved-session viewer can list sessions and show message transcripts.
+Compaction events are not printed as transcript messages by the viewer.
+
+`UndoStore` stores the latest undo buffer under:
+
+```text
+.code-squid/undo/
+```
+
+Starting a new run or resume replaces the undo buffer. Before `write_file`
+mutates a target, `ToolExecutor` asks `UndoStore` to snapshot the file's
+pre-change state. Repeated writes to the same path keep the first pre-change
+snapshot. `python main.py undo` restores existing-file snapshots and deletes
+files that did not exist before the write.
+
+Ctrl+C marks the current session `interrupted` and prints the normal final
+session display. Model request failures mark the session `failed` and write a
+diagnostic log to `.code-squid/logs/latest.log`. The diagnostic log is narrow:
+it stores traceback details, not prompts, payloads, tool outputs, file contents,
+headers, or API keys.
+
+There is no permanent undo history, branching UI, tree navigation, or advanced
+session workflow in the current MVP.
 
 ## Tool Model
 
@@ -292,26 +406,21 @@ The active tool surface is:
 
 - requires an absolute path
 - reads UTF-8 text
-- can read any absolute path reachable by the process, not only files under
-  `repo_root`
 - supports optional 1-based inclusive `start_line` and `end_line`
-- rejects line ranges below 1 and rejects `end_line < start_line`
-- returns selected range metadata: `start_line`, `end_line`, `total_lines`, and
-  `ranged`
-- returns an empty string for a valid ranged read starting after EOF
+- supports ranged reads for focused inspection
+- truncates whole-file reads with shared head/tail truncation when content is
+  large
 - does not truncate ranged reads
-- truncates whole-file reads with shared head/tail truncation at 12,000
-  characters
-- reports content truncation metadata in the result dictionary
+- returns content plus truncation, range, and line-count metadata
+- can read any absolute path reachable by the process
 
 `write_file`:
 
 - requires an absolute path
 - writes the full file content as UTF-8 text
-- returns compact metadata instead of echoing the written content
-- can write any absolute path reachable by the process, not only files under
-  `repo_root`
+- returns compact metadata instead of echoing full written content
 - does not create parent directories explicitly
+- can write any absolute path reachable by the process
 - is snapshotted by `ToolExecutor` before mutation when undo storage is wired
 
 `run_command`:
@@ -322,325 +431,74 @@ The active tool surface is:
 - times out after 10 seconds
 - returns `ok` based on process return code
 - returns a normalized timeout failure with `timed_out: True`
-- truncates large output with shared head/tail truncation at 12,000 characters
+- truncates large output with shared head/tail truncation
+- is used for discovery, verification, and shell behavior
 - is not undo-protected, even if it mutates files
 
 There is no patch/edit tool, structured search tool, repo-policy tool,
 dedicated test runner, browser tool, or plugin-provided tool. Discovery,
 verification, and most shell behavior go through `run_command`.
 
-## Approval
-
-Approval is a runtime gate in the agent loop, not a prompt convention.
-
-Current modes:
-
-- `never`: approve all tool actions
-- `always`: prompt before every tool action
-
-The approval policy receives normalized tool actions before execution. If a
-user denies an action, the action is not executed and the model receives a
-failed tool result with `user denied tool action`.
-
-Approval is not a sandbox. In `always` mode the user can decline a proposed
-action, but approved `run_command` actions still execute through the shell and
-approved file tools still use absolute paths.
-
-## Provider And Error Handling
-
-The provider layer is OpenAI-compatible rather than LM Studio-specific. LM
-Studio remains the default local-server configuration, but the transport class
-only knows how to call an OpenAI-compatible chat-completions endpoint.
-
-Provider request failures are handled as follows:
-
-1. `OpenAICompatibleProvider.create_response(...)` performs the raw request.
-2. `ModelAdapter.respond(...)` wraps provider exceptions as
-   `ModelRequestError("Model request failed")`.
-3. `main.py` catches `ModelRequestError`.
-4. The session status is updated to `failed`.
-5. `storage/error_log.py` writes a diagnostic traceback to:
-
-   ```text
-   .code-squid/logs/latest.log
-   ```
-
-6. The CLI prints a short friendly message and the log path instead of dumping a
-   provider traceback into normal terminal output.
-
-The error log is intentionally narrow. It writes a UTC timestamp and traceback
-details, and avoids prompts, payloads, tool outputs, file contents, headers, and
-API keys. The log is latest-only, not a permanent history.
-
-## Session Storage
-
-Saved sessions live under:
-
-```text
-.code-squid/sessions/<session_id>/
-```
-
-Each session folder contains:
-
-- `metadata.json`
-- `session.jsonl`
-
-Session IDs are human-readable timestamp plus task slug, with a short random
-suffix if needed to avoid collisions.
-
-`metadata.json` records session-level information such as task, status,
-timestamps, repo root, and active leaf id. `session.jsonl` records append-only
-message entries.
-
-Current session statuses are:
-
-- `active`: the session is currently running or ready to continue
-- `complete`: the last task or follow-up completed
-- `interrupted`: Ctrl+C stopped the run
-- `failed`: repeated invalid replies, model request failure, or tool-step limit
-  stopped the run
-- `abandoned`: valid metadata status, but not wired to a command
-
-`complete` is not permanently sealed. Resuming a complete session appends a
-follow-up user message and continues the same saved session.
-
-The saved-session viewer is intentionally plain and can be noisy. It is a small
-inspection aid, not a polished transcript UI.
-
-## Resume Behavior
-
-Resume loads saved messages, appends a follow-up user message, marks the session
-`active`, creates a new latest-only undo buffer for the resumed session, and
-continues the same saved session.
-
-The in-memory `Session` receives the saved transcript before the loop starts.
-`AgentLoop` detects that messages already exist and does not append the initial
-system/user messages again.
-
-Follow-up wording belongs to `agent/coding.py`; prompt text itself remains in
-`agent/prompts.py`.
-
-The in-memory `files_read` and `files_written` sets are not reconstructed from
-the saved transcript on resume. They track side effects seen in the current
-process.
-
-## Undo Behavior
-
-The latest-only undo buffer lives under:
-
-```text
-.code-squid/undo/
-```
-
-It contains:
-
-- `metadata.json`
-- `index.json`
-- `files/`
-
-Starting a new run or resume creates or replaces the undo buffer.
-
-`ToolExecutor` snapshots `write_file` targets before mutation. Snapshotting
-happens only for `write_file`; commands are not snapshotted. Repeated writes to
-the same path keep the first pre-change snapshot so undo restores the file to
-its state before the latest file-changing run touched it.
-
-If a snapshotted file did not exist before the write, undo deletes it if it
-exists. If it did exist, undo restores the saved bytes and creates parent
-directories as needed.
-
-Undo is invoked with:
-
-```bash
-python main.py undo
-```
-
-Undo is separate from sessions:
-
-- sessions record what happened
-- undo restores files from before the latest file-changing run
-
-There is no permanent undo history.
-
-## Interaction And Display
-
-The intended interaction style is conversational and stepwise. The prompt asks
-the model to choose one immediate tool call, then optionally narrate that same
-step in one or two short sentences.
-
-Runtime enforcement is narrower:
-
-- it enforces the number of tool actions before completion
-- it enforces no tool action in the final response
-- it enforces final-marker placement
-- it enforces the required final-summary labels
-- it rejects malformed tool calls before they enter assistant history
-- it rejects invalid assistant replies before they enter normal assistant
-  history
-- it records session status for completion, interruption, repeated invalid
-  replies, tool-step-limit failure, and model request failure
-- it gates tool execution through approval policy
-- it snapshots `write_file` targets for latest-run undo
-
-It does not enforce tone, brevity, whether the model read enough context before
-writing, whether verification was actually run, whether final-summary claims
-match the transcript, or whether narration matches the chosen tool. Those are
-prompt-level expectations and testable workflow conventions, not hard runtime
-guarantees.
-
-The terminal UI is intentionally small. In normal mode it formats final
-summaries, summarizes common pytest output, and prints compact file/action
-labels. In debug mode it prints rawer model replies, actions, tool results,
-transcript content, and disables spinner animation.
-
-## Platform Assumptions
-
-The implementation assumes Python and a Unix-like shell environment.
-
-Concrete assumptions in the current code:
-
-- `main.py` runs from the intended repository root.
-- `Path(".").resolve()` is the workspace root.
-- `run_command` uses `subprocess.run(..., shell=True)`, so command behavior is
-  shell- and platform-dependent.
-- The default provider endpoint is `http://127.0.0.1:1234/v1`, matching common
-  local OpenAI-compatible server usage.
-- The default model name is `qwen3.5-9b`.
-- `.code-squid/settings.json` and supported environment variables can override
-  provider, display, approval, and tool-step settings.
-- File tools use absolute paths and do not confine access to the repository.
-- The code imports local packages as top-level modules (`agent`, `config`,
-  `core`, `tools`, `providers`, `storage`, `ui`), so tests may need the repo
-  root on `PYTHONPATH` depending on how pytest is invoked.
-
-## Current Strengths
-
-- The runtime loop is short and easy to trace.
-- Generic runtime flow is separated from coding-agent policy.
-- Provider transport is separated from provider-response normalization.
-- Provider request failure handling has a clear boundary and friendly CLI path.
-- Settings are centralized and covered by tests.
-- Approval policy is UI-agnostic and wired into the tool execution path.
-- Tool execution is separated from tool-result transcript formatting.
-- Session persistence is separated from in-memory transcript state.
-- Latest-run undo is separated from session history.
-- The non-final tool-count contract is runtime-enforced.
-- Final-marker placement, required final-summary labels, and final-with-tool-call
-  rejection are runtime-enforced.
-- Provider tool-call metadata and matching tool-result IDs are preserved.
-- Tool result formatting guards against action/result length mismatches.
-- Tool outputs use consistent dictionaries rather than free-form observations.
-- `read_file` supports line ranges and whole-file truncation.
-- `run_command` has timeout handling and output truncation.
-- The small static tool set keeps the model's action space simple.
-- Invalid assistant replies are rejected before entering normal transcript
-  history.
-- Repeated invalid replies and tool-step limits have deterministic stop paths.
-- Terminal spinner behavior is isolated from runtime behavior.
-
-## Current Constraints And Known Limitations
-
-- There is no filesystem sandbox. Absolute-path file tools can read or write
-  outside the repository if the process has permission.
-- `run_command` executes arbitrary shell commands with `shell=True`.
-- Approval is optional and is not a sandbox.
-- There is no compaction yet.
-- There is no token/cost tracking beyond storing optional provider `usage` when
-  available.
-- There is no permanent undo history.
-- Undo only protects writes made through `write_file`; file mutations performed
-  by `run_command` are not snapshotted.
-- There is no full CLI framework or TUI.
-- There is no structured planner, multi-agent coordination, or background task
-  execution.
-- There is no hooks system, plugin system, or dynamic tool registration.
-- There is no programmatic runner seam for embedding Code Squid outside the CLI
-  wiring.
-- There is no runtime check that the agent verified its work before finalizing.
-- There is no runtime check that final-summary claims are truthful.
-- There is no runtime check that narration matches the chosen tool.
-- Tool argument validation is shallow and based on required field presence.
-- `write_file` replaces whole files; there is no structured diff or patch
-  application.
-- Discovery depends on shell commands rather than a dedicated search API.
-- The saved session viewer is intentionally plain and can be noisy.
-- Browser and visual app behavior is still manually verified by the user.
-  `node --check` only verifies JavaScript syntax.
-- The provider layer currently targets OpenAI-compatible chat completions through
-  the OpenAI client; other provider shapes would need adapters.
-
-## Validation Scope
-
-The repository contains focused unit tests for core contracts. It does not
-contain broad integration tests for live model behavior, provider compatibility,
-end-to-end coding tasks, command safety, transcript truthfulness, browser visual
-quality, or game feel.
-
-Current tests cover selected behavior in:
-
-- settings loading and environment overrides
-- approval policy and terminal approval prompting
-- `CodingAgent.validate_reply(...)`
-- `CodingAgent.is_final_content(...)`
-- `CodingAgent.should_stop(...)`
-- `CodingAgent.failure_message_for_invalid_replies(...)`
-- `AgentLoop`
-- `ModelAdapter`
-- `ToolExecutor`
-- `ToolResults`
-- `read_file`
-- `write_file`
-- `run_command`
-- `SessionStore`
-- `SessionIndex`
-- `UndoStore`
-- `error_log`
-- `TerminalDisplay`
-- `TerminalSpinner`
-- `main.py` command dispatch paths
-
-Important gaps:
-
-- no live provider integration tests
-- no tests proving verification happened before finalization
-- no tests proving final-summary claims are truthful
-- no tests for browser visual correctness or app quality
-- no tests for command safety or filesystem isolation
-- no tests for permanent undo history because it does not exist
-- no broad end-to-end coding-task regression suite
-
-Manual verification in this repo currently works with:
-
-```bash
-PYTHONPATH=. .venv/bin/pytest -q
-```
-
-## Architectural Boundary Summary
-
-Code Squid's current architecture is a single-agent, single-process runtime with
-settings, optional approval, append-only saved sessions, latest-only undo, and a
-small OpenAI-compatible provider boundary.
-
-The hard boundary between layers is:
-
-- settings loading returns validated configuration
-- provider transport returns raw model responses
-- model adapter normalizes responses into assistant messages plus actions
-- coding agent validates whether the normalized reply is acceptable
-- loop stores only valid assistant messages
-- approval policy decides whether each tool action may execute
-- tool executor runs approved actions and records side effects
-- tool result formatter turns execution results back into transcript messages
-- session storage persists what happened
-- undo storage preserves latest pre-write file states for `write_file`
-- error logging records diagnostic tracebacks for model request failures
-
-The runtime should stay generic below `agent/`. Coding-specific policy belongs
-in `agent/coding.py` and `agent/prompts.py`. Tool behavior belongs in `tools/`.
-Provider-specific transport belongs in `providers/`. Settings belong in
-`config/`. Session, undo, and error persistence belong in `storage/`. Terminal
-display belongs in `ui/`.
-
-When maintaining this repo, treat prompt text as guidance and Python validation
-as enforcement. If a behavior is important enough to rely on, it belongs in code
-or tests, not only in the prompt.
+## Ownership Boundaries
+
+`main.py` owns wiring and command dispatch. It should stay thin and should not
+grow agent policy, tool behavior, provider-specific response parsing, session
+storage internals, approval logic, undo mechanics, compaction strategy, or
+terminal formatting.
+
+`agent/` owns coding-agent behavior and prompt text. It decides which tools are
+exposed, which replies are valid, when the loop should stop, and what
+correction/failure messages are used.
+
+`config/settings.py` owns local settings parsing and environment overrides. It
+does not decide how settings are enforced.
+
+`core/agent_loop.py` owns generic turn flow. It is the sequencing layer, not the
+place for provider transport, terminal rendering, tool implementation, or
+coding-task prompt text.
+
+`core/model_adapter.py` owns provider response normalization and replay message
+shaping. Provider-specific HTTP/API calls stay in `providers/`.
+
+`core/compaction.py` owns transcript compression mechanics. It should not become
+workspace memory.
+
+`core/approval.py` owns approval decisions without depending on a concrete UI.
+The loop enforces those decisions before tool execution.
+
+`core/tool_executor.py` owns mechanical tool dispatch and side-effect tracking.
+Individual tool behavior stays in `tools/`.
+
+`storage/` owns durable local state. In-memory session behavior stays in
+`core/session.py`; live display stays in `ui/`.
+
+`ui/` owns terminal presentation only. Tool-event display is the reliable UX
+layer for what happened, while model-native narration is encouraged by prompts.
+
+## Known Limitations / Notes For Later
+
+- OpenRouter may produce invalid multi-tool replies despite
+  `parallel_tool_calls=False`; current handling is reject-and-retry through
+  correction messages.
+- Model-native narration is encouraged, but terminal tool-event display is the
+  reliable UX layer.
+- Compaction uses rough JSON/text length estimates, not exact tokenization.
+- Compaction should remain separate from future workspace memory.
+- Approval mode currently only supports `never` and `always`.
+- File access policy should remain explicit if stricter sandboxing is added
+  later; current file tools use absolute paths reachable by the process.
+- Future tool libraries should stay small per active agent/task, even if more
+  tools exist globally.
+- Do not turn Code Squid into a broad framework prematurely.
+- There are no live provider integration tests in the focused unit suite.
+
+## Practical Principles
+
+- Keep the tool set small and inspectable.
+- Keep provider transport separated from provider-response normalization.
+- Keep prompt guidance separate from runtime enforcement.
+- Keep durable session storage append-only and boring.
+- Keep undo latest-only until a real workflow requires more.
+- Prefer accurate boring descriptions over aspirational architecture.
+
+Small, inspectable, stupid simple.
