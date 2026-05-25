@@ -206,7 +206,9 @@ def compaction_prompt(prior_context: str) -> str:
 Summarize this prior Code Squid task context so another coding-agent turn can continue safely.
 
 Preserve the original task, files read, files changed, important findings, commands run and verification results, failed attempts and corrections, current next step, and remaining risks.
-Use exact file paths when available. Do not invent facts. Prefer recent tool results over older assumptions.
+Use exact file paths when available. Do not invent facts. Do not add speculative risks.
+Prefer recent tool results over older assumptions.
+Do not include a title or top-level heading. Return only the summary body.
 
 Prior context:
 {prior_context}
