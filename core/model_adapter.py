@@ -55,6 +55,22 @@ class ModelAdapter:
                 "format_error": str(e),
             }
 
+    def complete_text(self, messages: list[dict]) -> dict:
+        try:
+            raw_response = self.provider.create_response(
+                model=self.model_name,
+                messages=self._messages_for_provider(messages),
+                tools=[],
+            )
+        except Exception as exc:
+            raise ModelRequestError("Model request failed") from exc
+
+        assistant_message = raw_response.choices[0].message
+        return {
+            "content": assistant_message.content or "",
+            "usage": self._usage_from_response(raw_response),
+        }
+
     # Build the tiny metadata map the adapter needs for validation from the
     # active tool definitions passed into this request.
     def _tool_metadata_from_definitions(self, tool_definitions: list[dict]) -> dict:
@@ -148,7 +164,33 @@ class ModelAdapter:
             "message": message,
             "actions": actions,
             "format_error": "",
+            "usage": self._usage_from_response(raw_response),
         }
+
+    def _usage_from_response(self, raw_response) -> dict | None:
+        if isinstance(raw_response, dict):
+            usage = raw_response.get("usage")
+        else:
+            usage = getattr(raw_response, "usage", None)
+        if usage is None:
+            return None
+
+        return {
+            "input_tokens": self._usage_value(usage, "input_tokens", "prompt_tokens"),
+            "output_tokens": self._usage_value(usage, "output_tokens", "completion_tokens"),
+            "total_tokens": self._usage_value(usage, "total_tokens"),
+        }
+
+    def _usage_value(self, usage, *names: str):
+        for name in names:
+            if isinstance(usage, dict):
+                value = usage.get(name)
+            else:
+                value = getattr(usage, name, None)
+            if value is not None:
+                return value
+
+        return None
 
     # Parse the provider's tool-call arguments into a normal dictionary.
     # OpenAI-compatible APIs usually return tool arguments as a JSON string.

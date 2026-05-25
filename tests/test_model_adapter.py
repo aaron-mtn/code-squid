@@ -27,8 +27,9 @@ class FakeChoice:
 
 
 class FakeResponse:
-    def __init__(self, message: FakeMessage) -> None:
+    def __init__(self, message: FakeMessage, usage=None) -> None:
         self.choices = [FakeChoice(message)]
+        self.usage = usage
 
 
 class FakeProvider:
@@ -261,3 +262,57 @@ def test_provider_exception_is_wrapped_as_model_request_error() -> None:
 
     assert str(exc_info.value) == "Model request failed"
     assert exc_info.value.__cause__ is provider_error
+
+
+def test_complete_text_returns_assistant_content() -> None:
+    provider = FakeProvider(FakeResponse(FakeMessage(content="summary", tool_calls=[])))
+    adapter = ModelAdapter(provider=provider, model_name="test-model")
+
+    reply = adapter.complete_text(messages=[{"role": "user", "content": "summarize"}])
+
+    assert reply["content"] == "summary"
+
+
+def test_complete_text_does_not_expose_tools() -> None:
+    provider = FakeProvider(FakeResponse(FakeMessage(content="summary", tool_calls=[])))
+    adapter = ModelAdapter(provider=provider, model_name="test-model")
+
+    adapter.complete_text(messages=[{"role": "user", "content": "summarize"}])
+
+    assert provider.requests[0]["tools"] == []
+
+
+def test_respond_includes_normalized_usage_when_provider_usage_exists() -> None:
+    provider = FakeProvider(
+        FakeResponse(
+            FakeMessage(content="done", tool_calls=[]),
+            usage={"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14},
+        )
+    )
+    adapter = ModelAdapter(provider=provider, model_name="test-model")
+
+    reply = adapter.respond(messages=[{"role": "user", "content": "hi"}], tool_definitions=[])
+
+    assert reply["usage"] == {
+        "input_tokens": 10,
+        "output_tokens": 4,
+        "total_tokens": 14,
+    }
+
+
+def test_complete_text_includes_normalized_usage_when_provider_usage_exists() -> None:
+    provider = FakeProvider(
+        FakeResponse(
+            FakeMessage(content="summary", tool_calls=[]),
+            usage={"input_tokens": 20, "output_tokens": 6, "total_tokens": 26},
+        )
+    )
+    adapter = ModelAdapter(provider=provider, model_name="test-model")
+
+    reply = adapter.complete_text(messages=[{"role": "user", "content": "summarize"}])
+
+    assert reply["usage"] == {
+        "input_tokens": 20,
+        "output_tokens": 6,
+        "total_tokens": 26,
+    }

@@ -201,6 +201,18 @@ If the user asks not to edit files, do not use write_file.
 """.strip()
 
 
+def compaction_prompt(prior_context: str) -> str:
+    return f"""
+Summarize this prior Code Squid task context so another coding-agent turn can continue safely.
+
+Preserve the original task, files read, files changed, important findings, commands run and verification results, failed attempts and corrections, current next step, and remaining risks.
+Use exact file paths when available. Do not invent facts. Prefer recent tool results over older assumptions.
+
+Prior context:
+{prior_context}
+""".strip()
+
+
 CORRECTION_MESSAGES = {
     "non_final_no_tool_reply": """
 Format error: your last response did not include the required tool call.
