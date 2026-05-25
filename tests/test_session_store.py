@@ -85,6 +85,44 @@ def test_load_messages_returns_message_dicts_in_order(tmp_path: Path) -> None:
     assert store.load_messages() == messages
 
 
+def test_append_compaction_writes_jsonl_entry_and_updates_active_leaf(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path, "compact")
+
+    entry = store.append_compaction({"summary_chars": 12})
+    entries = read_entries(store)
+    metadata = read_metadata(store)
+
+    assert entry == entries[0]
+    assert entries[0]["id"] == "e_000001"
+    assert entries[0]["parent_id"] is None
+    assert entries[0]["type"] == "compaction"
+    assert entries[0]["metadata"] == {"summary_chars": 12}
+    assert metadata["active_leaf_id"] == "e_000001"
+
+
+def test_load_messages_ignores_compaction_entries(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path, "compact")
+    messages = [
+        {"role": "user", "content": "one"},
+        {"role": "assistant", "content": "two"},
+    ]
+
+    store.append_message(messages[0])
+    store.append_compaction({"summary_chars": 12})
+    store.append_message(messages[1])
+
+    assert store.load_messages() == messages
+
+
+def test_compaction_parent_id_links_to_previous_active_leaf(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path, "compact")
+
+    first = store.append_message({"role": "user", "content": "hello"})
+    compaction = store.append_compaction({"summary_chars": 12})
+
+    assert compaction["parent_id"] == first["id"]
+
+
 def test_open_returns_store_for_existing_session(tmp_path: Path) -> None:
     created = SessionStore.create(tmp_path, "open existing")
 

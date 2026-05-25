@@ -114,6 +114,29 @@ class SessionStore:
 
         return entry
 
+    # Append one compaction event as a JSONL entry.
+    def append_compaction(self, metadata: dict) -> dict:
+        session_metadata = self._read_metadata()
+        previous_leaf_id = session_metadata["active_leaf_id"]
+
+        entry_id = f"e_{self._next_entry_number():06d}"
+        entry = {
+            "id": entry_id,
+            "parent_id": previous_leaf_id,
+            "type": "compaction",
+            "timestamp": _utc_now(),
+            "metadata": metadata,
+        }
+
+        with self.jsonl_path.open("a", encoding="utf-8") as file:
+            file.write(json.dumps(entry) + "\n")
+
+        session_metadata["active_leaf_id"] = entry_id
+        session_metadata["updated_at"] = _utc_now()
+        self._write_metadata(session_metadata)
+
+        return entry
+
     # Load transcript messages from session.jsonl in order.
     #
     # This returns only the message dicts because core/session.py expects an

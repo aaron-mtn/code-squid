@@ -9,6 +9,7 @@ from agent.coding import CodingAgent
 from config.settings import DEFAULT_BASE_URL, Settings, load_settings
 from core.agent_loop import AgentLoop
 from core.approval import ApprovalPolicy
+from core.compaction import Compactor
 from core.model_adapter import ModelAdapter, ModelRequestError
 from core.session import Session
 from core.tool_executor import ToolExecutor
@@ -51,6 +52,7 @@ def _build_loop(
         model_name=settings.model.name,
         tool_call_content_mode=_tool_call_content_mode(settings),
     )
+    compactor = Compactor(settings.compaction, model_adapter)
 
     tool_executor = ToolExecutor(
         repo_root=repo_root,
@@ -71,6 +73,7 @@ def _build_loop(
         agent=agent,
         display=display,
         session_store=session_store,
+        compactor=compactor,
         max_tool_steps=settings.runtime.max_tool_steps,
         approval_policy=approval_policy,
     )

@@ -24,6 +24,7 @@ class AgentLoop:
         agent,
         display,
         session_store=None,
+        compactor=None,
         max_tool_steps: int | None = None,
         approval_policy: ApprovalPolicy | None = None,
     ) -> None:
@@ -34,6 +35,7 @@ class AgentLoop:
         self.agent = agent
         self.display = display
         self.session_store = session_store
+        self.compactor = compactor
         self.max_tool_steps = max_tool_steps
         self.approval_policy = approval_policy or ApprovalPolicy("never")
 
@@ -101,6 +103,11 @@ class AgentLoop:
                 self._update_status("failed")
                 stopped_after_step_limit = True
                 break
+
+            if self.compactor is not None:
+                compaction_metadata = self.compactor.maybe_compact(self.session)
+                if compaction_metadata is not None and self.session_store is not None:
+                    self.session_store.append_compaction(compaction_metadata)
 
             # Ask the model for the next assistant reply and any tool actions.
             self.display.thinking()

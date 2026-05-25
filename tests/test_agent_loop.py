@@ -39,11 +39,14 @@ class FakeAgent:
 
 
 class FakeModelAdapter:
-    def __init__(self, replies: list[dict]) -> None:
+    def __init__(self, replies: list[dict], events: list[str] | None = None) -> None:
         self.replies = replies
         self.index = 0
+        self.events = events
 
     def respond(self, messages: list[dict], tool_definitions: list[dict]) -> dict:
+        if self.events is not None:
+            self.events.append("respond")
         reply = self.replies[self.index]
         self.index += 1
         return reply
@@ -74,25 +77,31 @@ class FakePrompter:
 class FakeSessionStore:
     def __init__(self) -> None:
         self.messages = []
+        self.compactions = []
         self.statuses = []
 
     def append_message(self, message: dict, usage: dict | None = None) -> None:
         self.messages.append({"message": message, "usage": usage})
+
+    def append_compaction(self, metadata: dict) -> None:
+        self.compactions.append(metadata)
 
     def update_status(self, status: str) -> None:
         self.statuses.append(status)
 
 
 class NullDisplay:
-    def __init__(self) -> None:
+    def __init__(self, events: list[str] | None = None) -> None:
         self.step_limits_reached = []
         self.assistant_messages = []
         self.debug_replies = []
         self.rejected_replies = []
         self.debug = False
+        self.events = events
 
     def thinking(self) -> None:
-        pass
+        if self.events is not None:
+            self.events.append("thinking")
 
     def assistant_message(self, content: str) -> None:
         self.assistant_messages.append(content)
@@ -124,10 +133,29 @@ def reply(content: str, actions: list[dict] | None = None, reason: str = "") -> 
     }
 
 
+class FakeCompactor:
+    def __init__(self, metadata: dict | None = None, events: list[str] | None = None) -> None:
+        self.metadata = metadata
+        self.events = events
+        self.sessions = []
+
+    def maybe_compact(self, session: Session) -> dict | None:
+        if self.events is not None:
+            self.events.append("compact")
+        self.sessions.append(session)
+        return self.metadata
+
+
+class StopImmediatelyAgent(FakeAgent):
+    def should_stop(self, session: Session) -> bool:
+        return True
+
+
 def run_loop(
     replies: list[dict],
     max_tool_steps: int | None = None,
     approval_policy: ApprovalPolicy | None = None,
+    compactor: FakeCompactor | None = None,
 ) -> tuple[Session, FakeToolExecutor, FakeModelAdapter, NullDisplay]:
     session = Session(repo_root=None)
     tool_executor = FakeToolExecutor()
@@ -140,6 +168,7 @@ def run_loop(
         tool_results=FakeToolResults(),
         agent=FakeAgent(),
         display=display,
+        compactor=compactor,
         max_tool_steps=max_tool_steps,
         approval_policy=approval_policy,
     )
@@ -152,6 +181,7 @@ def run_loop(
 def run_loop_with_store(
     replies: list[dict],
     max_tool_steps: int | None = None,
+    compactor: FakeCompactor | None = None,
 ) -> tuple[Session, FakeToolExecutor, FakeSessionStore, FakeModelAdapter, NullDisplay]:
     session = Session(repo_root=None)
     tool_executor = FakeToolExecutor()
@@ -166,6 +196,7 @@ def run_loop_with_store(
         agent=FakeAgent(),
         display=display,
         session_store=session_store,
+        compactor=compactor,
         max_tool_steps=max_tool_steps,
     )
 
@@ -262,6 +293,76 @@ def test_preloaded_session_does_not_get_duplicate_initial_messages() -> None:
     assert [entry["message"] for entry in session_store.messages] == [
         {"role": "assistant", "content": "TASK COMPLETE"},
     ]
+
+
+def test_compactor_is_called_before_thinking_and_next_model_reply() -> None:
+    events = []
+    session = Session(repo_root=None)
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter([reply("TASK COMPLETE")], events=events),
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(events=events),
+        compactor=FakeCompactor(events=events),
+    )
+
+    loop.run()
+
+    assert events[:3] == ["compact", "thinking", "respond"]
+
+
+def test_compaction_metadata_is_persisted_when_store_exists() -> None:
+    metadata = {"estimated_tokens_before": 10, "estimated_tokens_after": 4}
+    _, _, session_store, _, _ = run_loop_with_store(
+        [reply("TASK COMPLETE")],
+        compactor=FakeCompactor(metadata),
+    )
+
+    assert session_store.compactions == [metadata]
+
+
+def test_compaction_without_metadata_is_not_persisted() -> None:
+    _, _, session_store, _, _ = run_loop_with_store(
+        [reply("TASK COMPLETE")],
+        compactor=FakeCompactor(None),
+    )
+
+    assert session_store.compactions == []
+
+
+def test_compactor_is_not_called_when_session_already_stopped() -> None:
+    compactor = FakeCompactor()
+    session = Session(repo_root=None)
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter([]),
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=StopImmediatelyAgent(),
+        display=NullDisplay(),
+        compactor=compactor,
+    )
+
+    loop.run()
+
+    assert compactor.sessions == []
+
+
+def test_compactor_is_not_called_after_step_limit_stops_loop() -> None:
+    compactor = FakeCompactor()
+
+    run_loop_with_store(
+        [
+            reply("valid", actions=[{"tool": "read_file"}]),
+            reply("TASK COMPLETE"),
+        ],
+        max_tool_steps=1,
+        compactor=compactor,
+    )
+
+    assert len(compactor.sessions) == 1
 
 
 def test_correction_messages_are_persisted_and_rejected_invalid_replies_are_not() -> None:
