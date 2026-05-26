@@ -391,18 +391,20 @@ class TerminalDisplay:
         summary_prefixes = (
             "Files changed:",
             "What changed:",
-            "Verification run:",
-            "Remaining risks:",
+            "Verification:",
+            "Remaining risks / notes:",
         )
         formatted_lines: list[str] = []
         found_summary = False
 
         for line in content.splitlines():
-            stripped = line.strip()
             # TASK COMPLETE is a runtime marker used for final validation. Hide
             # it only from normal display; debug mode still prints raw content.
-            if stripped == "TASK COMPLETE":
-                continue
+            if "TASK COMPLETE" in line:
+                line = line.replace("TASK COMPLETE", "")
+                if not line.strip():
+                    continue
+            stripped = line.strip()
 
             should_space = stripped.startswith(summary_prefixes)
             if not found_summary:

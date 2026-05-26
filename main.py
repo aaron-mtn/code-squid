@@ -2,6 +2,7 @@
 
 """Owns thin application wiring for standalone Code Squid; must not own core architecture, agent policy, or tool logic."""
 
+import os
 import sys
 from pathlib import Path
 
@@ -45,7 +46,7 @@ def _build_loop(
     settings: Settings,
     display: TerminalDisplay,
 ) -> AgentLoop:
-    provider = _build_provider(settings)
+    provider = _build_provider(settings, debug=display.debug)
 
     model_adapter = ModelAdapter(
         provider=provider,
@@ -81,7 +82,9 @@ def _build_loop(
     return loop
 
 
-def _build_provider(settings: Settings):
+def _build_provider(settings: Settings, debug: bool | None = None):
+    provider_debug = settings.display.debug if debug is None else debug
+
     if settings.model.provider == "ollama":
         if settings.model.base_url == DEFAULT_BASE_URL:
             return OllamaProvider(temperature=settings.model.temperature)
@@ -94,7 +97,7 @@ def _build_provider(settings: Settings):
         base_url=settings.model.base_url,
         api_key=settings.model.api_key,
         temperature=settings.model.temperature,
-        debug=settings.display.debug,
+        debug=provider_debug,
     )
 
 
@@ -135,7 +138,9 @@ def _run_loop(
 
 def _run_new_session(repo_root: Path) -> int:
     settings = load_settings(repo_root)
-    display = TerminalDisplay(debug=settings.display.debug)
+    trace = os.getenv("CODE_SQUID_TRACE") == "1"
+    debug = settings.display.debug or trace
+    display = TerminalDisplay(debug=debug, show_transcript=trace)
     display.start()
     task = input("Task: ")
     display.run_started()
@@ -151,6 +156,8 @@ def _run_new_session(repo_root: Path) -> int:
 
 def _resume_session(repo_root: Path, session_id: str) -> int:
     settings = load_settings(repo_root)
+    trace = os.getenv("CODE_SQUID_TRACE") == "1"
+    debug = settings.display.debug or trace
     session_dir = _session_dir_for_resume(repo_root, session_id)
     if session_dir is None:
         return 0
@@ -159,7 +166,7 @@ def _resume_session(repo_root: Path, session_id: str) -> int:
     session = Session(repo_root=repo_root)
     session.add_messages(*session_store.load_messages())
 
-    display = TerminalDisplay(debug=settings.display.debug)
+    display = TerminalDisplay(debug=debug, show_transcript=trace)
     display.start()
     follow_up_task = input("Follow-up task: ")
     display.run_started()

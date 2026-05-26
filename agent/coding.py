@@ -3,13 +3,13 @@
 from agent.prompts import SYSTEM_PROMPT, correction_message, follow_up_prompt, task_prompt
 from tools import TOOLS
 
-# Final summary for task completion must include all these phrases for finalization to be valid. 
-# The agent can use any wording it wants, as long as these phrases are present and the final non-empty line is "TASK COMPLETE".
+# Final summary for task completion must include all these phrases for finalization to be valid.
+# The agent can use any wording it wants, as long as these phrases are present and the first non-empty line is "TASK COMPLETE".
 REQUIRED_FINAL_LABELS = [
     "Files changed:",
     "What changed:",
-    "Verification run:",
-    "Remaining risks:",
+    "Verification:",
+    "Remaining risks / notes:",
 ]
 
 INVALID_REPLY_EXPLANATIONS = {
@@ -43,10 +43,10 @@ class CodingAgent:
     def tool_definitions(self) -> list[dict]:
         return [tool["definition"]() for tool in TOOLS.values()]
 
-    # Return true only when the final non-empty line is the completion marker.
+    # Return true only when the first non-empty line is the completion marker.
     def is_final_content(self, content: str) -> bool:
         lines = [line.strip() for line in content.splitlines() if line.strip()]
-        return bool(lines) and lines[-1].upper() == "TASK COMPLETE"
+        return bool(lines) and lines[0].upper() == "TASK COMPLETE"
 
     # Return any required final-summary labels that are missing from content.
     def missing_final_labels(self, content: str) -> list[str]:
@@ -54,7 +54,7 @@ class CodingAgent:
 
     # Decide whether the loop should stop.
     # Look backward through the transcript for the most recent assistant message.
-    # If that message has no tool calls and ends with TASK COMPLETE, stop the loop.
+    # If that message has no tool calls and starts with TASK COMPLETE, stop the loop.
     def should_stop(self, session) -> bool:
         for message in reversed(session.messages):
             if message["role"] == "user":
@@ -75,7 +75,7 @@ class CodingAgent:
     #
     # Valid reply shapes:
     # 1. A non-final reply with exactly one tool action
-    # 2. A final reply with TASK COMPLETE on the last non-empty line and no tool actions
+    # 2. A final reply with TASK COMPLETE on the first non-empty line and no tool actions
     #
     # Invalid reply shapes:
     # 1. A reply that carried a format_error from the model adapter
@@ -95,7 +95,7 @@ class CodingAgent:
                 "reason": "malformed_tool_call",
             }
 
-        # Final completion is valid when it ends with TASK COMPLETE and does
+        # Final completion is valid when it starts with TASK COMPLETE and does
         # not also try to issue tool actions.
         if self.is_final_content(content):
             if actions:

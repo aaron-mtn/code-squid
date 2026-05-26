@@ -697,9 +697,11 @@ def test_normal_assistant_final_summary_uses_report_heading(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     TerminalDisplay().assistant_message(
+        "TASK COMPLETE\n"
         "Files changed: ui/terminal.py\n"
         "What changed: polished display\n"
-        "TASK COMPLETE"
+        "Verification: `pytest tests/test_terminal.py`\n"
+        "Remaining risks / notes: No known remaining risks; terminal display tests passed."
     )
 
     output = capsys.readouterr().out
@@ -714,18 +716,35 @@ def test_normal_assistant_final_summary_hides_preamble(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     TerminalDisplay().assistant_message(
+        "TASK COMPLETE\n"
         "All tests pass now. Let me provide the final summary.\n"
         "Files changed: ui/terminal.py\n"
         "What changed: polished display\n"
-        "Verification run: `pytest tests/test_terminal.py`\n"
-        "Remaining risks: none\n"
-        "TASK COMPLETE"
+        "Verification: `pytest tests/test_terminal.py`\n"
+        "Remaining risks / notes: No known remaining risks; terminal display tests passed."
     )
 
     output = capsys.readouterr().out
     assert "All tests pass now" not in output
     assert "Files changed: ui/terminal.py" in output
-    assert "Verification run: `pytest tests/test_terminal.py`" in output
+    assert "Verification: `pytest tests/test_terminal.py`" in output
+    assert "Remaining risks / notes: No known remaining risks" in output
+
+
+def test_normal_assistant_final_summary_removes_inline_task_complete(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay().assistant_message(
+        "TASK COMPLETE\n"
+        "Files changed: ui/terminal.py\n"
+        "What changed: polished display\n"
+        "Verification: `pytest tests/test_terminal.py`\n"
+        "Remaining risks / notes: No known remaining risks; terminal display tests passed. TASK COMPLETE"
+    )
+
+    output = capsys.readouterr().out
+    assert "Remaining risks / notes: No known remaining risks" in output
+    assert "TASK COMPLETE" not in output
 
 
 def test_normal_assistant_message_with_only_task_complete_is_hidden(

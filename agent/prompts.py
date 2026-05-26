@@ -17,27 +17,27 @@ TOOL_USAGE_GUIDANCE = """
 - Do not over-explore guidance files when the task is already clear and no repo-specific guidance appears relevant.
 - Once the fix is verified and the task is complete, do not keep exploring or re-running unnecessary commands.
 - Do not run extra manual checks after a relevant test command already passed, unless a concrete unresolved issue remains.
-- If verification does not directly exercise the changed behavior, say so under Remaining risks.
+- If verification does not directly exercise the changed behavior, say so under Remaining risks / notes.
 - For browser/UI work, do not claim visual layout or interactive behavior was fully verified unless it was actually run or manually checked.
 """.strip()
 
 FINAL_SUMMARY_REQUIREMENTS = """
 If the task is complete, reply with a short human-readable summary and no tool call.
 
-Start the final response directly with the required summary labels. Do not introduce the summary with phrases like "Here is the summary" or "Let me provide a final summary."
+Start the final response with TASK COMPLETE as the first non-empty line. Do not introduce the summary with phrases like "Here is the summary" or "Let me provide a final summary."
 
 Your final summary must include these exact labels, including the colon:
 - Files changed:
 - What changed:
-- Verification run:
-- Remaining risks:
+- Verification:
+- Remaining risks / notes:
 
-If there are no remaining risks, say exactly:
-Remaining risks: none
+Include concise but useful detail for each section. Keep the final summary short.
 
-Do not claim Remaining risks: none unless the verification directly covered the requested behavior. If only syntax, static checks, or partial checks were run, describe the unverified behavior under Remaining risks.
+For Remaining risks / notes, use "none" only when verification passed and no concrete caveats remain. Prefer a short sentence explaining why risk is low, such as "No known remaining risks; the targeted regression test passed."
+Do not invent speculative risks. If only syntax, static checks, or partial checks were run, describe the concrete unverified behavior under Remaining risks / notes.
 
-The final non-empty line must be exactly:
+The first non-empty line must be exactly:
 
 TASK COMPLETE
 """.strip()
@@ -105,11 +105,11 @@ I am running the tests to verify the fix.
 [one real tool call to run verification]
 
 Valid final response:
+TASK COMPLETE
 Files changed: parser.py
 What changed: accepted the final summary format and preserved the existing tool-call contract
-Verification run: `python -m pytest tests/test_parser.py -v`
-Remaining risks: none
-TASK COMPLETE
+Verification: `python -m pytest tests/test_parser.py -v`
+Remaining risks / notes: No known remaining risks; the targeted regression test passed.
 
 ## Invalid examples
 
@@ -133,11 +133,11 @@ Why invalid:
 A non-final response should include visible narration before the tool call.
 
 Invalid final response:
+TASK COMPLETE
 Files changed/created: app.js
 What changed: created the app
-Verification run: `node --check app.js`
-Remaining risks: none
-TASK COMPLETE
+Verification: `node --check app.js`
+Remaining risks / notes: No known remaining risks; syntax validation passed.
 
 Why invalid:
 The final labels must match exactly, including the colon. Use `Files changed:`, not `Files changed/created:`.
@@ -182,11 +182,11 @@ I am verifying the fix now.
 [one real tool call to run tests]
 
 Valid final response:
+TASK COMPLETE
 Files changed: mathlib.py
 What changed: changed `return lower` to `return upper` in `clamp` when `value > upper`
-Verification run: `python -m pytest test_mathlib.py -v` (3 passed)
-Remaining risks: none
-TASK COMPLETE
+Verification: `python -m pytest test_mathlib.py -v` (3 passed)
+Remaining risks / notes: No known remaining risks; the targeted regression test passed.
 """.strip()
 
 
@@ -216,14 +216,18 @@ Prior context:
 
 
 CORRECTION_MESSAGES = {
-    "non_final_no_tool_reply": """
-Format error: your last response did not include the required tool call.
+    "non_final_no_tool_reply": f"""
+Format error: your last response had no tool call and was not accepted as a final response.
 
-Before the task is complete, every response must include exactly one real tool call for the immediate next step.
-Choose the tool call first.
-Do not explain again.
+If the task is complete, reply with the required final summary, include no tool call, and put TASK COMPLETE on the first non-empty line.
+
+If work remains, reply with exactly one real tool call for the immediate next step.
+
 Do not restate the plan.
-Reply now with the same next step and exactly one tool call.
+Do not explain the format error.
+Do not do extra verification or exploration unless concrete work remains.
+
+{FINAL_SUMMARY_REQUIREMENTS}
 """.strip(),
     "non_final_wrong_tool_count": """
 Format error: your last response used the wrong number of tool calls.

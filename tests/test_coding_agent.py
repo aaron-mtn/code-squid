@@ -6,7 +6,7 @@ def test_validate_reply_rejects_final_summary_missing_required_sections() -> Non
     agent = CodingAgent("demo task")
     reply = {
         "message": {
-            "content": "Files changed: a.py\nWhat changed: fixed the bug\nTASK COMPLETE",
+            "content": "TASK COMPLETE\nFiles changed: a.py\nWhat changed: fixed the bug",
         },
         "actions": [],
     }
@@ -132,11 +132,11 @@ def test_validate_reply_accepts_final_summary_with_all_required_sections() -> No
     reply = {
         "message": {
             "content": (
+                "TASK COMPLETE\n"
                 "Files changed: a.py\n"
                 "What changed: fixed the bug\n"
-                "Verification run: pytest\n"
-                "Remaining risks: none\n"
-                "TASK COMPLETE"
+                "Verification: pytest\n"
+                "Remaining risks / notes: No known remaining risks; pytest passed."
             ),
         },
         "actions": [],
@@ -150,16 +150,39 @@ def test_validate_reply_accepts_final_summary_with_all_required_sections() -> No
     }
 
 
+def test_validate_reply_rejects_old_verification_run_label() -> None:
+    agent = CodingAgent("demo task")
+    reply = {
+        "message": {
+            "content": (
+                "TASK COMPLETE\n"
+                "Files changed: a.py\n"
+                "What changed: fixed the bug\n"
+                "Verification run: pytest\n"
+                "Remaining risks / notes: No known remaining risks; pytest passed."
+            ),
+        },
+        "actions": [],
+    }
+
+    validation = agent.validate_reply(reply)
+
+    assert validation == {
+        "ok": False,
+        "reason": "final_missing_required_sections",
+    }
+
+
 def test_validate_reply_rejects_final_summary_with_tool_call() -> None:
     agent = CodingAgent("demo task")
     reply = {
         "message": {
             "content": (
+                "TASK COMPLETE\n"
                 "Files changed: a.py\n"
                 "What changed: fixed the bug\n"
-                "Verification run: pytest\n"
-                "Remaining risks: none\n"
-                "TASK COMPLETE"
+                "Verification: pytest\n"
+                "Remaining risks / notes: No known remaining risks; pytest passed."
             ),
         },
         "actions": [
@@ -179,18 +202,42 @@ def test_validate_reply_rejects_final_summary_with_tool_call() -> None:
     }
 
 
-def test_should_stop_accepts_final_summary_with_marker_on_last_non_empty_line() -> None:
+def test_validate_reply_rejects_old_trailing_only_final_marker() -> None:
+    agent = CodingAgent("demo task")
+    reply = {
+        "message": {
+            "content": (
+                "Files changed: a.py\n"
+                "What changed: fixed the bug\n"
+                "Verification: pytest\n"
+                "Remaining risks / notes: No known remaining risks; pytest passed.\n"
+                "TASK COMPLETE"
+            ),
+        },
+        "actions": [],
+    }
+
+    validation = agent.validate_reply(reply)
+
+    assert validation == {
+        "ok": False,
+        "reason": "non_final_no_tool_reply",
+    }
+
+
+def test_should_stop_accepts_final_summary_with_marker_on_first_non_empty_line() -> None:
     agent = CodingAgent("demo task")
     session = Session(repo_root=None)
     session.messages = [
         {
             "role": "assistant",
             "content": (
+                "\n"
+                "TASK COMPLETE\n"
                 "Files changed: a.py\n"
                 "What changed: fixed the bug\n"
-                "Verification run: pytest\n"
-                "Remaining risks: none\n"
-                "TASK COMPLETE"
+                "Verification: pytest\n"
+                "Remaining risks / notes: No known remaining risks; pytest passed."
             ),
         }
     ]
@@ -205,7 +252,7 @@ def test_should_stop_rejects_marker_when_missing_required_sections() -> None:
     session.messages = [
         {
             "role": "assistant",
-            "content": "Files changed: a.py\nWhat changed: fixed the bug\nTASK COMPLETE",
+            "content": "TASK COMPLETE\nFiles changed: a.py\nWhat changed: fixed the bug",
         }
     ]
 
@@ -213,13 +260,19 @@ def test_should_stop_rejects_marker_when_missing_required_sections() -> None:
     assert agent.should_stop(session) is False
 
 
-def test_should_stop_rejects_marker_when_not_on_last_non_empty_line() -> None:
+def test_should_stop_rejects_marker_when_not_on_first_non_empty_line() -> None:
     agent = CodingAgent("demo task")
     session = Session(repo_root=None)
     session.messages = [
         {
             "role": "assistant",
-            "content": "TASK COMPLETE\nNeed to keep working",
+            "content": (
+                "Files changed: a.py\n"
+                "What changed: fixed the bug\n"
+                "Verification: pytest\n"
+                "Remaining risks / notes: No known remaining risks; pytest passed.\n"
+                "TASK COMPLETE"
+            ),
         }
     ]
 
@@ -245,6 +298,15 @@ def test_failure_message_for_invalid_replies_includes_reason_and_explanation() -
     }
 
 
+def test_no_tool_correction_mentions_first_non_empty_line() -> None:
+    agent = CodingAgent("demo task")
+
+    message = agent.correction_message_for("non_final_no_tool_reply")
+
+    assert "first non-empty line" in message["content"]
+    assert "final non-empty line" not in message["content"]
+
+
 def test_follow_up_message_returns_user_message() -> None:
     agent = CodingAgent("original task")
 
@@ -264,11 +326,11 @@ def test_should_stop_does_not_stop_after_newer_user_follow_up() -> None:
         {
             "role": "assistant",
             "content": (
+                "TASK COMPLETE\n"
                 "Files changed: a.py\n"
                 "What changed: fixed the bug\n"
-                "Verification run: pytest\n"
-                "Remaining risks: none\n"
-                "TASK COMPLETE"
+                "Verification: pytest\n"
+                "Remaining risks / notes: No known remaining risks; pytest passed."
             ),
         },
         {

@@ -257,14 +257,14 @@ status and stops the loop.
 ### Final Contract
 
 A valid final assistant reply must include no tool calls and must have
-`TASK COMPLETE` as the final non-empty line.
+`TASK COMPLETE` as the first non-empty line.
 
 It must include these exact labels:
 
 - `Files changed:`
 - `What changed:`
-- `Verification run:`
-- `Remaining risks:`
+- `Verification:`
+- `Remaining risks / notes:`
 
 These labels are runtime-enforced. The terminal display hides the
 `TASK COMPLETE` marker in normal display, but the marker remains part of the

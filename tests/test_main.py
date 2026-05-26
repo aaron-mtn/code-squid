@@ -99,7 +99,7 @@ def _fake_input(response: str):
 def test_new_session_prints_banner_before_task_prompt(monkeypatch, tmp_path, capsys) -> None:
     displays: list[BannerDisplay] = []
 
-    def fake_display(debug: bool = False) -> BannerDisplay:
+    def fake_display(debug: bool = False, show_transcript: bool = False) -> BannerDisplay:
         display = BannerDisplay()
         displays.append(display)
         return display
@@ -133,7 +133,7 @@ def test_resume_session_prints_banner_before_follow_up_prompt(
     session_store = SessionStore.create(tmp_path, "original task")
     displays: list[BannerDisplay] = []
 
-    def fake_display(debug: bool = False) -> BannerDisplay:
+    def fake_display(debug: bool = False, show_transcript: bool = False) -> BannerDisplay:
         display = BannerDisplay()
         displays.append(display)
         return display
@@ -158,3 +158,95 @@ def test_resume_session_prints_banner_before_follow_up_prompt(
     assert len(displays) == 1
     assert displays[0].starts == 1
     assert displays[0].run_starts == 1
+
+
+def test_new_session_passes_trace_to_terminal_display(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    display_kwargs = []
+
+    def fake_display(**kwargs) -> BannerDisplay:
+        display_kwargs.append(kwargs)
+        return BannerDisplay()
+
+    monkeypatch.setenv("CODE_SQUID_TRACE", "1")
+    monkeypatch.setattr("main.TerminalDisplay", fake_display)
+    monkeypatch.setattr(builtins, "input", _fake_input("Do the thing"))
+    monkeypatch.setattr("main._build_loop", lambda *args: NoopLoop())
+    monkeypatch.setattr("main._run_loop", lambda *args: 0)
+
+    assert _run_new_session(tmp_path) == 0
+
+    assert display_kwargs == [{"debug": True, "show_transcript": True}]
+
+
+def test_new_session_trace_threads_effective_debug_to_provider(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    provider_kwargs = []
+
+    class CapturingDisplay(BannerDisplay):
+        def __init__(self, debug: bool = False, show_transcript: bool = False) -> None:
+            super().__init__()
+            self.debug = debug
+            self.show_transcript = show_transcript
+
+    class CapturingProvider:
+        def __init__(self, **kwargs) -> None:
+            provider_kwargs.append(kwargs)
+
+    monkeypatch.setenv("CODE_SQUID_TRACE", "1")
+    monkeypatch.setattr("main.TerminalDisplay", CapturingDisplay)
+    monkeypatch.setattr("main.OpenAICompatibleProvider", CapturingProvider)
+    monkeypatch.setattr(builtins, "input", _fake_input("Do the thing"))
+    monkeypatch.setattr("main._run_loop", lambda *args: 0)
+
+    assert _run_new_session(tmp_path) == 0
+
+    assert provider_kwargs[0]["debug"] is True
+
+
+def test_new_session_passes_debug_without_trace_to_terminal_display(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    display_kwargs = []
+
+    def fake_display(**kwargs) -> BannerDisplay:
+        display_kwargs.append(kwargs)
+        return BannerDisplay()
+
+    monkeypatch.setenv("CODE_SQUID_DEBUG", "1")
+    monkeypatch.setattr("main.TerminalDisplay", fake_display)
+    monkeypatch.setattr(builtins, "input", _fake_input("Do the thing"))
+    monkeypatch.setattr("main._build_loop", lambda *args: NoopLoop())
+    monkeypatch.setattr("main._run_loop", lambda *args: 0)
+
+    assert _run_new_session(tmp_path) == 0
+
+    assert display_kwargs == [{"debug": True, "show_transcript": False}]
+
+
+def test_resume_session_passes_trace_to_terminal_display(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    session_store = SessionStore.create(tmp_path, "original task")
+    display_kwargs = []
+
+    def fake_display(**kwargs) -> BannerDisplay:
+        display_kwargs.append(kwargs)
+        return BannerDisplay()
+
+    monkeypatch.setenv("CODE_SQUID_TRACE", "1")
+    monkeypatch.setattr("main.TerminalDisplay", fake_display)
+    monkeypatch.setattr("main._session_dir_for_resume", lambda repo_root, session_id: session_store.session_dir)
+    monkeypatch.setattr(builtins, "input", _fake_input("Continue the thing"))
+    monkeypatch.setattr("main._build_loop", lambda *args: NoopLoop())
+    monkeypatch.setattr("main._run_loop", lambda *args: 0)
+
+    assert _resume_session(tmp_path, session_store.session_id) == 0
+
+    assert display_kwargs == [{"debug": True, "show_transcript": True}]
