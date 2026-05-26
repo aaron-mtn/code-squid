@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from core.approval import USER_DENIED_TOOL_ACTION
+from core.agent_loop import RunResult
 from ui.terminal import (
     CODE_SQUID_BANNER,
     FINAL_REPORT_DIVIDER,
@@ -155,14 +156,60 @@ def test_model_request_failed_prints_short_message_with_log_path(
     )
 
 
-def test_action_started_prints_in_debug_mode(
+def test_read_write_action_started_is_quiet_in_debug_mode(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    display = TerminalDisplay(debug=True)
+
+    display.action_started({"tool": "read_file", "args": {"path": "kanban_toy2/app.js"}})
+    display.action_started({"tool": "write_file", "args": {"path": "kanban_toy2/app.js"}})
+
+    assert capsys.readouterr().out == ""
+
+
+def test_run_command_action_started_still_prints_in_debug_mode(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     TerminalDisplay(debug=True).action_started(
-        {"tool": "write_file", "args": {"path": "kanban_toy2/app.js"}}
+        {"tool": "run_command", "args": {"command": "python -m pytest -q"}}
     )
 
-    assert capsys.readouterr().out == "📝 Write: kanban_toy2/app.js\n"
+    assert capsys.readouterr().out == "💿 Run: python -m pytest\n"
+
+
+def test_debug_reply_prints_boxed_model_action(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay(debug=True).debug_reply(
+        {
+            "actions": [
+                {
+                    "tool": "read_file",
+                    "args": {"path": "/tmp/project/calculator.py"},
+                    "tool_call_id": "call_123",
+                    "raw_arguments": '{"path": "/tmp/project/calculator.py"}',
+                }
+            ]
+        }
+    )
+
+    output = capsys.readouterr().out
+    assert "┌─ model action " in output
+    assert "│ tool: read_file" in output
+    assert "│ path: " in output
+    assert "│ tool_call_id: call_123" in output
+    assert "actions: [" not in output
+    assert "raw_arguments" not in output
+
+
+def test_debug_reply_prints_none_for_no_actions(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay(debug=True).debug_reply({"actions": []})
+
+    output = capsys.readouterr().out
+    assert "┌─ model action " in output
+    assert "│ none" in output
 
 
 def test_approve_action_still_prints_requested_action(
@@ -344,6 +391,108 @@ def test_run_command_result_prints_one_test_summary_line(
     assert capsys.readouterr().out == "🧪 Tests passed: 2 passed\n"
 
 
+def test_debug_read_file_result_omits_full_content(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    action = {"tool": "read_file", "args": {"path": "/tmp/project/calculator.py"}}
+    result = {
+        "ok": True,
+        "tool": "read_file",
+        "path": "/tmp/project/calculator.py",
+        "content": "SECRET FILE CONTENT",
+        "content_truncated": False,
+        "content_original_chars": 19,
+        "content_returned_chars": 19,
+        "start_line": 1,
+        "end_line": 3,
+        "total_lines": 3,
+    }
+
+    TerminalDisplay(debug=True).tool_result(action, result)
+
+    output = capsys.readouterr().out
+    assert "📖 Read:" in output
+    assert "┌─ tool result " in output
+    assert "│ ok: true" in output
+    assert "│ tool: read_file" in output
+    assert "│ chars: 19 / 19" in output
+    assert "│ lines: 1-3 / 3" in output
+    assert "SECRET FILE CONTENT" not in output
+    assert "tool result: {" not in output
+
+
+def test_debug_failed_read_file_result_shows_error_not_empty_metadata(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    action = {"tool": "read_file", "args": {"path": "/tmp/project/missing.py"}}
+    result = {
+        "ok": False,
+        "tool": "read_file",
+        "path": "/tmp/project/missing.py",
+        "error": "file not found",
+    }
+
+    TerminalDisplay(debug=True).tool_result(action, result)
+
+    output = capsys.readouterr().out
+    assert "❌ Read failed:" in output
+    assert "│ ok: false" in output
+    assert "│ tool: read_file" in output
+    assert "│ error: file not found" in output
+    assert "│ chars:" not in output
+    assert "│ lines:" not in output
+
+
+def test_debug_failed_write_file_result_shows_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    action = {"tool": "write_file", "args": {"path": "/tmp/project/app.py"}}
+    result = {
+        "ok": False,
+        "tool": "write_file",
+        "path": "/tmp/project/app.py",
+        "error": "permission denied",
+    }
+
+    TerminalDisplay(debug=True).tool_result(action, result)
+
+    output = capsys.readouterr().out
+    assert "❌ Write failed:" in output
+    assert "│ ok: false" in output
+    assert "│ tool: write_file" in output
+    assert "│ error: permission denied" in output
+    assert "│ characters_written:" not in output
+    assert "│ summary:" not in output
+
+
+def test_debug_run_command_result_omits_full_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    action = {"tool": "run_command", "args": {"command": "pytest -q"}}
+    result = {
+        "ok": True,
+        "tool": "run_command",
+        "output": "SECRET COMMAND OUTPUT\n2 passed in 0.01s",
+        "output_truncated": False,
+        "output_original_chars": 36,
+        "output_returned_chars": 36,
+        "returncode": 0,
+        "timed_out": False,
+    }
+
+    TerminalDisplay(debug=True).tool_result(action, result)
+
+    output = capsys.readouterr().out
+    assert "🧪 Tests passed: 2 passed" in output
+    assert "┌─ tool result " in output
+    assert "│ returncode: 0" in output
+    assert "│ timed_out: false" in output
+    assert "│ chars: 36 / 36" in output
+    assert "│ pytest: 2 passed" in output
+    assert "SECRET COMMAND OUTPUT" not in output
+    assert "tool result: {" not in output
+
+
 def test_normal_non_tty_thinking_does_not_print_working(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -481,6 +630,28 @@ def test_normal_completion_prints_session_complete(
     assert capsys.readouterr().out.endswith("✅ Session complete\n")
 
 
+@pytest.mark.parametrize(
+    ("run_result", "expected"),
+    [
+        (RunResult(status="complete"), "✅ Session complete"),
+        (RunResult(status="failed", reason="invalid reply"), "❌ Session failed"),
+        (RunResult(status="interrupted", reason="user interrupted"), "⚠️ Session interrupted"),
+    ],
+)
+def test_loop_finished_prints_status_label(
+    capsys: pytest.CaptureFixture[str],
+    run_result: RunResult,
+    expected: str,
+) -> None:
+    session = SimpleNamespace(files_read=set(), files_written=set(), messages=[])
+
+    TerminalDisplay().loop_finished(session, run_result)
+
+    output = capsys.readouterr().out
+    assert expected in output
+    assert output.count("Session complete") == (1 if run_result.status == "complete" else 0)
+
+
 def test_loop_finished_prints_divider_before_file_report(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -503,6 +674,23 @@ def test_loop_finished_prints_divider_before_file_report(
         "\n"
         "✅ Session complete\n"
     )
+
+
+def test_loop_finished_prints_full_stored_paths_in_final_file_report(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    full_path = "/home/aaron/Desktop/coding_agent_eval_repos/01_single_bug/calculator.py"
+    session = SimpleNamespace(
+        files_read={full_path},
+        files_written={full_path},
+        messages=[],
+    )
+
+    TerminalDisplay().loop_finished(session)
+
+    output = capsys.readouterr().out
+    assert f"  - {full_path}\n" in output
+    assert "…/01_single_bug/calculator.py" not in output
 
 
 def test_normal_assistant_final_summary_uses_report_heading(
@@ -553,7 +741,41 @@ def test_debug_assistant_message_preserves_raw_task_complete(
 ) -> None:
     TerminalDisplay(debug=True).assistant_message("TASK COMPLETE")
 
-    assert capsys.readouterr().out == "-> model replied\nassistant: TASK COMPLETE\n"
+    assert capsys.readouterr().out == "🦑 TASK COMPLETE\n\n"
+
+
+def test_debug_loop_finished_does_not_print_transcript_by_default(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    session = SimpleNamespace(
+        files_read=set(),
+        files_written=set(),
+        messages=[{"role": "user", "content": "secret task"}],
+    )
+
+    TerminalDisplay(debug=True).loop_finished(session)
+
+    output = capsys.readouterr().out
+    assert "✅ Session complete" in output
+    assert "Full transcript:" not in output
+    assert "secret task" not in output
+
+
+def test_show_transcript_prints_full_transcript(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    session = SimpleNamespace(
+        files_read=set(),
+        files_written=set(),
+        messages=[{"role": "user", "content": "secret task"}],
+    )
+
+    TerminalDisplay(debug=True, show_transcript=True).loop_finished(session)
+
+    output = capsys.readouterr().out
+    assert "Full transcript:" in output
+    assert "[user]" in output
+    assert "secret task" in output
 
 
 def test_interrupted_completion_does_not_print_session_complete(

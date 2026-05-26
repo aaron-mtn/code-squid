@@ -29,8 +29,14 @@ FINAL_REPORT_DIVIDER = "──────────────────�
 class TerminalDisplay:
     """Owns terminal formatting for the agent loop."""
 
-    def __init__(self, debug: bool = False, _spinner: TerminalSpinner | None = None) -> None:
+    def __init__(
+        self,
+        debug: bool = False,
+        show_transcript: bool = False,
+        _spinner: TerminalSpinner | None = None,
+    ) -> None:
         self.debug = debug
+        self.show_transcript = show_transcript
         self._interrupted = False
         self._spinner = _spinner if _spinner is not None else TerminalSpinner(enabled=not debug)
         self._needs_leading_blank = False
@@ -60,8 +66,8 @@ class TerminalDisplay:
         self._stop_spinner()
         content = content.strip()
         if self.debug:
-            print("-> model replied")
-            print(f"assistant: {content}")
+            if content:
+                self._print_assistant_narration(content)
             return
 
         if not content:
@@ -78,6 +84,9 @@ class TerminalDisplay:
     def action_started(self, action: dict) -> None:
         self._stop_spinner()
         if not self.debug:
+            return
+
+        if action.get("tool") in {"read_file", "write_file"}:
             return
 
         print(self._action_text(action))
@@ -125,29 +134,32 @@ class TerminalDisplay:
 
     def tool_result(self, action: dict, result: dict) -> None:
         self._stop_spinner()
-        if self.debug:
-            print(f"tool result: {result}")
 
         if result.get("error") == USER_DENIED_TOOL_ACTION:
             self._print_visible_line("🚫 Action denied")
+            self._print_debug_tool_result(action, result)
             return
 
         tool_name = action.get("tool")
         if tool_name == "run_command":
             self._run_command_result(action, result)
+            self._print_debug_tool_result(action, result)
             return
 
         if result.get("ok", False):
             if tool_name in {"read_file", "write_file"}:
                 self._print_visible_line(self._action_label(action, "success"))
+            self._print_debug_tool_result(action, result)
             return
 
         error = result.get("error", "unknown error")
         if tool_name in {"read_file", "write_file"}:
             self._print_visible_line(f"{self._action_label(action, 'failure')} - {error}")
+            self._print_debug_tool_result(action, result)
             return
 
         self._print_visible_line(f"❌ {tool_name} failed: {error}")
+        self._print_debug_tool_result(action, result)
 
     def reply_rejected(self, reason: str) -> None:
         self._stop_spinner()
@@ -176,7 +188,7 @@ class TerminalDisplay:
         print("Code Squid could not get a response from the configured model provider.")
         print(f"Details saved to: {log_path}")
 
-    def loop_finished(self, session) -> None:
+    def loop_finished(self, session, run_result=None) -> None:
         self._stop_spinner()
         if self._needs_leading_blank:
             self._print_leading_blank_if_needed()
@@ -187,11 +199,19 @@ class TerminalDisplay:
         self._print_file_list("📖 Files read", session.files_read)
         print()
         self._print_file_list("📝 Files written", session.files_written)
-        if not self._interrupted:
-            print()
+        status = getattr(run_result, "status", None)
+        if status is None:
+            status = "interrupted" if self._interrupted else "complete"
+
+        print()
+        if status == "failed":
+            print("❌ Session failed")
+        elif status == "interrupted":
+            print("⚠️ Session interrupted")
+        else:
             print("✅ Session complete")
 
-        if not self.debug:
+        if not self.show_transcript:
             return
 
         print()
@@ -205,7 +225,11 @@ class TerminalDisplay:
             return
 
         self._stop_spinner()
-        print(f"actions: {reply.get('actions', [])}")
+        actions = reply.get("actions", [])
+        if not actions:
+            self._debug_block("model action", ["none"])
+        for action in actions:
+            self._debug_block("model action", self._debug_action_lines(action))
         if reply.get("format_error"):
             print(f"format_error: {reply['format_error']}")
 
@@ -236,6 +260,101 @@ class TerminalDisplay:
         for line in lines[1:]:
             print(f"   {line}" if line else "")
         print()
+
+    def _debug_block(self, title: str, lines: list[str]) -> None:
+        width = 47
+        top_label = f"─ {title} "
+        print(f"┌{top_label}{'─' * max(width - len(top_label), 0)}")
+        for line in lines:
+            print(f"│ {line}")
+        print(f"└{'─' * width}")
+
+    def _debug_action_lines(self, action: dict) -> list[str]:
+        tool_name = action.get("tool", "")
+        args = action.get("args", {})
+        lines = [f"tool: {tool_name}"]
+
+        if tool_name in {"read_file", "write_file"} and args.get("path"):
+            lines.append(f"path: {self._short_path(str(args['path']))}")
+        if tool_name == "run_command" and args.get("command"):
+            lines.append(f"command: {self._truncate_middle(str(args['command']), COMMAND_LABEL_MAX)}")
+        if action.get("tool_call_id"):
+            lines.append(f"tool_call_id: {action['tool_call_id']}")
+
+        return lines
+
+    def _print_debug_tool_result(self, action: dict, result: dict) -> None:
+        if not self.debug:
+            return
+
+        print()
+        self._debug_block("tool result", self._debug_tool_result_lines(action, result))
+
+    def _debug_tool_result_lines(self, action: dict, result: dict) -> list[str]:
+        tool_name = action.get("tool", "")
+        lines = [
+            f"ok: {self._debug_value(result.get('ok', False))}",
+            f"tool: {tool_name}",
+        ]
+        args = action.get("args", {})
+
+        if tool_name == "read_file":
+            if args.get("path"):
+                lines.append(f"path: {self._short_path(str(args['path']))}")
+            if not result.get("ok", False) and result.get("error"):
+                lines.append(f"error: {result['error']}")
+                return lines
+            lines.extend(
+                [
+                    "chars: "
+                    f"{result.get('content_returned_chars', 0)} / "
+                    f"{result.get('content_original_chars', 0)}",
+                    "lines: "
+                    f"{result.get('start_line', '')}-{result.get('end_line', '')} / "
+                    f"{result.get('total_lines', '')}",
+                    f"truncated: {self._debug_value(result.get('content_truncated', False))}",
+                ]
+            )
+            return lines
+
+        if tool_name == "write_file":
+            if args.get("path"):
+                lines.append(f"path: {self._short_path(str(args['path']))}")
+            if not result.get("ok", False) and result.get("error"):
+                lines.append(f"error: {result['error']}")
+                return lines
+            lines.extend(
+                [
+                    f"characters_written: {result.get('characters_written', 0)}",
+                    f"summary: {result.get('summary', '')}",
+                ]
+            )
+            return lines
+
+        if tool_name == "run_command":
+            lines.extend(
+                [
+                    f"returncode: {result.get('returncode', '')}",
+                    f"timed_out: {self._debug_value(result.get('timed_out', False))}",
+                    "chars: "
+                    f"{result.get('output_returned_chars', 0)} / "
+                    f"{result.get('output_original_chars', 0)}",
+                    f"truncated: {self._debug_value(result.get('output_truncated', False))}",
+                ]
+            )
+            summary = self._pytest_summary(result.get("output", ""))
+            if summary:
+                lines.append(f"pytest: {summary}")
+            return lines
+
+        if result.get("error"):
+            lines.append(f"error: {result['error']}")
+        return lines
+
+    def _debug_value(self, value: object) -> str:
+        if isinstance(value, bool):
+            return str(value).lower()
+        return str(value)
 
     def _print_final_summary(self, content: str) -> None:
         formatted = self._format_final_summary(content)
@@ -312,8 +431,7 @@ class TerminalDisplay:
             return
 
         for path in sorted(paths):
-            display_path = path if self.debug else self._short_path(path)
-            print(f"  - {display_path}")
+            print(f"  - {path}")
 
     def _short_path(self, path: str) -> str:
         if not path:

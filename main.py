@@ -7,7 +7,7 @@ from pathlib import Path
 
 from agent.coding import CodingAgent
 from config.settings import DEFAULT_BASE_URL, Settings, load_settings
-from core.agent_loop import AgentLoop
+from core.agent_loop import AgentLoop, RunResult
 from core.approval import ApprovalPolicy
 from core.compaction import Compactor
 from core.model_adapter import ModelAdapter, ModelRequestError
@@ -112,11 +112,12 @@ def _run_loop(
     session_store: SessionStore,
 ) -> int:
     try:
-        loop.run()
+        run_result = loop.run()
     except KeyboardInterrupt:
         session_store.update_status("interrupted")
+        run_result = RunResult(status="interrupted", reason="user interrupted")
         display.interrupted()
-        display.loop_finished(session)
+        display.loop_finished(session, run_result)
         return 0
     except ModelRequestError as error:
         session_store.update_status("failed")
@@ -128,7 +129,7 @@ def _run_loop(
         display.model_request_failed(display_path)
         return 1
 
-    display.loop_finished(session)
+    display.loop_finished(session, run_result)
     return 0
 
 

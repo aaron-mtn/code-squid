@@ -52,32 +52,21 @@ class OpenAICompatibleProvider(BaseProvider):
         def field(name: str) -> object:
             return payload[name] if name in payload else "<missing>"
 
-        message_summaries = []
-        for message in payload["messages"][-3:]:
-            if "content" not in message:
-                content_state = "<missing>"
-            elif message["content"] is None:
-                content_state = "None"
-            elif message["content"] == "":
-                content_state = "empty"
-            else:
-                content_state = "non-empty"
+        lines = [
+            "provider: openai-compatible",
+            f"model: {field('model')}",
+            f"messages: {len(payload['messages'])}",
+            f"tools: {len(payload.get('tools') or [])}",
+            f"temperature: {field('temperature')}",
+            f"parallel_tool_calls: {str(field('parallel_tool_calls')).lower()}",
+            f"tool_choice: {field('tool_choice')}",
+        ]
+        self._debug_block("provider request", lines)
 
-            message_summaries.append(
-                {
-                    "role": message.get("role", "<missing>"),
-                    "content": content_state,
-                    "tool_calls": len(message.get("tool_calls") or []),
-                }
-            )
-
-        print(
-            "OpenAI-compatible request: "
-            f"model={field('model')!r} "
-            f"tools_count={len(payload.get('tools') or [])} "
-            f"temperature={field('temperature')} "
-            f"parallel_tool_calls={field('parallel_tool_calls')} "
-            f"tool_choice={field('tool_choice')} "
-            f"message_count={len(payload['messages'])} "
-            f"recent_messages={message_summaries}"
-        )
+    def _debug_block(self, title: str, lines: list[str]) -> None:
+        width = 47
+        top_label = f"─ {title} "
+        print(f"┌{top_label}{'─' * max(width - len(top_label), 0)}")
+        for line in lines:
+            print(f"│ {line}")
+        print(f"└{'─' * width}")

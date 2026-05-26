@@ -1,11 +1,18 @@
 # core/agent_loop.py
 
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from core.approval import ApprovalPolicy, denied_result
 
 
 MAX_CONSECUTIVE_INVALID_REPLIES = 3
+
+
+@dataclass(frozen=True)
+class RunResult:
+    status: Literal["complete", "failed", "interrupted"]
+    reason: str = ""
 
 
 class AgentLoop:
@@ -82,7 +89,7 @@ class AgentLoop:
     # 7. announces each tool result to the display
     # 8. converts tool results into transcript messages
     # 9. stores those result messages in the session
-    def run(self) -> None:
+    def run(self) -> RunResult:
         # New sessions start with the agent's initial system/user messages.
         # Resumed sessions can already contain transcript history, so do not
         # blindly append another kickoff.
@@ -91,6 +98,7 @@ class AgentLoop:
         consecutive_invalid_replies = 0
         stopped_after_repeated_invalid_replies = False
         stopped_after_step_limit = False
+        failure_reason = ""
         tool_steps_used = 0
 
         # Keep going until the agent says the task is complete.
@@ -102,6 +110,7 @@ class AgentLoop:
                 self.display.step_limit_reached(self.max_tool_steps)
                 self._update_status("failed")
                 stopped_after_step_limit = True
+                failure_reason = f"reached tool step limit: {self.max_tool_steps}"
                 break
 
             if self.compactor is not None:
@@ -144,6 +153,7 @@ class AgentLoop:
                     )
                     self._update_status("failed")
                     stopped_after_repeated_invalid_replies = True
+                    failure_reason = validation["reason"]
                     break
 
                 self._add_message(self.agent.correction_message_for(validation["reason"]))
@@ -176,5 +186,8 @@ class AgentLoop:
             if reply["actions"]:
                 tool_steps_used += 1
 
-        if not stopped_after_repeated_invalid_replies and not stopped_after_step_limit:
-            self._update_status("complete")
+        if stopped_after_repeated_invalid_replies or stopped_after_step_limit:
+            return RunResult(status="failed", reason=failure_reason)
+
+        self._update_status("complete")
+        return RunResult(status="complete")

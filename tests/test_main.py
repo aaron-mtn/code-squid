@@ -1,6 +1,7 @@
 import builtins
 from pathlib import Path
 
+from core.agent_loop import RunResult
 from core.model_adapter import ModelRequestError
 from main import _resume_session, _run_loop, _run_new_session
 from storage.session_store import SessionStore
@@ -21,6 +22,7 @@ class FakeDisplay:
         self.run_starts = 0
         self.failure_path = None
         self.finished = False
+        self.run_result = None
 
     def start(self) -> None:
         self.starts += 1
@@ -31,8 +33,9 @@ class FakeDisplay:
     def model_request_failed(self, log_path: Path) -> None:
         self.failure_path = log_path
 
-    def loop_finished(self, session) -> None:
+    def loop_finished(self, session, run_result=None) -> None:
         self.finished = True
+        self.run_result = run_result
 
 
 class FakeSessionStore:
@@ -81,8 +84,8 @@ class BannerDisplay(FakeDisplay):
 
 
 class NoopLoop:
-    def run(self) -> None:
-        pass
+    def run(self) -> RunResult:
+        return RunResult(status="complete")
 
 
 def _fake_input(response: str):

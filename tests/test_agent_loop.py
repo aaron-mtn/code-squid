@@ -1,6 +1,6 @@
 import json
 
-from core.agent_loop import AgentLoop
+from core.agent_loop import AgentLoop, RunResult
 from core.approval import ApprovalPolicy
 from core.session import Session
 from core.tool_results import ToolResults
@@ -255,6 +255,47 @@ def test_loop_stops_after_three_consecutive_invalid_replies() -> None:
             "Explanation: the model tried to finalize without the required summary sections"
         ),
     }
+
+
+def test_normal_completion_returns_complete_run_result() -> None:
+    session = Session(repo_root=None)
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter([reply("TASK COMPLETE")]),
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+    )
+
+    result = loop.run()
+
+    assert result == RunResult(status="complete")
+
+
+def test_repeated_invalid_replies_return_failed_run_result() -> None:
+    session = Session(repo_root=None)
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter(
+            [
+                reply("bad 1", reason="non_final_no_tool_reply"),
+                reply("bad 2", reason="non_final_wrong_tool_count"),
+                reply("bad 3", reason="final_missing_required_sections"),
+            ]
+        ),
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+    )
+
+    result = loop.run()
+
+    assert result == RunResult(
+        status="failed",
+        reason="final_missing_required_sections",
+    )
 
 
 def test_initial_and_valid_assistant_messages_are_persisted() -> None:

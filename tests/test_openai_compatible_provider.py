@@ -110,14 +110,12 @@ def test_debug_on_prints_parallel_tool_calls_false_without_message_contents(caps
     )
 
     output = capsys.readouterr().out
-    assert "parallel_tool_calls=False" in output
-    assert "tools_count=1" in output
-    assert "temperature=<missing>" in output
-    assert "tool_choice=<missing>" in output
-    assert "message_count=4" in output
-    assert "'role': 'user'" in output
-    assert "'content': 'non-empty'" in output
-    assert "'content': 'None'" in output
-    assert "'content': 'empty'" in output
-    assert "'tool_calls': 1" in output
+    assert "┌─ provider request " in output
+    assert "│ provider: openai-compatible" in output
+    assert "│ model: test-model" in output
+    assert "│ messages: 4" in output
+    assert "│ tools: 1" in output
+    assert "│ temperature: <missing>" in output
+    assert "│ parallel_tool_calls: false" in output
+    assert "│ tool_choice: <missing>" in output
     assert "secret task" not in output

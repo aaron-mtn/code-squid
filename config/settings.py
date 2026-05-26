@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
@@ -69,7 +69,7 @@ class Settings:
     model: ModelSettings
     display: DisplaySettings
     runtime: RuntimeSettings
-    compaction: CompactionSettings
+    compaction: CompactionSettings = field(default_factory=CompactionSettings)
 
 
 def _read_settings_file(settings_path: Path) -> dict[str, Any]:
