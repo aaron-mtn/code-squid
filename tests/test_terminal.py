@@ -11,6 +11,7 @@ from ui.terminal import (
     CODE_SQUID_BANNER,
     DIM_STYLE,
     FINAL_REPORT_DIVIDER,
+    RUN_DETAIL_INDENT,
     RESET_STYLE,
     RUN_EVENT_INDENT,
     RUN_STARTED_DIVIDER,
@@ -115,7 +116,7 @@ def test_thinking_after_visible_tool_result_prints_one_leading_blank(
         {"tool": "run_command", "args": {"command": "ls tests"}},
         {"ok": True, "output": ""},
     )
-    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}🔎 Listed files\n"
+    assert capsys.readouterr().out == f"{RUN_DETAIL_INDENT}🔎 Listed files\n"
 
     display.thinking()
     display.thinking()
@@ -249,7 +250,7 @@ def test_reply_rejected_prints_friendly_nudge_for_missing_tool_call(
     TerminalDisplay().reply_rejected("non_final_no_tool_reply")
 
     assert capsys.readouterr().out == (
-        f"{RUN_EVENT_INDENT}↪ Nudging model to choose an action…\n"
+        f"{RUN_DETAIL_INDENT}↪ Nudging model to choose an action…\n"
     )
 
 
@@ -262,7 +263,7 @@ def test_reply_rejected_dims_friendly_nudge_in_tty(
     TerminalDisplay().reply_rejected("non_final_no_tool_reply")
 
     assert capsys.readouterr().out == (
-        f"{DIM_STYLE}{RUN_EVENT_INDENT}↪ Nudging model to choose an action…{RESET_STYLE}\n"
+        f"{DIM_STYLE}{RUN_DETAIL_INDENT}↪ Nudging model to choose an action…{RESET_STYLE}\n"
     )
 
 
@@ -304,7 +305,7 @@ def test_long_outside_path_uses_ellipsis(capsys: pytest.CaptureFixture[str]) -> 
     )
 
     assert capsys.readouterr().out == (
-        f"{RUN_EVENT_INDENT}📖 Read: …/01_single_bug/test_calculator.py\n"
+        f"{RUN_DETAIL_INDENT}📖 Read: …/01_single_bug/test_calculator.py\n"
     )
 
 
@@ -318,7 +319,7 @@ def test_repo_local_path_becomes_relative(capsys: pytest.CaptureFixture[str]) ->
     )
 
     assert capsys.readouterr().out == (
-        f"{RUN_EVENT_INDENT}📖 Read: tests/test_terminal.py\n"
+        f"{RUN_DETAIL_INDENT}📖 Read: tests/test_terminal.py\n"
     )
 
 
@@ -339,7 +340,7 @@ def test_pytest_command_success_label_is_compact(
         {"ok": True, "output": ""},
     )
 
-    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}{expected}"
+    assert capsys.readouterr().out == f"{RUN_DETAIL_INDENT}{expected}"
 
 
 @pytest.mark.parametrize(
@@ -365,7 +366,7 @@ def test_search_and_list_commands_use_compact_labels(
     assert capsys.readouterr().out == f"Approve tool action?\n{approval_label}"
 
     TerminalDisplay().tool_result(action, {"ok": True, "output": ""})
-    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}{success_label}"
+    assert capsys.readouterr().out == f"{RUN_DETAIL_INDENT}{success_label}"
 
 
 @pytest.mark.parametrize(
@@ -389,7 +390,7 @@ def test_search_and_list_success_labels_are_dim_in_tty(
     )
 
     assert capsys.readouterr().out == (
-        f"{DIM_STYLE}{RUN_EVENT_INDENT}{success_label}{RESET_STYLE}\n"
+        f"{DIM_STYLE}{RUN_DETAIL_INDENT}{success_label}{RESET_STYLE}\n"
     )
 
 
@@ -402,7 +403,7 @@ def test_write_file_result_prints_one_success_line(
     display.action_started(action)
     display.tool_result(action, {"ok": True})
 
-    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}📝 Wrote: kanban_toy2/app.js\n"
+    assert capsys.readouterr().out == f"{RUN_DETAIL_INDENT}📝 Wrote: kanban_toy2/app.js\n"
 
 
 def test_run_command_result_prints_one_success_line(
@@ -414,7 +415,7 @@ def test_run_command_result_prints_one_success_line(
     display.action_started(action)
     display.tool_result(action, {"ok": True, "output": ""})
 
-    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}💿 Ran: node --check app.js\n"
+    assert capsys.readouterr().out == f"{RUN_DETAIL_INDENT}💿 Ran: node --check app.js\n"
 
 
 def test_tool_result_followed_by_assistant_message_has_one_blank_line(
@@ -429,7 +430,7 @@ def test_tool_result_followed_by_assistant_message_has_one_blank_line(
     display.assistant_message("The directory doesn't exist yet.")
 
     assert capsys.readouterr().out == (
-        f"{RUN_EVENT_INDENT}🔎 Listed files\n"
+        f"{RUN_DETAIL_INDENT}🔎 Listed files\n"
         "\n"
         f"{RUN_EVENT_INDENT}🦑 The directory doesn't exist yet.\n"
     )
@@ -448,7 +449,7 @@ def test_assistant_message_followed_by_tool_result_has_one_blank_line(
 
     assert capsys.readouterr().out == (
         f"{RUN_EVENT_INDENT}🦑 Directory created.\n"
-        f"{RUN_EVENT_INDENT}📝 Wrote: kanban_toy2/index.html\n"
+        f"{RUN_DETAIL_INDENT}📝 Wrote: kanban_toy2/index.html\n"
     )
 
 
@@ -466,7 +467,7 @@ def test_first_visible_output_after_header_has_no_extra_leading_blank(
     assert capsys.readouterr().out == (
         f"{CODE_SQUID_BANNER}\n"
         "\n"
-        f"{RUN_EVENT_INDENT}🔎 Listed files\n"
+        f"{RUN_DETAIL_INDENT}🔎 Listed files\n"
     )
 
 
@@ -479,7 +480,7 @@ def test_run_command_result_prints_one_test_summary_line(
     display.action_started(action)
     display.tool_result(action, {"ok": True, "output": "2 passed in 0.01s"})
 
-    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}🧪 Tests passed: 2 passed\n"
+    assert capsys.readouterr().out == f"{RUN_DETAIL_INDENT}🧪 Tests passed: 2 passed\n"
 
 
 def test_debug_read_file_result_omits_full_content(
@@ -668,7 +669,7 @@ def test_tool_result_stops_spinner_before_printing_result(
     assert spinner.starts == 1
     assert spinner.stops == 1
     assert capsys.readouterr().out == (
-        f"{RUN_EVENT_INDENT}📝 Wrote: kanban_toy2/index.html\n"
+        f"{RUN_DETAIL_INDENT}📝 Wrote: kanban_toy2/index.html\n"
     )
 
 
@@ -699,7 +700,7 @@ def test_interrupted_stops_spinner_before_printing(
 
     assert spinner.starts == 1
     assert spinner.stops == 1
-    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}⏹️ Interrupted\n"
+    assert capsys.readouterr().out == f"{RUN_DETAIL_INDENT}⏹️ Interrupted\n"
 
 
 def test_generic_long_command_gets_middle_truncated(
@@ -711,9 +712,9 @@ def test_generic_long_command_gets_middle_truncated(
     TerminalDisplay().tool_result(action, {"ok": True, "output": ""})
 
     output = capsys.readouterr().out
-    assert output.startswith(f"{RUN_EVENT_INDENT}💿 Ran: printf '")
+    assert output.startswith(f"{RUN_DETAIL_INDENT}💿 Ran: printf '")
     assert "…" in output
-    assert len(output.removesuffix("\n")) <= len(RUN_EVENT_INDENT) + len("💿 Ran: ") + 80
+    assert len(output.removesuffix("\n")) <= len(RUN_DETAIL_INDENT) + len("💿 Ran: ") + 80
 
 
 def test_normal_completion_prints_session_complete(
@@ -762,11 +763,13 @@ def test_loop_finished_prints_divider_before_file_report(
     assert capsys.readouterr().out == (
         "\n"
         f"{FINAL_REPORT_DIVIDER}\n"
-        "📖 Files read:\n"
-        "  - app.py\n"
+        "📚 Session files\n"
         "\n"
-        "📝 Files written:\n"
-        "  - app.py\n"
+        "  Files read\n"
+        "    app.py\n"
+        "\n"
+        "  Files written\n"
+        "    app.py\n"
         "\n"
         "✅ Session complete\n"
     )
@@ -785,7 +788,7 @@ def test_loop_finished_prints_full_stored_paths_in_final_file_report(
     TerminalDisplay().loop_finished(session)
 
     output = capsys.readouterr().out
-    assert f"  - {full_path}\n" in output
+    assert f"    {full_path}\n" in output
     assert "…/01_single_bug/calculator.py" not in output
 
 
@@ -802,8 +805,8 @@ def test_normal_assistant_final_summary_uses_report_heading(
 
     output = capsys.readouterr().out
     assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n📋 Final summary\n\n")
-    assert "Files changed: ui/terminal.py" in output
-    assert "What changed: polished display" in output
+    assert "  Files changed\n    ui/terminal.py" in output
+    assert "  What changed\n    polished display" in output
     assert "🦑" not in output
     assert "TASK COMPLETE" not in output
 
@@ -822,9 +825,9 @@ def test_normal_assistant_final_summary_hides_preamble(
 
     output = capsys.readouterr().out
     assert "All tests pass now" not in output
-    assert "Files changed: ui/terminal.py" in output
-    assert "Verification: `pytest tests/test_terminal.py`" in output
-    assert "Remaining risks / notes: No known remaining risks" in output
+    assert "  Files changed\n    ui/terminal.py" in output
+    assert "  Verification\n    `pytest tests/test_terminal.py`" in output
+    assert "  Remaining risks / notes\n    No known remaining risks" in output
 
 
 def test_normal_assistant_final_summary_removes_inline_task_complete(
@@ -839,8 +842,30 @@ def test_normal_assistant_final_summary_removes_inline_task_complete(
     )
 
     output = capsys.readouterr().out
-    assert "Remaining risks / notes: No known remaining risks" in output
+    assert "  Remaining risks / notes\n    No known remaining risks" in output
     assert "TASK COMPLETE" not in output
+
+
+def test_normal_assistant_final_summary_preserves_multiline_fields(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay().assistant_message(
+        "TASK COMPLETE\n"
+        "Files changed: ui/terminal.py\n"
+        "What changed: polished display\n"
+        "- grouped final files\n"
+        "- sectioned summary\n"
+        "Verification: `pytest tests/test_terminal.py`\n"
+        "Remaining risks / notes: none"
+    )
+
+    output = capsys.readouterr().out
+    assert (
+        "  What changed\n"
+        "    polished display\n"
+        "    - grouped final files\n"
+        "    - sectioned summary\n"
+    ) in output
 
 
 def test_normal_assistant_message_with_only_task_complete_is_hidden(
@@ -903,7 +928,7 @@ def test_interrupted_completion_does_not_print_session_complete(
     display.loop_finished(session)
 
     output = capsys.readouterr().out
-    assert output.startswith(f"{RUN_EVENT_INDENT}⏹️ Interrupted\n")
+    assert output.startswith(f"{RUN_DETAIL_INDENT}⏹️ Interrupted\n")
     assert "✅ Session complete" not in output
 
 
@@ -913,7 +938,7 @@ def test_tool_result_displays_action_denied(capsys: pytest.CaptureFixture[str]) 
         {"ok": False, "error": USER_DENIED_TOOL_ACTION},
     )
 
-    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}🚫 Action denied\n"
+    assert capsys.readouterr().out == f"{RUN_DETAIL_INDENT}🚫 Action denied\n"
 
 
 def test_denied_run_command_displays_action_denied(
@@ -925,5 +950,5 @@ def test_denied_run_command_displays_action_denied(
     )
 
     output = capsys.readouterr().out
-    assert output == f"{RUN_EVENT_INDENT}🚫 Action denied\n"
+    assert output == f"{RUN_DETAIL_INDENT}🚫 Action denied\n"
     assert "🕵️ Review output" not in output

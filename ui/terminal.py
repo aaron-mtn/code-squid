@@ -26,6 +26,7 @@ CODE_SQUID_BANNER = """\
 RUN_STARTED_DIVIDER = "╰─ starting run ─────────────────────────────────────────────"
 FINAL_REPORT_DIVIDER = "────────────────────────────────────────"
 RUN_EVENT_INDENT = "  "
+RUN_DETAIL_INDENT = "    "
 STARTUP_PANEL_WIDTH = 76
 STARTUP_CONTROLS = "Enter send • Alt+Enter newline • Ctrl+C stop"
 INPUT_IDENTITY_LINE = "@code-squid 🦑"
@@ -217,9 +218,11 @@ class TerminalDisplay:
             print()
 
         print(FINAL_REPORT_DIVIDER)
-        self._print_file_list("📖 Files read", session.files_read)
+        print("📚 Session files")
         print()
-        self._print_file_list("📝 Files written", session.files_written)
+        self._print_file_list("Files read", session.files_read)
+        print()
+        self._print_file_list("Files written", session.files_written)
         status = getattr(run_result, "status", None)
         if status is None:
             status = "interrupted" if self._interrupted else "complete"
@@ -303,16 +306,22 @@ class TerminalDisplay:
     def _print_visible_line(self, line: str, dim: bool = False) -> None:
         self._print_leading_blank_if_needed()
         if not self.debug:
-            line = self._run_event_line(line)
+            line = self._run_detail_line(line)
         if dim and sys.stdout.isatty():
             line = f"{DIM_STYLE}{line}{RESET_STYLE}"
         print(line)
         self._needs_leading_blank = True
 
     def _run_event_line(self, line: str) -> str:
+        return self._indented_run_line(line, RUN_EVENT_INDENT)
+
+    def _run_detail_line(self, line: str) -> str:
+        return self._indented_run_line(line, RUN_DETAIL_INDENT)
+
+    def _indented_run_line(self, line: str, indent: str) -> str:
         if not line:
             return line
-        return f"{RUN_EVENT_INDENT}{line}"
+        return f"{indent}{line}"
 
     def _reply_rejected_line(self, reason: str) -> str:
         if self.debug:
@@ -464,14 +473,16 @@ class TerminalDisplay:
         self._print_visible_line(self._action_label(action, "success"), dim=True)
 
     def _format_final_summary(self, content: str) -> str:
-        summary_prefixes = (
-            "Files changed:",
-            "What changed:",
-            "Verification:",
-            "Remaining risks / notes:",
+        summary_sections = (
+            ("Files changed:", "Files changed"),
+            ("What changed:", "What changed"),
+            ("Verification:", "Verification"),
+            ("Remaining risks / notes:", "Remaining risks / notes"),
         )
-        formatted_lines: list[str] = []
-        found_summary = False
+        section_by_prefix = dict(summary_sections)
+        prefixes = tuple(section_by_prefix)
+        sections: list[tuple[str, list[str]]] = []
+        current_lines: list[str] | None = None
 
         for line in content.splitlines():
             # TASK COMPLETE is a runtime marker used for final validation. Hide
@@ -482,18 +493,28 @@ class TerminalDisplay:
                     continue
             stripped = line.strip()
 
-            should_space = stripped.startswith(summary_prefixes)
-            if not found_summary:
-                if not should_space:
-                    continue
-                found_summary = True
+            matching_prefix = next(
+                (prefix for prefix in prefixes if stripped.startswith(prefix)),
+                None,
+            )
+            if matching_prefix is not None:
+                current_lines = [stripped.removeprefix(matching_prefix).strip()]
+                sections.append((section_by_prefix[matching_prefix], current_lines))
+                continue
 
-            if should_space and formatted_lines and formatted_lines[-1] != "":
+            if current_lines is None:
+                continue
+
+            current_lines.append(line)
+
+        formatted_lines: list[str] = []
+        for heading, lines in sections:
+            if formatted_lines:
                 formatted_lines.append("")
+            formatted_lines.append(f"  {heading}")
+            formatted_lines.extend(f"    {line}" if line else "" for line in lines)
 
-            formatted_lines.append(line)
-
-        return "\n".join(formatted_lines).strip()
+        return "\n".join(formatted_lines).strip("\n")
 
     def _pytest_summary(self, output: str) -> str:
         matches = re.findall(
@@ -503,13 +524,13 @@ class TerminalDisplay:
         return matches[-1] if matches else ""
 
     def _print_file_list(self, title: str, paths: set[str]) -> None:
-        print(f"{title}:")
+        print(f"  {title}")
         if not paths:
-            print("  - none")
+            print("    none")
             return
 
         for path in sorted(paths):
-            print(f"  - {path}")
+            print(f"    {path}")
 
     def _short_path(self, path: str) -> str:
         if not path:
