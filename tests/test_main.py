@@ -2,7 +2,14 @@ from pathlib import Path
 
 from core.agent_loop import RunResult
 from core.model_adapter import ModelRequestError
-from main import _resume_session, _run_loop, _run_new_session
+from main import (
+    PROMPT_PREFIX,
+    PROMPT_TOOLBAR,
+    _prompt_task,
+    _resume_session,
+    _run_loop,
+    _run_new_session,
+)
 from storage.session_store import SessionStore
 from ui.terminal import CODE_SQUID_BANNER, RUN_STARTED_DIVIDER
 
@@ -89,12 +96,29 @@ class NoopLoop:
 
 def _fake_prompt_task(response: str):
     def fake_prompt_task(label: str) -> str:
-        print(label)
-        print("Enter to send • Alt+Enter for newline")
-        print("> ", end="")
+        print(PROMPT_PREFIX, end="")
         return response
 
     return fake_prompt_task
+
+
+def test_prompt_task_uses_agent_prompt_and_toolbar(monkeypatch) -> None:
+    prompt_calls = []
+
+    class FakePromptSession:
+        def prompt(self, *args, **kwargs) -> str:
+            prompt_calls.append((args, kwargs))
+            return "Do the thing"
+
+    monkeypatch.setattr("main.PromptSession", FakePromptSession)
+
+    assert _prompt_task("Task") == "Do the thing"
+
+    args, kwargs = prompt_calls[0]
+    assert args == ([("ansicyan bold", PROMPT_PREFIX)],)
+    assert kwargs["bottom_toolbar"] == PROMPT_TOOLBAR
+    assert kwargs["multiline"] is True
+    assert kwargs["key_bindings"] is not None
 
 
 def test_new_session_prints_banner_before_task_prompt(monkeypatch, tmp_path, capsys) -> None:
@@ -118,9 +142,7 @@ def test_new_session_prints_banner_before_task_prompt(monkeypatch, tmp_path, cap
 
     assert capsys.readouterr().out == (
         f"{CODE_SQUID_BANNER}\n\n"
-        "Task\n"
-        "Enter to send • Alt+Enter for newline\n"
-        "> "
+        f"{PROMPT_PREFIX}"
         f"\n{RUN_STARTED_DIVIDER}\n\n"
     )
     assert len(displays) == 1
@@ -182,9 +204,7 @@ def test_resume_session_prints_banner_before_follow_up_prompt(
 
     assert capsys.readouterr().out == (
         f"{CODE_SQUID_BANNER}\n\n"
-        "Follow-up task\n"
-        "Enter to send • Alt+Enter for newline\n"
-        "> "
+        f"{PROMPT_PREFIX}"
         f"\n{RUN_STARTED_DIVIDER}\n\n"
     )
     assert len(displays) == 1

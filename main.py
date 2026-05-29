@@ -30,6 +30,10 @@ from ui.sessions import USAGE, handle_session_viewer
 from ui.terminal import TerminalDisplay
 
 
+PROMPT_PREFIX = "code-squid🦑 "
+PROMPT_TOOLBAR = "agent   enter: send   alt-enter: newline   ctrl-c: stop"
+
+
 def _prompt_task(label: str) -> str:
     ANSI_SEQUENCES["\x1b[27;2;13~"] = Keys.ControlJ
     ANSI_SEQUENCES["\x1b[13;2u"] = Keys.ControlJ
@@ -49,10 +53,9 @@ def _prompt_task(label: str) -> str:
         event.current_buffer.insert_text("\n")
 
     session = PromptSession()
-    print(label)
-    print("Enter to send • Alt+Enter for newline")
     return session.prompt(
-        "> ",
+        [("ansicyan bold", PROMPT_PREFIX)],
+        bottom_toolbar=PROMPT_TOOLBAR,
         multiline=True,
         key_bindings=bindings,
     )
