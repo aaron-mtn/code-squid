@@ -6,7 +6,8 @@ import os
 import sys
 from pathlib import Path
 
-from prompt_toolkit import PromptSession
+from prompt_toolkit import PromptSession, print_formatted_text
+from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.input.ansi_escape_sequences import ANSI_SEQUENCES
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
@@ -27,11 +28,10 @@ from storage.session_index import latest_session_id, session_dir_for
 from storage.session_store import SessionStore
 from storage.undo_store import UndoStore
 from ui.sessions import USAGE, handle_session_viewer
-from ui.terminal import TerminalDisplay
+from ui.terminal import INPUT_IDENTITY_LINE, INPUT_PROMPT_PREFIX, StartupInfo, TerminalDisplay
 
 
-PROMPT_PREFIX = "code-squid🦑 "
-PROMPT_TOOLBAR = "agent   enter: send   alt-enter: newline   ctrl-c: stop"
+PROMPT_PREFIX = INPUT_PROMPT_PREFIX
 
 
 def _prompt_task(label: str) -> str:
@@ -52,10 +52,11 @@ def _prompt_task(label: str) -> str:
     def _(event) -> None:
         event.current_buffer.insert_text("\n")
 
+    print_formatted_text(FormattedText([("ansicyan bold", INPUT_IDENTITY_LINE)]))
+
     session = PromptSession()
     return session.prompt(
-        [("ansicyan bold", PROMPT_PREFIX)],
-        bottom_toolbar=PROMPT_TOOLBAR,
+        FormattedText([("ansigreen bold", PROMPT_PREFIX)]),
         multiline=True,
         key_bindings=bindings,
     )
@@ -143,6 +144,15 @@ def _tool_call_content_mode(settings: Settings) -> str:
     return "empty"
 
 
+def _startup_info(repo_root: Path, settings: Settings) -> StartupInfo:
+    return StartupInfo(
+        directory=repo_root,
+        provider=settings.model.provider,
+        model=settings.model.name,
+        approval_mode=settings.runtime.approval_mode,
+    )
+
+
 def _run_loop(
     repo_root: Path,
     loop: AgentLoop,
@@ -176,7 +186,11 @@ def _run_new_session(repo_root: Path) -> int:
     settings = load_settings(repo_root)
     trace = os.getenv("CODE_SQUID_TRACE") == "1"
     debug = settings.display.debug or trace
-    display = TerminalDisplay(debug=debug, show_transcript=trace)
+    display = TerminalDisplay(
+        debug=debug,
+        show_transcript=trace,
+        startup_info=_startup_info(repo_root, settings),
+    )
     display.start()
     task = _prompt_task("Task")
     if not task.strip():
@@ -206,7 +220,11 @@ def _resume_session(repo_root: Path, session_id: str) -> int:
     session = Session(repo_root=repo_root)
     session.add_messages(*session_store.load_messages())
 
-    display = TerminalDisplay(debug=debug, show_transcript=trace)
+    display = TerminalDisplay(
+        debug=debug,
+        show_transcript=trace,
+        startup_info=_startup_info(repo_root, settings),
+    )
     display.start()
     follow_up_task = _prompt_task("Follow-up task")
     if not follow_up_task.strip():

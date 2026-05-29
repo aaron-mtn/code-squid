@@ -1,8 +1,10 @@
 """Small terminal display layer for Code Squid."""
 
+from dataclasses import dataclass
 from pathlib import Path
 import re
 import shlex
+import sys
 
 from core.approval import USER_DENIED_TOOL_ACTION
 from ui.spinner import TerminalSpinner
@@ -12,18 +14,31 @@ PATH_LABEL_MAX = 56
 COMMAND_LABEL_MAX = 80
 APPROVAL_COMMAND_LABEL_MAX = 120
 CODE_SQUID_BANNER = """\
-╭────────────────────────────────────────────────────────────────────────────╮
-│  ██████╗ ██████╗ ██████╗ ███████╗    ███████╗ ██████╗ ██╗   ██╗██╗██████╗  │
-│ ██╔════╝██╔═══██╗██╔══██╗██╔════╝    ██╔════╝██╔═══██╗██║   ██║██║██╔══██╗ │
-│ ██║     ██║   ██║██║  ██║█████╗      ███████╗██║   ██║██║   ██║██║██║  ██║ │
-│ ██║     ██║   ██║██║  ██║██╔══╝      ╚════██║██║▄▄ ██║██║   ██║██║██║  ██║ │
-│ ╚██████╗╚██████╔╝██████╔╝███████╗    ███████║╚██████╔╝╚██████╔╝██║██████╔╝ │
-│  ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝    ╚══════╝ ╚══▀▀═╝  ╚═════╝ ╚═╝╚═════╝  │
-│                                                                            │
-│                 🦑 A small coding agent with tentacles.                    │
-╰────────────────────────────────────────────────────────────────────────────╯"""
+
+ ██████╗ ██████╗ ██████╗ ███████╗    ███████╗ ██████╗ ██╗   ██╗██╗██████╗
+██╔════╝██╔═══██╗██╔══██╗██╔════╝    ██╔════╝██╔═══██╗██║   ██║██║██╔══██╗
+██║     ██║   ██║██║  ██║█████╗      ███████╗██║   ██║██║   ██║██║██║  ██║
+██║     ██║   ██║██║  ██║██╔══╝      ╚════██║██║▄▄ ██║██║   ██║██║██║  ██║
+╚██████╗╚██████╔╝██████╔╝███████╗    ███████║╚██████╔╝╚██████╔╝██║██████╔╝
+ ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝    ╚══════╝ ╚══▀▀═╝  ╚═════╝ ╚═╝╚═════╝
+
+                 🦑 A small coding agent with tentacles."""
 RUN_STARTED_DIVIDER = "╰─ starting run ─────────────────────────────────────────────"
 FINAL_REPORT_DIVIDER = "────────────────────────────────────────"
+STARTUP_PANEL_WIDTH = 76
+STARTUP_CONTROLS = "Enter send • Alt+Enter newline • Ctrl+C stop"
+INPUT_IDENTITY_LINE = "@code-squid 🦑"
+INPUT_PROMPT_PREFIX = "› "
+DIM_STYLE = "\033[2m"
+RESET_STYLE = "\033[0m"
+
+
+@dataclass(frozen=True)
+class StartupInfo:
+    directory: Path
+    provider: str
+    model: str
+    approval_mode: str
 
 
 class TerminalDisplay:
@@ -33,10 +48,12 @@ class TerminalDisplay:
         self,
         debug: bool = False,
         show_transcript: bool = False,
+        startup_info: StartupInfo | None = None,
         _spinner: TerminalSpinner | None = None,
     ) -> None:
         self.debug = debug
         self.show_transcript = show_transcript
+        self.startup_info = startup_info
         self._interrupted = False
         self._spinner = _spinner if _spinner is not None else TerminalSpinner(enabled=not debug)
         self._needs_leading_blank = False
@@ -148,7 +165,7 @@ class TerminalDisplay:
 
         if result.get("ok", False):
             if tool_name in {"read_file", "write_file"}:
-                self._print_visible_line(self._action_label(action, "success"))
+                self._print_visible_line(self._action_label(action, "success"), dim=True)
             self._print_debug_tool_result(action, result)
             return
 
@@ -163,7 +180,10 @@ class TerminalDisplay:
 
     def reply_rejected(self, reason: str) -> None:
         self._stop_spinner()
-        self._print_visible_line(f"⚠️ Reply rejected: {reason}")
+        self._print_visible_line(
+            self._reply_rejected_line(reason),
+            dim=not self.debug and reason == "non_final_no_tool_reply",
+        )
 
     def repeated_invalid_replies(self, reason: str, count: int) -> None:
         self._stop_spinner()
@@ -240,7 +260,37 @@ class TerminalDisplay:
 
     def _print_startup_banner(self) -> None:
         print(CODE_SQUID_BANNER)
+        if self.startup_info is not None:
+            print()
+            print(self._startup_info_panel(self.startup_info))
         print()
+
+    def _startup_info_panel(self, startup_info: StartupInfo) -> str:
+        inner_width = STARTUP_PANEL_WIDTH - 2
+        title = " startup "
+        top = f"╭─{title}{'─' * max(inner_width - len(title) - 1, 0)}╮"
+        bottom = f"╰{'─' * inner_width}╯"
+        lines = [
+            ("Directory", str(startup_info.directory)),
+            ("Provider", startup_info.provider),
+            ("Model", startup_info.model),
+            ("Approval mode", startup_info.approval_mode),
+            ("Controls", STARTUP_CONTROLS),
+        ]
+        return "\n".join(
+            [
+                top,
+                *(self._startup_info_line(label, value, inner_width) for label, value in lines),
+                bottom,
+            ]
+        )
+
+    def _startup_info_line(self, label: str, value: str, inner_width: int) -> str:
+        label_text = f"{label}:"
+        available = inner_width - 2 - 15
+        value = self._truncate_middle(str(value), max(available, 1))
+        content = f" {label_text:<14} {value}"
+        return f"│{content:<{inner_width}}│"
 
     def _print_leading_blank_if_needed(self) -> None:
         # Tool results are one-line event blocks; separate the next visible
@@ -249,10 +299,25 @@ class TerminalDisplay:
             print()
             self._needs_leading_blank = False
 
-    def _print_visible_line(self, line: str) -> None:
+    def _print_visible_line(self, line: str, dim: bool = False) -> None:
         self._print_leading_blank_if_needed()
+        if dim and sys.stdout.isatty():
+            line = f"{DIM_STYLE}{line}{RESET_STYLE}"
         print(line)
         self._needs_leading_blank = True
+
+    def _reply_rejected_line(self, reason: str) -> str:
+        if self.debug:
+            return f"⚠️ Reply rejected: {reason}"
+
+        messages = {
+            "non_final_no_tool_reply": "↪ Nudging model to choose a tool…",
+            "non_final_wrong_tool_count": "⚠️ Reply rejected: expected exactly one tool call.",
+            "malformed_tool_call": "⚠️ Reply rejected: could not read the requested tool call.",
+            "final_with_tool_call": "⚠️ Reply rejected: final reply cannot include a tool call.",
+            "final_missing_required_sections": "⚠️ Reply rejected: final reply is missing required sections.",
+        }
+        return messages.get(reason, "⚠️ Reply rejected: invalid assistant reply.")
 
     def _print_assistant_narration(self, content: str) -> None:
         lines = content.splitlines() or [""]
@@ -385,7 +450,7 @@ class TerminalDisplay:
             self._print_visible_line(self._action_label(action, "failure"))
             return
 
-        self._print_visible_line(self._action_label(action, "success"))
+        self._print_visible_line(self._action_label(action, "success"), dim=True)
 
     def _format_final_summary(self, content: str) -> str:
         summary_prefixes = (

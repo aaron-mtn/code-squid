@@ -3,15 +3,15 @@ from pathlib import Path
 from core.agent_loop import RunResult
 from core.model_adapter import ModelRequestError
 from main import (
+    INPUT_IDENTITY_LINE,
     PROMPT_PREFIX,
-    PROMPT_TOOLBAR,
     _prompt_task,
     _resume_session,
     _run_loop,
     _run_new_session,
 )
 from storage.session_store import SessionStore
-from ui.terminal import CODE_SQUID_BANNER, RUN_STARTED_DIVIDER
+from ui.terminal import CODE_SQUID_BANNER, RUN_STARTED_DIVIDER, StartupInfo, TerminalDisplay
 
 
 class ModelFailingLoop:
@@ -76,10 +76,34 @@ def test_run_loop_handles_model_request_error_with_log_and_status(tmp_path) -> N
     assert "core.model_adapter.ModelRequestError: Model request failed" in log_text
 
 
+def _expected_startup_output(repo_root: Path) -> str:
+    startup_info = StartupInfo(
+        directory=repo_root,
+        provider="openai_compatible",
+        model="qwen3.5-9b",
+        approval_mode="never",
+    )
+    return f"{CODE_SQUID_BANNER}\n\n{TerminalDisplay()._startup_info_panel(startup_info)}\n\n"
+
+
 class BannerDisplay(FakeDisplay):
+    def __init__(
+        self,
+        debug: bool = False,
+        show_transcript: bool = False,
+        startup_info: StartupInfo | None = None,
+    ) -> None:
+        super().__init__()
+        self.debug = debug
+        self.show_transcript = show_transcript
+        self.startup_info = startup_info
+
     def start(self) -> None:
         super().start()
         print(CODE_SQUID_BANNER)
+        if self.startup_info is not None:
+            print()
+            print(TerminalDisplay()._startup_info_panel(self.startup_info))
         print()
 
     def run_started(self) -> None:
@@ -96,13 +120,14 @@ class NoopLoop:
 
 def _fake_prompt_task(response: str):
     def fake_prompt_task(label: str) -> str:
+        print(INPUT_IDENTITY_LINE)
         print(PROMPT_PREFIX, end="")
         return response
 
     return fake_prompt_task
 
 
-def test_prompt_task_uses_agent_prompt_and_toolbar(monkeypatch) -> None:
+def test_prompt_task_uses_agent_prompt_without_toolbar(monkeypatch) -> None:
     prompt_calls = []
 
     class FakePromptSession:
@@ -115,8 +140,8 @@ def test_prompt_task_uses_agent_prompt_and_toolbar(monkeypatch) -> None:
     assert _prompt_task("Task") == "Do the thing"
 
     args, kwargs = prompt_calls[0]
-    assert args == ([("ansicyan bold", PROMPT_PREFIX)],)
-    assert kwargs["bottom_toolbar"] == PROMPT_TOOLBAR
+    assert args == ([("ansigreen bold", PROMPT_PREFIX)],)
+    assert "bottom_toolbar" not in kwargs
     assert kwargs["multiline"] is True
     assert kwargs["key_bindings"] is not None
 
@@ -124,8 +149,8 @@ def test_prompt_task_uses_agent_prompt_and_toolbar(monkeypatch) -> None:
 def test_new_session_prints_banner_before_task_prompt(monkeypatch, tmp_path, capsys) -> None:
     displays: list[BannerDisplay] = []
 
-    def fake_display(debug: bool = False, show_transcript: bool = False) -> BannerDisplay:
-        display = BannerDisplay()
+    def fake_display(**kwargs) -> BannerDisplay:
+        display = BannerDisplay(**kwargs)
         displays.append(display)
         return display
 
@@ -141,9 +166,9 @@ def test_new_session_prints_banner_before_task_prompt(monkeypatch, tmp_path, cap
     assert _run_new_session(tmp_path) == 0
 
     assert capsys.readouterr().out == (
-        f"{CODE_SQUID_BANNER}\n\n"
-        f"{PROMPT_PREFIX}"
-        f"\n{RUN_STARTED_DIVIDER}\n\n"
+        _expected_startup_output(tmp_path)
+        + f"{INPUT_IDENTITY_LINE}\n{PROMPT_PREFIX}"
+        + f"\n{RUN_STARTED_DIVIDER}\n\n"
     )
     assert len(displays) == 1
     assert displays[0].starts == 1
@@ -154,7 +179,7 @@ def test_new_session_empty_task_exits_without_run(monkeypatch, tmp_path, capsys)
     displays: list[BannerDisplay] = []
 
     def fake_display(**kwargs) -> BannerDisplay:
-        display = BannerDisplay()
+        display = BannerDisplay(**kwargs)
         displays.append(display)
         return display
 
@@ -182,8 +207,8 @@ def test_resume_session_prints_banner_before_follow_up_prompt(
     session_store = SessionStore.create(tmp_path, "original task")
     displays: list[BannerDisplay] = []
 
-    def fake_display(debug: bool = False, show_transcript: bool = False) -> BannerDisplay:
-        display = BannerDisplay()
+    def fake_display(**kwargs) -> BannerDisplay:
+        display = BannerDisplay(**kwargs)
         displays.append(display)
         return display
 
@@ -203,9 +228,9 @@ def test_resume_session_prints_banner_before_follow_up_prompt(
     assert _resume_session(tmp_path, session_store.session_id) == 0
 
     assert capsys.readouterr().out == (
-        f"{CODE_SQUID_BANNER}\n\n"
-        f"{PROMPT_PREFIX}"
-        f"\n{RUN_STARTED_DIVIDER}\n\n"
+        _expected_startup_output(tmp_path)
+        + f"{INPUT_IDENTITY_LINE}\n{PROMPT_PREFIX}"
+        + f"\n{RUN_STARTED_DIVIDER}\n\n"
     )
     assert len(displays) == 1
     assert displays[0].starts == 1
@@ -217,7 +242,7 @@ def test_resume_session_empty_task_exits_without_run(monkeypatch, tmp_path, caps
     displays: list[BannerDisplay] = []
 
     def fake_display(**kwargs) -> BannerDisplay:
-        display = BannerDisplay()
+        display = BannerDisplay(**kwargs)
         displays.append(display)
         return display
 
@@ -249,7 +274,7 @@ def test_new_session_passes_trace_to_terminal_display(
 
     def fake_display(**kwargs) -> BannerDisplay:
         display_kwargs.append(kwargs)
-        return BannerDisplay()
+        return BannerDisplay(**kwargs)
 
     monkeypatch.setenv("CODE_SQUID_TRACE", "1")
     monkeypatch.setattr("main.TerminalDisplay", fake_display)
@@ -259,7 +284,18 @@ def test_new_session_passes_trace_to_terminal_display(
 
     assert _run_new_session(tmp_path) == 0
 
-    assert display_kwargs == [{"debug": True, "show_transcript": True}]
+    assert display_kwargs == [
+        {
+            "debug": True,
+            "show_transcript": True,
+            "startup_info": StartupInfo(
+                directory=tmp_path,
+                provider="openai_compatible",
+                model="qwen3.5-9b",
+                approval_mode="never",
+            ),
+        }
+    ]
 
 
 def test_new_session_trace_threads_effective_debug_to_provider(
@@ -269,10 +305,7 @@ def test_new_session_trace_threads_effective_debug_to_provider(
     provider_kwargs = []
 
     class CapturingDisplay(BannerDisplay):
-        def __init__(self, debug: bool = False, show_transcript: bool = False) -> None:
-            super().__init__()
-            self.debug = debug
-            self.show_transcript = show_transcript
+        pass
 
     class CapturingProvider:
         def __init__(self, **kwargs) -> None:
@@ -297,7 +330,7 @@ def test_new_session_passes_debug_without_trace_to_terminal_display(
 
     def fake_display(**kwargs) -> BannerDisplay:
         display_kwargs.append(kwargs)
-        return BannerDisplay()
+        return BannerDisplay(**kwargs)
 
     monkeypatch.setenv("CODE_SQUID_DEBUG", "1")
     monkeypatch.setattr("main.TerminalDisplay", fake_display)
@@ -307,7 +340,18 @@ def test_new_session_passes_debug_without_trace_to_terminal_display(
 
     assert _run_new_session(tmp_path) == 0
 
-    assert display_kwargs == [{"debug": True, "show_transcript": False}]
+    assert display_kwargs == [
+        {
+            "debug": True,
+            "show_transcript": False,
+            "startup_info": StartupInfo(
+                directory=tmp_path,
+                provider="openai_compatible",
+                model="qwen3.5-9b",
+                approval_mode="never",
+            ),
+        }
+    ]
 
 
 def test_resume_session_passes_trace_to_terminal_display(
@@ -319,7 +363,7 @@ def test_resume_session_passes_trace_to_terminal_display(
 
     def fake_display(**kwargs) -> BannerDisplay:
         display_kwargs.append(kwargs)
-        return BannerDisplay()
+        return BannerDisplay(**kwargs)
 
     monkeypatch.setenv("CODE_SQUID_TRACE", "1")
     monkeypatch.setattr("main.TerminalDisplay", fake_display)
@@ -333,4 +377,15 @@ def test_resume_session_passes_trace_to_terminal_display(
 
     assert _resume_session(tmp_path, session_store.session_id) == 0
 
-    assert display_kwargs == [{"debug": True, "show_transcript": True}]
+    assert display_kwargs == [
+        {
+            "debug": True,
+            "show_transcript": True,
+            "startup_info": StartupInfo(
+                directory=tmp_path,
+                provider="openai_compatible",
+                model="qwen3.5-9b",
+                approval_mode="never",
+            ),
+        }
+    ]

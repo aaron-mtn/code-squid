@@ -1,5 +1,6 @@
 import builtins
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -8,8 +9,12 @@ from core.approval import USER_DENIED_TOOL_ACTION
 from core.agent_loop import RunResult
 from ui.terminal import (
     CODE_SQUID_BANNER,
+    DIM_STYLE,
     FINAL_REPORT_DIVIDER,
+    RESET_STYLE,
     RUN_STARTED_DIVIDER,
+    STARTUP_CONTROLS,
+    StartupInfo,
     TerminalDisplay,
 )
 
@@ -135,6 +140,30 @@ def test_first_thinking_after_header_does_not_print_extra_blank(
     assert capsys.readouterr().out == ""
 
 
+def test_banner_keeps_logo_and_tagline_without_outer_box() -> None:
+    lines = CODE_SQUID_BANNER.splitlines()
+
+    assert lines[0] == (
+        " ██████╗ ██████╗ ██████╗ ███████╗    "
+        "███████╗ ██████╗ ██╗   ██╗██╗██████╗"
+    )
+    assert lines[-1] == "                 🦑 A small coding agent with tentacles."
+    assert not any(line.startswith(("╭", "╰", "│")) for line in lines)
+
+
+def test_startup_panel_includes_controls() -> None:
+    panel = TerminalDisplay()._startup_info_panel(
+        StartupInfo(
+            directory=Path("/tmp/project"),
+            provider="openai_compatible",
+            model="qwen3.5-9b",
+            approval_mode="never",
+        )
+    )
+
+    assert f"Controls:      {STARTUP_CONTROLS}" in panel
+
+
 def test_run_started_prints_starting_run_divider(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -210,6 +239,37 @@ def test_debug_reply_prints_none_for_no_actions(
     output = capsys.readouterr().out
     assert "┌─ model action " in output
     assert "│ none" in output
+
+
+def test_reply_rejected_prints_friendly_nudge_for_missing_tool_call(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay().reply_rejected("non_final_no_tool_reply")
+
+    assert capsys.readouterr().out == "↪ Nudging model to choose a tool…\n"
+
+
+def test_reply_rejected_dims_friendly_nudge_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    TerminalDisplay().reply_rejected("non_final_no_tool_reply")
+
+    assert capsys.readouterr().out == (
+        f"{DIM_STYLE}↪ Nudging model to choose a tool…{RESET_STYLE}\n"
+    )
+
+
+def test_debug_reply_rejected_keeps_raw_reason(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay(debug=True).reply_rejected("non_final_no_tool_reply")
+
+    assert capsys.readouterr().out == (
+        "⚠️ Reply rejected: non_final_no_tool_reply\n"
+    )
 
 
 def test_approve_action_still_prints_requested_action(
@@ -298,6 +358,29 @@ def test_search_and_list_commands_use_compact_labels(
 
     TerminalDisplay().tool_result(action, {"ok": True, "output": ""})
     assert capsys.readouterr().out == success_label
+
+
+@pytest.mark.parametrize(
+    ("command", "success_label"),
+    [
+        ("rg TODO", "🔎 Searched files"),
+        ("ls tests", "🔎 Listed files"),
+    ],
+)
+def test_search_and_list_success_labels_are_dim_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+    success_label: str,
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    TerminalDisplay().tool_result(
+        {"tool": "run_command", "args": {"command": command}},
+        {"ok": True, "output": ""},
+    )
+
+    assert capsys.readouterr().out == f"{DIM_STYLE}{success_label}{RESET_STYLE}\n"
 
 
 def test_write_file_result_prints_one_success_line(
