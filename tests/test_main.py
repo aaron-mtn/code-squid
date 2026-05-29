@@ -127,6 +127,12 @@ def _fake_prompt_task(response: str):
     return fake_prompt_task
 
 
+def _cancel_prompt_task(label: str) -> str:
+    print(INPUT_IDENTITY_LINE)
+    print(PROMPT_PREFIX, end="")
+    raise KeyboardInterrupt
+
+
 def test_prompt_task_uses_agent_prompt_without_toolbar(monkeypatch) -> None:
     prompt_calls = []
 
@@ -199,6 +205,30 @@ def test_new_session_empty_task_exits_without_run(monkeypatch, tmp_path, capsys)
     assert not (tmp_path / ".code-squid" / "sessions").exists()
 
 
+def test_new_session_cancelled_task_exits_without_run(monkeypatch, tmp_path, capsys) -> None:
+    displays: list[BannerDisplay] = []
+
+    def fake_display(**kwargs) -> BannerDisplay:
+        display = BannerDisplay(**kwargs)
+        displays.append(display)
+        return display
+
+    def fail_build_loop(*args):
+        raise AssertionError("_build_loop should not run for a cancelled task")
+
+    monkeypatch.setattr("main.TerminalDisplay", fake_display)
+    monkeypatch.setattr("main._prompt_task", _cancel_prompt_task)
+    monkeypatch.setattr("main._build_loop", fail_build_loop)
+
+    assert _run_new_session(tmp_path) == 0
+
+    assert "⏹️ Cancelled before task started" in capsys.readouterr().out
+    assert len(displays) == 1
+    assert displays[0].starts == 1
+    assert displays[0].run_starts == 0
+    assert not (tmp_path / ".code-squid" / "sessions").exists()
+
+
 def test_resume_session_prints_banner_before_follow_up_prompt(
     monkeypatch,
     tmp_path,
@@ -260,6 +290,35 @@ def test_resume_session_empty_task_exits_without_run(monkeypatch, tmp_path, caps
     assert _resume_session(tmp_path, session_store.session_id) == 0
 
     assert "No task entered; nothing to run." in capsys.readouterr().out
+    assert len(displays) == 1
+    assert displays[0].starts == 1
+    assert displays[0].run_starts == 0
+    assert session_store.load_messages() == []
+
+
+def test_resume_session_cancelled_task_exits_without_run(monkeypatch, tmp_path, capsys) -> None:
+    session_store = SessionStore.create(tmp_path, "original task")
+    displays: list[BannerDisplay] = []
+
+    def fake_display(**kwargs) -> BannerDisplay:
+        display = BannerDisplay(**kwargs)
+        displays.append(display)
+        return display
+
+    def fail_build_loop(*args):
+        raise AssertionError("_build_loop should not run for a cancelled follow-up")
+
+    monkeypatch.setattr("main.TerminalDisplay", fake_display)
+    monkeypatch.setattr(
+        "main._session_dir_for_resume",
+        lambda repo_root, session_id: session_store.session_dir,
+    )
+    monkeypatch.setattr("main._prompt_task", _cancel_prompt_task)
+    monkeypatch.setattr("main._build_loop", fail_build_loop)
+
+    assert _resume_session(tmp_path, session_store.session_id) == 0
+
+    assert "⏹️ Cancelled before task started" in capsys.readouterr().out
     assert len(displays) == 1
     assert displays[0].starts == 1
     assert displays[0].run_starts == 0

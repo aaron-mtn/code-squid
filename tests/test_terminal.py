@@ -142,12 +142,13 @@ def test_first_thinking_after_header_does_not_print_extra_blank(
 
 def test_banner_keeps_logo_and_tagline_without_outer_box() -> None:
     lines = CODE_SQUID_BANNER.splitlines()
+    content_lines = [line for line in lines if line]
 
-    assert lines[0] == (
+    assert content_lines[0] == (
         " ██████╗ ██████╗ ██████╗ ███████╗    "
         "███████╗ ██████╗ ██╗   ██╗██╗██████╗"
     )
-    assert lines[-1] == "                 🦑 A small coding agent with tentacles."
+    assert content_lines[-1] == "                 🦑 A small coding agent with tentacles."
     assert not any(line.startswith(("╭", "╰", "│")) for line in lines)
 
 

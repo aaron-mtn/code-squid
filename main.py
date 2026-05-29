@@ -32,6 +32,7 @@ from ui.terminal import INPUT_IDENTITY_LINE, INPUT_PROMPT_PREFIX, StartupInfo, T
 
 
 PROMPT_PREFIX = INPUT_PROMPT_PREFIX
+CANCELLED_BEFORE_RUN_MESSAGE = "⏹️ Cancelled before task started"
 
 
 def _prompt_task(label: str) -> str:
@@ -60,6 +61,14 @@ def _prompt_task(label: str) -> str:
         multiline=True,
         key_bindings=bindings,
     )
+
+
+def _prompt_task_or_cancel(label: str) -> str | None:
+    try:
+        return _prompt_task(label)
+    except KeyboardInterrupt:
+        print(CANCELLED_BEFORE_RUN_MESSAGE)
+        return None
 
 
 def _session_dir_for_resume(repo_root: Path, session_id: str) -> Path | None:
@@ -192,7 +201,9 @@ def _run_new_session(repo_root: Path) -> int:
         startup_info=_startup_info(repo_root, settings),
     )
     display.start()
-    task = _prompt_task("Task")
+    task = _prompt_task_or_cancel("Task")
+    if task is None:
+        return 0
     if not task.strip():
         print("No task entered; nothing to run.")
         return 0
@@ -226,7 +237,9 @@ def _resume_session(repo_root: Path, session_id: str) -> int:
         startup_info=_startup_info(repo_root, settings),
     )
     display.start()
-    follow_up_task = _prompt_task("Follow-up task")
+    follow_up_task = _prompt_task_or_cancel("Follow-up task")
+    if follow_up_task is None:
+        return 0
     if not follow_up_task.strip():
         print("No task entered; nothing to run.")
         return 0
