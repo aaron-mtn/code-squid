@@ -1,4 +1,5 @@
 import builtins
+import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -654,6 +655,25 @@ def test_multiline_assistant_message_indents_continuation_lines(
     )
 
 
+def test_assistant_message_wraps_to_terminal_width(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        "ui.terminal.shutil.get_terminal_size",
+        lambda fallback: os.terminal_size((44, 24)),
+    )
+
+    TerminalDisplay().assistant_message(
+        "This assistant narration line should wrap cleanly under the squid marker."
+    )
+
+    assert capsys.readouterr().out == (
+        f"{RUN_EVENT_INDENT}🦑 This assistant narration line should\n"
+        f"{RUN_EVENT_INDENT}   wrap cleanly under the squid marker.\n"
+    )
+
+
 def test_tool_result_stops_spinner_before_printing_result(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -865,6 +885,32 @@ def test_normal_assistant_final_summary_preserves_multiline_fields(
         "    polished display\n"
         "    - grouped final files\n"
         "    - sectioned summary\n"
+    ) in output
+
+
+def test_normal_assistant_final_summary_wraps_body_lines(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        "ui.terminal.shutil.get_terminal_size",
+        lambda fallback: os.terminal_size((44, 24)),
+    )
+
+    TerminalDisplay().assistant_message(
+        "TASK COMPLETE\n"
+        "Files changed: ui/terminal.py\n"
+        "What changed: This final summary body line should wrap neatly while keeping its section indentation.\n"
+        "Verification: `pytest tests/test_terminal.py`\n"
+        "Remaining risks / notes: none"
+    )
+
+    output = capsys.readouterr().out
+    assert (
+        "  What changed\n"
+        "    This final summary body line should wrap\n"
+        "    neatly while keeping its section\n"
+        "    indentation.\n"
     ) in output
 
 

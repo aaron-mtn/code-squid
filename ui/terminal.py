@@ -1,10 +1,14 @@
+# ui/terminal.py
+
 """Small terminal display layer for Code Squid."""
 
 from dataclasses import dataclass
 from pathlib import Path
 import re
 import shlex
+import shutil
 import sys
+import textwrap
 
 from core.approval import USER_DENIED_TOOL_ACTION
 from ui.spinner import TerminalSpinner
@@ -13,6 +17,7 @@ from ui.spinner import TerminalSpinner
 PATH_LABEL_MAX = 56
 COMMAND_LABEL_MAX = 80
 APPROVAL_COMMAND_LABEL_MAX = 120
+DISPLAY_WRAP_WIDTH = 96
 CODE_SQUID_BANNER = """\
 
  ██████╗ ██████╗ ██████╗ ███████╗    ███████╗ ██████╗ ██╗   ██╗██╗██████╗
@@ -338,11 +343,32 @@ class TerminalDisplay:
 
     def _print_assistant_narration(self, content: str, trailing_blank: bool = True) -> None:
         lines = content.splitlines() or [""]
-        first_line = f"🦑 {lines[0]}"
-        print(self._run_event_line(first_line) if not self.debug else first_line)
+        if self.debug:
+            first_line = f"🦑 {lines[0]}"
+            print(first_line)
+            for line in lines[1:]:
+                continuation = f"   {line}" if line else ""
+                print(continuation)
+            if trailing_blank:
+                print()
+            return
+
+        for output_line in self._wrapped_display_lines(
+            lines[0],
+            initial_indent=f"{RUN_EVENT_INDENT}🦑 ",
+            subsequent_indent=f"{RUN_EVENT_INDENT}   ",
+        ):
+            print(output_line)
         for line in lines[1:]:
-            continuation = f"   {line}" if line else ""
-            print(self._run_event_line(continuation) if not self.debug else continuation)
+            if not line:
+                print()
+                continue
+            for output_line in self._wrapped_display_lines(
+                line,
+                initial_indent=f"{RUN_EVENT_INDENT}   ",
+                subsequent_indent=f"{RUN_EVENT_INDENT}   ",
+            ):
+                print(output_line)
         if trailing_blank:
             print()
 
@@ -512,9 +538,38 @@ class TerminalDisplay:
             if formatted_lines:
                 formatted_lines.append("")
             formatted_lines.append(f"  {heading}")
-            formatted_lines.extend(f"    {line}" if line else "" for line in lines)
+            for line in lines:
+                formatted_lines.extend(
+                    self._wrapped_display_lines(
+                        line,
+                        initial_indent="    ",
+                        subsequent_indent="    ",
+                    )
+                )
 
         return "\n".join(formatted_lines).strip("\n")
+
+    def _wrapped_display_lines(
+        self,
+        text: str,
+        initial_indent: str,
+        subsequent_indent: str,
+    ) -> list[str]:
+        if not text:
+            return [""]
+
+        wrap_width = min(
+            DISPLAY_WRAP_WIDTH,
+            shutil.get_terminal_size(fallback=(DISPLAY_WRAP_WIDTH, 24)).columns,
+        )
+        return textwrap.wrap(
+            text,
+            width=max(wrap_width, 1),
+            initial_indent=initial_indent,
+            subsequent_indent=subsequent_indent,
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
 
     def _pytest_summary(self, output: str) -> str:
         matches = re.findall(
