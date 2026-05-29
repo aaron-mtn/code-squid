@@ -6,6 +6,11 @@ import os
 import sys
 from pathlib import Path
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.input.ansi_escape_sequences import ANSI_SEQUENCES
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.keys import Keys
+
 from agent.coding import CodingAgent
 from config.settings import DEFAULT_BASE_URL, Settings, load_settings
 from core.agent_loop import AgentLoop, RunResult
@@ -23,6 +28,34 @@ from storage.session_store import SessionStore
 from storage.undo_store import UndoStore
 from ui.sessions import USAGE, handle_session_viewer
 from ui.terminal import TerminalDisplay
+
+
+def _prompt_task(label: str) -> str:
+    ANSI_SEQUENCES["\x1b[27;2;13~"] = Keys.ControlJ
+    ANSI_SEQUENCES["\x1b[13;2u"] = Keys.ControlJ
+
+    bindings = KeyBindings()
+
+    @bindings.add("enter")
+    def _(event) -> None:
+        event.app.exit(result=event.current_buffer.text)
+
+    @bindings.add("c-j")
+    def _(event) -> None:
+        event.current_buffer.insert_text("\n")
+
+    @bindings.add("escape", "enter")
+    def _(event) -> None:
+        event.current_buffer.insert_text("\n")
+
+    session = PromptSession()
+    print(label)
+    print("Enter to send • Alt+Enter for newline")
+    return session.prompt(
+        "> ",
+        multiline=True,
+        key_bindings=bindings,
+    )
 
 
 def _session_dir_for_resume(repo_root: Path, session_id: str) -> Path | None:
@@ -142,7 +175,11 @@ def _run_new_session(repo_root: Path) -> int:
     debug = settings.display.debug or trace
     display = TerminalDisplay(debug=debug, show_transcript=trace)
     display.start()
-    task = input("Task: ")
+    task = _prompt_task("Task")
+    if not task.strip():
+        print("No task entered; nothing to run.")
+        return 0
+
     display.run_started()
 
     session = Session(repo_root=repo_root)
@@ -168,7 +205,11 @@ def _resume_session(repo_root: Path, session_id: str) -> int:
 
     display = TerminalDisplay(debug=debug, show_transcript=trace)
     display.start()
-    follow_up_task = input("Follow-up task: ")
+    follow_up_task = _prompt_task("Follow-up task")
+    if not follow_up_task.strip():
+        print("No task entered; nothing to run.")
+        return 0
+
     display.run_started()
     agent = CodingAgent(task=follow_up_task)
     follow_up_message = agent.follow_up_message(follow_up_task)

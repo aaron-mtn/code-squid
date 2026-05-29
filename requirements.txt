@@ -1,1 +1,2 @@
 openai
+prompt_toolkit
