@@ -33,6 +33,30 @@ from ui.terminal import INPUT_IDENTITY_LINE, INPUT_PROMPT_PREFIX, StartupInfo, T
 
 PROMPT_PREFIX = INPUT_PROMPT_PREFIX
 CANCELLED_BEFORE_RUN_MESSAGE = "⏹️ Cancelled before task started"
+HELP_COMMAND = "/help"
+HELP_TEXT = """\
+Code Squid help
+
+At the task prompt:
+  Normal input runs a coding task.
+  Enter sends.
+  Alt+Enter inserts a newline.
+  Ctrl+C cancels before a run or interrupts an active run.
+
+Shell commands:
+  python main.py undo
+  python main.py sessions
+  python main.py show latest
+  python main.py resume latest
+  python main.py resume <session_id>"""
+
+
+def _is_help_input(task: str) -> bool:
+    return task.strip() == HELP_COMMAND
+
+
+def _print_help() -> None:
+    print(HELP_TEXT)
 
 
 def _prompt_task(label: str) -> str:
@@ -204,6 +228,9 @@ def _run_new_session(repo_root: Path) -> int:
     task = _prompt_task_or_cancel("Task")
     if task is None:
         return 0
+    if _is_help_input(task):
+        _print_help()
+        return 0
     if not task.strip():
         print("No task entered; nothing to run.")
         return 0
@@ -239,6 +266,9 @@ def _resume_session(repo_root: Path, session_id: str) -> int:
     display.start()
     follow_up_task = _prompt_task_or_cancel("Follow-up task")
     if follow_up_task is None:
+        return 0
+    if _is_help_input(follow_up_task):
+        _print_help()
         return 0
     if not follow_up_task.strip():
         print("No task entered; nothing to run.")

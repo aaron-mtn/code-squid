@@ -311,7 +311,7 @@ class TerminalDisplay:
             return f"⚠️ Reply rejected: {reason}"
 
         messages = {
-            "non_final_no_tool_reply": "↪ Nudging model to choose a tool…",
+            "non_final_no_tool_reply": "↪ Nudging model to choose an action…",
             "non_final_wrong_tool_count": "⚠️ Reply rejected: expected exactly one tool call.",
             "malformed_tool_call": "⚠️ Reply rejected: could not read the requested tool call.",
             "final_with_tool_call": "⚠️ Reply rejected: final reply cannot include a tool call.",

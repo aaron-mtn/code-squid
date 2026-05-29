@@ -3,6 +3,7 @@ from pathlib import Path
 from core.agent_loop import RunResult
 from core.model_adapter import ModelRequestError
 from main import (
+    HELP_TEXT,
     INPUT_IDENTITY_LINE,
     PROMPT_PREFIX,
     _prompt_task,
@@ -205,6 +206,30 @@ def test_new_session_empty_task_exits_without_run(monkeypatch, tmp_path, capsys)
     assert not (tmp_path / ".code-squid" / "sessions").exists()
 
 
+def test_new_session_help_exits_without_session_or_run(monkeypatch, tmp_path, capsys) -> None:
+    displays: list[BannerDisplay] = []
+
+    def fake_display(**kwargs) -> BannerDisplay:
+        display = BannerDisplay(**kwargs)
+        displays.append(display)
+        return display
+
+    def fail_build_loop(*args):
+        raise AssertionError("_build_loop should not run for help")
+
+    monkeypatch.setattr("main.TerminalDisplay", fake_display)
+    monkeypatch.setattr("main._prompt_task", _fake_prompt_task(" /help \n"))
+    monkeypatch.setattr("main._build_loop", fail_build_loop)
+
+    assert _run_new_session(tmp_path) == 0
+
+    assert HELP_TEXT in capsys.readouterr().out
+    assert len(displays) == 1
+    assert displays[0].starts == 1
+    assert displays[0].run_starts == 0
+    assert not (tmp_path / ".code-squid" / "sessions").exists()
+
+
 def test_new_session_cancelled_task_exits_without_run(monkeypatch, tmp_path, capsys) -> None:
     displays: list[BannerDisplay] = []
 
@@ -294,6 +319,36 @@ def test_resume_session_empty_task_exits_without_run(monkeypatch, tmp_path, caps
     assert displays[0].starts == 1
     assert displays[0].run_starts == 0
     assert session_store.load_messages() == []
+
+
+def test_resume_session_help_exits_without_follow_up_or_run(monkeypatch, tmp_path, capsys) -> None:
+    session_store = SessionStore.create(tmp_path, "original task")
+    displays: list[BannerDisplay] = []
+
+    def fake_display(**kwargs) -> BannerDisplay:
+        display = BannerDisplay(**kwargs)
+        displays.append(display)
+        return display
+
+    def fail_build_loop(*args):
+        raise AssertionError("_build_loop should not run for help")
+
+    monkeypatch.setattr("main.TerminalDisplay", fake_display)
+    monkeypatch.setattr(
+        "main._session_dir_for_resume",
+        lambda repo_root, session_id: session_store.session_dir,
+    )
+    monkeypatch.setattr("main._prompt_task", _fake_prompt_task("/help"))
+    monkeypatch.setattr("main._build_loop", fail_build_loop)
+
+    assert _resume_session(tmp_path, session_store.session_id) == 0
+
+    assert HELP_TEXT in capsys.readouterr().out
+    assert len(displays) == 1
+    assert displays[0].starts == 1
+    assert displays[0].run_starts == 0
+    assert session_store.load_messages() == []
+    assert not (tmp_path / ".code-squid" / "undo").exists()
 
 
 def test_resume_session_cancelled_task_exits_without_run(monkeypatch, tmp_path, capsys) -> None:
