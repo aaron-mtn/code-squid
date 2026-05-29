@@ -28,8 +28,10 @@ CODE_SQUID_BANNER = """\
  ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝    ╚══════╝ ╚══▀▀═╝  ╚═════╝ ╚═╝╚═════╝
 
                  🦑 A small coding agent with tentacles."""
-RUN_STARTED_DIVIDER = "╰─ starting run ─────────────────────────────────────────────"
-FINAL_REPORT_DIVIDER = "────────────────────────────────────────"
+RAIL_WIDTH = 61
+RUN_STARTED_LABEL = "╰─ starting run "
+RUN_STARTED_DIVIDER = f"{RUN_STARTED_LABEL}{'─' * (RAIL_WIDTH - len(RUN_STARTED_LABEL))}"
+FINAL_REPORT_DIVIDER = "─" * RAIL_WIDTH
 RUN_EVENT_INDENT = "  "
 RUN_DETAIL_INDENT = "    "
 STARTUP_PANEL_WIDTH = 76

@@ -13,6 +13,7 @@ from ui.terminal import (
     CODE_SQUID_BANNER,
     DIM_STYLE,
     FINAL_REPORT_DIVIDER,
+    RAIL_WIDTH,
     RUN_DETAIL_INDENT,
     RESET_STYLE,
     RUN_EVENT_INDENT,
@@ -253,6 +254,11 @@ def test_run_started_prints_starting_run_divider(
     TerminalDisplay().run_started()
 
     assert capsys.readouterr().out == f"\n{RUN_STARTED_DIVIDER}\n\n"
+
+
+def test_report_divider_matches_starting_run_rail_width() -> None:
+    assert len(RUN_STARTED_DIVIDER) == RAIL_WIDTH
+    assert len(FINAL_REPORT_DIVIDER) == RAIL_WIDTH
 
 
 def test_run_started_colors_starting_run_divider_cyan_in_tty(
