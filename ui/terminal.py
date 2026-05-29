@@ -25,6 +25,7 @@ CODE_SQUID_BANNER = """\
                  🦑 A small coding agent with tentacles."""
 RUN_STARTED_DIVIDER = "╰─ starting run ─────────────────────────────────────────────"
 FINAL_REPORT_DIVIDER = "────────────────────────────────────────"
+RUN_EVENT_INDENT = "  "
 STARTUP_PANEL_WIDTH = 76
 STARTUP_CONTROLS = "Enter send • Alt+Enter newline • Ctrl+C stop"
 INPUT_IDENTITY_LINE = "@code-squid 🦑"
@@ -95,7 +96,7 @@ class TerminalDisplay:
             return
 
         self._print_leading_blank_if_needed()
-        self._print_assistant_narration(content)
+        self._print_assistant_narration(content, trailing_blank=False)
         self._needs_leading_blank = False
 
     def action_started(self, action: dict) -> None:
@@ -301,10 +302,17 @@ class TerminalDisplay:
 
     def _print_visible_line(self, line: str, dim: bool = False) -> None:
         self._print_leading_blank_if_needed()
+        if not self.debug:
+            line = self._run_event_line(line)
         if dim and sys.stdout.isatty():
             line = f"{DIM_STYLE}{line}{RESET_STYLE}"
         print(line)
         self._needs_leading_blank = True
+
+    def _run_event_line(self, line: str) -> str:
+        if not line:
+            return line
+        return f"{RUN_EVENT_INDENT}{line}"
 
     def _reply_rejected_line(self, reason: str) -> str:
         if self.debug:
@@ -319,12 +327,15 @@ class TerminalDisplay:
         }
         return messages.get(reason, "⚠️ Reply rejected: invalid assistant reply.")
 
-    def _print_assistant_narration(self, content: str) -> None:
+    def _print_assistant_narration(self, content: str, trailing_blank: bool = True) -> None:
         lines = content.splitlines() or [""]
-        print(f"🦑 {lines[0]}")
+        first_line = f"🦑 {lines[0]}"
+        print(self._run_event_line(first_line) if not self.debug else first_line)
         for line in lines[1:]:
-            print(f"   {line}" if line else "")
-        print()
+            continuation = f"   {line}" if line else ""
+            print(self._run_event_line(continuation) if not self.debug else continuation)
+        if trailing_blank:
+            print()
 
     def _debug_block(self, title: str, lines: list[str]) -> None:
         width = 47

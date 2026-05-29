@@ -12,6 +12,7 @@ from ui.terminal import (
     DIM_STYLE,
     FINAL_REPORT_DIVIDER,
     RESET_STYLE,
+    RUN_EVENT_INDENT,
     RUN_STARTED_DIVIDER,
     STARTUP_CONTROLS,
     StartupInfo,
@@ -114,7 +115,7 @@ def test_thinking_after_visible_tool_result_prints_one_leading_blank(
         {"tool": "run_command", "args": {"command": "ls tests"}},
         {"ok": True, "output": ""},
     )
-    assert capsys.readouterr().out == "🔎 Listed files\n"
+    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}🔎 Listed files\n"
 
     display.thinking()
     display.thinking()
@@ -247,7 +248,9 @@ def test_reply_rejected_prints_friendly_nudge_for_missing_tool_call(
 ) -> None:
     TerminalDisplay().reply_rejected("non_final_no_tool_reply")
 
-    assert capsys.readouterr().out == "↪ Nudging model to choose a tool…\n"
+    assert capsys.readouterr().out == (
+        f"{RUN_EVENT_INDENT}↪ Nudging model to choose an action…\n"
+    )
 
 
 def test_reply_rejected_dims_friendly_nudge_in_tty(
@@ -259,7 +262,7 @@ def test_reply_rejected_dims_friendly_nudge_in_tty(
     TerminalDisplay().reply_rejected("non_final_no_tool_reply")
 
     assert capsys.readouterr().out == (
-        f"{DIM_STYLE}↪ Nudging model to choose a tool…{RESET_STYLE}\n"
+        f"{DIM_STYLE}{RUN_EVENT_INDENT}↪ Nudging model to choose an action…{RESET_STYLE}\n"
     )
 
 
@@ -300,7 +303,9 @@ def test_long_outside_path_uses_ellipsis(capsys: pytest.CaptureFixture[str]) -> 
         {"ok": True},
     )
 
-    assert capsys.readouterr().out == "📖 Read: …/01_single_bug/test_calculator.py\n"
+    assert capsys.readouterr().out == (
+        f"{RUN_EVENT_INDENT}📖 Read: …/01_single_bug/test_calculator.py\n"
+    )
 
 
 def test_repo_local_path_becomes_relative(capsys: pytest.CaptureFixture[str]) -> None:
@@ -312,7 +317,9 @@ def test_repo_local_path_becomes_relative(capsys: pytest.CaptureFixture[str]) ->
         {"ok": True},
     )
 
-    assert capsys.readouterr().out == "📖 Read: tests/test_terminal.py\n"
+    assert capsys.readouterr().out == (
+        f"{RUN_EVENT_INDENT}📖 Read: tests/test_terminal.py\n"
+    )
 
 
 @pytest.mark.parametrize(
@@ -332,7 +339,7 @@ def test_pytest_command_success_label_is_compact(
         {"ok": True, "output": ""},
     )
 
-    assert capsys.readouterr().out == expected
+    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}{expected}"
 
 
 @pytest.mark.parametrize(
@@ -358,7 +365,7 @@ def test_search_and_list_commands_use_compact_labels(
     assert capsys.readouterr().out == f"Approve tool action?\n{approval_label}"
 
     TerminalDisplay().tool_result(action, {"ok": True, "output": ""})
-    assert capsys.readouterr().out == success_label
+    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}{success_label}"
 
 
 @pytest.mark.parametrize(
@@ -381,7 +388,9 @@ def test_search_and_list_success_labels_are_dim_in_tty(
         {"ok": True, "output": ""},
     )
 
-    assert capsys.readouterr().out == f"{DIM_STYLE}{success_label}{RESET_STYLE}\n"
+    assert capsys.readouterr().out == (
+        f"{DIM_STYLE}{RUN_EVENT_INDENT}{success_label}{RESET_STYLE}\n"
+    )
 
 
 def test_write_file_result_prints_one_success_line(
@@ -393,7 +402,7 @@ def test_write_file_result_prints_one_success_line(
     display.action_started(action)
     display.tool_result(action, {"ok": True})
 
-    assert capsys.readouterr().out == "📝 Wrote: kanban_toy2/app.js\n"
+    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}📝 Wrote: kanban_toy2/app.js\n"
 
 
 def test_run_command_result_prints_one_success_line(
@@ -405,7 +414,7 @@ def test_run_command_result_prints_one_success_line(
     display.action_started(action)
     display.tool_result(action, {"ok": True, "output": ""})
 
-    assert capsys.readouterr().out == "💿 Ran: node --check app.js\n"
+    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}💿 Ran: node --check app.js\n"
 
 
 def test_tool_result_followed_by_assistant_message_has_one_blank_line(
@@ -420,10 +429,9 @@ def test_tool_result_followed_by_assistant_message_has_one_blank_line(
     display.assistant_message("The directory doesn't exist yet.")
 
     assert capsys.readouterr().out == (
-        "🔎 Listed files\n"
+        f"{RUN_EVENT_INDENT}🔎 Listed files\n"
         "\n"
-        "🦑 The directory doesn't exist yet.\n"
-        "\n"
+        f"{RUN_EVENT_INDENT}🦑 The directory doesn't exist yet.\n"
     )
 
 
@@ -439,9 +447,8 @@ def test_assistant_message_followed_by_tool_result_has_one_blank_line(
     )
 
     assert capsys.readouterr().out == (
-        "🦑 Directory created.\n"
-        "\n"
-        "📝 Wrote: kanban_toy2/index.html\n"
+        f"{RUN_EVENT_INDENT}🦑 Directory created.\n"
+        f"{RUN_EVENT_INDENT}📝 Wrote: kanban_toy2/index.html\n"
     )
 
 
@@ -459,7 +466,7 @@ def test_first_visible_output_after_header_has_no_extra_leading_blank(
     assert capsys.readouterr().out == (
         f"{CODE_SQUID_BANNER}\n"
         "\n"
-        "🔎 Listed files\n"
+        f"{RUN_EVENT_INDENT}🔎 Listed files\n"
     )
 
 
@@ -472,7 +479,7 @@ def test_run_command_result_prints_one_test_summary_line(
     display.action_started(action)
     display.tool_result(action, {"ok": True, "output": "2 passed in 0.01s"})
 
-    assert capsys.readouterr().out == "🧪 Tests passed: 2 passed\n"
+    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}🧪 Tests passed: 2 passed\n"
 
 
 def test_debug_read_file_result_omits_full_content(
@@ -609,7 +616,9 @@ def test_assistant_message_stops_spinner_before_printing_content(
 
     assert spinner.starts == 1
     assert spinner.stops == 1
-    assert capsys.readouterr().out == "🦑 The directory doesn't exist yet.\n\n"
+    assert capsys.readouterr().out == (
+        f"{RUN_EVENT_INDENT}🦑 The directory doesn't exist yet.\n"
+    )
 
 
 def test_normal_assistant_message_uses_squid_marker(
@@ -617,7 +626,9 @@ def test_normal_assistant_message_uses_squid_marker(
 ) -> None:
     TerminalDisplay().assistant_message("The directory doesn't exist yet.")
 
-    assert capsys.readouterr().out == "🦑 The directory doesn't exist yet.\n\n"
+    assert capsys.readouterr().out == (
+        f"{RUN_EVENT_INDENT}🦑 The directory doesn't exist yet.\n"
+    )
 
 
 def test_assistant_message_does_not_hide_fallback_like_narration(
@@ -625,7 +636,7 @@ def test_assistant_message_does_not_hide_fallback_like_narration(
 ) -> None:
     TerminalDisplay().assistant_message("Using read_file.")
 
-    assert capsys.readouterr().out == "🦑 Using read_file.\n\n"
+    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}🦑 Using read_file.\n"
 
 
 def test_multiline_assistant_message_indents_continuation_lines(
@@ -637,9 +648,8 @@ def test_multiline_assistant_message_indents_continuation_lines(
     )
 
     assert capsys.readouterr().out == (
-        "🦑 The directory doesn't exist yet.\n"
-        "   I need to create it and then build the Kanban board.\n"
-        "\n"
+        f"{RUN_EVENT_INDENT}🦑 The directory doesn't exist yet.\n"
+        f"{RUN_EVENT_INDENT}   I need to create it and then build the Kanban board.\n"
     )
 
 
@@ -657,7 +667,9 @@ def test_tool_result_stops_spinner_before_printing_result(
 
     assert spinner.starts == 1
     assert spinner.stops == 1
-    assert capsys.readouterr().out == "📝 Wrote: kanban_toy2/index.html\n"
+    assert capsys.readouterr().out == (
+        f"{RUN_EVENT_INDENT}📝 Wrote: kanban_toy2/index.html\n"
+    )
 
 
 def test_approval_prompt_stops_spinner_before_asking(
@@ -687,7 +699,7 @@ def test_interrupted_stops_spinner_before_printing(
 
     assert spinner.starts == 1
     assert spinner.stops == 1
-    assert capsys.readouterr().out == "⏹️ Interrupted\n"
+    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}⏹️ Interrupted\n"
 
 
 def test_generic_long_command_gets_middle_truncated(
@@ -699,9 +711,9 @@ def test_generic_long_command_gets_middle_truncated(
     TerminalDisplay().tool_result(action, {"ok": True, "output": ""})
 
     output = capsys.readouterr().out
-    assert output.startswith("💿 Ran: printf '")
+    assert output.startswith(f"{RUN_EVENT_INDENT}💿 Ran: printf '")
     assert "…" in output
-    assert len(output.removesuffix("\n")) <= len("💿 Ran: ") + 80
+    assert len(output.removesuffix("\n")) <= len(RUN_EVENT_INDENT) + len("💿 Ran: ") + 80
 
 
 def test_normal_completion_prints_session_complete(
@@ -891,7 +903,7 @@ def test_interrupted_completion_does_not_print_session_complete(
     display.loop_finished(session)
 
     output = capsys.readouterr().out
-    assert output.startswith("⏹️ Interrupted\n")
+    assert output.startswith(f"{RUN_EVENT_INDENT}⏹️ Interrupted\n")
     assert "✅ Session complete" not in output
 
 
@@ -901,7 +913,7 @@ def test_tool_result_displays_action_denied(capsys: pytest.CaptureFixture[str]) 
         {"ok": False, "error": USER_DENIED_TOOL_ACTION},
     )
 
-    assert capsys.readouterr().out == "🚫 Action denied\n"
+    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}🚫 Action denied\n"
 
 
 def test_denied_run_command_displays_action_denied(
@@ -913,5 +925,5 @@ def test_denied_run_command_displays_action_denied(
     )
 
     output = capsys.readouterr().out
-    assert output == "🚫 Action denied\n"
+    assert output == f"{RUN_EVENT_INDENT}🚫 Action denied\n"
     assert "🕵️ Review output" not in output
