@@ -11,6 +11,7 @@ from typing import TextIO
 
 
 SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+RESET_STYLE = "\033[0m"
 
 
 class TerminalSpinner:
@@ -22,11 +23,13 @@ class TerminalSpinner:
         interval: float = 0.08,
         enabled: bool = True,
         prefix: str = "",
+        style: str = "",
     ) -> None:
         self.stream = stream if stream is not None else sys.stdout
         self.interval = interval
         self.enabled = enabled
         self.prefix = prefix
+        self.style = style
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -77,7 +80,10 @@ class TerminalSpinner:
             frame_index = (frame_index + 1) % len(SPINNER_FRAMES)
 
     def _write_frame(self, frame_index: int) -> None:
-        self.stream.write(f"\r{self.prefix}🦑 {SPINNER_FRAMES[frame_index]}")
+        text = f"{self.prefix}🦑 {SPINNER_FRAMES[frame_index]}"
+        if self.style and self.stream.isatty():
+            text = f"{self.style}{text}{RESET_STYLE}"
+        self.stream.write(f"\r{text}")
         self.stream.flush()
 
     def _can_animate(self) -> bool:

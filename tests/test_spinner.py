@@ -1,4 +1,5 @@
-from ui.spinner import SPINNER_FRAMES, TerminalSpinner
+from ui.spinner import RESET_STYLE, SPINNER_FRAMES, TerminalSpinner
+from ui.terminal import SOFT_CYAN_STYLE
 
 
 class FakeStream:
@@ -41,6 +42,41 @@ def test_spinner_writes_and_clears_one_tty_line() -> None:
     spinner.stop()
 
     assert stream.writes == ["\r🦑 ⠋", "\r\033[K"]
+
+
+def test_spinner_styles_tty_frame_and_resets() -> None:
+    stream = FakeStream(tty=True)
+    spinner = TerminalSpinner(stream=stream, interval=10, style=SOFT_CYAN_STYLE)
+
+    spinner.start()
+    spinner.stop()
+
+    assert stream.writes == [
+        f"\r{SOFT_CYAN_STYLE}🦑 ⠋{RESET_STYLE}",
+        "\r\033[K",
+    ]
+
+
+def test_spinner_ignores_style_when_stdout_is_not_tty() -> None:
+    stream = FakeStream(tty=False)
+    spinner = TerminalSpinner(stream=stream, style=SOFT_CYAN_STYLE)
+
+    spinner.start()
+    spinner.stop()
+
+    assert stream.writes == []
+    assert stream.flushes == 0
+
+
+def test_spinner_is_quiet_when_disabled() -> None:
+    stream = FakeStream(tty=True)
+    spinner = TerminalSpinner(stream=stream, enabled=False, style=SOFT_CYAN_STYLE)
+
+    spinner.start()
+    spinner.stop()
+
+    assert stream.writes == []
+    assert stream.flushes == 0
 
 
 def test_spinner_prefix_indents_frame_text() -> None:

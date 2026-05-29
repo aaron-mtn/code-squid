@@ -17,10 +17,12 @@ from ui.terminal import (
     RESET_STYLE,
     RUN_EVENT_INDENT,
     SOFT_CYAN_HEX,
-    SOFT_CYAN_RGB,
     SOFT_CYAN_STYLE,
+    SOFT_GREEN_HEX,
     SOFT_GREEN_STYLE,
+    SOFT_RED_HEX,
     SOFT_RED_STYLE,
+    SOFT_YELLOW_HEX,
     SOFT_YELLOW_STYLE,
     RUN_STARTED_DIVIDER,
     STARTUP_CONTROLS,
@@ -175,10 +177,36 @@ def test_startup_panel_includes_controls() -> None:
     assert f"Controls:      {STARTUP_CONTROLS}" in panel
 
 
-def test_soft_cyan_constants_share_prompt_identity_color() -> None:
-    assert SOFT_CYAN_RGB == (125, 211, 252)
+def test_soft_color_constants_derive_expected_ansi_styles() -> None:
     assert SOFT_CYAN_HEX == "#7dd3fc"
+    assert SOFT_GREEN_HEX == "#86efac"
+    assert SOFT_YELLOW_HEX == "#fde047"
+    assert SOFT_RED_HEX == "#f87171"
     assert SOFT_CYAN_STYLE == "\033[38;2;125;211;252m"
+    assert SOFT_GREEN_STYLE == "\033[38;2;134;239;172m"
+    assert SOFT_YELLOW_STYLE == "\033[38;2;253;224;71m"
+    assert SOFT_RED_STYLE == "\033[38;2;248;113;113m"
+
+
+def test_default_spinner_uses_soft_cyan_style(monkeypatch: pytest.MonkeyPatch) -> None:
+    spinner_kwargs = []
+
+    class CapturingSpinner(FakeSpinner):
+        def __init__(self, **kwargs) -> None:
+            super().__init__()
+            spinner_kwargs.append(kwargs)
+
+    monkeypatch.setattr("ui.terminal.TerminalSpinner", CapturingSpinner)
+
+    TerminalDisplay()
+
+    assert spinner_kwargs == [
+        {
+            "enabled": True,
+            "prefix": RUN_EVENT_INDENT,
+            "style": SOFT_CYAN_STYLE,
+        }
+    ]
 
 
 def test_run_started_prints_starting_run_divider(

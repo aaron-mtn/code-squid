@@ -37,15 +37,26 @@ STARTUP_CONTROLS = "Enter send • Alt+Enter newline • Ctrl+C stop"
 INPUT_IDENTITY_LINE = "@code-squid 🦑"
 INPUT_PROMPT_PREFIX = "› "
 DIM_STYLE = "\033[2m"
-# Softer / more pastel
-SOFT_CYAN_RGB = (125, 211, 252)
-SOFT_CYAN_HEX = "#{:02x}{:02x}{:02x}".format(*SOFT_CYAN_RGB)
-SOFT_CYAN_STYLE = "\033[38;2;{};{};{}m".format(*SOFT_CYAN_RGB)
-SOFT_GREEN_STYLE = "\033[38;2;134;239;172m"
-SOFT_YELLOW_STYLE = "\033[38;2;253;224;71m"
-SOFT_RED_STYLE = "\033[38;2;248;113;113m"
 BOLD_STYLE = "\033[1m"
 RESET_STYLE = "\033[0m"
+SOFT_CYAN_HEX = "#7dd3fc"
+SOFT_GREEN_HEX = "#86efac"
+SOFT_YELLOW_HEX = "#ffea80"
+SOFT_RED_HEX = "#f77998"
+
+
+def _ansi_fg(hex_color: str) -> str:
+    value = hex_color.removeprefix("#")
+    r = int(value[0:2], 16)
+    g = int(value[2:4], 16)
+    b = int(value[4:6], 16)
+    return f"\033[38;2;{r};{g};{b}m"
+
+
+SOFT_CYAN_STYLE = _ansi_fg(SOFT_CYAN_HEX)
+SOFT_GREEN_STYLE = _ansi_fg(SOFT_GREEN_HEX)
+SOFT_YELLOW_STYLE = _ansi_fg(SOFT_YELLOW_HEX)
+SOFT_RED_STYLE = _ansi_fg(SOFT_RED_HEX)
 
 
 @dataclass(frozen=True)
@@ -80,7 +91,11 @@ class TerminalDisplay:
         self._spinner = (
             _spinner
             if _spinner is not None
-            else TerminalSpinner(enabled=not debug, prefix=RUN_EVENT_INDENT)
+            else TerminalSpinner(
+                enabled=not debug,
+                prefix=RUN_EVENT_INDENT,
+                style=SOFT_CYAN_STYLE,
+            )
         )
         self._needs_leading_blank = False
         self._needs_detail_blank_after_assistant = False
