@@ -74,6 +74,26 @@ def _styled_text(text: str, *styles: str) -> str:
     return f"{''.join(styles)}{text}{RESET_STYLE}"
 
 
+def _structural_text(text: str) -> str:
+    return _styled_text(text, SOFT_CYAN_STYLE)
+
+
+def _structural_prefix(prefix: str, text: str) -> str:
+    if not sys.stdout.isatty():
+        return f"{prefix}{text}"
+    return f"{SOFT_CYAN_STYLE}{prefix}{RESET_STYLE}{text}"
+
+
+def _structural_bordered_line(left: str, content: str, right: str) -> str:
+    if not sys.stdout.isatty():
+        return f"{left}{content}{right}"
+    return (
+        f"{SOFT_CYAN_STYLE}{left}{RESET_STYLE}"
+        f"{content}"
+        f"{SOFT_CYAN_STYLE}{right}{RESET_STYLE}"
+    )
+
+
 class TerminalDisplay:
     """Owns terminal formatting for the agent loop."""
 
@@ -109,7 +129,7 @@ class TerminalDisplay:
     def run_started(self) -> None:
         self._stop_spinner()
         print()
-        print(RUN_STARTED_DIVIDER)
+        print(_structural_text(RUN_STARTED_DIVIDER))
         print()
         self._needs_leading_blank = False
         self._needs_detail_blank_after_assistant = False
@@ -269,7 +289,7 @@ class TerminalDisplay:
         else:
             print()
 
-        print(FINAL_REPORT_DIVIDER)
+        print(_structural_text(FINAL_REPORT_DIVIDER))
         print("📚 Session files")
         print()
         self._print_file_list("Files read", session.files_read)
@@ -335,9 +355,9 @@ class TerminalDisplay:
         ]
         return "\n".join(
             [
-                top,
+                _structural_text(top),
                 *(self._startup_info_line(label, value, inner_width) for label, value in lines),
-                bottom,
+                _structural_text(bottom),
             ]
         )
 
@@ -346,7 +366,7 @@ class TerminalDisplay:
         available = inner_width - 2 - 15
         value = self._truncate_middle(str(value), max(available, 1))
         content = f" {label_text:<14} {value}"
-        return f"│{content:<{inner_width}}│"
+        return _structural_bordered_line("│", f"{content:<{inner_width}}", "│")
 
     def _print_leading_blank_if_needed(self) -> None:
         # Tool results are one-line event blocks; separate the next visible
@@ -424,10 +444,10 @@ class TerminalDisplay:
     def _debug_block(self, title: str, lines: list[str]) -> None:
         width = 47
         top_label = f"─ {title} "
-        print(f"┌{top_label}{'─' * max(width - len(top_label), 0)}")
+        print(_structural_text(f"┌{top_label}{'─' * max(width - len(top_label), 0)}"))
         for line in lines:
-            print(f"│ {line}")
-        print(f"└{'─' * width}")
+            print(_structural_prefix("│", f" {line}"))
+        print(_structural_text(f"└{'─' * width}"))
 
     def _debug_action_lines(self, action: dict) -> list[str]:
         tool_name = action.get("tool", "")
@@ -522,7 +542,7 @@ class TerminalDisplay:
             return
 
         self._print_leading_blank_if_needed()
-        print(FINAL_REPORT_DIVIDER)
+        print(_structural_text(FINAL_REPORT_DIVIDER))
         print("📋 Final summary")
         print()
         print(formatted)

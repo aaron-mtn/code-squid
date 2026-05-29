@@ -177,15 +177,53 @@ def test_startup_panel_includes_controls() -> None:
     assert f"Controls:      {STARTUP_CONTROLS}" in panel
 
 
+def test_startup_panel_colors_only_structural_borders_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    panel = TerminalDisplay()._startup_info_panel(
+        StartupInfo(
+            directory=Path("/tmp/project"),
+            provider="openai_compatible",
+            model="qwen3.5-9b",
+            approval_mode="never",
+        )
+    )
+
+    lines = panel.splitlines()
+    assert lines[0].startswith(f"{SOFT_CYAN_STYLE}╭─ startup ")
+    assert lines[0].endswith(f"╮{RESET_STYLE}")
+    assert lines[1].startswith(f"{SOFT_CYAN_STYLE}│{RESET_STYLE} Directory:")
+    assert lines[1].endswith(f"{SOFT_CYAN_STYLE}│{RESET_STYLE}")
+    assert f"{SOFT_CYAN_STYLE}Directory" not in lines[1]
+    assert lines[-1].startswith(f"{SOFT_CYAN_STYLE}╰")
+    assert lines[-1].endswith(f"╯{RESET_STYLE}")
+
+
+def test_startup_panel_stays_plain_when_not_tty() -> None:
+    panel = TerminalDisplay()._startup_info_panel(
+        StartupInfo(
+            directory=Path("/tmp/project"),
+            provider="openai_compatible",
+            model="qwen3.5-9b",
+            approval_mode="never",
+        )
+    )
+
+    assert SOFT_CYAN_STYLE not in panel
+    assert RESET_STYLE not in panel
+
+
 def test_soft_color_constants_derive_expected_ansi_styles() -> None:
     assert SOFT_CYAN_HEX == "#7dd3fc"
     assert SOFT_GREEN_HEX == "#86efac"
-    assert SOFT_YELLOW_HEX == "#fde047"
-    assert SOFT_RED_HEX == "#f87171"
+    assert SOFT_YELLOW_HEX == "#ffea80"
+    assert SOFT_RED_HEX == "#f77998"
     assert SOFT_CYAN_STYLE == "\033[38;2;125;211;252m"
     assert SOFT_GREEN_STYLE == "\033[38;2;134;239;172m"
-    assert SOFT_YELLOW_STYLE == "\033[38;2;253;224;71m"
-    assert SOFT_RED_STYLE == "\033[38;2;248;113;113m"
+    assert SOFT_YELLOW_STYLE == "\033[38;2;255;234;128m"
+    assert SOFT_RED_STYLE == "\033[38;2;247;121;152m"
 
 
 def test_default_spinner_uses_soft_cyan_style(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -215,6 +253,19 @@ def test_run_started_prints_starting_run_divider(
     TerminalDisplay().run_started()
 
     assert capsys.readouterr().out == f"\n{RUN_STARTED_DIVIDER}\n\n"
+
+
+def test_run_started_colors_starting_run_divider_cyan_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    TerminalDisplay().run_started()
+
+    assert capsys.readouterr().out == (
+        f"\n{SOFT_CYAN_STYLE}{RUN_STARTED_DIVIDER}{RESET_STYLE}\n\n"
+    )
 
 
 def test_model_request_failed_prints_short_message_with_log_path(
@@ -274,6 +325,21 @@ def test_debug_reply_prints_boxed_model_action(
     assert "│ tool_call_id: call_123" in output
     assert "actions: [" not in output
     assert "raw_arguments" not in output
+
+
+def test_debug_block_colors_structural_rails_cyan_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    TerminalDisplay(debug=True)._debug_block("model action", ["tool: read_file"])
+
+    output = capsys.readouterr().out
+    assert output.startswith(f"{SOFT_CYAN_STYLE}┌─ model action ")
+    assert f"\n{SOFT_CYAN_STYLE}│{RESET_STYLE} tool: read_file\n" in output
+    assert output.rstrip().endswith(f"─{RESET_STYLE}")
+    assert f"{SOFT_CYAN_STYLE}tool: read_file" not in output
 
 
 def test_debug_reply_prints_none_for_no_actions(
@@ -870,6 +936,21 @@ def test_loop_finished_prints_divider_before_file_report(
     )
 
 
+def test_loop_finished_colors_file_report_divider_cyan_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    session = SimpleNamespace(files_read=set(), files_written=set(), messages=[])
+
+    TerminalDisplay().loop_finished(session)
+
+    assert capsys.readouterr().out.startswith(
+        f"\n{SOFT_CYAN_STYLE}{FINAL_REPORT_DIVIDER}{RESET_STYLE}\n"
+        "📚 Session files\n"
+    )
+
+
 def test_loop_finished_prints_full_stored_paths_in_final_file_report(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -904,6 +985,26 @@ def test_normal_assistant_final_summary_uses_report_heading(
     assert "  What changed\n    polished display" in output
     assert "🦑" not in output
     assert "TASK COMPLETE" not in output
+
+
+def test_final_summary_colors_report_divider_cyan_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    TerminalDisplay().assistant_message(
+        "TASK COMPLETE\n"
+        "Files changed: ui/terminal.py\n"
+        "What changed: polished display\n"
+        "Verification: `pytest tests/test_terminal.py`\n"
+        "Remaining risks / notes: none"
+    )
+
+    assert capsys.readouterr().out.startswith(
+        f"{SOFT_CYAN_STYLE}{FINAL_REPORT_DIVIDER}{RESET_STYLE}\n"
+        "📋 Final summary\n\n"
+    )
 
 
 def test_final_summary_headings_are_bold_in_tty(
