@@ -9,12 +9,19 @@ import pytest
 from core.approval import USER_DENIED_TOOL_ACTION
 from core.agent_loop import RunResult
 from ui.terminal import (
+    BOLD_STYLE,
     CODE_SQUID_BANNER,
     DIM_STYLE,
     FINAL_REPORT_DIVIDER,
     RUN_DETAIL_INDENT,
     RESET_STYLE,
     RUN_EVENT_INDENT,
+    SOFT_CYAN_HEX,
+    SOFT_CYAN_RGB,
+    SOFT_CYAN_STYLE,
+    SOFT_GREEN_STYLE,
+    SOFT_RED_STYLE,
+    SOFT_YELLOW_STYLE,
     RUN_STARTED_DIVIDER,
     STARTUP_CONTROLS,
     StartupInfo,
@@ -168,6 +175,12 @@ def test_startup_panel_includes_controls() -> None:
     assert f"Controls:      {STARTUP_CONTROLS}" in panel
 
 
+def test_soft_cyan_constants_share_prompt_identity_color() -> None:
+    assert SOFT_CYAN_RGB == (125, 211, 252)
+    assert SOFT_CYAN_HEX == "#7dd3fc"
+    assert SOFT_CYAN_STYLE == "\033[38;2;125;211;252m"
+
+
 def test_run_started_prints_starting_run_divider(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -255,7 +268,7 @@ def test_reply_rejected_prints_friendly_nudge_for_missing_tool_call(
     )
 
 
-def test_reply_rejected_dims_friendly_nudge_in_tty(
+def test_reply_rejected_colors_friendly_nudge_yellow_in_tty(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -264,7 +277,8 @@ def test_reply_rejected_dims_friendly_nudge_in_tty(
     TerminalDisplay().reply_rejected("non_final_no_tool_reply")
 
     assert capsys.readouterr().out == (
-        f"{DIM_STYLE}{RUN_DETAIL_INDENT}↪ Nudging model to choose an action…{RESET_STYLE}\n"
+        f"{SOFT_YELLOW_STYLE}{RUN_DETAIL_INDENT}↪ Nudging model to choose an action…"
+        f"{RESET_STYLE}\n"
     )
 
 
@@ -437,7 +451,7 @@ def test_tool_result_followed_by_assistant_message_has_one_blank_line(
     )
 
 
-def test_assistant_message_followed_by_tool_result_has_one_blank_line(
+def test_assistant_message_followed_by_tool_result_has_blank_line(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     display = TerminalDisplay()
@@ -450,6 +464,7 @@ def test_assistant_message_followed_by_tool_result_has_one_blank_line(
 
     assert capsys.readouterr().out == (
         f"{RUN_EVENT_INDENT}🦑 Directory created.\n"
+        "\n"
         f"{RUN_DETAIL_INDENT}📝 Wrote: kanban_toy2/index.html\n"
     )
 
@@ -482,6 +497,38 @@ def test_run_command_result_prints_one_test_summary_line(
     display.tool_result(action, {"ok": True, "output": "2 passed in 0.01s"})
 
     assert capsys.readouterr().out == f"{RUN_DETAIL_INDENT}🧪 Tests passed: 2 passed\n"
+
+
+def test_tests_passed_line_is_green_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    TerminalDisplay().tool_result(
+        {"tool": "run_command", "args": {"command": "pytest -q"}},
+        {"ok": True, "output": "2 passed in 0.01s"},
+    )
+
+    assert capsys.readouterr().out == (
+        f"{SOFT_GREEN_STYLE}{RUN_DETAIL_INDENT}🧪 Tests passed: 2 passed{RESET_STYLE}\n"
+    )
+
+
+def test_command_failure_line_is_red_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    TerminalDisplay().tool_result(
+        {"tool": "run_command", "args": {"command": "pytest -q"}},
+        {"ok": False, "output": ""},
+    )
+
+    assert capsys.readouterr().out == (
+        f"{SOFT_RED_STYLE}{RUN_DETAIL_INDENT}❌ Command failed: pytest{RESET_STYLE}\n"
+    )
 
 
 def test_debug_read_file_result_omits_full_content(
@@ -829,6 +876,27 @@ def test_normal_assistant_final_summary_uses_report_heading(
     assert "  What changed\n    polished display" in output
     assert "🦑" not in output
     assert "TASK COMPLETE" not in output
+
+
+def test_final_summary_headings_are_bold_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    TerminalDisplay().assistant_message(
+        "TASK COMPLETE\n"
+        "Files changed: ui/terminal.py\n"
+        "What changed: polished display\n"
+        "Verification: `pytest tests/test_terminal.py`\n"
+        "Remaining risks / notes: none"
+    )
+
+    output = capsys.readouterr().out
+    assert f"  {BOLD_STYLE}Files changed{RESET_STYLE}\n    ui/terminal.py" in output
+    assert f"  {BOLD_STYLE}What changed{RESET_STYLE}\n    polished display" in output
+    assert f"  {BOLD_STYLE}Verification{RESET_STYLE}\n" in output
+    assert f"  {BOLD_STYLE}Remaining risks / notes{RESET_STYLE}\n    none" in output
 
 
 def test_normal_assistant_final_summary_hides_preamble(

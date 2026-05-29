@@ -21,10 +21,12 @@ class TerminalSpinner:
         stream: TextIO | None = None,
         interval: float = 0.08,
         enabled: bool = True,
+        prefix: str = "",
     ) -> None:
         self.stream = stream if stream is not None else sys.stdout
         self.interval = interval
         self.enabled = enabled
+        self.prefix = prefix
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -75,7 +77,7 @@ class TerminalSpinner:
             frame_index = (frame_index + 1) % len(SPINNER_FRAMES)
 
     def _write_frame(self, frame_index: int) -> None:
-        self.stream.write(f"\r🦑 {SPINNER_FRAMES[frame_index]}")
+        self.stream.write(f"\r{self.prefix}🦑 {SPINNER_FRAMES[frame_index]}")
         self.stream.flush()
 
     def _can_animate(self) -> bool:

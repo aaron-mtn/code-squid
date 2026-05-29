@@ -41,3 +41,13 @@ def test_spinner_writes_and_clears_one_tty_line() -> None:
     spinner.stop()
 
     assert stream.writes == ["\r🦑 ⠋", "\r\033[K"]
+
+
+def test_spinner_prefix_indents_frame_text() -> None:
+    stream = FakeStream(tty=True)
+    spinner = TerminalSpinner(stream=stream, interval=10, prefix="  ")
+
+    spinner.start()
+    spinner.stop()
+
+    assert stream.writes == ["\r  🦑 ⠋", "\r\033[K"]

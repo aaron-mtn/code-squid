@@ -28,10 +28,17 @@ from storage.session_index import latest_session_id, session_dir_for
 from storage.session_store import SessionStore
 from storage.undo_store import UndoStore
 from ui.sessions import USAGE, handle_session_viewer
-from ui.terminal import INPUT_IDENTITY_LINE, INPUT_PROMPT_PREFIX, StartupInfo, TerminalDisplay
+from ui.terminal import (
+    INPUT_IDENTITY_LINE,
+    INPUT_PROMPT_PREFIX,
+    SOFT_CYAN_HEX,
+    StartupInfo,
+    TerminalDisplay,
+)
 
 
 PROMPT_PREFIX = INPUT_PROMPT_PREFIX
+PROMPT_STYLE = f"{SOFT_CYAN_HEX} bold"
 CANCELLED_BEFORE_RUN_MESSAGE = "⏹️ Cancelled before task started"
 HELP_COMMAND = "/help"
 HELP_TEXT = """\
@@ -77,11 +84,11 @@ def _prompt_task(label: str) -> str:
     def _(event) -> None:
         event.current_buffer.insert_text("\n")
 
-    print_formatted_text(FormattedText([("ansicyan bold", INPUT_IDENTITY_LINE)]))
+    print_formatted_text(FormattedText([(PROMPT_STYLE, INPUT_IDENTITY_LINE)]))
 
     session = PromptSession()
     return session.prompt(
-        FormattedText([("ansigreen bold", PROMPT_PREFIX)]),
+        FormattedText([(PROMPT_STYLE, PROMPT_PREFIX)]),
         multiline=True,
         key_bindings=bindings,
     )

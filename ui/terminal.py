@@ -15,9 +15,9 @@ from ui.spinner import TerminalSpinner
 
 
 PATH_LABEL_MAX = 56
-COMMAND_LABEL_MAX = 80
+COMMAND_LABEL_MAX = 64
 APPROVAL_COMMAND_LABEL_MAX = 120
-DISPLAY_WRAP_WIDTH = 96
+DISPLAY_WRAP_WIDTH = 64
 CODE_SQUID_BANNER = """\
 
  ██████╗ ██████╗ ██████╗ ███████╗    ███████╗ ██████╗ ██╗   ██╗██╗██████╗
@@ -37,6 +37,14 @@ STARTUP_CONTROLS = "Enter send • Alt+Enter newline • Ctrl+C stop"
 INPUT_IDENTITY_LINE = "@code-squid 🦑"
 INPUT_PROMPT_PREFIX = "› "
 DIM_STYLE = "\033[2m"
+# Softer / more pastel
+SOFT_CYAN_RGB = (125, 211, 252)
+SOFT_CYAN_HEX = "#{:02x}{:02x}{:02x}".format(*SOFT_CYAN_RGB)
+SOFT_CYAN_STYLE = "\033[38;2;{};{};{}m".format(*SOFT_CYAN_RGB)
+SOFT_GREEN_STYLE = "\033[38;2;134;239;172m"
+SOFT_YELLOW_STYLE = "\033[38;2;253;224;71m"
+SOFT_RED_STYLE = "\033[38;2;248;113;113m"
+BOLD_STYLE = "\033[1m"
 RESET_STYLE = "\033[0m"
 
 
@@ -46,6 +54,13 @@ class StartupInfo:
     provider: str
     model: str
     approval_mode: str
+
+
+def _styled_text(text: str, *styles: str) -> str:
+    styles = tuple(style for style in styles if style)
+    if not styles or not sys.stdout.isatty():
+        return text
+    return f"{''.join(styles)}{text}{RESET_STYLE}"
 
 
 class TerminalDisplay:
@@ -62,13 +77,19 @@ class TerminalDisplay:
         self.show_transcript = show_transcript
         self.startup_info = startup_info
         self._interrupted = False
-        self._spinner = _spinner if _spinner is not None else TerminalSpinner(enabled=not debug)
+        self._spinner = (
+            _spinner
+            if _spinner is not None
+            else TerminalSpinner(enabled=not debug, prefix=RUN_EVENT_INDENT)
+        )
         self._needs_leading_blank = False
+        self._needs_detail_blank_after_assistant = False
 
     def start(self) -> None:
         self._stop_spinner()
         self._print_startup_banner()
         self._needs_leading_blank = False
+        self._needs_detail_blank_after_assistant = False
 
     def run_started(self) -> None:
         self._stop_spinner()
@@ -76,6 +97,7 @@ class TerminalDisplay:
         print(RUN_STARTED_DIVIDER)
         print()
         self._needs_leading_blank = False
+        self._needs_detail_blank_after_assistant = False
 
     def thinking(self) -> None:
         if self.debug:
@@ -104,6 +126,7 @@ class TerminalDisplay:
         self._print_leading_blank_if_needed()
         self._print_assistant_narration(content, trailing_blank=False)
         self._needs_leading_blank = False
+        self._needs_detail_blank_after_assistant = True
 
     def action_started(self, action: dict) -> None:
         self._stop_spinner()
@@ -160,7 +183,7 @@ class TerminalDisplay:
         self._stop_spinner()
 
         if result.get("error") == USER_DENIED_TOOL_ACTION:
-            self._print_visible_line("🚫 Action denied")
+            self._print_visible_line("🚫 Action denied", style=SOFT_RED_STYLE)
             self._print_debug_tool_result(action, result)
             return
 
@@ -178,39 +201,48 @@ class TerminalDisplay:
 
         error = result.get("error", "unknown error")
         if tool_name in {"read_file", "write_file"}:
-            self._print_visible_line(f"{self._action_label(action, 'failure')} - {error}")
+            self._print_visible_line(
+                f"{self._action_label(action, 'failure')} - {error}",
+                style=SOFT_RED_STYLE,
+            )
             self._print_debug_tool_result(action, result)
             return
 
-        self._print_visible_line(f"❌ {tool_name} failed: {error}")
+        self._print_visible_line(f"❌ {tool_name} failed: {error}", style=SOFT_RED_STYLE)
         self._print_debug_tool_result(action, result)
 
     def reply_rejected(self, reason: str) -> None:
         self._stop_spinner()
         self._print_visible_line(
             self._reply_rejected_line(reason),
-            dim=not self.debug and reason == "non_final_no_tool_reply",
+            style=SOFT_YELLOW_STYLE,
         )
 
     def repeated_invalid_replies(self, reason: str, count: int) -> None:
         self._stop_spinner()
-        self._print_visible_line(f"⚠️ Stopping after {count} invalid replies: {reason}")
+        self._print_visible_line(
+            f"⚠️ Stopping after {count} invalid replies: {reason}",
+            style=SOFT_YELLOW_STYLE,
+        )
 
     def step_limit_reached(self, max_tool_steps: int) -> None:
         self._stop_spinner()
-        self._print_visible_line(f"⚠️ Stopping after reaching tool step limit: {max_tool_steps}")
+        self._print_visible_line(
+            f"⚠️ Stopping after reaching tool step limit: {max_tool_steps}",
+            style=SOFT_YELLOW_STYLE,
+        )
 
     def interrupted(self) -> None:
         self._stop_spinner()
         self._interrupted = True
-        self._print_visible_line("⏹️ Interrupted")
+        self._print_visible_line("⏹️ Interrupted", style=SOFT_YELLOW_STYLE)
 
     def model_request_failed(self, log_path: Path) -> None:
         self._stop_spinner()
         # Normal CLI users need a clear failure and the saved details path,
         # not a raw traceback from whichever provider happened to fail.
         self._print_leading_blank_if_needed()
-        print("🚫 Model request failed")
+        print(_styled_text("🚫 Model request failed", SOFT_RED_STYLE))
         print()
         print("Code Squid could not get a response from the configured model provider.")
         print(f"Details saved to: {log_path}")
@@ -234,11 +266,11 @@ class TerminalDisplay:
 
         print()
         if status == "failed":
-            print("❌ Session failed")
+            print(_styled_text("❌ Session failed", SOFT_RED_STYLE))
         elif status == "interrupted":
-            print("⚠️ Session interrupted")
+            print(_styled_text("⚠️ Session interrupted", SOFT_YELLOW_STYLE))
         else:
-            print("✅ Session complete")
+            print(_styled_text("✅ Session complete", SOFT_GREEN_STYLE))
 
         if not self.show_transcript:
             return
@@ -308,12 +340,14 @@ class TerminalDisplay:
             print()
             self._needs_leading_blank = False
 
-    def _print_visible_line(self, line: str, dim: bool = False) -> None:
+    def _print_visible_line(self, line: str, dim: bool = False, style: str = "") -> None:
         self._print_leading_blank_if_needed()
+        if self._needs_detail_blank_after_assistant:
+            print()
+            self._needs_detail_blank_after_assistant = False
         if not self.debug:
             line = self._run_detail_line(line)
-        if dim and sys.stdout.isatty():
-            line = f"{DIM_STYLE}{line}{RESET_STYLE}"
+        line = _styled_text(line, *(style, DIM_STYLE if dim else ""))
         print(line)
         self._needs_leading_blank = True
 
@@ -481,19 +515,28 @@ class TerminalDisplay:
 
     def _run_command_result(self, action: dict, result: dict) -> None:
         if result.get("timed_out"):
-            self._print_visible_line("⌛️ Command timed out")
+            self._print_visible_line("⌛️ Command timed out", style=SOFT_YELLOW_STYLE)
             return
 
         summary = self._pytest_summary(result.get("output", ""))
         if summary:
             if "failed" in summary:
-                self._print_visible_line(f"🔎 Tests need review: {summary}")
+                self._print_visible_line(
+                    f"🔎 Tests need review: {summary}",
+                    style=SOFT_YELLOW_STYLE,
+                )
             else:
-                self._print_visible_line(f"🧪 Tests passed: {summary}")
+                self._print_visible_line(
+                    f"🧪 Tests passed: {summary}",
+                    style=SOFT_GREEN_STYLE,
+                )
             return
 
         if not result.get("ok", False):
-            self._print_visible_line(self._action_label(action, "failure"))
+            self._print_visible_line(
+                self._action_label(action, "failure"),
+                style=SOFT_RED_STYLE,
+            )
             return
 
         self._print_visible_line(self._action_label(action, "success"), dim=True)
@@ -537,7 +580,7 @@ class TerminalDisplay:
         for heading, lines in sections:
             if formatted_lines:
                 formatted_lines.append("")
-            formatted_lines.append(f"  {heading}")
+            formatted_lines.append(f"  {_styled_text(heading, BOLD_STYLE)}")
             for line in lines:
                 formatted_lines.extend(
                     self._wrapped_display_lines(

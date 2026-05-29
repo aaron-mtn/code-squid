@@ -5,6 +5,7 @@ from core.model_adapter import ModelRequestError
 from main import (
     HELP_TEXT,
     INPUT_IDENTITY_LINE,
+    PROMPT_STYLE,
     PROMPT_PREFIX,
     _prompt_task,
     _resume_session,
@@ -12,7 +13,13 @@ from main import (
     _run_new_session,
 )
 from storage.session_store import SessionStore
-from ui.terminal import CODE_SQUID_BANNER, RUN_STARTED_DIVIDER, StartupInfo, TerminalDisplay
+from ui.terminal import (
+    CODE_SQUID_BANNER,
+    RUN_STARTED_DIVIDER,
+    SOFT_CYAN_HEX,
+    StartupInfo,
+    TerminalDisplay,
+)
 
 
 class ModelFailingLoop:
@@ -136,6 +143,7 @@ def _cancel_prompt_task(label: str) -> str:
 
 def test_prompt_task_uses_agent_prompt_without_toolbar(monkeypatch) -> None:
     prompt_calls = []
+    identity_calls = []
 
     class FakePromptSession:
         def prompt(self, *args, **kwargs) -> str:
@@ -143,11 +151,16 @@ def test_prompt_task_uses_agent_prompt_without_toolbar(monkeypatch) -> None:
             return "Do the thing"
 
     monkeypatch.setattr("main.PromptSession", FakePromptSession)
+    monkeypatch.setattr("main.print_formatted_text", lambda text: identity_calls.append(text))
 
     assert _prompt_task("Task") == "Do the thing"
 
     args, kwargs = prompt_calls[0]
-    assert args == ([("ansigreen bold", PROMPT_PREFIX)],)
+    assert identity_calls == [[(PROMPT_STYLE, INPUT_IDENTITY_LINE)]]
+    assert args == ([(PROMPT_STYLE, PROMPT_PREFIX)],)
+    assert args[0][0][0] == identity_calls[0][0][0]
+    assert PROMPT_STYLE == f"{SOFT_CYAN_HEX} bold"
+    assert PROMPT_STYLE != "ansicyan bold"
     assert "bottom_toolbar" not in kwargs
     assert kwargs["multiline"] is True
     assert kwargs["key_bindings"] is not None
