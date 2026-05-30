@@ -9,6 +9,7 @@ import pytest
 from core.approval import USER_DENIED_TOOL_ACTION
 from core.agent_loop import RunResult
 from ui.terminal import (
+    APPROVAL_PANEL_WIDTH,
     BOLD_STYLE,
     CODE_SQUID_BANNER,
     DIM_STYLE,
@@ -42,6 +43,30 @@ class FakeSpinner:
 
     def stop(self) -> None:
         self.stops += 1
+
+
+def _approval_panel_output(tool: str, label: str, value: str) -> str:
+    inner_width = APPROVAL_PANEL_WIDTH - 2
+    label_width = 7
+    value_width = inner_width - 2 - label_width - 1
+    title = " approval required "
+    top = f"╭─{title}{'─' * max(inner_width - len(title) - 1, 0)}╮"
+    bottom = f"╰{'─' * inner_width}╯"
+    tool_content = f" {'Tool:':<{label_width}} {tool:<{value_width}}"
+    action_content = f" {f'{label}:':<{label_width}} {value:<{value_width}}"
+    return "\n".join(
+        [
+            f"{RUN_DETAIL_INDENT}{top}",
+            f"{RUN_DETAIL_INDENT}│{tool_content:<{inner_width}}│",
+            f"{RUN_DETAIL_INDENT}│{action_content:<{inner_width}}│",
+            f"{RUN_DETAIL_INDENT}{bottom}",
+            "",
+        ]
+    )
+
+
+def _approval_prompt() -> str:
+    return f"{RUN_DETAIL_INDENT}Approve this tool action? [y/N] "
 
 
 @pytest.mark.parametrize("response", ["y", "yes", "Y", "YES"])
@@ -86,11 +111,123 @@ def test_approve_action_uses_multiline_prompt(
         is False
     )
 
-    assert capsys.readouterr().out == (
-        "Approve tool action?\n"
-        "💿 Run: python -m pytest\n"
+    assert capsys.readouterr().out == _approval_panel_output(
+        "run_command",
+        "Action",
+        "python -m pytest -q",
     )
-    assert prompts == ["[y/N] "]
+    assert prompts == [_approval_prompt()]
+
+
+@pytest.mark.parametrize(
+    ("action", "tool", "label", "value"),
+    [
+        (
+            {"tool": "read_file", "args": {"path": "kanban_toy2/index.html"}},
+            "read_file",
+            "Path",
+            "kanban_toy2/index.html",
+        ),
+        (
+            {"tool": "write_file", "args": {"path": "kanban_toy2/index.html"}},
+            "write_file",
+            "Path",
+            "kanban_toy2/index.html",
+        ),
+        (
+            {"tool": "run_command", "args": {"command": "mkdir -p /some/path"}},
+            "run_command",
+            "Action",
+            "mkdir -p /some/path",
+        ),
+    ],
+)
+def test_approve_action_uses_boxed_panel_for_common_tools(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    action: dict,
+    tool: str,
+    label: str,
+    value: str,
+) -> None:
+    monkeypatch.setattr(builtins, "input", lambda prompt: "n")
+
+    TerminalDisplay().approve_action(action)
+
+    assert capsys.readouterr().out == _approval_panel_output(tool, label, value)
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        {
+            "tool": "run_command",
+            "args": {
+                "command": (
+                    "python -m pytest tests/test_terminal.py "
+                    "--some-extremely-long-option-name with-a-very-long-value"
+                )
+            },
+        },
+        {
+            "tool": "write_file",
+            "args": {
+                "path": (
+                    "/home/aaron/Desktop/projects/very/deep/example/"
+                    "kanban_toy2/subdirectory/index.html"
+                )
+            },
+        },
+    ],
+)
+def test_approval_panel_truncates_long_command_or_path(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    action: dict,
+) -> None:
+    prompts: list[str] = []
+
+    def fake_input(prompt: str) -> str:
+        prompts.append(prompt)
+        return "n"
+
+    monkeypatch.setattr(builtins, "input", fake_input)
+
+    TerminalDisplay().approve_action(action)
+
+    out = capsys.readouterr().out
+    assert "…" in out
+    for line in out.splitlines():
+        assert len(line) <= len(RUN_DETAIL_INDENT) + APPROVAL_PANEL_WIDTH
+    assert len(prompts) == 1
+    assert len(prompts[0]) <= len(RUN_DETAIL_INDENT) + APPROVAL_PANEL_WIDTH + 1
+
+
+def test_approval_panel_colors_only_structural_borders_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    prompts: list[str] = []
+
+    def fake_input(prompt: str) -> str:
+        prompts.append(prompt)
+        return "n"
+
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(builtins, "input", fake_input)
+
+    TerminalDisplay().approve_action(
+        {"tool": "write_file", "args": {"path": "kanban_toy2/index.html"}}
+    )
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].startswith(f"{RUN_DETAIL_INDENT}{SOFT_CYAN_STYLE}╭─ approval required ")
+    assert lines[0].endswith(f"╮{RESET_STYLE}")
+    assert lines[1].startswith(f"{RUN_DETAIL_INDENT}{SOFT_CYAN_STYLE}│{RESET_STYLE} Tool:")
+    assert lines[1].endswith(f"{SOFT_CYAN_STYLE}│{RESET_STYLE}")
+    assert f"{SOFT_CYAN_STYLE}Tool" not in lines[1]
+    assert lines[3] == f"{RUN_DETAIL_INDENT}{SOFT_CYAN_STYLE}╰{'─' * (APPROVAL_PANEL_WIDTH - 2)}╯{RESET_STYLE}"
+    assert prompts == [_approval_prompt()]
 
 
 def test_action_started_is_quiet_in_normal_mode(
@@ -402,9 +539,10 @@ def test_approve_action_still_prints_requested_action(
         {"tool": "write_file", "args": {"path": "kanban_toy2/app.js"}}
     )
 
-    assert capsys.readouterr().out == (
-        "Approve tool action?\n"
-        "📝 Write: kanban_toy2/app.js\n"
+    assert capsys.readouterr().out == _approval_panel_output(
+        "write_file",
+        "Path",
+        "kanban_toy2/app.js",
     )
 
 
@@ -459,26 +597,29 @@ def test_pytest_command_success_label_is_compact(
 
 
 @pytest.mark.parametrize(
-    ("command", "approval_label", "success_label"),
+    ("command", "success_label"),
     [
-        ("find . -name '*.py'", "🔎 Search files\n", "🔎 Searched files\n"),
-        ("rg TODO", "🔎 Search files\n", "🔎 Searched files\n"),
-        ("grep -R TODO .", "🔎 Search files\n", "🔎 Searched files\n"),
-        ("ls tests", "🔎 List files\n", "🔎 Listed files\n"),
+        ("find . -name '*.py'", "🔎 Searched files\n"),
+        ("rg TODO", "🔎 Searched files\n"),
+        ("grep -R TODO .", "🔎 Searched files\n"),
+        ("ls tests", "🔎 Listed files\n"),
     ],
 )
-def test_search_and_list_commands_use_compact_labels(
+def test_search_and_list_commands_use_compact_success_labels(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     command: str,
-    approval_label: str,
     success_label: str,
 ) -> None:
     monkeypatch.setattr(builtins, "input", lambda prompt: "n")
     action = {"tool": "run_command", "args": {"command": command}}
 
     TerminalDisplay().approve_action(action)
-    assert capsys.readouterr().out == f"Approve tool action?\n{approval_label}"
+    assert capsys.readouterr().out == _approval_panel_output(
+        "run_command",
+        "Action",
+        command,
+    )
 
     TerminalDisplay().tool_result(action, {"ok": True, "output": ""})
     assert capsys.readouterr().out == f"{RUN_DETAIL_INDENT}{success_label}"
@@ -853,7 +994,24 @@ def test_approval_prompt_stops_spinner_before_asking(
 
     assert spinner.starts == 1
     assert spinner.stops == 1
-    assert capsys.readouterr().out == "Approve tool action?\n📖 Read: \n"
+    assert capsys.readouterr().out == _approval_panel_output("read_file", "Path", "")
+
+
+def test_approval_prompt_follows_assistant_with_single_blank(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(builtins, "input", lambda prompt: "n")
+    display = TerminalDisplay()
+
+    display.assistant_message("I'll inspect the file.")
+    display.approve_action({"tool": "read_file"})
+
+    assert capsys.readouterr().out == (
+        f"{RUN_EVENT_INDENT}🦑 I'll inspect the file.\n"
+        "\n"
+        f"{_approval_panel_output('read_file', 'Path', '')}"
+    )
 
 
 def test_interrupted_stops_spinner_before_printing(

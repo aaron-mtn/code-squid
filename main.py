@@ -13,7 +13,12 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 
 from agent.coding import CodingAgent
-from config.settings import DEFAULT_BASE_URL, Settings, load_settings
+from config.settings import (
+    DEFAULT_BASE_URL,
+    Settings,
+    load_settings,
+    write_approval_mode,
+)
 from core.agent_loop import AgentLoop, RunResult
 from core.approval import ApprovalPolicy
 from core.compaction import Compactor
@@ -52,10 +57,22 @@ At the task prompt:
 
 Shell commands:
   python main.py undo
+  python main.py mode
+  python main.py mode safe
+  python main.py mode yolo
   python main.py sessions
   python main.py show latest
   python main.py resume latest
   python main.py resume <session_id>"""
+
+FRIENDLY_MODES = {
+    "always": "safe",
+    "never": "yolo",
+}
+APPROVAL_MODES = {
+    "safe": "always",
+    "yolo": "never",
+}
 
 
 def _is_help_input(task: str) -> bool:
@@ -305,6 +322,36 @@ def _undo(repo_root: Path) -> None:
     print(f"↩️ Undo complete: restored {restored}, deleted {deleted}")
 
 
+def _mode(repo_root: Path, args: list[str]) -> int:
+    if not args:
+        settings = load_settings(repo_root)
+        approval_mode = settings.runtime.approval_mode
+        friendly_mode = FRIENDLY_MODES[approval_mode]
+        print(f"Current mode: {friendly_mode} (approval_mode={approval_mode})")
+        return 0
+
+    if len(args) != 1 or args[0] not in APPROVAL_MODES:
+        print("Invalid mode. Valid options: safe, yolo")
+        return 1
+
+    friendly_mode = args[0]
+    approval_mode = APPROVAL_MODES[friendly_mode]
+    write_approval_mode(repo_root, approval_mode)
+
+    if friendly_mode == "safe":
+        print(
+            "Mode set to safe (approval_mode=always). "
+            "Code Squid will ask before tool execution. This is not a sandbox."
+        )
+    else:
+        print(
+            "Mode set to yolo (approval_mode=never). "
+            "Tools will run without approval prompts."
+        )
+
+    return 0
+
+
 # Create the app objects, wire them together, and run one coding task.
 def main() -> int:
     repo_root = Path(".").resolve()
@@ -313,6 +360,9 @@ def main() -> int:
     if args == ["undo"]:
         _undo(repo_root)
         return 0
+
+    if args and args[0] == "mode":
+        return _mode(repo_root, args[1:])
 
     if handle_session_viewer(repo_root, args):
         return 0

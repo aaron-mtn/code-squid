@@ -8,9 +8,9 @@ SMALL AGENT. BIG TENTACLES.
 ## What it is
 
 Code Squid is a command-line coding agent that can read files, write files, and
-run commands in a local repository. It works through model tool calls, keeps a
-visible transcript of what is happening, and persists sessions so work can be
-shown or resumed later.
+run commands while working in a local repository. It works through model tool
+calls, shows a visible transcript of what is happening, and persists sessions so
+work can be shown, resumed, or reviewed later.
 
 It supports resume, latest-only undo, approval mode, transcript compaction, and
 a small set of local tools. The project is intended to stay small and
@@ -21,9 +21,13 @@ inspectable.
 Code Squid is not a general agent framework, a hardened sandbox, a multi-agent
 system, or a polished TUI/GUI.
 
+Approval mode is not containment. Code Squid can run local shell commands and
+can read or write real files as the current user.
+
 ## Current status
 
-This repository is at an MVP checkpoint.
+This repository is at an MVP checkpoint. It is public, but still a personal
+experimental project while the architecture and direction settle.
 
 LM Studio, or another OpenAI-compatible local server, is the recommended default
 provider path. The native Ollama provider exists and is experimental.
@@ -39,9 +43,8 @@ is sent. Code Squid rejects those replies and retries with a correction message.
 - Visible narration plus terminal tool-event display
 - Local tools: `read_file`, `write_file`, and `run_command`
 - Sessions saved under `.code-squid/sessions`
-- Show and list saved sessions
-- Resume the latest session or a specific session
-- Latest-only undo
+- Session listing, transcript display, and resume
+- Latest-only undo for `write_file`
 - Approval mode: `never` or `always`
 - Settings file with environment variable overrides
 - Provider support: `openai_compatible`, `openrouter`, and `ollama`
@@ -81,10 +84,15 @@ Enter a task when prompted. For example:
 Work in /absolute/path/to/repo. Start by reading the failing test and relevant implementation. Fix the bug with the smallest correct change. Run verification before finalizing.
 ```
 
-The interactive task prompt currently reads one input line. For long tasks,
-paste the task as one line for now. Multiline task input and stdin task input
-are not implemented yet; if you paste multiple lines into a normal shell, extra
-lines may be interpreted by the shell after Code Squid exits.
+The task prompt supports multiline input:
+
+- `Enter` sends the task.
+- `Alt+Enter` inserts a newline.
+- `Ctrl+J` inserts a newline.
+- `Ctrl+C` cancels before the run starts or interrupts an active run.
+
+Stdin task input is not implemented yet; start tasks from the interactive
+prompt.
 
 ## Configuration
 
@@ -132,6 +140,9 @@ Supported environment overrides:
 - `CODE_SQUID_PROVIDER`
 - `CODE_SQUID_TEMPERATURE`
 - `CODE_SQUID_DEBUG`
+
+`CODE_SQUID_TRACE=1` enables debug output and prints the full transcript at the
+end of a run.
 
 ## Providers
 
@@ -197,6 +208,9 @@ python main.py show <session_id>
 python main.py resume latest
 python main.py resume <session_id>
 python main.py undo
+python main.py mode
+python main.py mode safe
+python main.py mode yolo
 ```
 
 `python main.py` starts a new interactive task.
@@ -215,14 +229,63 @@ for a follow-up task.
 
 `python main.py undo` restores the latest undo buffer.
 
+`python main.py mode` prints the current approval mode.
+
+`python main.py mode safe` sets `runtime.approval_mode` to `always`. Safe mode
+asks before tool execution, but it is not a sandbox.
+
+`python main.py mode yolo` sets `runtime.approval_mode` to `never`. Tools run
+without approval prompts.
+
+At the task prompt, enter `/help` to print the current prompt keybindings and
+command summary.
+
+## Tools and safety
+
+Code Squid exposes three local tools to the model:
+
+- `read_file(path, start_line=None, end_line=None)`
+- `write_file(path, content)`
+- `run_command(command)`
+
+`read_file` and `write_file` require absolute paths. They are not restricted to
+the repository root; they can read or write any absolute path reachable by the
+current process.
+
+`run_command` runs a shell command from the current/configured repo root by
+default. It uses the local shell, has a timeout, and can mutate files or perform
+other local side effects.
+
+Code Squid is a trusted local tool, not a hardened sandbox. Review tasks and
+model/provider behavior with that in mind.
+
 ## Approval mode
+
+Friendly mode names map to the underlying setting:
+
+- `safe` means `approval_mode=always`
+- `yolo` means `approval_mode=never`
 
 `never` is trusted local mode. Tools run without prompting.
 
 `always` asks before every tool execution. If a tool call is denied, the denial
 is returned to the model as a normal failed tool result.
 
-Approval mode is not a sandbox. It is an interaction gate before tool execution.
+Approval mode is an interaction gate before tool execution, not a sandbox or
+containment boundary.
+
+## Local state and privacy
+
+Code Squid stores local runtime state under:
+
+```text
+.code-squid/
+```
+
+That directory may contain settings, sessions, logs, undo snapshots,
+transcripts, prompts, file contents, command output, local paths, and other
+repo-specific data. It is ignored by this repository and should stay ignored.
+Do not publish, upload, or share `.code-squid/` without reviewing it first.
 
 ## Sessions and undo
 
@@ -232,13 +295,14 @@ Sessions are stored in:
 .code-squid/sessions
 ```
 
-Each session records transcript and event entries in `session.jsonl`. Resume
-loads the saved messages, appends a follow-up user message, and continues the
-same saved session.
+Each session records transcript and event entries in `session.jsonl`. The
+session commands are useful for show/resume/report-style workflows: list saved
+sessions, inspect a transcript, or continue a previous run with a follow-up
+task.
 
-Undo restores the latest undo buffer only. Before `write_file` changes a file,
-Code Squid snapshots the previous state for undo. `run_command` is not
-undo-protected and can mutate files directly.
+Undo is latest-only. Starting a new run or resume creates a fresh undo buffer.
+Before `write_file` changes a file, Code Squid snapshots the previous state for
+undo. `run_command` is not undo-protected and can mutate files directly.
 
 ## Compaction
 
@@ -254,12 +318,27 @@ workspace memory.
 - Local trusted tool execution can affect real files.
 - Approval mode is not a sandbox.
 - `run_command` can mutate files and is not undo-protected.
+- Tool access is small by design: no plugin system, browser tool, patch tool,
+  or structured search tool.
 - OpenRouter can be noisier than local OpenAI-compatible providers.
+- The native Ollama provider is experimental.
 - Model quality matters, especially for tool use and final summaries.
 - There is no GUI/TUI yet.
-- There is no plugin system.
 - Compaction does not use an exact tokenizer yet.
-- Multiline task input and stdin task input are not implemented yet.
+- Stdin task input is not implemented yet.
+
+## Contributing
+
+Code Squid is public, but outside contributions are not actively accepted yet
+while the architecture and direction are still settling. Issues and pull
+requests may not be reviewed promptly.
+
+Forks and feedback are welcome.
+
+## License
+
+No `LICENSE` file is included yet. Until one is added, do not assume Code Squid
+is licensed for reuse or redistribution.
 
 ## Architecture reference
 

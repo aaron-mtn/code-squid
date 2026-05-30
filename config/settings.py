@@ -267,3 +267,21 @@ def load_settings(repo_root: Path) -> Settings:
         ),
         compaction=compaction,
     )
+
+
+def write_approval_mode(repo_root: Path, approval_mode: str) -> None:
+    if approval_mode not in VALID_APPROVAL_MODES:
+        valid_modes = ", ".join(sorted(VALID_APPROVAL_MODES))
+        raise ValueError(f"approval_mode must be one of {valid_modes}")
+
+    settings_path = repo_root / ".code-squid" / "settings.json"
+    raw_settings = _read_settings_file(settings_path)
+    runtime_settings = _section(raw_settings, "runtime", settings_path)
+    runtime_settings["approval_mode"] = approval_mode
+    raw_settings["runtime"] = runtime_settings
+
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        json.dumps(raw_settings, indent=2) + "\n",
+        encoding="utf-8",
+    )

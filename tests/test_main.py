@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from core.agent_loop import RunResult
@@ -7,6 +8,7 @@ from main import (
     INPUT_IDENTITY_LINE,
     PROMPT_STYLE,
     PROMPT_PREFIX,
+    _mode,
     _prompt_task,
     _resume_session,
     _run_loop,
@@ -58,6 +60,86 @@ class FakeSessionStore:
 
     def update_status(self, status: str) -> None:
         self.statuses.append(status)
+
+
+def _write_settings(repo_root: Path, settings: dict) -> Path:
+    settings_dir = repo_root / ".code-squid"
+    settings_dir.mkdir()
+    settings_path = settings_dir / "settings.json"
+    settings_path.write_text(json.dumps(settings), encoding="utf-8")
+    return settings_path
+
+
+def test_mode_displays_safe_for_always(tmp_path, capsys) -> None:
+    _write_settings(tmp_path, {"runtime": {"approval_mode": "always"}})
+
+    assert _mode(tmp_path, []) == 0
+
+    assert capsys.readouterr().out == "Current mode: safe (approval_mode=always)\n"
+
+
+def test_mode_displays_yolo_for_never(tmp_path, capsys) -> None:
+    _write_settings(tmp_path, {"runtime": {"approval_mode": "never"}})
+
+    assert _mode(tmp_path, []) == 0
+
+    assert capsys.readouterr().out == "Current mode: yolo (approval_mode=never)\n"
+
+
+def test_mode_safe_writes_approval_always_and_preserves_settings(tmp_path, capsys) -> None:
+    settings_path = _write_settings(
+        tmp_path,
+        {
+            "model": {"name": "local-model"},
+            "runtime": {"approval_mode": "never", "max_tool_steps": 3},
+        },
+    )
+
+    assert _mode(tmp_path, ["safe"]) == 0
+
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert settings == {
+        "model": {"name": "local-model"},
+        "runtime": {"approval_mode": "always", "max_tool_steps": 3},
+    }
+    assert capsys.readouterr().out == (
+        "Mode set to safe (approval_mode=always). "
+        "Code Squid will ask before tool execution. This is not a sandbox.\n"
+    )
+
+
+def test_mode_yolo_writes_approval_never(tmp_path, capsys) -> None:
+    settings_path = _write_settings(tmp_path, {"runtime": {"approval_mode": "always"}})
+
+    assert _mode(tmp_path, ["yolo"]) == 0
+
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert settings["runtime"]["approval_mode"] == "never"
+    assert capsys.readouterr().out == (
+        "Mode set to yolo (approval_mode=never). "
+        "Tools will run without approval prompts.\n"
+    )
+
+
+def test_mode_safe_creates_minimal_settings_file(tmp_path, capsys) -> None:
+    settings_path = tmp_path / ".code-squid" / "settings.json"
+
+    assert _mode(tmp_path, ["safe"]) == 0
+
+    assert json.loads(settings_path.read_text(encoding="utf-8")) == {
+        "runtime": {"approval_mode": "always"}
+    }
+    capsys.readouterr()
+
+
+def test_mode_invalid_value_does_not_modify_settings(tmp_path, capsys) -> None:
+    settings_path = _write_settings(tmp_path, {"runtime": {"approval_mode": "always"}})
+    original = settings_path.read_text(encoding="utf-8")
+
+    assert _mode(tmp_path, ["banana"]) == 1
+
+    assert settings_path.read_text(encoding="utf-8") == original
+    assert capsys.readouterr().out == "Invalid mode. Valid options: safe, yolo\n"
 
 
 def test_run_loop_handles_model_request_error_with_log_and_status(tmp_path) -> None:

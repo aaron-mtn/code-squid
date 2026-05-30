@@ -35,6 +35,7 @@ FINAL_REPORT_DIVIDER = "─" * RAIL_WIDTH
 RUN_EVENT_INDENT = "  "
 RUN_DETAIL_INDENT = "    "
 STARTUP_PANEL_WIDTH = 76
+APPROVAL_PANEL_WIDTH = RAIL_WIDTH
 STARTUP_CONTROLS = "Enter send • Alt+Enter newline • Ctrl+C stop"
 INPUT_IDENTITY_LINE = "@code-squid 🦑"
 INPUT_PROMPT_PREFIX = "› "
@@ -178,14 +179,76 @@ class TerminalDisplay:
     def approve_action(self, action: dict) -> bool:
         self._stop_spinner()
         self._print_leading_blank_if_needed()
-        print("Approve tool action?")
-        print(self._action_text(action))
+        if self._needs_detail_blank_after_assistant:
+            print()
+        self._needs_detail_blank_after_assistant = False
+        panel_lines, prompt = self._approval_panel(action)
+        for line in panel_lines:
+            print(line)
         self._needs_leading_blank = True
-        response = input("[y/N] ")
+        response = input(prompt)
         return response.strip().lower() in {"y", "yes"}
 
     def _action_text(self, action: dict) -> str:
         return self._action_label(action, "start")
+
+    def _approval_line(self, line: str) -> str:
+        if self.debug:
+            return line
+        return self._run_detail_line(line)
+
+    def _approval_panel(self, action: dict) -> tuple[list[str], str]:
+        inner_width = APPROVAL_PANEL_WIDTH - 2
+        title = " approval required "
+        top = f"╭─{title}{'─' * max(inner_width - len(title) - 1, 0)}╮"
+        bottom = f"╰{'─' * inner_width}╯"
+        lines = [
+            self._approval_line(_structural_text(top)),
+            self._approval_panel_line("Tool", str(action.get("tool", "")), inner_width),
+            self._approval_panel_action_line(action, inner_width),
+            self._approval_line(_structural_text(bottom)),
+        ]
+        prompt = self._approval_prompt()
+        return lines, prompt
+
+    def _approval_panel_action_line(self, action: dict, inner_width: int) -> str:
+        tool_name = action.get("tool", "")
+        args = action.get("args", {})
+
+        if tool_name in {"read_file", "write_file"}:
+            return self._approval_panel_line(
+                "Path",
+                self._short_path(self._single_line(args.get("path", ""))),
+                inner_width,
+            )
+
+        if tool_name == "run_command":
+            return self._approval_panel_line(
+                "Action",
+                self._single_line(args.get("command", "")),
+                inner_width,
+            )
+
+        return self._approval_panel_line("Action", self._action_text(action), inner_width)
+
+    def _approval_panel_line(self, label: str, value: str, inner_width: int) -> str:
+        label_text = f"{label}:"
+        label_width = 7
+        available = inner_width - 2 - label_width - 1
+        value = self._truncate_middle(str(value), max(available, 1))
+        content = f" {label_text:<{label_width}} {value}"
+        return self._approval_line(
+            _structural_bordered_line("│", f"{content:<{inner_width}}", "│")
+        )
+
+    def _approval_prompt(self) -> str:
+        prompt = "Approve this tool action? [y/N] "
+        if self.debug:
+            return prompt
+        return self._run_detail_line(prompt)
+
+    def _single_line(self, value: object) -> str:
+        return " ".join(str(value).splitlines())
 
     # These helpers are display-only. They must never mutate action args,
     # result payloads, session storage, or any values sent back to the agent.
