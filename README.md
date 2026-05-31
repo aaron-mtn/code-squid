@@ -268,8 +268,10 @@ Friendly mode names map to the underlying setting:
 
 `never` is trusted local mode. Tools run without prompting.
 
-`always` asks before every tool execution. If a tool call is denied, the denial
-is returned to the model as a normal failed tool result.
+`always` asks before every tool execution. Press Enter to approve the proposed
+tool action. Type a comment to reject the action and steer the model; the
+denial is returned to the model as a normal failed tool result before your
+comment is added as the next user instruction.
 
 Approval mode is an interaction gate before tool execution, not a sandbox or
 containment boundary.

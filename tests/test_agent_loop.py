@@ -1,7 +1,7 @@
 import json
 
 from core.agent_loop import AgentLoop, RunResult
-from core.approval import ApprovalPolicy
+from core.approval import ApprovalDecision, ApprovalPolicy
 from core.session import Session
 from core.tool_results import ToolResults
 
@@ -67,11 +67,11 @@ class FakeToolResults:
 
 
 class FakePrompter:
-    def __init__(self, approved: bool) -> None:
-        self.approved = approved
+    def __init__(self, decision: ApprovalDecision) -> None:
+        self.decision = decision
 
-    def approve_action(self, action: dict) -> bool:
-        return self.approved
+    def approve_action(self, action: dict) -> ApprovalDecision:
+        return self.decision
 
 
 class FakeSessionStore:
@@ -501,11 +501,36 @@ def test_approval_denial_does_not_execute_tool_action() -> None:
             ),
             reply("TASK COMPLETE"),
         ],
-        approval_policy=ApprovalPolicy("always", prompter=FakePrompter(approved=False)),
+        approval_policy=ApprovalPolicy(
+            "always",
+            prompter=FakePrompter(ApprovalDecision(approved=False)),
+        ),
     )
 
     assert tool_executor.actions == []
     assert session.messages[-1]["content"] == "TASK COMPLETE"
+
+
+def test_empty_approval_decision_executes_tool_action() -> None:
+    session, tool_executor, _, _ = run_loop(
+        [
+            reply(
+                "valid",
+                actions=[{"tool": "read_file", "tool_call_id": "call_1"}],
+            ),
+            reply("TASK COMPLETE"),
+        ],
+        approval_policy=ApprovalPolicy(
+            "always",
+            prompter=FakePrompter(ApprovalDecision(approved=True, instruction="")),
+        ),
+    )
+
+    assert tool_executor.actions == [{"tool": "read_file", "tool_call_id": "call_1"}]
+    assert all(
+        message.get("content") != "user denied tool action"
+        for message in session.messages
+    )
 
 
 def test_approval_denial_appends_normal_denied_tool_result_message() -> None:
@@ -526,7 +551,10 @@ def test_approval_denial_appends_normal_denied_tool_result_message() -> None:
         tool_results=ToolResults(),
         agent=FakeAgent(),
         display=NullDisplay(),
-        approval_policy=ApprovalPolicy("always", prompter=FakePrompter(approved=False)),
+        approval_policy=ApprovalPolicy(
+            "always",
+            prompter=FakePrompter(ApprovalDecision(approved=False)),
+        ),
     )
 
     loop.run()
@@ -538,6 +566,120 @@ def test_approval_denial_appends_normal_denied_tool_result_message() -> None:
         "ok": False,
         "tool": "read_file",
         "error": "user denied tool action",
+    }
+
+
+def test_approval_comment_is_appended_after_denied_tool_result() -> None:
+    session = Session(repo_root=None)
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter(
+            [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "valid",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "read_file",
+                                    "arguments": '{"path": "/tmp/x"}',
+                                },
+                            }
+                        ],
+                    },
+                    "actions": [{"tool": "read_file", "tool_call_id": "call_1"}],
+                    "reason": "",
+                },
+                reply("TASK COMPLETE"),
+            ]
+        ),
+        tool_executor=FakeToolExecutor(),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        approval_policy=ApprovalPolicy(
+            "always",
+            prompter=FakePrompter(
+                ApprovalDecision(
+                    approved=False,
+                    instruction="Please inspect the project tree first.",
+                )
+            ),
+        ),
+    )
+
+    loop.run()
+
+    assistant_index = next(
+        index
+        for index, message in enumerate(session.messages)
+        if message.get("role") == "assistant" and message.get("tool_calls")
+    )
+    assert session.messages[assistant_index + 1]["role"] == "tool"
+    assert session.messages[assistant_index + 1]["tool_call_id"] == "call_1"
+    assert json.loads(session.messages[assistant_index + 1]["content"])["error"] == (
+        "user denied tool action"
+    )
+    assert session.messages[assistant_index + 2] == {
+        "role": "user",
+        "content": "Please inspect the project tree first.",
+    }
+
+
+def test_multiline_approval_comment_is_appended_after_denied_tool_result() -> None:
+    instruction = "Please do this instead:\n1. Read README.md\n2. Keep the patch tiny"
+    session = Session(repo_root=None)
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter(
+            [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "valid",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "run_command",
+                                    "arguments": '{"command": "npm test"}',
+                                },
+                            }
+                        ],
+                    },
+                    "actions": [{"tool": "run_command", "tool_call_id": "call_1"}],
+                    "reason": "",
+                },
+                reply("TASK COMPLETE"),
+            ]
+        ),
+        tool_executor=FakeToolExecutor(),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        approval_policy=ApprovalPolicy(
+            "always",
+            prompter=FakePrompter(
+                ApprovalDecision(approved=False, instruction=instruction)
+            ),
+        ),
+    )
+
+    loop.run()
+
+    assistant_index = next(
+        index
+        for index, message in enumerate(session.messages)
+        if message.get("role") == "assistant" and message.get("tool_calls")
+    )
+    assert session.messages[assistant_index + 1]["role"] == "tool"
+    assert session.messages[assistant_index + 2] == {
+        "role": "user",
+        "content": instruction,
     }
 
 

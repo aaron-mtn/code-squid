@@ -10,7 +10,10 @@ import shutil
 import sys
 import textwrap
 
-from core.approval import USER_DENIED_TOOL_ACTION
+from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
+
+from core.approval import ApprovalDecision, USER_DENIED_TOOL_ACTION
+from ui.prompt_input import prompt_multiline_input
 from ui.spinner import TerminalSpinner
 
 
@@ -43,6 +46,7 @@ DIM_STYLE = "\033[2m"
 BOLD_STYLE = "\033[1m"
 RESET_STYLE = "\033[0m"
 SOFT_CYAN_HEX = "#7dd3fc"
+INPUT_PROMPT_STYLE = f"{SOFT_CYAN_HEX} bold"
 SOFT_GREEN_HEX = "#86efac"
 SOFT_YELLOW_HEX = "#ffea80"
 SOFT_RED_HEX = "#f77998"
@@ -177,7 +181,7 @@ class TerminalDisplay:
 
         print(self._action_text(action))
 
-    def approve_action(self, action: dict) -> bool:
+    def approve_action(self, action: dict) -> ApprovalDecision:
         self._stop_spinner()
         self._print_leading_blank_if_needed()
         if self._needs_detail_blank_after_assistant:
@@ -187,12 +191,19 @@ class TerminalDisplay:
         for line in panel_lines:
             print(line)
         self._needs_leading_blank = True
-        response = input(prompt)
-        approved = response.strip().lower() in {"y", "yes"}
-        if self._can_compact_approval_prompt():
-            self._clear_printed_lines(len(panel_lines) + 1)
-            self._print_compact_approval_result(action, approved)
-        return approved
+        response = prompt_multiline_input(prompt)
+        approved = response.strip() == ""
+        instruction = "" if approved else response
+        can_compact = self._can_compact_approval_prompt() and "\n" not in response
+        if can_compact:
+            self._clear_printed_lines(
+                len(panel_lines) + self._printed_prompt_line_count(prompt)
+            )
+            self._print_compact_approval_result(action, approved, instruction)
+        elif not approved:
+            self._print_rejected_approval_result(instruction)
+            self._compacted_denied_action = action
+        return ApprovalDecision(approved=approved, instruction=instruction)
 
     def _action_text(self, action: dict) -> str:
         return self._action_label(action, "start")
@@ -202,7 +213,7 @@ class TerminalDisplay:
             return line
         return self._run_detail_line(line)
 
-    def _approval_panel(self, action: dict) -> tuple[list[str], str]:
+    def _approval_panel(self, action: dict) -> tuple[list[str], AnyFormattedText]:
         inner_width = APPROVAL_PANEL_WIDTH - 2
         title = " approval required "
         top = f"╭─{title}{'─' * max(inner_width - len(title) - 1, 0)}╮"
@@ -246,11 +257,28 @@ class TerminalDisplay:
             _structural_bordered_line("│", f"{content:<{inner_width}}", "│")
         )
 
-    def _approval_prompt(self) -> str:
-        prompt = "Approve this tool action? [y/N] "
+    def _approval_prompt(self) -> AnyFormattedText:
+        prompt_text = "Enter to approve, or type guidance instead:\n"
         if self.debug:
-            return prompt
-        return self._run_detail_line(prompt)
+            return FormattedText(
+                [
+                    ("", prompt_text),
+                    (INPUT_PROMPT_STYLE, INPUT_PROMPT_PREFIX),
+                ]
+            )
+        return FormattedText(
+            [
+                ("", self._run_detail_line(prompt_text)),
+                (INPUT_PROMPT_STYLE, INPUT_PROMPT_PREFIX),
+            ]
+        )
+
+    def _printed_prompt_line_count(self, prompt: AnyFormattedText) -> int:
+        if isinstance(prompt, str):
+            text = prompt
+        else:
+            text = "".join(fragment[1] for fragment in prompt)
+        return text.count("\n") + 1
 
     def _can_compact_approval_prompt(self) -> bool:
         return (
@@ -264,16 +292,34 @@ class TerminalDisplay:
             sys.stdout.write("\033[1A\r\033[2K")
         sys.stdout.flush()
 
-    def _print_compact_approval_result(self, action: dict, approved: bool) -> None:
+    def _print_compact_approval_result(
+        self,
+        action: dict,
+        approved: bool,
+        instruction: str,
+    ) -> None:
         if approved:
             self._needs_leading_blank = False
             self._compacted_denied_action = None
             return
 
-        line = _styled_text(self._run_detail_line("🚫 Denied"), SOFT_RED_STYLE)
-        print(line)
+        self._print_rejected_approval_result(instruction)
         self._needs_leading_blank = True
         self._compacted_denied_action = action
+
+    def _print_rejected_approval_result(self, instruction: str) -> None:
+        if instruction:
+            comment = self._truncate_middle(
+                self._single_line(instruction),
+                DISPLAY_WRAP_WIDTH,
+            )
+            label = f"💬 User note: {comment}"
+            style = SOFT_CYAN_STYLE
+        else:
+            label = "🚫 Action denied"
+            style = SOFT_RED_STYLE
+        line = _styled_text(self._run_detail_line(label), style)
+        print(line)
 
     def _single_line(self, value: object) -> str:
         return " ".join(str(value).splitlines())

@@ -15,13 +15,14 @@ USER_DENIED_TOOL_ACTION = "user denied tool action"
 
 
 class ApprovalPrompter(Protocol):
-    def approve_action(self, action: dict) -> bool:
-        """Return True when the user approves a tool action."""
+    def approve_action(self, action: dict) -> "ApprovalDecision":
+        """Return the user's approval decision for a tool action."""
 
 
 @dataclass(frozen=True)
 class ApprovalDecision:
     approved: bool
+    instruction: str = ""
     reason: str = ""
 
 
@@ -45,12 +46,17 @@ class ApprovalPolicy:
                 reason="approval prompter required",
             )
 
-        if self.prompter.approve_action(action):
+        decision = self.prompter.approve_action(action)
+        if isinstance(decision, bool):
+            decision = ApprovalDecision(approved=decision)
+
+        if decision.approved:
             return ApprovalDecision(approved=True)
 
         return ApprovalDecision(
             approved=False,
-            reason=USER_DENIED_TOOL_ACTION,
+            instruction=decision.instruction,
+            reason=decision.reason or USER_DENIED_TOOL_ACTION,
         )
 
 

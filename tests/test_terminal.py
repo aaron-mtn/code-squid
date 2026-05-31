@@ -1,10 +1,10 @@
-import builtins
 import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
 
 import pytest
+from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
 
 from core.approval import USER_DENIED_TOOL_ACTION
 from core.agent_loop import RunResult
@@ -14,6 +14,8 @@ from ui.terminal import (
     CODE_SQUID_BANNER,
     DIM_STYLE,
     FINAL_REPORT_DIVIDER,
+    INPUT_PROMPT_PREFIX,
+    INPUT_PROMPT_STYLE,
     RAIL_WIDTH,
     RUN_DETAIL_INDENT,
     RESET_STYLE,
@@ -65,41 +67,90 @@ def _approval_panel_output(tool: str, label: str, value: str) -> str:
     )
 
 
-def _approval_prompt() -> str:
-    return f"{RUN_DETAIL_INDENT}Approve this tool action? [y/N] "
+def _approval_prompt() -> FormattedText:
+    return FormattedText(
+        [
+            ("", f"{RUN_DETAIL_INDENT}Enter to approve, or type guidance instead:\n"),
+            (INPUT_PROMPT_STYLE, INPUT_PROMPT_PREFIX),
+        ]
+    )
 
 
-@pytest.mark.parametrize("response", ["y", "yes", "Y", "YES"])
-def test_approve_action_accepts_y_and_yes(
+def _prompt_plain_text(prompt: AnyFormattedText) -> str:
+    if isinstance(prompt, str):
+        return prompt
+    return "".join(fragment[1] for fragment in prompt)
+
+
+@pytest.mark.parametrize("response", ["", "   "])
+def test_approve_action_accepts_empty_input(
     monkeypatch: pytest.MonkeyPatch,
     response: str,
 ) -> None:
-    monkeypatch.setattr(builtins, "input", lambda prompt: response)
+    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: response)
 
-    assert TerminalDisplay().approve_action({"tool": "read_file"}) is True
+    decision = TerminalDisplay().approve_action({"tool": "read_file"})
+
+    assert decision.approved is True
+    assert decision.instruction == ""
 
 
-@pytest.mark.parametrize("response", ["", "n", "no", "sure"])
-def test_approve_action_denies_anything_else(
+@pytest.mark.parametrize("response", ["n", "no", "use python instead"])
+def test_approve_action_rejects_non_empty_input_as_instruction(
     monkeypatch: pytest.MonkeyPatch,
     response: str,
 ) -> None:
-    monkeypatch.setattr(builtins, "input", lambda prompt: response)
+    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: response)
 
-    assert TerminalDisplay().approve_action({"tool": "read_file"}) is False
+    decision = TerminalDisplay().approve_action({"tool": "read_file"})
+
+    assert decision.approved is False
+    assert decision.instruction == response
+
+
+def test_approve_action_rejects_multiline_input_with_full_instruction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = "Use a narrower change.\nKeep the tests focused.\nDo not run npm."
+    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: response)
+
+    decision = TerminalDisplay().approve_action({"tool": "read_file"})
+
+    assert decision.approved is False
+    assert decision.instruction == response
+
+
+def test_multiline_rejection_summary_is_compacted_without_losing_instruction(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    response = (
+        "Use a narrower change.\n"
+        "This second line should reach the model.\n"
+        "This third line can stay out of the visible summary."
+    )
+    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: response)
+
+    decision = TerminalDisplay().approve_action({"tool": "read_file"})
+
+    assert decision.instruction == response
+    out = capsys.readouterr().out
+    assert "User note: Use a narrower change." in out
+    assert "…" in out
+    assert "\nThis second line should reach the model" not in out
 
 
 def test_approve_action_uses_multiline_prompt(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    prompts: list[str] = []
+    prompts: list[AnyFormattedText] = []
 
-    def fake_input(prompt: str) -> str:
+    def fake_input(prompt: AnyFormattedText) -> str:
         prompts.append(prompt)
-        return "n"
+        return ""
 
-    monkeypatch.setattr(builtins, "input", fake_input)
+    monkeypatch.setattr("ui.terminal.prompt_multiline_input", fake_input)
 
     assert (
         TerminalDisplay().approve_action(
@@ -108,7 +159,8 @@ def test_approve_action_uses_multiline_prompt(
                 "args": {"command": "python -m pytest -q"},
             }
         )
-        is False
+        .approved
+        is True
     )
 
     assert capsys.readouterr().out == _approval_panel_output(
@@ -150,7 +202,7 @@ def test_approve_action_uses_boxed_panel_for_common_tools(
     label: str,
     value: str,
 ) -> None:
-    monkeypatch.setattr(builtins, "input", lambda prompt: "n")
+    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: "")
 
     TerminalDisplay().approve_action(action)
 
@@ -185,13 +237,13 @@ def test_approval_panel_truncates_long_command_or_path(
     capsys: pytest.CaptureFixture[str],
     action: dict,
 ) -> None:
-    prompts: list[str] = []
+    prompts: list[AnyFormattedText] = []
 
-    def fake_input(prompt: str) -> str:
+    def fake_input(prompt: AnyFormattedText) -> str:
         prompts.append(prompt)
-        return "n"
+        return ""
 
-    monkeypatch.setattr(builtins, "input", fake_input)
+    monkeypatch.setattr("ui.terminal.prompt_multiline_input", fake_input)
 
     TerminalDisplay().approve_action(action)
 
@@ -200,21 +252,24 @@ def test_approval_panel_truncates_long_command_or_path(
     for line in out.splitlines():
         assert len(line) <= len(RUN_DETAIL_INDENT) + APPROVAL_PANEL_WIDTH
     assert len(prompts) == 1
-    assert len(prompts[0]) <= len(RUN_DETAIL_INDENT) + APPROVAL_PANEL_WIDTH + 1
+    assert all(
+        len(line) <= len(RUN_DETAIL_INDENT) + APPROVAL_PANEL_WIDTH + 1
+        for line in _prompt_plain_text(prompts[0]).splitlines()
+    )
 
 
 def test_approval_panel_colors_only_structural_borders_in_tty(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    prompts: list[str] = []
+    prompts: list[AnyFormattedText] = []
 
-    def fake_input(prompt: str) -> str:
+    def fake_input(prompt: AnyFormattedText) -> str:
         prompts.append(prompt)
-        return "n"
+        return ""
 
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr(builtins, "input", fake_input)
+    monkeypatch.setattr("ui.terminal.prompt_multiline_input", fake_input)
 
     TerminalDisplay(show_transcript=True).approve_action(
         {"tool": "write_file", "args": {"path": "kanban_toy2/index.html"}}
@@ -234,21 +289,22 @@ def test_approve_action_compacts_approved_panel_in_interactive_tty(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    def fake_input(prompt: str) -> str:
-        print(prompt)
-        return "y"
+    def fake_input(prompt: AnyFormattedText) -> str:
+        print(_prompt_plain_text(prompt))
+        return ""
 
     action = {"tool": "run_command", "args": {"command": "python -m pytest -q"}}
     display = TerminalDisplay()
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr(builtins, "input", fake_input)
+    monkeypatch.setattr("ui.terminal.prompt_multiline_input", fake_input)
 
-    assert display.approve_action(action) is True
+    assert display.approve_action(action).approved is True
 
     out = capsys.readouterr().out
-    assert out.count("\033[1A\r\033[2K") == 5
+    assert out.count("\033[1A\r\033[2K") == 6
     assert "✅ Approved" not in out
     assert "🚫 Denied" not in out
+    assert "💬 User note" not in out
     assert out.endswith("\033[1A\r\033[2K")
 
     display.tool_result(action, {"ok": True, "output": ""})
@@ -262,9 +318,9 @@ def test_approve_action_compacts_denied_panel_with_short_path_in_interactive_tty
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    def fake_input(prompt: str) -> str:
-        print(prompt)
-        return "no"
+    def fake_input(prompt: AnyFormattedText) -> str:
+        print(_prompt_plain_text(prompt))
+        return "use the existing directory"
 
     action = {
         "tool": "write_file",
@@ -276,14 +332,20 @@ def test_approve_action_compacts_denied_panel_with_short_path_in_interactive_tty
         },
     }
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr(builtins, "input", fake_input)
+    monkeypatch.setattr("ui.terminal.prompt_multiline_input", fake_input)
 
-    assert TerminalDisplay().approve_action(action) is False
+    decision = TerminalDisplay().approve_action(action)
+
+    assert decision.approved is False
+    assert decision.instruction == "use the existing directory"
 
     out = capsys.readouterr().out
-    assert out.count("\033[1A\r\033[2K") == 5
+    assert out.count("\033[1A\r\033[2K") == 6
+    assert "approval required" not in out.split("\033[2K")[-1]
     assert out.endswith(
-        f"{SOFT_RED_STYLE}{RUN_DETAIL_INDENT}🚫 Denied{RESET_STYLE}\n"
+        f"{SOFT_CYAN_STYLE}{RUN_DETAIL_INDENT}"
+        "💬 User note: use the existing directory"
+        f"{RESET_STYLE}\n"
     )
 
 
@@ -291,16 +353,16 @@ def test_compact_denial_suppresses_duplicate_denied_tool_result(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    def fake_input(prompt: str) -> str:
-        print(prompt)
-        return "n"
+    def fake_input(prompt: AnyFormattedText) -> str:
+        print(_prompt_plain_text(prompt))
+        return "try reading first"
 
     action = {"tool": "write_file", "args": {"path": "kanban_toy2/index.html"}}
     display = TerminalDisplay()
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr(builtins, "input", fake_input)
+    monkeypatch.setattr("ui.terminal.prompt_multiline_input", fake_input)
 
-    assert display.approve_action(action) is False
+    assert display.approve_action(action).approved is False
     capsys.readouterr()
 
     display.tool_result(action, {"ok": False, "error": USER_DENIED_TOOL_ACTION})
@@ -611,7 +673,7 @@ def test_approve_action_still_prints_requested_action(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(builtins, "input", lambda prompt: "n")
+    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: "")
 
     TerminalDisplay().approve_action(
         {"tool": "write_file", "args": {"path": "kanban_toy2/app.js"}}
@@ -689,7 +751,7 @@ def test_search_and_list_commands_use_compact_success_labels(
     command: str,
     success_label: str,
 ) -> None:
-    monkeypatch.setattr(builtins, "input", lambda prompt: "n")
+    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: "")
     action = {"tool": "run_command", "args": {"command": command}}
 
     TerminalDisplay().approve_action(action)
@@ -1065,21 +1127,36 @@ def test_approval_prompt_stops_spinner_before_asking(
 ) -> None:
     spinner = FakeSpinner()
     display = TerminalDisplay(_spinner=spinner)
-    monkeypatch.setattr(builtins, "input", lambda prompt: "n")
+    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: "stop")
 
     display.thinking()
-    assert display.approve_action({"tool": "read_file"}) is False
+    assert display.approve_action({"tool": "read_file"}).approved is False
 
     assert spinner.starts == 1
     assert spinner.stops == 1
-    assert capsys.readouterr().out == _approval_panel_output("read_file", "Path", "")
+    assert capsys.readouterr().out == (
+        _approval_panel_output("read_file", "Path", "")
+        + f"{RUN_DETAIL_INDENT}💬 User note: stop\n"
+    )
+
+
+def test_approval_prompt_preserves_ctrl_c_interrupt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def interrupt(prompt: str) -> str:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("ui.terminal.prompt_multiline_input", interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        TerminalDisplay().approve_action({"tool": "read_file"})
 
 
 def test_approval_prompt_follows_assistant_with_single_blank(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(builtins, "input", lambda prompt: "n")
+    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: "")
     display = TerminalDisplay()
 
     display.assistant_message("I'll inspect the file.")

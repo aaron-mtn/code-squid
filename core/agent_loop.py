@@ -62,6 +62,9 @@ class AgentLoop:
         for message in messages:
             self._add_message(message)
 
+    def _user_instruction_message(self, instruction: str) -> dict[str, str]:
+        return {"role": "user", "content": instruction}
+
     # Update durable session status when persistence is wired in.
     def _update_status(self, status: str) -> None:
         if self.session_store is not None:
@@ -166,6 +169,7 @@ class AgentLoop:
 
             # Execute each requested tool action and collect the raw results.
             results = []
+            approval_instructions = []
             for action in reply["actions"]:
                 decision = self.approval_policy.check(action)
                 if decision.approved:
@@ -173,6 +177,8 @@ class AgentLoop:
                     result = self.tool_executor.execute(action)
                 else:
                     result = denied_result(action, decision.reason)
+                    if decision.instruction.strip():
+                        approval_instructions.append(decision.instruction)
                 self.display.tool_result(action, result)
                 results.append(result)
 
@@ -182,6 +188,12 @@ class AgentLoop:
                 results,
             )
             self._add_messages(*result_messages)
+            self._add_messages(
+                *[
+                    self._user_instruction_message(instruction)
+                    for instruction in approval_instructions
+                ]
+            )
 
             if reply["actions"]:
                 tool_steps_used += 1

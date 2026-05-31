@@ -6,11 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.input.ansi_escape_sequences import ANSI_SEQUENCES
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.keys import Keys
 
 from agent.coding import CodingAgent
 from config.settings import (
@@ -33,9 +29,11 @@ from storage.session_index import latest_session_id, session_dir_for
 from storage.session_store import SessionStore
 from storage.undo_store import UndoStore
 from ui.sessions import USAGE, handle_session_viewer
+from ui.prompt_input import prompt_multiline_input
 from ui.terminal import (
     INPUT_IDENTITY_LINE,
     INPUT_PROMPT_PREFIX,
+    INPUT_PROMPT_STYLE,
     SOFT_CYAN_HEX,
     StartupInfo,
     TerminalDisplay,
@@ -43,7 +41,7 @@ from ui.terminal import (
 
 
 PROMPT_PREFIX = INPUT_PROMPT_PREFIX
-PROMPT_STYLE = f"{SOFT_CYAN_HEX} bold"
+PROMPT_STYLE = INPUT_PROMPT_STYLE
 CANCELLED_BEFORE_RUN_MESSAGE = "⏹️ Cancelled before task started"
 HELP_COMMAND = "/help"
 HELP_TEXT = """\
@@ -84,30 +82,9 @@ def _print_help() -> None:
 
 
 def _prompt_task(label: str) -> str:
-    ANSI_SEQUENCES["\x1b[27;2;13~"] = Keys.ControlJ
-    ANSI_SEQUENCES["\x1b[13;2u"] = Keys.ControlJ
-
-    bindings = KeyBindings()
-
-    @bindings.add("enter")
-    def _(event) -> None:
-        event.app.exit(result=event.current_buffer.text)
-
-    @bindings.add("c-j")
-    def _(event) -> None:
-        event.current_buffer.insert_text("\n")
-
-    @bindings.add("escape", "enter")
-    def _(event) -> None:
-        event.current_buffer.insert_text("\n")
-
-    print_formatted_text(FormattedText([(PROMPT_STYLE, INPUT_IDENTITY_LINE)]))
-
-    session = PromptSession()
-    return session.prompt(
+    return prompt_multiline_input(
         FormattedText([(PROMPT_STYLE, PROMPT_PREFIX)]),
-        multiline=True,
-        key_bindings=bindings,
+        preface=FormattedText([(PROMPT_STYLE, INPUT_IDENTITY_LINE)]),
     )
 
 

@@ -225,27 +225,21 @@ def _cancel_prompt_task(label: str) -> str:
 
 def test_prompt_task_uses_agent_prompt_without_toolbar(monkeypatch) -> None:
     prompt_calls = []
-    identity_calls = []
 
-    class FakePromptSession:
-        def prompt(self, *args, **kwargs) -> str:
-            prompt_calls.append((args, kwargs))
-            return "Do the thing"
+    def fake_prompt(prompt, *, preface=None) -> str:
+        prompt_calls.append((prompt, preface))
+        return "Do the thing"
 
-    monkeypatch.setattr("main.PromptSession", FakePromptSession)
-    monkeypatch.setattr("main.print_formatted_text", lambda text: identity_calls.append(text))
+    monkeypatch.setattr("main.prompt_multiline_input", fake_prompt)
 
     assert _prompt_task("Task") == "Do the thing"
 
-    args, kwargs = prompt_calls[0]
-    assert identity_calls == [[(PROMPT_STYLE, INPUT_IDENTITY_LINE)]]
-    assert args == ([(PROMPT_STYLE, PROMPT_PREFIX)],)
-    assert args[0][0][0] == identity_calls[0][0][0]
+    prompt, preface = prompt_calls[0]
+    assert preface == [(PROMPT_STYLE, INPUT_IDENTITY_LINE)]
+    assert prompt == [(PROMPT_STYLE, PROMPT_PREFIX)]
+    assert prompt[0][0] == preface[0][0]
     assert PROMPT_STYLE == f"{SOFT_CYAN_HEX} bold"
     assert PROMPT_STYLE != "ansicyan bold"
-    assert "bottom_toolbar" not in kwargs
-    assert kwargs["multiline"] is True
-    assert kwargs["key_bindings"] is not None
 
 
 def test_new_session_prints_banner_before_task_prompt(monkeypatch, tmp_path, capsys) -> None:
