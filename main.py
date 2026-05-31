@@ -34,7 +34,6 @@ from ui.terminal import (
     INPUT_IDENTITY_LINE,
     INPUT_PROMPT_PREFIX,
     INPUT_PROMPT_STYLE,
-    SOFT_CYAN_HEX,
     StartupInfo,
     TerminalDisplay,
 )
