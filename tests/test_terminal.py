@@ -216,7 +216,7 @@ def test_approval_panel_colors_only_structural_borders_in_tty(
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     monkeypatch.setattr(builtins, "input", fake_input)
 
-    TerminalDisplay().approve_action(
+    TerminalDisplay(show_transcript=True).approve_action(
         {"tool": "write_file", "args": {"path": "kanban_toy2/index.html"}}
     )
 
@@ -228,6 +228,84 @@ def test_approval_panel_colors_only_structural_borders_in_tty(
     assert f"{SOFT_CYAN_STYLE}Tool" not in lines[1]
     assert lines[3] == f"{RUN_DETAIL_INDENT}{SOFT_CYAN_STYLE}╰{'─' * (APPROVAL_PANEL_WIDTH - 2)}╯{RESET_STYLE}"
     assert prompts == [_approval_prompt()]
+
+
+def test_approve_action_compacts_approved_panel_in_interactive_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fake_input(prompt: str) -> str:
+        print(prompt)
+        return "y"
+
+    action = {"tool": "run_command", "args": {"command": "python -m pytest -q"}}
+    display = TerminalDisplay()
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(builtins, "input", fake_input)
+
+    assert display.approve_action(action) is True
+
+    out = capsys.readouterr().out
+    assert out.count("\033[1A\r\033[2K") == 5
+    assert "✅ Approved" not in out
+    assert "🚫 Denied" not in out
+    assert out.endswith("\033[1A\r\033[2K")
+
+    display.tool_result(action, {"ok": True, "output": ""})
+
+    assert capsys.readouterr().out == (
+        f"{DIM_STYLE}{RUN_DETAIL_INDENT}💿 Ran: python -m pytest{RESET_STYLE}\n"
+    )
+
+
+def test_approve_action_compacts_denied_panel_with_short_path_in_interactive_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fake_input(prompt: str) -> str:
+        print(prompt)
+        return "no"
+
+    action = {
+        "tool": "write_file",
+        "args": {
+            "path": (
+                "/home/aaron/Desktop/projects/very/deep/example/"
+                "kanban_toy2/subdirectory/index.html"
+            )
+        },
+    }
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(builtins, "input", fake_input)
+
+    assert TerminalDisplay().approve_action(action) is False
+
+    out = capsys.readouterr().out
+    assert out.count("\033[1A\r\033[2K") == 5
+    assert out.endswith(
+        f"{SOFT_RED_STYLE}{RUN_DETAIL_INDENT}🚫 Denied{RESET_STYLE}\n"
+    )
+
+
+def test_compact_denial_suppresses_duplicate_denied_tool_result(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fake_input(prompt: str) -> str:
+        print(prompt)
+        return "n"
+
+    action = {"tool": "write_file", "args": {"path": "kanban_toy2/index.html"}}
+    display = TerminalDisplay()
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(builtins, "input", fake_input)
+
+    assert display.approve_action(action) is False
+    capsys.readouterr()
+
+    display.tool_result(action, {"ok": False, "error": USER_DENIED_TOOL_ACTION})
+
+    assert capsys.readouterr().out == ""
 
 
 def test_action_started_is_quiet_in_normal_mode(

@@ -122,6 +122,7 @@ class TerminalDisplay:
         )
         self._needs_leading_blank = False
         self._needs_detail_blank_after_assistant = False
+        self._compacted_denied_action: dict | None = None
 
     def start(self) -> None:
         self._stop_spinner()
@@ -187,7 +188,11 @@ class TerminalDisplay:
             print(line)
         self._needs_leading_blank = True
         response = input(prompt)
-        return response.strip().lower() in {"y", "yes"}
+        approved = response.strip().lower() in {"y", "yes"}
+        if self._can_compact_approval_prompt():
+            self._clear_printed_lines(len(panel_lines) + 1)
+            self._print_compact_approval_result(action, approved)
+        return approved
 
     def _action_text(self, action: dict) -> str:
         return self._action_label(action, "start")
@@ -247,6 +252,29 @@ class TerminalDisplay:
             return prompt
         return self._run_detail_line(prompt)
 
+    def _can_compact_approval_prompt(self) -> bool:
+        return (
+            not self.debug
+            and not self.show_transcript
+            and sys.stdout.isatty()
+        )
+
+    def _clear_printed_lines(self, line_count: int) -> None:
+        for _ in range(line_count):
+            sys.stdout.write("\033[1A\r\033[2K")
+        sys.stdout.flush()
+
+    def _print_compact_approval_result(self, action: dict, approved: bool) -> None:
+        if approved:
+            self._needs_leading_blank = False
+            self._compacted_denied_action = None
+            return
+
+        line = _styled_text(self._run_detail_line("🚫 Denied"), SOFT_RED_STYLE)
+        print(line)
+        self._needs_leading_blank = True
+        self._compacted_denied_action = action
+
     def _single_line(self, value: object) -> str:
         return " ".join(str(value).splitlines())
 
@@ -283,6 +311,9 @@ class TerminalDisplay:
         self._stop_spinner()
 
         if result.get("error") == USER_DENIED_TOOL_ACTION:
+            if self._compacted_denied_action == action:
+                self._compacted_denied_action = None
+                return
             self._print_visible_line("🚫 Action denied", style=SOFT_RED_STYLE)
             self._print_debug_tool_result(action, result)
             return
