@@ -53,6 +53,7 @@ At the task prompt:
   Ctrl+C cancels before a run or interrupts an active run.
 
 Shell commands:
+  python main.py --cwd /path/to/project
   python main.py undo
   python main.py mode
   python main.py mode safe
@@ -78,6 +79,31 @@ def _is_help_input(task: str) -> bool:
 
 def _print_help() -> None:
     print(HELP_TEXT)
+
+
+def _extract_cwd_arg(args: list[str]) -> tuple[str | None, list[str]]:
+    if "--cwd" not in args:
+        return None, args
+
+    cwd_index = args.index("--cwd")
+    if cwd_index + 1 >= len(args):
+        raise ValueError("--cwd requires a path")
+
+    cwd_arg = args[cwd_index + 1]
+    remaining_args = args[:cwd_index] + args[cwd_index + 2 :]
+    return cwd_arg, remaining_args
+
+
+def _resolve_workspace_root(cwd_arg: str | None) -> Path:
+    workspace_root = Path.cwd() if cwd_arg is None else Path(cwd_arg).expanduser()
+    resolved_root = workspace_root.resolve()
+
+    if not resolved_root.exists():
+        raise ValueError(f"--cwd path does not exist: {workspace_root}")
+    if not resolved_root.is_dir():
+        raise ValueError(f"--cwd path is not a directory: {workspace_root}")
+
+    return resolved_root
 
 
 def _prompt_task(label: str) -> str:
@@ -330,8 +356,13 @@ def _mode(repo_root: Path, args: list[str]) -> int:
 
 # Create the app objects, wire them together, and run one coding task.
 def main() -> int:
-    repo_root = Path(".").resolve()
     args = sys.argv[1:]
+    try:
+        cwd_arg, args = _extract_cwd_arg(args)
+        repo_root = _resolve_workspace_root(cwd_arg)
+    except ValueError as error:
+        print(error)
+        return 1
 
     if args == ["undo"]:
         _undo(repo_root)

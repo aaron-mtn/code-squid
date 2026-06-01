@@ -493,6 +493,24 @@ def test_startup_panel_stays_plain_when_not_tty() -> None:
     assert RESET_STYLE not in panel
 
 
+def test_short_path_prefers_startup_workspace_root(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = workspace / "src" / "app.py"
+    target.parent.mkdir()
+    target.write_text("print('hello')\n", encoding="utf-8")
+    display = TerminalDisplay(
+        startup_info=StartupInfo(
+            directory=workspace,
+            provider="openai_compatible",
+            model="qwen3.5-9b",
+            approval_mode="never",
+        )
+    )
+
+    assert display._short_path(str(target)) == "src/app.py"
+
+
 def test_soft_color_constants_derive_expected_ansi_styles() -> None:
     assert SOFT_CYAN_HEX == "#7dd3fc"
     assert SOFT_GREEN_HEX == "#86efac"

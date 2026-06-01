@@ -12,6 +12,7 @@ from storage.session_index import (
 
 USAGE = (
     "Usage: python main.py "
+    "[--cwd <path>] "
     "[sessions | show latest | show <session_id> | resume latest | resume <session_id> "
     "| undo | mode | mode safe | mode yolo]"
 )

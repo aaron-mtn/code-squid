@@ -832,7 +832,7 @@ class TerminalDisplay:
         try:
             path_obj = Path(raw_path).expanduser()
             if path_obj.is_absolute():
-                display_path = str(path_obj.resolve().relative_to(Path.cwd().resolve()))
+                display_path = str(path_obj.resolve().relative_to(self._display_root()))
             else:
                 display_path = raw_path
         except (OSError, ValueError):
@@ -846,6 +846,11 @@ class TerminalDisplay:
             return self._truncate_middle("/".join(("…", *parts[-2:])), PATH_LABEL_MAX)
 
         return self._truncate_middle(display_path, PATH_LABEL_MAX)
+
+    def _display_root(self) -> Path:
+        if self.startup_info is not None:
+            return self.startup_info.directory.resolve()
+        return Path.cwd().resolve()
 
     def _truncate_middle(self, value: str, max_length: int) -> str:
         if len(value) <= max_length:

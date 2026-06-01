@@ -8,11 +8,13 @@ from main import (
     INPUT_IDENTITY_LINE,
     PROMPT_STYLE,
     PROMPT_PREFIX,
+    _resolve_workspace_root,
     _mode,
     _prompt_task,
     _resume_session,
     _run_loop,
     _run_new_session,
+    main,
 )
 from storage.session_store import SessionStore
 from ui.terminal import (
@@ -68,6 +70,69 @@ def _write_settings(repo_root: Path, settings: dict) -> Path:
     settings_path = settings_dir / "settings.json"
     settings_path.write_text(json.dumps(settings), encoding="utf-8")
     return settings_path
+
+
+def test_resolve_workspace_root_omitted_uses_current_directory(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    assert _resolve_workspace_root(None) == tmp_path.resolve()
+
+
+def test_resolve_workspace_root_valid_cwd_uses_selected_directory(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    assert _resolve_workspace_root(str(workspace)) == workspace.resolve()
+
+
+def test_resolve_workspace_root_missing_cwd_fails_clearly(tmp_path) -> None:
+    missing = tmp_path / "missing"
+
+    try:
+        _resolve_workspace_root(str(missing))
+    except ValueError as error:
+        assert str(error) == f"--cwd path does not exist: {missing}"
+    else:
+        raise AssertionError("Expected missing --cwd path to fail")
+
+
+def test_resolve_workspace_root_file_cwd_fails_clearly(tmp_path) -> None:
+    file_path = tmp_path / "file.txt"
+    file_path.write_text("not a directory", encoding="utf-8")
+
+    try:
+        _resolve_workspace_root(str(file_path))
+    except ValueError as error:
+        assert str(error) == f"--cwd path is not a directory: {file_path}"
+    else:
+        raise AssertionError("Expected file --cwd path to fail")
+
+
+def test_main_passes_selected_cwd_to_existing_commands(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    calls = []
+
+    def fake_mode(repo_root: Path, args: list[str]) -> int:
+        calls.append((repo_root, args))
+        return 0
+
+    monkeypatch.setattr("sys.argv", ["main.py", "--cwd", str(tmp_path), "mode"])
+    monkeypatch.setattr("main._mode", fake_mode)
+
+    assert main() == 0
+    assert calls == [(tmp_path.resolve(), [])]
+
+
+def test_main_missing_cwd_value_fails_clearly(monkeypatch, capsys) -> None:
+    monkeypatch.setattr("sys.argv", ["main.py", "--cwd"])
+
+    assert main() == 1
+    assert capsys.readouterr().out == "--cwd requires a path\n"
 
 
 def test_mode_displays_safe_for_always(tmp_path, capsys) -> None:

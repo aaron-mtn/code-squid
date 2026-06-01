@@ -1,6 +1,8 @@
 import importlib
 from pathlib import Path
+import shlex
 from subprocess import TimeoutExpired
+import sys
 
 import pytest
 
@@ -40,6 +42,19 @@ def test_read_file_rejects_relative_path_and_succeeds_with_absolute_path(tmp_pat
         "total_lines": 1,
         "ranged": False,
     }
+
+
+def test_run_command_uses_selected_repo_root_as_cwd(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    result = run_command(
+        workspace,
+        f'{shlex.quote(sys.executable)} -c "from pathlib import Path; print(Path.cwd())"',
+    )
+
+    assert result["ok"] is True
+    assert result["output"] == f"{workspace.resolve()}\n"
 
 
 def test_read_file_supports_start_and_end_line_range(tmp_path: Path) -> None:

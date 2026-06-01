@@ -26,7 +26,8 @@ settings -> provider -> model adapter -> coding-agent policy -> agent loop -> ap
 
 - `main.py`
   - Thin CLI entry point, object wiring, and small command dispatch.
-  - Uses the current directory as `repo_root`.
+  - Uses the selected workspace directory as `repo_root`; by default this is
+    the current directory.
   - Loads settings and wires provider, model adapter, compactor, session state,
     session storage, undo storage, tool executor, tool-result formatter,
     terminal display, approval policy, coding agent, and loop.
