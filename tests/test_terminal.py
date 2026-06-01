@@ -1284,7 +1284,48 @@ def test_loop_finished_prints_full_stored_paths_in_final_file_report(
 
     output = capsys.readouterr().out
     assert f"    {full_path}\n" in output
+    assert "\033]8" not in output
     assert "…/01_single_bug/calculator.py" not in output
+
+
+def test_loop_finished_prints_clickable_file_links_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    full_path = str(tmp_path / "calculator.py")
+    file_uri = Path(full_path).expanduser().resolve().as_uri()
+    session = SimpleNamespace(
+        files_read={full_path},
+        files_written={full_path},
+        messages=[],
+    )
+
+    TerminalDisplay().loop_finished(session)
+
+    output = capsys.readouterr().out
+    assert f"    \033]8;;{file_uri}\033\\{full_path}\033]8;;\033\\\n" in output
+
+
+def test_debug_loop_finished_keeps_file_paths_plain_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    full_path = str(tmp_path / "calculator.py")
+    session = SimpleNamespace(
+        files_read={full_path},
+        files_written={full_path},
+        messages=[],
+    )
+
+    TerminalDisplay(debug=True).loop_finished(session)
+
+    output = capsys.readouterr().out
+    assert f"    {full_path}\n" in output
+    assert "\033]8" not in output
 
 
 def test_normal_assistant_final_summary_uses_report_heading(

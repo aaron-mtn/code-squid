@@ -66,6 +66,22 @@ SOFT_YELLOW_STYLE = _ansi_fg(SOFT_YELLOW_HEX)
 SOFT_RED_STYLE = _ansi_fg(SOFT_RED_HEX)
 
 
+def _terminal_link(label: str, uri: str) -> str:
+    return f"\033]8;;{uri}\033\\{label}\033]8;;\033\\"
+
+
+def _file_link(path: str) -> str:
+    if not sys.stdout.isatty():
+        return path
+
+    try:
+        uri = Path(path).expanduser().resolve().as_uri()
+    except (OSError, RuntimeError, ValueError):
+        return path
+
+    return _terminal_link(path, uri)
+
+
 @dataclass(frozen=True)
 class StartupInfo:
     directory: Path
@@ -805,7 +821,8 @@ class TerminalDisplay:
             return
 
         for path in sorted(paths):
-            print(f"    {path}")
+            display_path = path if self.debug else _file_link(path)
+            print(f"    {display_path}")
 
     def _short_path(self, path: str) -> str:
         if not path:
