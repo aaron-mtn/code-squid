@@ -57,6 +57,7 @@ Shell commands:
   python main.py undo
   python main.py mode
   python main.py mode safe
+  python main.py mode guarded
   python main.py mode yolo
   python main.py sessions
   python main.py show latest
@@ -65,10 +66,12 @@ Shell commands:
 
 FRIENDLY_MODES = {
     "always": "safe",
+    "guarded": "guarded",
     "never": "yolo",
 }
 APPROVAL_MODES = {
     "safe": "always",
+    "guarded": "guarded",
     "yolo": "never",
 }
 
@@ -334,7 +337,7 @@ def _mode(repo_root: Path, args: list[str]) -> int:
         return 0
 
     if len(args) != 1 or args[0] not in APPROVAL_MODES:
-        print("Invalid mode. Valid options: safe, yolo")
+        print("Invalid mode. Valid options: safe, guarded, yolo")
         return 1
 
     friendly_mode = args[0]
@@ -345,6 +348,11 @@ def _mode(repo_root: Path, args: list[str]) -> int:
         print(
             "Mode set to safe (approval_mode=always). "
             "Code Squid will ask before tool execution. This is not a sandbox."
+        )
+    elif friendly_mode == "guarded":
+        print(
+            "Mode set to guarded (approval_mode=guarded). "
+            "Low-risk workspace actions can run without approval prompts."
         )
     else:
         print(

@@ -18,6 +18,26 @@ def test_approval_policy_never_approves_without_prompter() -> None:
     assert decision.reason == ""
 
 
+def test_approval_policy_guarded_allows_action_without_reason() -> None:
+    prompter = FakePrompter(ApprovalDecision(approved=False))
+
+    decision = ApprovalPolicy("guarded", prompter=prompter).check({"tool": "read_file"})
+
+    assert decision.approved is True
+    assert prompter.actions == []
+
+
+def test_approval_policy_guarded_prompts_for_action_with_reason() -> None:
+    action = {"tool": "run_command", "approval_reason": "Command is risky"}
+    prompter = FakePrompter(ApprovalDecision(approved=False))
+
+    decision = ApprovalPolicy("guarded", prompter=prompter).check(action)
+
+    assert decision.approved is False
+    assert decision.reason == USER_DENIED_TOOL_ACTION
+    assert prompter.actions == [action]
+
+
 def test_approval_policy_always_approves_when_prompter_approves() -> None:
     action = {"tool": "read_file"}
     prompter = FakePrompter(ApprovalDecision(approved=True))

@@ -10,6 +10,7 @@ from typing import Protocol
 
 APPROVAL_NEVER = "never"
 APPROVAL_ALWAYS = "always"
+APPROVAL_GUARDED = "guarded"
 
 USER_DENIED_TOOL_ACTION = "user denied tool action"
 
@@ -30,7 +31,7 @@ class ApprovalPolicy:
     """Owns approval-mode decisions without depending on a UI implementation."""
 
     def __init__(self, mode: str, prompter: ApprovalPrompter | None = None) -> None:
-        if mode not in {APPROVAL_NEVER, APPROVAL_ALWAYS}:
+        if mode not in {APPROVAL_NEVER, APPROVAL_ALWAYS, APPROVAL_GUARDED}:
             raise ValueError(f"Unknown approval mode: {mode}")
 
         self.mode = mode
@@ -38,6 +39,9 @@ class ApprovalPolicy:
 
     def check(self, action: dict) -> ApprovalDecision:
         if self.mode == APPROVAL_NEVER:
+            return ApprovalDecision(approved=True)
+
+        if self.mode == APPROVAL_GUARDED and not action.get("approval_reason"):
             return ApprovalDecision(approved=True)
 
         if self.prompter is None:

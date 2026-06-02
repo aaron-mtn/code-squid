@@ -151,6 +151,14 @@ def test_mode_displays_yolo_for_never(tmp_path, capsys) -> None:
     assert capsys.readouterr().out == "Current mode: yolo (approval_mode=never)\n"
 
 
+def test_mode_displays_guarded_for_guarded(tmp_path, capsys) -> None:
+    _write_settings(tmp_path, {"runtime": {"approval_mode": "guarded"}})
+
+    assert _mode(tmp_path, []) == 0
+
+    assert capsys.readouterr().out == "Current mode: guarded (approval_mode=guarded)\n"
+
+
 def test_mode_safe_writes_approval_always_and_preserves_settings(tmp_path, capsys) -> None:
     settings_path = _write_settings(
         tmp_path,
@@ -186,6 +194,19 @@ def test_mode_yolo_writes_approval_never(tmp_path, capsys) -> None:
     )
 
 
+def test_mode_guarded_writes_approval_guarded(tmp_path, capsys) -> None:
+    settings_path = _write_settings(tmp_path, {"runtime": {"approval_mode": "always"}})
+
+    assert _mode(tmp_path, ["guarded"]) == 0
+
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert settings["runtime"]["approval_mode"] == "guarded"
+    assert capsys.readouterr().out == (
+        "Mode set to guarded (approval_mode=guarded). "
+        "Low-risk workspace actions can run without approval prompts.\n"
+    )
+
+
 def test_mode_safe_creates_minimal_settings_file(tmp_path, capsys) -> None:
     settings_path = tmp_path / ".code-squid" / "settings.json"
 
@@ -204,7 +225,7 @@ def test_mode_invalid_value_does_not_modify_settings(tmp_path, capsys) -> None:
     assert _mode(tmp_path, ["banana"]) == 1
 
     assert settings_path.read_text(encoding="utf-8") == original
-    assert capsys.readouterr().out == "Invalid mode. Valid options: safe, yolo\n"
+    assert capsys.readouterr().out == "Invalid mode. Valid options: safe, guarded, yolo\n"
 
 
 def test_run_loop_handles_model_request_error_with_log_and_status(tmp_path) -> None:

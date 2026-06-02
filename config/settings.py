@@ -25,7 +25,7 @@ DEFAULT_TEMPERATURE = None
 # Approval mode is parsed here, but enforcement belongs in the runtime/tool
 # execution path. "never" is the current trusted-local behavior.
 DEFAULT_APPROVAL_MODE = "never"
-VALID_APPROVAL_MODES = {"never", "always"}
+VALID_APPROVAL_MODES = {"never", "always", "guarded"}
 
 # None means unlimited tool steps. Users can set a positive integer if they want
 # a loop guard for smaller or less reliable models.

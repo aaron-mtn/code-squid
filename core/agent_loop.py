@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from core.approval import ApprovalPolicy, denied_result
+from core.command_safety import guarded_run_command_reason
 from core.workspace_boundary import workspace_boundary_reason
 
 
@@ -173,9 +174,13 @@ class AgentLoop:
             approval_instructions = []
             for action in reply["actions"]:
                 workspace_boundary_reason_value = self._workspace_boundary_reason(action)
+                approval_reason = (
+                    workspace_boundary_reason_value
+                    or self._guarded_run_command_reason(action)
+                )
                 approval_action = (
-                    {**action, "approval_reason": workspace_boundary_reason_value}
-                    if workspace_boundary_reason_value is not None
+                    {**action, "approval_reason": approval_reason}
+                    if approval_reason is not None
                     else action
                 )
                 decision = self.approval_policy.check(approval_action)
@@ -222,3 +227,23 @@ class AgentLoop:
             return None
 
         return workspace_boundary_reason(action, repo_root)
+
+    def _guarded_run_command_reason(self, action: dict) -> str | None:
+        if self.approval_policy.mode != "guarded":
+            return None
+        if action.get("tool") != "run_command":
+            return None
+
+        args = action.get("args", {})
+        if not isinstance(args, dict):
+            return "Command is not on the guarded allowlist"
+
+        command = args.get("command")
+        if not isinstance(command, str):
+            return "Command is not on the guarded allowlist"
+
+        repo_root = getattr(self.tool_executor, "repo_root", None)
+        if repo_root is None:
+            return "Command is not on the guarded allowlist"
+
+        return guarded_run_command_reason(command, repo_root)

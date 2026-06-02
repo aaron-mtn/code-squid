@@ -53,7 +53,8 @@ class FakeModelAdapter:
 
 
 class FakeToolExecutor:
-    def __init__(self) -> None:
+    def __init__(self, repo_root=None) -> None:
+        self.repo_root = repo_root
         self.actions = []
 
     def execute(self, action: dict) -> dict:
@@ -69,8 +70,10 @@ class FakeToolResults:
 class FakePrompter:
     def __init__(self, decision: ApprovalDecision) -> None:
         self.decision = decision
+        self.actions = []
 
     def approve_action(self, action: dict) -> ApprovalDecision:
+        self.actions.append(action)
         return self.decision
 
 
@@ -156,9 +159,10 @@ def run_loop(
     max_tool_steps: int | None = None,
     approval_policy: ApprovalPolicy | None = None,
     compactor: FakeCompactor | None = None,
+    repo_root=None,
 ) -> tuple[Session, FakeToolExecutor, FakeModelAdapter, NullDisplay]:
-    session = Session(repo_root=None)
-    tool_executor = FakeToolExecutor()
+    session = Session(repo_root=repo_root)
+    tool_executor = FakeToolExecutor(repo_root=repo_root)
     model_adapter = FakeModelAdapter(replies)
     display = NullDisplay()
     loop = AgentLoop(
@@ -509,6 +513,168 @@ def test_approval_denial_does_not_execute_tool_action() -> None:
 
     assert tool_executor.actions == []
     assert session.messages[-1]["content"] == "TASK COMPLETE"
+
+
+def test_guarded_allows_inside_workspace_read_file_without_approval(tmp_path) -> None:
+    target = tmp_path / "README.md"
+    target.write_text("hello", encoding="utf-8")
+    prompter = FakePrompter(ApprovalDecision(approved=False))
+
+    _, tool_executor, _, _ = run_loop(
+        [
+            reply("valid", actions=[{"tool": "read_file", "args": {"path": str(target)}}]),
+            reply("TASK COMPLETE"),
+        ],
+        approval_policy=ApprovalPolicy("guarded", prompter=prompter),
+        repo_root=tmp_path,
+    )
+
+    assert prompter.actions == []
+    assert tool_executor.actions == [
+        {"tool": "read_file", "args": {"path": str(target)}}
+    ]
+
+
+def test_guarded_allows_inside_workspace_write_file_without_approval(tmp_path) -> None:
+    target = tmp_path / "README.md"
+    prompter = FakePrompter(ApprovalDecision(approved=False))
+
+    _, tool_executor, _, _ = run_loop(
+        [
+            reply(
+                "valid",
+                actions=[
+                    {
+                        "tool": "write_file",
+                        "args": {"path": str(target), "content": "hello"},
+                    }
+                ],
+            ),
+            reply("TASK COMPLETE"),
+        ],
+        approval_policy=ApprovalPolicy("guarded", prompter=prompter),
+        repo_root=tmp_path,
+    )
+
+    assert prompter.actions == []
+    assert tool_executor.actions == [
+        {"tool": "write_file", "args": {"path": str(target), "content": "hello"}}
+    ]
+
+
+def test_guarded_asks_for_outside_workspace_file_tool(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside.txt"
+    workspace.mkdir()
+    prompter = FakePrompter(ApprovalDecision(approved=False))
+
+    _, tool_executor, _, _ = run_loop(
+        [
+            reply(
+                "valid",
+                actions=[{"tool": "read_file", "args": {"path": str(outside)}}],
+            ),
+            reply("TASK COMPLETE"),
+        ],
+        approval_policy=ApprovalPolicy("guarded", prompter=prompter),
+        repo_root=workspace,
+    )
+
+    assert tool_executor.actions == []
+    assert len(prompter.actions) == 1
+    assert prompter.actions[0]["tool"] == "read_file"
+    assert "outside the workspace root" in prompter.actions[0]["approval_reason"]
+
+
+def test_guarded_allows_low_risk_run_command_without_approval(tmp_path) -> None:
+    prompter = FakePrompter(ApprovalDecision(approved=False))
+
+    _, tool_executor, _, _ = run_loop(
+        [
+            reply("valid", actions=[{"tool": "run_command", "args": {"command": "pwd"}}]),
+            reply("TASK COMPLETE"),
+        ],
+        approval_policy=ApprovalPolicy("guarded", prompter=prompter),
+        repo_root=tmp_path,
+    )
+
+    assert prompter.actions == []
+    assert tool_executor.actions == [
+        {"tool": "run_command", "args": {"command": "pwd"}}
+    ]
+
+
+def test_guarded_asks_for_risky_run_command(tmp_path) -> None:
+    prompter = FakePrompter(ApprovalDecision(approved=False))
+
+    _, tool_executor, _, _ = run_loop(
+        [
+            reply(
+                "valid",
+                actions=[{"tool": "run_command", "args": {"command": "mkdir build"}}],
+            ),
+            reply("TASK COMPLETE"),
+        ],
+        approval_policy=ApprovalPolicy("guarded", prompter=prompter),
+        repo_root=tmp_path,
+    )
+
+    assert tool_executor.actions == []
+    assert prompter.actions == [
+        {
+            "tool": "run_command",
+            "args": {"command": "mkdir build"},
+            "approval_reason": "Command uses shell syntax that requires approval",
+        }
+    ]
+
+
+def test_always_still_asks_for_every_tool(tmp_path) -> None:
+    target = tmp_path / "README.md"
+    target.write_text("hello", encoding="utf-8")
+    prompter = FakePrompter(ApprovalDecision(approved=True))
+
+    _, tool_executor, _, _ = run_loop(
+        [
+            reply("valid", actions=[{"tool": "read_file", "args": {"path": str(target)}}]),
+            reply("TASK COMPLETE"),
+        ],
+        approval_policy=ApprovalPolicy("always", prompter=prompter),
+        repo_root=tmp_path,
+    )
+
+    assert len(prompter.actions) == 1
+    assert tool_executor.actions == [
+        {"tool": "read_file", "args": {"path": str(target)}}
+    ]
+
+
+def test_never_still_asks_never_and_allows_outside_workspace(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside.txt"
+    workspace.mkdir()
+    prompter = FakePrompter(ApprovalDecision(approved=False))
+
+    _, tool_executor, _, _ = run_loop(
+        [
+            reply(
+                "valid",
+                actions=[{"tool": "read_file", "args": {"path": str(outside)}}],
+            ),
+            reply("TASK COMPLETE"),
+        ],
+        approval_policy=ApprovalPolicy("never", prompter=prompter),
+        repo_root=workspace,
+    )
+
+    assert prompter.actions == []
+    assert tool_executor.actions == [
+        {
+            "tool": "read_file",
+            "args": {"path": str(outside)},
+            "outside_workspace_approved": True,
+        }
+    ]
 
 
 def test_empty_approval_decision_executes_tool_action() -> None:
