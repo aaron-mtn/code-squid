@@ -238,10 +238,28 @@ class TerminalDisplay:
             self._approval_line(_structural_text(top)),
             self._approval_panel_line("Tool", str(action.get("tool", "")), inner_width),
             self._approval_panel_action_line(action, inner_width),
-            self._approval_line(_structural_text(bottom)),
         ]
+        if action.get("approval_reason"):
+            lines.append(
+                self._approval_panel_line(
+                    "Reason",
+                    self._approval_reason_label(action),
+                    inner_width,
+                )
+            )
+        lines.append(self._approval_line(_structural_text(bottom)))
         prompt = self._approval_prompt()
         return lines, prompt
+
+    def _approval_reason_label(self, action: dict) -> str:
+        reason = self._single_line(str(action.get("approval_reason", "")))
+        if self._is_outside_workspace_approval(action):
+            return "Outside workspace"
+        return reason
+
+    def _is_outside_workspace_approval(self, action: dict) -> bool:
+        reason = self._single_line(str(action.get("approval_reason", "")))
+        return reason.startswith("Requested path is outside the workspace root:")
 
     def _approval_panel_action_line(self, action: dict, inner_width: int) -> str:
         tool_name = action.get("tool", "")

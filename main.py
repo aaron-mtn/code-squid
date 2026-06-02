@@ -155,6 +155,7 @@ def _build_loop(
         repo_root=repo_root,
         session=session,
         undo_store=undo_store,
+        allow_outside_workspace=settings.runtime.approval_mode == "never",
     )
     tool_results = ToolResults()
     approval_policy = ApprovalPolicy(

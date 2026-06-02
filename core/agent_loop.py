@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from core.approval import ApprovalPolicy, denied_result
+from core.workspace_boundary import workspace_boundary_reason
 
 
 MAX_CONSECUTIVE_INVALID_REPLIES = 3
@@ -171,15 +172,26 @@ class AgentLoop:
             results = []
             approval_instructions = []
             for action in reply["actions"]:
-                decision = self.approval_policy.check(action)
+                workspace_boundary_reason_value = self._workspace_boundary_reason(action)
+                approval_action = (
+                    {**action, "approval_reason": workspace_boundary_reason_value}
+                    if workspace_boundary_reason_value is not None
+                    else action
+                )
+                decision = self.approval_policy.check(approval_action)
                 if decision.approved:
-                    self.display.action_started(action)
-                    result = self.tool_executor.execute(action)
+                    execute_action = (
+                        {**action, "outside_workspace_approved": True}
+                        if workspace_boundary_reason_value is not None
+                        else action
+                    )
+                    self.display.action_started(approval_action)
+                    result = self.tool_executor.execute(execute_action)
                 else:
                     result = denied_result(action, decision.reason)
                     if decision.instruction.strip():
                         approval_instructions.append(decision.instruction)
-                self.display.tool_result(action, result)
+                self.display.tool_result(approval_action, result)
                 results.append(result)
 
             # Convert tool results into transcript messages and store them.
@@ -203,3 +215,10 @@ class AgentLoop:
 
         self._update_status("complete")
         return RunResult(status="complete")
+
+    def _workspace_boundary_reason(self, action: dict) -> str | None:
+        repo_root = getattr(self.tool_executor, "repo_root", None)
+        if repo_root is None:
+            return None
+
+        return workspace_boundary_reason(action, repo_root)

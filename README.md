@@ -248,9 +248,9 @@ Code Squid exposes three local tools to the model:
 - `write_file(path, content)`
 - `run_command(command)`
 
-`read_file` and `write_file` require absolute paths. They are not restricted to
-the repository root; they can read or write any absolute path reachable by the
-current process.
+`read_file` and `write_file` require absolute paths. Paths outside the selected
+workspace root require approval in safe mode and are allowed without prompts in
+yolo mode.
 
 `run_command` runs a shell command from the current/configured repo root by
 default. It uses the local shell, has a timeout, and can mutate files or perform

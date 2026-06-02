@@ -1158,6 +1158,43 @@ def test_approval_prompt_stops_spinner_before_asking(
     )
 
 
+def test_approval_prompt_shows_short_outside_workspace_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reason = (
+        "Requested path is outside the workspace root: /home/aaron/Desktop/circus.md "
+        "(workspace root: /home/aaron/Desktop/coding_agent_eval_repos). "
+        "Approval is required unless approval_mode=never."
+    )
+    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: "")
+
+    TerminalDisplay(
+        startup_info=StartupInfo(
+            directory=Path("/home/aaron/Desktop/coding_agent_eval_repos"),
+            provider="openai",
+            model="gpt-5",
+            approval_mode="on-request",
+        )
+    ).approve_action(
+        {
+            "tool": "read_file",
+            "args": {"path": "/home/aaron/Desktop/circus.md"},
+            "approval_reason": reason,
+        }
+    )
+
+    output = capsys.readouterr().out
+    assert "Reason:" in output
+    assert "Outside workspace" in output
+    assert "Path:" in output
+    assert "/home/aaron/Desktop/circus.md" in output
+    assert "Requested path is outside the workspace root" not in output
+    assert "Approval is required unless approval_mode=never" not in output
+    assert "Requested path:" not in output
+    assert "Workspace root:" not in output
+
+
 def test_approval_prompt_preserves_ctrl_c_interrupt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -2,19 +2,27 @@
 
 from pathlib import Path
 
+from core.workspace_boundary import workspace_boundary_reason
 from tools import TOOLS
 
 
 class ToolExecutor:
-    """Owns dispatching tool actions, normalizing raw tool outputs, and recording simple tool side effects; must not own prompts, policy, or provider logic."""
+    """Owns tool dispatch, execution-time guards, normalized outputs, and simple tool side effects; must not own prompts, approval decisions, or provider logic."""
 
-    # Store the repo root and session used during tool execution.
-    # repo_root is the default working directory for run_command;
-    # read_file and write_file use absolute paths directly.
-    def __init__(self, repo_root: Path, session, undo_store=None) -> None:
+    # repo_root is the default working directory for run_command and the workspace
+    # boundary for structured file-tool execution guards.
+    # read_file and write_file still use absolute paths directly.
+    def __init__(
+        self,
+        repo_root: Path,
+        session,
+        undo_store=None,
+        allow_outside_workspace: bool = False,
+    ) -> None:
         self.repo_root = repo_root
         self.session = session
         self.undo_store = undo_store
+        self.allow_outside_workspace = allow_outside_workspace
 
     # Execute one tool action by looking up the tool and calling its execute function.
     # If the tool runs successfully, record any simple side effects in the session.
@@ -29,6 +37,16 @@ class ToolExecutor:
                 "tool": tool_name,
                 "error": f"Unknown tool: {tool_name}",
             }
+
+        outside_workspace_approved = bool(action.get("outside_workspace_approved"))
+        if not self.allow_outside_workspace and not outside_workspace_approved:
+            constraint_reason = workspace_boundary_reason(action, self.repo_root)
+            if constraint_reason is not None:
+                return {
+                    "ok": False,
+                    "tool": tool_name,
+                    "error": constraint_reason,
+                }
 
         try:
             if self.undo_store is not None and tool_name == "write_file":
