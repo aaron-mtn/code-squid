@@ -135,12 +135,12 @@ def test_main_missing_cwd_value_fails_clearly(monkeypatch, capsys) -> None:
     assert capsys.readouterr().out == "--cwd requires a path\n"
 
 
-def test_mode_displays_safe_for_always(tmp_path, capsys) -> None:
+def test_mode_displays_strict_for_always(tmp_path, capsys) -> None:
     _write_settings(tmp_path, {"runtime": {"approval_mode": "always"}})
 
     assert _mode(tmp_path, []) == 0
 
-    assert capsys.readouterr().out == "Current mode: safe (approval_mode=always)\n"
+    assert capsys.readouterr().out == "Current mode: strict (approval_mode=always)\n"
 
 
 def test_mode_displays_yolo_for_never(tmp_path, capsys) -> None:
@@ -151,15 +151,15 @@ def test_mode_displays_yolo_for_never(tmp_path, capsys) -> None:
     assert capsys.readouterr().out == "Current mode: yolo (approval_mode=never)\n"
 
 
-def test_mode_displays_guarded_for_guarded(tmp_path, capsys) -> None:
+def test_mode_displays_balanced_for_guarded(tmp_path, capsys) -> None:
     _write_settings(tmp_path, {"runtime": {"approval_mode": "guarded"}})
 
     assert _mode(tmp_path, []) == 0
 
-    assert capsys.readouterr().out == "Current mode: guarded (approval_mode=guarded)\n"
+    assert capsys.readouterr().out == "Current mode: balanced (approval_mode=guarded)\n"
 
 
-def test_mode_safe_writes_approval_always_and_preserves_settings(tmp_path, capsys) -> None:
+def test_mode_strict_writes_approval_always_and_preserves_settings(tmp_path, capsys) -> None:
     settings_path = _write_settings(
         tmp_path,
         {
@@ -168,7 +168,7 @@ def test_mode_safe_writes_approval_always_and_preserves_settings(tmp_path, capsy
         },
     )
 
-    assert _mode(tmp_path, ["safe"]) == 0
+    assert _mode(tmp_path, ["strict"]) == 0
 
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
     assert settings == {
@@ -176,8 +176,8 @@ def test_mode_safe_writes_approval_always_and_preserves_settings(tmp_path, capsy
         "runtime": {"approval_mode": "always", "max_tool_steps": 3},
     }
     assert capsys.readouterr().out == (
-        "Mode set to safe (approval_mode=always). "
-        "Code Squid will ask before tool execution. This is not a sandbox.\n"
+        "Mode set to strict (approval_mode=always). "
+        "Code Squid will ask before every tool execution. This is not a sandbox.\n"
     )
 
 
@@ -194,23 +194,23 @@ def test_mode_yolo_writes_approval_never(tmp_path, capsys) -> None:
     )
 
 
-def test_mode_guarded_writes_approval_guarded(tmp_path, capsys) -> None:
+def test_mode_balanced_writes_approval_guarded(tmp_path, capsys) -> None:
     settings_path = _write_settings(tmp_path, {"runtime": {"approval_mode": "always"}})
 
-    assert _mode(tmp_path, ["guarded"]) == 0
+    assert _mode(tmp_path, ["balanced"]) == 0
 
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
     assert settings["runtime"]["approval_mode"] == "guarded"
     assert capsys.readouterr().out == (
-        "Mode set to guarded (approval_mode=guarded). "
+        "Mode set to balanced (approval_mode=guarded). "
         "Low-risk workspace actions can run without approval prompts.\n"
     )
 
 
-def test_mode_safe_creates_minimal_settings_file(tmp_path, capsys) -> None:
+def test_mode_strict_creates_minimal_settings_file(tmp_path, capsys) -> None:
     settings_path = tmp_path / ".code-squid" / "settings.json"
 
-    assert _mode(tmp_path, ["safe"]) == 0
+    assert _mode(tmp_path, ["strict"]) == 0
 
     assert json.loads(settings_path.read_text(encoding="utf-8")) == {
         "runtime": {"approval_mode": "always"}
@@ -225,7 +225,15 @@ def test_mode_invalid_value_does_not_modify_settings(tmp_path, capsys) -> None:
     assert _mode(tmp_path, ["banana"]) == 1
 
     assert settings_path.read_text(encoding="utf-8") == original
-    assert capsys.readouterr().out == "Invalid mode. Valid options: safe, guarded, yolo\n"
+    assert capsys.readouterr().out == "Invalid mode. Valid options: strict, balanced, yolo\n"
+
+
+def test_help_text_lists_new_friendly_modes() -> None:
+    assert "  python main.py mode strict\n" in HELP_TEXT
+    assert "  python main.py mode balanced\n" in HELP_TEXT
+    assert "  python main.py mode yolo\n" in HELP_TEXT
+    assert "  python main.py mode safe\n" not in HELP_TEXT
+    assert "  python main.py mode guarded\n" not in HELP_TEXT
 
 
 def test_run_loop_handles_model_request_error_with_log_and_status(tmp_path) -> None:
@@ -257,7 +265,7 @@ def _expected_startup_output(repo_root: Path) -> str:
         directory=repo_root,
         provider="openai_compatible",
         model="qwen3.5-9b",
-        approval_mode="never",
+        approval_mode="yolo",
     )
     return f"{CODE_SQUID_BANNER}\n\n{TerminalDisplay()._startup_info_panel(startup_info)}\n\n"
 
@@ -555,10 +563,11 @@ def test_resume_session_cancelled_task_exits_without_run(monkeypatch, tmp_path, 
     assert session_store.load_messages() == []
 
 
-def test_new_session_passes_trace_to_terminal_display(
+def test_new_session_passes_trace_and_friendly_mode_to_terminal_display(
     monkeypatch,
     tmp_path,
 ) -> None:
+    _write_settings(tmp_path, {"runtime": {"approval_mode": "guarded"}})
     display_kwargs = []
 
     def fake_display(**kwargs) -> BannerDisplay:
@@ -581,7 +590,7 @@ def test_new_session_passes_trace_to_terminal_display(
                 directory=tmp_path,
                 provider="openai_compatible",
                 model="qwen3.5-9b",
-                approval_mode="never",
+                approval_mode="balanced",
             ),
         }
     ]
@@ -637,7 +646,7 @@ def test_new_session_passes_debug_without_trace_to_terminal_display(
                 directory=tmp_path,
                 provider="openai_compatible",
                 model="qwen3.5-9b",
-                approval_mode="never",
+                approval_mode="yolo",
             ),
         }
     ]
@@ -674,7 +683,7 @@ def test_resume_session_passes_trace_to_terminal_display(
                 directory=tmp_path,
                 provider="openai_compatible",
                 model="qwen3.5-9b",
-                approval_mode="never",
+                approval_mode="yolo",
             ),
         }
     ]

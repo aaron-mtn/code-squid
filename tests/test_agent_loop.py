@@ -624,7 +624,7 @@ def test_guarded_asks_for_risky_run_command(tmp_path) -> None:
         {
             "tool": "run_command",
             "args": {"command": "mkdir build"},
-            "approval_reason": "Command uses shell syntax that requires approval",
+            "approval_reason": "Command may modify files",
         }
     ]
 

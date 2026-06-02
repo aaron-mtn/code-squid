@@ -56,8 +56,8 @@ Shell commands:
   python main.py --cwd /path/to/project
   python main.py undo
   python main.py mode
-  python main.py mode safe
-  python main.py mode guarded
+  python main.py mode strict
+  python main.py mode balanced
   python main.py mode yolo
   python main.py sessions
   python main.py show latest
@@ -65,13 +65,13 @@ Shell commands:
   python main.py resume <session_id>"""
 
 FRIENDLY_MODES = {
-    "always": "safe",
-    "guarded": "guarded",
+    "always": "strict",
+    "guarded": "balanced",
     "never": "yolo",
 }
 APPROVAL_MODES = {
-    "safe": "always",
-    "guarded": "guarded",
+    "strict": "always",
+    "balanced": "guarded",
     "yolo": "never",
 }
 
@@ -212,7 +212,7 @@ def _startup_info(repo_root: Path, settings: Settings) -> StartupInfo:
         directory=repo_root,
         provider=settings.model.provider,
         model=settings.model.name,
-        approval_mode=settings.runtime.approval_mode,
+        approval_mode=FRIENDLY_MODES[settings.runtime.approval_mode],
     )
 
 
@@ -337,21 +337,21 @@ def _mode(repo_root: Path, args: list[str]) -> int:
         return 0
 
     if len(args) != 1 or args[0] not in APPROVAL_MODES:
-        print("Invalid mode. Valid options: safe, guarded, yolo")
+        print("Invalid mode. Valid options: strict, balanced, yolo")
         return 1
 
     friendly_mode = args[0]
     approval_mode = APPROVAL_MODES[friendly_mode]
     write_approval_mode(repo_root, approval_mode)
 
-    if friendly_mode == "safe":
+    if friendly_mode == "strict":
         print(
-            "Mode set to safe (approval_mode=always). "
-            "Code Squid will ask before tool execution. This is not a sandbox."
+            "Mode set to strict (approval_mode=always). "
+            "Code Squid will ask before every tool execution. This is not a sandbox."
         )
-    elif friendly_mode == "guarded":
+    elif friendly_mode == "balanced":
         print(
-            "Mode set to guarded (approval_mode=guarded). "
+            "Mode set to balanced (approval_mode=guarded). "
             "Low-risk workspace actions can run without approval prompts."
         )
     else:

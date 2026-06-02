@@ -11,14 +11,17 @@ from core.workspace_boundary import is_inside_workspace
 
 
 SHELL_SYNTAX_REASON = "Command uses shell syntax that requires approval"
+MUTATING_COMMAND_REASON = "Command may modify files"
 OUTSIDE_PATH_REASON = "Command references a path outside the workspace"
 NOT_ALLOWLISTED_REASON = "Command is not on the guarded allowlist"
 
-_SHELL_SYNTAX_PATTERNS = (">", "|", ";", "$(", "`", "\n", "&&")
-_RISKY_TOKENS = {
+_SHELL_SYNTAX_PATTERNS = (">", ">>", "|", ";", "$(", "`", "\n", "&&", "||")
+_SHELL_COMMANDS = {
     "tee",
     "xargs",
     "-exec",
+}
+_MUTATING_COMMANDS = {
     "rm",
     "mv",
     "cp",
@@ -77,17 +80,26 @@ def guarded_run_command_reason(command: str, workspace_root: Path) -> str | None
 
 def _risky_token_reason(tokens: list[str]) -> str | None:
     lowered = [token.lower() for token in tokens]
-    if any(token in _RISKY_TOKENS for token in lowered):
+    if any(token in _SHELL_COMMANDS for token in lowered):
         return SHELL_SYNTAX_REASON
-    if lowered[:2] in (["bash", "-c"], ["sh", "-c"], ["python", "-c"]):
+    if any(token in _MUTATING_COMMANDS for token in lowered):
+        return MUTATING_COMMAND_REASON
+    if lowered[:2] in (
+        ["bash", "-c"],
+        ["sh", "-c"],
+        ["python", "-c"],
+        ["python3", "-c"],
+    ):
         return SHELL_SYNTAX_REASON
     if lowered[:2] in (
         ["pip", "install"],
+        ["pip3", "install"],
         ["npm", "install"],
+        ["npm", "ci"],
         ["git", "reset"],
         ["git", "clean"],
     ):
-        return SHELL_SYNTAX_REASON
+        return MUTATING_COMMAND_REASON
     return None
 
 

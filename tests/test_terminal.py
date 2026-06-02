@@ -448,10 +448,11 @@ def test_startup_panel_includes_controls() -> None:
             directory=Path("/tmp/project"),
             provider="openai_compatible",
             model="qwen3.5-9b",
-            approval_mode="never",
+            approval_mode="yolo",
         )
     )
 
+    assert "Approval mode: yolo" in panel
     assert f"Controls:      {STARTUP_CONTROLS}" in panel
 
 
@@ -465,7 +466,7 @@ def test_startup_panel_colors_only_structural_borders_in_tty(
             directory=Path("/tmp/project"),
             provider="openai_compatible",
             model="qwen3.5-9b",
-            approval_mode="never",
+            approval_mode="yolo",
         )
     )
 
@@ -485,7 +486,7 @@ def test_startup_panel_stays_plain_when_not_tty() -> None:
             directory=Path("/tmp/project"),
             provider="openai_compatible",
             model="qwen3.5-9b",
-            approval_mode="never",
+            approval_mode="yolo",
         )
     )
 
@@ -504,7 +505,7 @@ def test_short_path_prefers_startup_workspace_root(tmp_path: Path) -> None:
             directory=workspace,
             provider="openai_compatible",
             model="qwen3.5-9b",
-            approval_mode="never",
+            approval_mode="yolo",
         )
     )
 

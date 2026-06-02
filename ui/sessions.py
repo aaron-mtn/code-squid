@@ -14,7 +14,7 @@ USAGE = (
     "Usage: python main.py "
     "[--cwd <path>] "
     "[sessions | show latest | show <session_id> | resume latest | resume <session_id> "
-    "| undo | mode | mode safe | mode yolo]"
+    "| undo | mode | mode strict | mode balanced | mode yolo]"
 )
 
 
