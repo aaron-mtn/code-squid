@@ -178,14 +178,18 @@ class TerminalDisplay:
         if not content:
             return
 
-        if "TASK COMPLETE" in content:
-            self._print_final_summary(content)
-            return
-
         self._print_leading_blank_if_needed()
         self._print_assistant_narration(content, trailing_blank=False)
         self._needs_leading_blank = False
         self._needs_detail_blank_after_assistant = True
+
+    def final_message(self, content: str) -> None:
+        self._stop_spinner()
+        content = content.strip()
+        if not content:
+            return
+
+        self._print_final_summary(content)
 
     def action_started(self, action: dict) -> None:
         self._stop_spinner()
@@ -761,6 +765,7 @@ class TerminalDisplay:
         prefixes = tuple(section_by_prefix)
         sections: list[tuple[str, list[str]]] = []
         current_lines: list[str] | None = None
+        plain_lines: list[str] = []
 
         for line in content.splitlines():
             # Hide legacy completion markers from normal display; debug mode
@@ -781,21 +786,32 @@ class TerminalDisplay:
                 continue
 
             if current_lines is None:
+                plain_lines.append(line)
                 continue
 
             current_lines.append(line)
 
         formatted_lines: list[str] = []
-        for heading, lines in sections:
-            if formatted_lines:
-                formatted_lines.append("")
-            formatted_lines.append(f"  {_styled_text(heading, BOLD_STYLE)}")
-            for line in lines:
+        if sections:
+            for heading, lines in sections:
+                if formatted_lines:
+                    formatted_lines.append("")
+                formatted_lines.append(f"  {_styled_text(heading, BOLD_STYLE)}")
+                for line in lines:
+                    formatted_lines.extend(
+                        self._wrapped_display_lines(
+                            line,
+                            initial_indent="    ",
+                            subsequent_indent="    ",
+                        )
+                    )
+        else:
+            for line in plain_lines:
                 formatted_lines.extend(
                     self._wrapped_display_lines(
                         line,
-                        initial_indent="    ",
-                        subsequent_indent="    ",
+                        initial_indent="",
+                        subsequent_indent="",
                     )
                 )
 

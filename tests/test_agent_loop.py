@@ -97,6 +97,7 @@ class NullDisplay:
     def __init__(self, events: list[str] | None = None) -> None:
         self.step_limits_reached = []
         self.assistant_messages = []
+        self.final_messages = []
         self.debug_replies = []
         self.rejected_replies = []
         self.debug = False
@@ -108,6 +109,9 @@ class NullDisplay:
 
     def assistant_message(self, content: str) -> None:
         self.assistant_messages.append(content)
+
+    def final_message(self, content: str) -> None:
+        self.final_messages.append(content)
 
     def debug_reply(self, reply: dict) -> None:
         self.debug_replies.append(reply)
@@ -432,9 +436,29 @@ def test_invalid_assistant_reply_is_not_displayed_in_normal_mode() -> None:
         ]
     )
 
-    assert display.assistant_messages == ["TASK COMPLETE"]
+    assert display.assistant_messages == []
+    assert display.final_messages == ["TASK COMPLETE"]
     assert display.rejected_replies == ["empty_final_reply"]
     assert display.debug_replies[0]["message"]["content"] == "bad 1"
+
+
+def test_no_tool_final_reply_uses_final_display_path() -> None:
+    _, _, _, display = run_loop([reply("TASK COMPLETE")])
+
+    assert display.final_messages == ["TASK COMPLETE"]
+    assert display.assistant_messages == []
+
+
+def test_one_tool_reply_uses_normal_assistant_display_path() -> None:
+    _, _, _, display = run_loop(
+        [
+            reply("Using read_file.", actions=[{"tool": "read_file"}]),
+            reply("TASK COMPLETE"),
+        ]
+    )
+
+    assert display.assistant_messages == ["Using read_file."]
+    assert display.final_messages == ["TASK COMPLETE"]
 
 
 def test_invalid_assistant_reply_is_displayed_in_debug_mode() -> None:
@@ -457,7 +481,8 @@ def test_invalid_assistant_reply_is_displayed_in_debug_mode() -> None:
 
     loop.run()
 
-    assert display.assistant_messages == ["bad 1", "TASK COMPLETE"]
+    assert display.assistant_messages == ["bad 1"]
+    assert display.final_messages == ["TASK COMPLETE"]
     assert display.rejected_replies == ["empty_final_reply"]
 
 

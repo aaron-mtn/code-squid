@@ -166,7 +166,10 @@ class AgentLoop:
 
             # Only valid assistant replies are added to normal transcript history.
             consecutive_invalid_replies = 0
-            self.display.assistant_message(reply["message"]["content"])
+            if reply["actions"]:
+                self.display.assistant_message(reply["message"]["content"])
+            else:
+                self.display.final_message(reply["message"]["content"])
             self._add_message(reply["message"], usage=reply.get("usage"))
 
             # Execute each requested tool action and collect the raw results.

@@ -1384,11 +1384,10 @@ def test_debug_loop_finished_keeps_file_paths_plain_in_tty(
     assert "\033]8" not in output
 
 
-def test_normal_assistant_final_summary_uses_report_heading(
+def test_final_message_renders_report_heading(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    TerminalDisplay().assistant_message(
-        "TASK COMPLETE\n"
+    TerminalDisplay().final_message(
         "Files changed: ui/terminal.py\n"
         "What changed: polished display\n"
         "Verification: `pytest tests/test_terminal.py`\n"
@@ -1403,14 +1402,28 @@ def test_normal_assistant_final_summary_uses_report_heading(
     assert "TASK COMPLETE" not in output
 
 
+def test_final_message_displays_unlabeled_content_under_report_heading(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay().final_message(
+        "I ran `pwd`; the workspace is "
+        "`/home/aaron/Desktop/coding_agent_eval_repos`."
+    )
+
+    output = capsys.readouterr().out
+    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n📋 Final summary\n\n")
+    assert "I ran `pwd`; the workspace is" in output
+    assert "`/home/aaron/Desktop/coding_agent_eval_repos`." in output
+    assert "🦑" not in output
+
+
 def test_final_summary_colors_report_divider_cyan_in_tty(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
 
-    TerminalDisplay().assistant_message(
-        "TASK COMPLETE\n"
+    TerminalDisplay().final_message(
         "Files changed: ui/terminal.py\n"
         "What changed: polished display\n"
         "Verification: `pytest tests/test_terminal.py`\n"
@@ -1429,8 +1442,7 @@ def test_final_summary_headings_are_bold_in_tty(
 ) -> None:
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
 
-    TerminalDisplay().assistant_message(
-        "TASK COMPLETE\n"
+    TerminalDisplay().final_message(
         "Files changed: ui/terminal.py\n"
         "What changed: polished display\n"
         "Verification: `pytest tests/test_terminal.py`\n"
@@ -1444,11 +1456,10 @@ def test_final_summary_headings_are_bold_in_tty(
     assert f"  {BOLD_STYLE}Remaining risks / notes{RESET_STYLE}\n    none" in output
 
 
-def test_normal_assistant_final_summary_hides_preamble(
+def test_final_message_with_sections_hides_preamble(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    TerminalDisplay().assistant_message(
-        "TASK COMPLETE\n"
+    TerminalDisplay().final_message(
         "All tests pass now. Let me provide the final summary.\n"
         "Files changed: ui/terminal.py\n"
         "What changed: polished display\n"
@@ -1463,10 +1474,10 @@ def test_normal_assistant_final_summary_hides_preamble(
     assert "  Remaining risks / notes\n    No known remaining risks" in output
 
 
-def test_normal_assistant_final_summary_removes_inline_task_complete(
+def test_final_message_removes_inline_task_complete(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    TerminalDisplay().assistant_message(
+    TerminalDisplay().final_message(
         "TASK COMPLETE\n"
         "Files changed: ui/terminal.py\n"
         "What changed: polished display\n"
@@ -1479,11 +1490,10 @@ def test_normal_assistant_final_summary_removes_inline_task_complete(
     assert "TASK COMPLETE" not in output
 
 
-def test_normal_assistant_final_summary_preserves_multiline_fields(
+def test_final_message_preserves_multiline_fields(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    TerminalDisplay().assistant_message(
-        "TASK COMPLETE\n"
+    TerminalDisplay().final_message(
         "Files changed: ui/terminal.py\n"
         "What changed: polished display\n"
         "- grouped final files\n"
@@ -1501,7 +1511,7 @@ def test_normal_assistant_final_summary_preserves_multiline_fields(
     ) in output
 
 
-def test_normal_assistant_final_summary_wraps_body_lines(
+def test_final_message_wraps_body_lines(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1510,8 +1520,7 @@ def test_normal_assistant_final_summary_wraps_body_lines(
         lambda fallback: os.terminal_size((44, 24)),
     )
 
-    TerminalDisplay().assistant_message(
-        "TASK COMPLETE\n"
+    TerminalDisplay().final_message(
         "Files changed: ui/terminal.py\n"
         "What changed: This final summary body line should wrap neatly while keeping its section indentation.\n"
         "Verification: `pytest tests/test_terminal.py`\n"
@@ -1527,10 +1536,10 @@ def test_normal_assistant_final_summary_wraps_body_lines(
     ) in output
 
 
-def test_normal_assistant_message_with_only_task_complete_is_hidden(
+def test_final_message_with_only_task_complete_is_hidden(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    TerminalDisplay().assistant_message("TASK COMPLETE")
+    TerminalDisplay().final_message("TASK COMPLETE")
 
     assert capsys.readouterr().out == ""
 
