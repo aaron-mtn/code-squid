@@ -578,11 +578,9 @@ class TerminalDisplay:
             return f"⚠️ Reply rejected: {reason}"
 
         messages = {
-            "non_final_no_tool_reply": "↪ Nudging model to choose an action…",
+            "empty_final_reply": "↪ Nudging model to write a final answer…",
             "non_final_wrong_tool_count": "⚠️ Reply rejected: expected exactly one tool call.",
             "malformed_tool_call": "⚠️ Reply rejected: could not read the requested tool call.",
-            "final_with_tool_call": "⚠️ Reply rejected: final reply cannot include a tool call.",
-            "final_missing_required_sections": "⚠️ Reply rejected: final reply is missing required sections.",
         }
         return messages.get(reason, "⚠️ Reply rejected: invalid assistant reply.")
 
@@ -765,8 +763,8 @@ class TerminalDisplay:
         current_lines: list[str] | None = None
 
         for line in content.splitlines():
-            # TASK COMPLETE is a runtime marker used for final validation. Hide
-            # it only from normal display; debug mode still prints raw content.
+            # Hide legacy completion markers from normal display; debug mode
+            # still prints raw content.
             if "TASK COMPLETE" in line:
                 line = line.replace("TASK COMPLETE", "")
                 if not line.strip():

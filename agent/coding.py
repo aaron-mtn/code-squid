@@ -3,20 +3,9 @@
 from agent.prompts import SYSTEM_PROMPT, correction_message, follow_up_prompt, task_prompt
 from tools import TOOLS
 
-# Final summary for task completion must include all these phrases for finalization to be valid.
-# The agent can use any wording it wants, as long as these phrases are present and the first non-empty line is "TASK COMPLETE".
-REQUIRED_FINAL_LABELS = [
-    "Files changed:",
-    "What changed:",
-    "Verification:",
-    "Remaining risks / notes:",
-]
-
 INVALID_REPLY_EXPLANATIONS = {
-    "non_final_no_tool_reply": "the model replied without the required tool call",
+    "empty_final_reply": "the model replied with no tool call and no final content",
     "non_final_wrong_tool_count": "the model used the wrong number of tool calls",
-    "final_with_tool_call": "the model tried to finalize while still issuing a tool call",
-    "final_missing_required_sections": "the model tried to finalize without the required summary sections",
     "malformed_tool_call": "the model produced an invalid tool call payload",
 }
 
@@ -43,18 +32,9 @@ class CodingAgent:
     def tool_definitions(self) -> list[dict]:
         return [tool["definition"]() for tool in TOOLS.values()]
 
-    # Return true only when the first non-empty line is the completion marker.
-    def is_final_content(self, content: str) -> bool:
-        lines = [line.strip() for line in content.splitlines() if line.strip()]
-        return bool(lines) and lines[0].upper() == "TASK COMPLETE"
-
-    # Return any required final-summary labels that are missing from content.
-    def missing_final_labels(self, content: str) -> list[str]:
-        return [label for label in REQUIRED_FINAL_LABELS if label not in content]
-
     # Decide whether the loop should stop.
     # Look backward through the transcript for the most recent assistant message.
-    # If that message has no tool calls and starts with TASK COMPLETE, stop the loop.
+    # If that message has no tool calls and non-empty content, stop the loop.
     def should_stop(self, session) -> bool:
         for message in reversed(session.messages):
             if message["role"] == "user":
@@ -65,8 +45,7 @@ class CodingAgent:
 
             return (
                 not message.get("tool_calls")
-                and self.is_final_content(message["content"])
-                and not self.missing_final_labels(message["content"])
+                and bool(message.get("content", "").strip())
             )
 
         return False
@@ -74,14 +53,13 @@ class CodingAgent:
     # Validate whether a normalized model reply counts as a real coding-agent turn.
     #
     # Valid reply shapes:
-    # 1. A non-final reply with exactly one tool action
-    # 2. A final reply with TASK COMPLETE on the first non-empty line and no tool actions
+    # 1. A normal tool turn with exactly one tool action
+    # 2. A final reply with non-empty content and no tool actions
     #
     # Invalid reply shapes:
     # 1. A reply that carried a format_error from the model adapter
-    # 2. A non-final reply with no tool action
-    # 3. A non-final reply with the wrong number of tool actions
-    # 4. A final reply that also includes tool actions
+    # 2. A reply with no tool action and empty content
+    # 3. A reply with the wrong number of tool actions
     def validate_reply(self, reply: dict) -> dict:
         actions = reply["actions"]
         content = reply["message"]["content"].strip()
@@ -95,33 +73,20 @@ class CodingAgent:
                 "reason": "malformed_tool_call",
             }
 
-        # Final completion is valid when it starts with TASK COMPLETE and does
-        # not also try to issue tool actions.
-        if self.is_final_content(content):
-            if actions:
-                return {
-                    "ok": False,
-                    "reason": "final_with_tool_call",
-                }
-
-            if self.missing_final_labels(content):
-                return {
-                    "ok": False,
-                    "reason": "final_missing_required_sections",
-                }
-
-            return {
-                "ok": True,
-                "reason": "",
-            }
-
-        # Non-final replies must include exactly one tool action.
+        # No tool call means final answer, as long as the content is not empty.
         if len(actions) == 0:
+            if content:
+                return {
+                    "ok": True,
+                    "reason": "",
+                }
+
             return {
                 "ok": False,
-                "reason": "non_final_no_tool_reply",
+                "reason": "empty_final_reply",
             }
 
+        # Tool turns must include exactly one tool action.
         if len(actions) != 1:
             return {
                 "ok": False,

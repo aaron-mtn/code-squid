@@ -238,10 +238,8 @@ The runtime enforces:
 - malformed tool-call output is rejected
 - unknown tool names are rejected during model-adapter validation
 - missing required tool arguments are rejected during model-adapter validation
-- non-final replies with zero tool actions are rejected
-- non-final replies with more than one tool action are rejected
-- final replies that also include tool actions are rejected
-- final replies missing required labels are rejected
+- empty replies with zero tool actions are rejected
+- replies with more than one tool action are rejected
 
 Invalid replies are rejected before entering normal assistant history. The loop
 stores a correction user message instead. A valid reply resets the invalid-reply
@@ -258,18 +256,19 @@ status and stops the loop.
 ### Final Contract
 
 A valid final assistant reply must include no tool calls and must have
-`TASK COMPLETE` as the first non-empty line.
+non-empty content.
 
-It must include these exact labels:
+For coding tasks, prompts ask the agent to prefer these summary labels when
+they are relevant:
 
 - `Files changed:`
 - `What changed:`
 - `Verification:`
 - `Remaining risks / notes:`
 
-These labels are runtime-enforced. The terminal display hides the
-`TASK COMPLETE` marker in normal display, but the marker remains part of the
-stored assistant message.
+These labels are guidance only, not runtime-enforced. The terminal display still
+hides a legacy `TASK COMPLETE` marker if a model includes it, but finalization no
+longer depends on that marker.
 
 ### Tool Transcript Contract
 

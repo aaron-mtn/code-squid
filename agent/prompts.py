@@ -24,22 +24,16 @@ TOOL_USAGE_GUIDANCE = """
 FINAL_SUMMARY_REQUIREMENTS = """
 If the task is complete, reply with a short human-readable summary and no tool call.
 
-Start the final response with TASK COMPLETE as the first non-empty line. Do not introduce the summary with phrases like "Here is the summary" or "Let me provide a final summary."
-
-Your final summary must include these exact labels, including the colon:
+For coding tasks, prefer these labels when they are relevant:
 - Files changed:
 - What changed:
 - Verification:
 - Remaining risks / notes:
 
-Include concise but useful detail for each section. Keep the final summary short.
+Include concise but useful detail for each section you use. Keep the final summary short.
 
 For Remaining risks / notes, use "none" only when verification passed and no concrete caveats remain. Prefer a short sentence explaining why risk is low, such as "No known remaining risks; the targeted regression test passed."
 Do not invent speculative risks. If only syntax, static checks, or partial checks were run, describe the concrete unverified behavior under Remaining risks / notes.
-
-The first non-empty line must be exactly:
-
-TASK COMPLETE
 """.strip()
 
 REQUIRED_RESPONSE_FORMAT = """
@@ -105,7 +99,6 @@ I am running the tests to verify the fix.
 [one real tool call to run verification]
 
 Valid final response:
-TASK COMPLETE
 Files changed: parser.py
 What changed: accepted the final summary format and preserved the existing tool-call contract
 Verification: `python -m pytest tests/test_parser.py -v`
@@ -133,14 +126,10 @@ Why invalid:
 A non-final response should include visible narration before the tool call.
 
 Invalid final response:
-TASK COMPLETE
-Files changed/created: app.js
-What changed: created the app
-Verification: `node --check app.js`
-Remaining risks / notes: No known remaining risks; syntax validation passed.
+[empty response with no tool call]
 
 Why invalid:
-The final labels must match exactly, including the colon. Use `Files changed:`, not `Files changed/created:`.
+The final response must include non-empty human-readable content.
 
 Failure to follow this format will cause your response to be rejected.
 """.strip()
@@ -182,7 +171,6 @@ I am verifying the fix now.
 [one real tool call to run tests]
 
 Valid final response:
-TASK COMPLETE
 Files changed: mathlib.py
 What changed: changed `return lower` to `return upper` in `clamp` when `value > upper`
 Verification: `python -m pytest test_mathlib.py -v` (3 passed)
@@ -216,10 +204,10 @@ Prior context:
 
 
 CORRECTION_MESSAGES = {
-    "non_final_no_tool_reply": f"""
-Format error: your last response had no tool call and was not accepted as a final response.
+    "empty_final_reply": f"""
+Format error: your last response had no tool call and no final content.
 
-If the task is complete, reply with the required final summary, include no tool call, and put TASK COMPLETE on the first non-empty line.
+If the task is complete, reply with a concise final summary and no tool call.
 
 If work remains, reply with exactly one real tool call for the immediate next step.
 
@@ -240,20 +228,6 @@ Format error: your last response included a tool call but no visible assistant n
 
 Before the task is complete, every response must include brief visible narration plus exactly one real tool call for the immediate next step.
 Reply now with brief narration and exactly one tool call for that same immediate step.
-""".strip(),
-    "final_with_tool_call": f"""
-Format error: a final completion response cannot include a tool call.
-
-{FINAL_SUMMARY_REQUIREMENTS}
-
-If the task is not complete, reply with exactly one real tool call for the immediate next step.
-""".strip(),
-    "final_missing_required_sections": f"""
-Format error: your final completion response is missing one or more required summary sections.
-
-{FINAL_SUMMARY_REQUIREMENTS}
-
-Please reply again with all required sections and no tool call.
 """.strip(),
     "malformed_tool_call": """
 Format error: your last response included an invalid tool call.

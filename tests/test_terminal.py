@@ -654,13 +654,13 @@ def test_debug_reply_prints_none_for_no_actions(
     assert "│ none" in output
 
 
-def test_reply_rejected_prints_friendly_nudge_for_missing_tool_call(
+def test_reply_rejected_prints_friendly_nudge_for_empty_final_reply(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    TerminalDisplay().reply_rejected("non_final_no_tool_reply")
+    TerminalDisplay().reply_rejected("empty_final_reply")
 
     assert capsys.readouterr().out == (
-        f"{RUN_DETAIL_INDENT}↪ Nudging model to choose an action…\n"
+        f"{RUN_DETAIL_INDENT}↪ Nudging model to write a final answer…\n"
     )
 
 
@@ -670,10 +670,10 @@ def test_reply_rejected_colors_friendly_nudge_yellow_in_tty(
 ) -> None:
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
 
-    TerminalDisplay().reply_rejected("non_final_no_tool_reply")
+    TerminalDisplay().reply_rejected("empty_final_reply")
 
     assert capsys.readouterr().out == (
-        f"{SOFT_YELLOW_STYLE}{RUN_DETAIL_INDENT}↪ Nudging model to choose an action…"
+        f"{SOFT_YELLOW_STYLE}{RUN_DETAIL_INDENT}↪ Nudging model to write a final answer…"
         f"{RESET_STYLE}\n"
     )
 
@@ -681,10 +681,10 @@ def test_reply_rejected_colors_friendly_nudge_yellow_in_tty(
 def test_debug_reply_rejected_keeps_raw_reason(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    TerminalDisplay(debug=True).reply_rejected("non_final_no_tool_reply")
+    TerminalDisplay(debug=True).reply_rejected("empty_final_reply")
 
     assert capsys.readouterr().out == (
-        "⚠️ Reply rejected: non_final_no_tool_reply\n"
+        "⚠️ Reply rejected: empty_final_reply\n"
     )
 
 

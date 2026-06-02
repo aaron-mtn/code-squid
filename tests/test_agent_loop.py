@@ -33,7 +33,7 @@ class FakeAgent:
             "content": (
                 f"Code Squid stopped after {count} consecutive invalid replies.\n"
                 f"Last invalid reply reason: {reason}\n"
-                "Explanation: the model tried to finalize without the required summary sections"
+                "Explanation: the model replied with no tool call and no final content"
             ),
         }
 
@@ -212,17 +212,17 @@ def run_loop_with_store(
 def test_valid_reply_resets_consecutive_invalid_reply_counter() -> None:
     session, tool_executor, _, _ = run_loop(
         [
-            reply("bad 1", reason="non_final_no_tool_reply"),
-            reply("bad 2", reason="non_final_no_tool_reply"),
+            reply("bad 1", reason="empty_final_reply"),
+            reply("bad 2", reason="empty_final_reply"),
             reply("valid", actions=[{"tool": "read_file"}]),
-            reply("bad 3", reason="non_final_no_tool_reply"),
-            reply("bad 4", reason="non_final_no_tool_reply"),
+            reply("bad 3", reason="empty_final_reply"),
+            reply("bad 4", reason="empty_final_reply"),
             reply("TASK COMPLETE"),
         ]
     )
 
     assert [message["content"] for message in session.messages].count(
-        "correction:non_final_no_tool_reply"
+        "correction:empty_final_reply"
     ) == 4
     assert session.messages[-1]["content"] == "TASK COMPLETE"
     assert tool_executor.actions == [{"tool": "read_file"}]
@@ -231,22 +231,22 @@ def test_valid_reply_resets_consecutive_invalid_reply_counter() -> None:
 def test_invalid_replies_get_normal_correction_before_limit() -> None:
     session, _, _, _ = run_loop(
         [
-            reply("bad 1", reason="non_final_no_tool_reply"),
+            reply("bad 1", reason="empty_final_reply"),
             reply("bad 2", reason="non_final_wrong_tool_count"),
             reply("TASK COMPLETE"),
         ]
     )
 
-    assert {"role": "user", "content": "correction:non_final_no_tool_reply"} in session.messages
+    assert {"role": "user", "content": "correction:empty_final_reply"} in session.messages
     assert {"role": "user", "content": "correction:non_final_wrong_tool_count"} in session.messages
 
 
 def test_loop_stops_after_three_consecutive_invalid_replies() -> None:
     session, _, _, _ = run_loop(
         [
-            reply("bad 1", reason="non_final_no_tool_reply"),
+            reply("bad 1", reason="empty_final_reply"),
             reply("bad 2", reason="non_final_wrong_tool_count"),
-            reply("bad 3", reason="final_missing_required_sections"),
+            reply("bad 3", reason="empty_final_reply"),
             reply("TASK COMPLETE"),
         ]
     )
@@ -255,8 +255,8 @@ def test_loop_stops_after_three_consecutive_invalid_replies() -> None:
         "role": "assistant",
         "content": (
             "Code Squid stopped after 3 consecutive invalid replies.\n"
-            "Last invalid reply reason: final_missing_required_sections\n"
-            "Explanation: the model tried to finalize without the required summary sections"
+            "Last invalid reply reason: empty_final_reply\n"
+            "Explanation: the model replied with no tool call and no final content"
         ),
     }
 
@@ -283,9 +283,9 @@ def test_repeated_invalid_replies_return_failed_run_result() -> None:
         session=session,
         model_adapter=FakeModelAdapter(
             [
-                reply("bad 1", reason="non_final_no_tool_reply"),
+                reply("bad 1", reason="empty_final_reply"),
                 reply("bad 2", reason="non_final_wrong_tool_count"),
-                reply("bad 3", reason="final_missing_required_sections"),
+                reply("bad 3", reason="empty_final_reply"),
             ]
         ),
         tool_executor=FakeToolExecutor(),
@@ -298,7 +298,7 @@ def test_repeated_invalid_replies_return_failed_run_result() -> None:
 
     assert result == RunResult(
         status="failed",
-        reason="final_missing_required_sections",
+        reason="empty_final_reply",
     )
 
 
@@ -413,27 +413,27 @@ def test_compactor_is_not_called_after_step_limit_stops_loop() -> None:
 def test_correction_messages_are_persisted_and_rejected_invalid_replies_are_not() -> None:
     _, _, session_store, _, _ = run_loop_with_store(
         [
-            reply("bad 1", reason="non_final_no_tool_reply"),
+            reply("bad 1", reason="empty_final_reply"),
             reply("TASK COMPLETE"),
         ]
     )
 
     persisted_messages = [entry["message"] for entry in session_store.messages]
 
-    assert {"role": "user", "content": "correction:non_final_no_tool_reply"} in persisted_messages
+    assert {"role": "user", "content": "correction:empty_final_reply"} in persisted_messages
     assert {"role": "assistant", "content": "bad 1"} not in persisted_messages
 
 
 def test_invalid_assistant_reply_is_not_displayed_in_normal_mode() -> None:
     _, _, _, display = run_loop(
         [
-            reply("bad 1", reason="non_final_no_tool_reply"),
+            reply("bad 1", reason="empty_final_reply"),
             reply("TASK COMPLETE"),
         ]
     )
 
     assert display.assistant_messages == ["TASK COMPLETE"]
-    assert display.rejected_replies == ["non_final_no_tool_reply"]
+    assert display.rejected_replies == ["empty_final_reply"]
     assert display.debug_replies[0]["message"]["content"] == "bad 1"
 
 
@@ -445,7 +445,7 @@ def test_invalid_assistant_reply_is_displayed_in_debug_mode() -> None:
         session=session,
         model_adapter=FakeModelAdapter(
             [
-                reply("bad 1", reason="non_final_no_tool_reply"),
+                reply("bad 1", reason="empty_final_reply"),
                 reply("TASK COMPLETE"),
             ]
         ),
@@ -458,15 +458,15 @@ def test_invalid_assistant_reply_is_displayed_in_debug_mode() -> None:
     loop.run()
 
     assert display.assistant_messages == ["bad 1", "TASK COMPLETE"]
-    assert display.rejected_replies == ["non_final_no_tool_reply"]
+    assert display.rejected_replies == ["empty_final_reply"]
 
 
 def test_failure_message_is_persisted_after_repeated_invalid_replies() -> None:
     _, _, session_store, _, _ = run_loop_with_store(
         [
-            reply("bad 1", reason="non_final_no_tool_reply"),
+            reply("bad 1", reason="empty_final_reply"),
             reply("bad 2", reason="non_final_wrong_tool_count"),
-            reply("bad 3", reason="final_missing_required_sections"),
+            reply("bad 3", reason="empty_final_reply"),
         ]
     )
 
@@ -474,8 +474,8 @@ def test_failure_message_is_persisted_after_repeated_invalid_replies() -> None:
         "role": "assistant",
         "content": (
             "Code Squid stopped after 3 consecutive invalid replies.\n"
-            "Last invalid reply reason: final_missing_required_sections\n"
-            "Explanation: the model tried to finalize without the required summary sections"
+            "Last invalid reply reason: empty_final_reply\n"
+            "Explanation: the model replied with no tool call and no final content"
         ),
     }
     assert {"role": "assistant", "content": "bad 3"} not in [
@@ -858,9 +858,9 @@ def test_complete_status_is_written_on_normal_completion() -> None:
 def test_failed_status_is_written_after_repeated_invalid_replies() -> None:
     _, _, session_store, _, _ = run_loop_with_store(
         [
-            reply("bad 1", reason="non_final_no_tool_reply"),
+            reply("bad 1", reason="empty_final_reply"),
             reply("bad 2", reason="non_final_wrong_tool_count"),
-            reply("bad 3", reason="final_missing_required_sections"),
+            reply("bad 3", reason="empty_final_reply"),
         ]
     )
 
@@ -901,14 +901,14 @@ def test_max_tool_steps_one_stops_before_next_model_reply() -> None:
 def test_invalid_rejected_replies_do_not_count_toward_tool_step_limit() -> None:
     session, tool_executor, _, model_adapter, display = run_loop_with_store(
         [
-            reply("bad 1", reason="non_final_no_tool_reply"),
+            reply("bad 1", reason="empty_final_reply"),
             reply("valid", actions=[{"tool": "read_file"}]),
             reply("TASK COMPLETE"),
         ],
         max_tool_steps=1,
     )
 
-    assert {"role": "user", "content": "correction:non_final_no_tool_reply"} in session.messages
+    assert {"role": "user", "content": "correction:empty_final_reply"} in session.messages
     assert tool_executor.actions == [{"tool": "read_file"}]
     assert model_adapter.index == 2
     assert display.step_limits_reached == [1]
