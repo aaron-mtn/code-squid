@@ -19,6 +19,8 @@ TOOL_USAGE_GUIDANCE = """
 - Do not run extra manual checks after a relevant test command already passed, unless a concrete unresolved issue remains.
 - If verification does not directly exercise the changed behavior, say so under Remaining risks / notes.
 - For browser/UI work, do not claim visual layout or interactive behavior was fully verified unless it was actually run or manually checked.
+- Do not use more than one action or tool call in the same response. 
+- Do not batch multiple reads, writes, or commands together. If you want to inspect multiple files, choose the single most important file first. If you want to run a command and inspect a file, choose the one action that should happen first.
 """.strip()
 
 FINAL_SUMMARY_REQUIREMENTS = """
@@ -40,8 +42,11 @@ REQUIRED_RESPONSE_FORMAT = """
 ## Required response format
 
 Before the task is complete, every response must include:
-1. one short visible narration sentence
+1. brief visible narration
 2. exactly one real tool call for the immediate next step
+
+The visible narration is required. It tells the user why the tool is being used.
+A tool call without visible narration is invalid.
 
 Code Squid executes one tool call at a time.
 Do not call more than one tool in the same response.
@@ -49,21 +54,17 @@ Do not batch reads, writes, or commands together.
 If you want to inspect multiple files, choose the single most important file first.
 If you want to run a command and inspect a file, choose the one action that should happen first.
 
-Write the narration first, then issue the tool call in the same response.
-The narration and tool call should describe the same immediate action.
-
-Good narration should briefly explain:
-- what you learned from the last observation, if applicable
-- why the next tool action follows
-- what you are checking, changing, or verifying now
+The narration and tool call must describe the same immediate action.
+Do not describe a list of future steps.
+Do not split narration and tool use across separate turns.
 
 Rules:
 - exactly one tool call before the task is complete
-- visible narration must not be empty when using a tool
-- the narration should describe the same immediate action as the tool call
-- do not describe multiple future actions
-- do not split narration and tool use across separate turns
+- visible narration is required when using a tool
+- narration must describe only the immediate tool action
 - do not issue more than one tool call in a response before the task is complete
+- do not use a tool in the final response
+- do not forget to use a tool in every non-final response
 """.strip()
 
 SYSTEM_PROMPT = f"""
@@ -151,7 +152,7 @@ Work step by step:
 4. Run the strongest practical verification.
 5. Finish only when the task is complete.
 
-Use tools when needed, and avoid broad unnecessary changes.
+Use one tool at a time, and avoid broad unnecessary changes.
 Prefer write_file for replacing full file contents.
 Always use absolute paths with read_file and write_file.
 Use run_command for shell behavior, program execution, and verification.

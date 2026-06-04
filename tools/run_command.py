@@ -9,7 +9,7 @@ from ._truncation import truncate_head_tail
 
 
 TOOL_NAME = "run_command"
-DEFAULT_TIMEOUT_SECONDS = 10
+DEFAULT_TIMEOUT_SECONDS = 15
 
 
 # Return the tool definition shown to the model.
