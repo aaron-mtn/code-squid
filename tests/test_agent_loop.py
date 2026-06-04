@@ -236,20 +236,20 @@ def test_invalid_replies_get_normal_correction_before_limit() -> None:
     session, _, _, _ = run_loop(
         [
             reply("bad 1", reason="empty_final_reply"),
-            reply("bad 2", reason="non_final_wrong_tool_count"),
+            reply("bad 2", reason="non_final_too_many_tool_calls"),
             reply("TASK COMPLETE"),
         ]
     )
 
     assert {"role": "user", "content": "correction:empty_final_reply"} in session.messages
-    assert {"role": "user", "content": "correction:non_final_wrong_tool_count"} in session.messages
+    assert {"role": "user", "content": "correction:non_final_too_many_tool_calls"} in session.messages
 
 
 def test_loop_stops_after_three_consecutive_invalid_replies() -> None:
     session, _, _, _ = run_loop(
         [
             reply("bad 1", reason="empty_final_reply"),
-            reply("bad 2", reason="non_final_wrong_tool_count"),
+            reply("bad 2", reason="non_final_too_many_tool_calls"),
             reply("bad 3", reason="empty_final_reply"),
             reply("TASK COMPLETE"),
         ]
@@ -288,7 +288,7 @@ def test_repeated_invalid_replies_return_failed_run_result() -> None:
         model_adapter=FakeModelAdapter(
             [
                 reply("bad 1", reason="empty_final_reply"),
-                reply("bad 2", reason="non_final_wrong_tool_count"),
+                reply("bad 2", reason="non_final_too_many_tool_calls"),
                 reply("bad 3", reason="empty_final_reply"),
             ]
         ),
@@ -490,7 +490,7 @@ def test_failure_message_is_persisted_after_repeated_invalid_replies() -> None:
     _, _, session_store, _, _ = run_loop_with_store(
         [
             reply("bad 1", reason="empty_final_reply"),
-            reply("bad 2", reason="non_final_wrong_tool_count"),
+            reply("bad 2", reason="non_final_too_many_tool_calls"),
             reply("bad 3", reason="empty_final_reply"),
         ]
     )
@@ -884,7 +884,7 @@ def test_failed_status_is_written_after_repeated_invalid_replies() -> None:
     _, _, session_store, _, _ = run_loop_with_store(
         [
             reply("bad 1", reason="empty_final_reply"),
-            reply("bad 2", reason="non_final_wrong_tool_count"),
+            reply("bad 2", reason="non_final_too_many_tool_calls"),
             reply("bad 3", reason="empty_final_reply"),
         ]
     )

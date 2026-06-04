@@ -5,7 +5,7 @@ from tools import TOOLS
 
 INVALID_REPLY_EXPLANATIONS = {
     "empty_final_reply": "the model replied with no tool call and no final content",
-    "non_final_wrong_tool_count": "the model used the wrong number of tool calls",
+    "non_final_too_many_tool_calls": "the model used too many tool calls",
     "malformed_tool_call": "the model produced an invalid tool call payload",
 }
 
@@ -90,7 +90,7 @@ class CodingAgent:
         if len(actions) != 1:
             return {
                 "ok": False,
-                "reason": "non_final_wrong_tool_count",
+                "reason": "non_final_too_many_tool_calls",
             }
 
         return {

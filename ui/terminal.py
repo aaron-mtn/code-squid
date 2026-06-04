@@ -583,7 +583,7 @@ class TerminalDisplay:
 
         messages = {
             "empty_final_reply": "↪ Nudging model to write a final answer…",
-            "non_final_wrong_tool_count": "⚠️ Reply rejected: expected exactly one tool call.",
+            "non_final_too_many_tool_calls": "⚠️ Reply rejected: expected exactly one tool call.",
             "malformed_tool_call": "⚠️ Reply rejected: could not read the requested tool call.",
         }
         return messages.get(reason, "⚠️ Reply rejected: invalid assistant reply.")

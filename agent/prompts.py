@@ -43,8 +43,14 @@ Before the task is complete, every response must include:
 1. one short visible narration sentence
 2. exactly one real tool call for the immediate next step
 
+Code Squid executes one tool call at a time.
+Do not call more than one tool in the same response.
+Do not batch reads, writes, or commands together.
+If you want to inspect multiple files, choose the single most important file first.
+If you want to run a command and inspect a file, choose the one action that should happen first.
+
 Write the narration first, then issue the tool call in the same response.
-The narration and tool call must describe the same immediate action.
+The narration and tool call should describe the same immediate action.
 
 Good narration should briefly explain:
 - what you learned from the last observation, if applicable
@@ -54,9 +60,8 @@ Good narration should briefly explain:
 Rules:
 - exactly one tool call before the task is complete
 - visible narration must not be empty when using a tool
-- narration must come before the tool call
-- narration must match the chosen tool call
-- do not describe later planned steps
+- the narration should describe the same immediate action as the tool call
+- do not describe multiple future actions
 - do not split narration and tool use across separate turns
 - do not issue more than one tool call in a response before the task is complete
 """.strip()
@@ -217,11 +222,17 @@ Do not do extra verification or exploration unless concrete work remains.
 
 {FINAL_SUMMARY_REQUIREMENTS}
 """.strip(),
-    "non_final_wrong_tool_count": """
-Format error: your last response used the wrong number of tool calls.
+    "non_final_too_many_tool_calls": """
+Format error: your last response requested too many tool calls.
 
-Before the task is complete, every response must include exactly one real tool call for the immediate next step.
-Reply again now with exactly one tool call.
+Code Squid executes only one tool call per turn.
+Do not batch reads, writes, or commands together.
+Choose the single most important immediate next action and call only that one tool now.
+
+If you attempted multiple reads, start with the file most necessary to make progress.
+If you attempted a command plus another tool, choose only the command or only the file action needed next.
+Do not describe a list of future steps.
+Reply now with brief narration and exactly one real tool call.
 """.strip(),
     "non_final_missing_narration": """
 Format error: your last response included a tool call but no visible assistant narration.

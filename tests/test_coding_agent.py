@@ -128,7 +128,7 @@ def test_validate_reply_rejects_more_than_one_tool_call() -> None:
 
     assert validation == {
         "ok": False,
-        "reason": "non_final_wrong_tool_count",
+        "reason": "non_final_too_many_tool_calls",
     }
 
 
