@@ -485,9 +485,11 @@ class TerminalDisplay:
         elif status == "interrupted":
             print(_styled_text("⚠️ Session interrupted", SOFT_YELLOW_STYLE))
         else:
-            print(_styled_text("✅ Session complete", SOFT_GREEN_STYLE))
+            print(_styled_text("✅ Done!", SOFT_GREEN_STYLE))
 
         if not self.show_transcript:
+            if status == "complete":
+                print()
             return
 
         print()
@@ -721,7 +723,7 @@ class TerminalDisplay:
 
         self._print_leading_blank_if_needed()
         print(_structural_text(FINAL_REPORT_DIVIDER))
-        print("📋 Final summary")
+        print("🦑 Result:")
         print()
         print(formatted)
         self._needs_leading_blank = False

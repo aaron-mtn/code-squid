@@ -354,12 +354,12 @@ def _resume_session(repo_root: Path, session_id: str) -> int:
 
 
 def _run_interactive(repo_root: Path) -> int:
+    settings = load_settings(repo_root)
+    display = _run_display(repo_root, settings)
+    display.start()
     active_session_id: str | None = None
 
     while True:
-        settings = load_settings(repo_root)
-        display = _run_display(repo_root, settings)
-        display.start()
         task = _prompt_task_or_cancel("Task")
         if task is None:
             return 0

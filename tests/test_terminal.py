@@ -1253,25 +1253,25 @@ def test_generic_long_command_gets_middle_truncated(
     assert len(output.removesuffix("\n")) <= len(RUN_DETAIL_INDENT) + len("💿 Ran: ") + 80
 
 
-def test_normal_completion_prints_session_complete(
+def test_normal_completion_prints_finished(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     session = SimpleNamespace(files_read=set(), files_written=set(), messages=[])
 
     TerminalDisplay().loop_finished(session)
 
-    assert capsys.readouterr().out.endswith("✅ Session complete\n")
+    assert capsys.readouterr().out.endswith("✅ Done!\n\n")
 
 
 @pytest.mark.parametrize(
     ("run_result", "expected"),
     [
-        (RunResult(status="complete"), "✅ Session complete"),
+        (RunResult(status="complete"), "✅ Done!"),
         (RunResult(status="failed", reason="invalid reply"), "❌ Session failed"),
         (RunResult(status="interrupted", reason="user interrupted"), "⚠️ Session interrupted"),
     ],
 )
-def test_loop_finished_prints_status_label(
+def test_loop_Done_prints_status_label(
     capsys: pytest.CaptureFixture[str],
     run_result: RunResult,
     expected: str,
@@ -1282,7 +1282,7 @@ def test_loop_finished_prints_status_label(
 
     output = capsys.readouterr().out
     assert expected in output
-    assert output.count("Session complete") == (1 if run_result.status == "complete" else 0)
+    assert output.count("✅ Done!") == (1 if run_result.status == "complete" else 0)
 
 
 def test_loop_finished_prints_divider_before_file_report(
@@ -1307,7 +1307,8 @@ def test_loop_finished_prints_divider_before_file_report(
         "  Files written\n"
         "    app.py\n"
         "\n"
-        "✅ Session complete\n"
+        "✅ Done!\n"
+        "\n"
     )
 
 
@@ -1395,10 +1396,9 @@ def test_final_message_renders_report_heading(
     )
 
     output = capsys.readouterr().out
-    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n📋 Final summary\n\n")
+    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n🦑 Result\n\n")
     assert "  Files changed\n    ui/terminal.py" in output
     assert "  What changed\n    polished display" in output
-    assert "🦑" not in output
     assert "TASK COMPLETE" not in output
 
 
@@ -1411,10 +1411,9 @@ def test_final_message_displays_unlabeled_content_under_report_heading(
     )
 
     output = capsys.readouterr().out
-    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n📋 Final summary\n\n")
+    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n🦑 Result\n\n")
     assert "I ran `pwd`; the workspace is" in output
     assert "`/home/aaron/Desktop/coding_agent_eval_repos`." in output
-    assert "🦑" not in output
 
 
 def test_final_summary_colors_report_divider_cyan_in_tty(
@@ -1432,7 +1431,7 @@ def test_final_summary_colors_report_divider_cyan_in_tty(
 
     assert capsys.readouterr().out.startswith(
         f"{SOFT_CYAN_STYLE}{FINAL_REPORT_DIVIDER}{RESET_STYLE}\n"
-        "📋 Final summary\n\n"
+        "🦑 Result\n\n"
     )
 
 
@@ -1564,7 +1563,7 @@ def test_debug_loop_finished_does_not_print_transcript_by_default(
     TerminalDisplay(debug=True).loop_finished(session)
 
     output = capsys.readouterr().out
-    assert "✅ Session complete" in output
+    assert "✅ Done" in output
     assert "Full transcript:" not in output
     assert "secret task" not in output
 
@@ -1586,7 +1585,7 @@ def test_show_transcript_prints_full_transcript(
     assert "secret task" in output
 
 
-def test_interrupted_completion_does_not_print_session_complete(
+def test_interrupted_completion_does_not_print_finished(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     session = SimpleNamespace(files_read=set(), files_written=set(), messages=[])
@@ -1597,7 +1596,7 @@ def test_interrupted_completion_does_not_print_session_complete(
 
     output = capsys.readouterr().out
     assert output.startswith(f"{RUN_DETAIL_INDENT}⏹️ Interrupted\n")
-    assert "✅ Session complete" not in output
+    assert "✅ Done" not in output
 
 
 def test_tool_result_displays_action_denied(capsys: pytest.CaptureFixture[str]) -> None:
