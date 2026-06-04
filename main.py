@@ -43,6 +43,8 @@ PROMPT_PREFIX = INPUT_PROMPT_PREFIX
 PROMPT_STYLE = INPUT_PROMPT_STYLE
 CANCELLED_BEFORE_RUN_MESSAGE = "⏹️ Cancelled before task started"
 HELP_COMMAND = "/help"
+NEW_COMMAND = "/new"
+EXIT_COMMANDS = {"/exit", "exit", "quit"}
 HELP_TEXT = """\
 Code Squid help
 
@@ -78,6 +80,14 @@ APPROVAL_MODES = {
 
 def _is_help_input(task: str) -> bool:
     return task.strip() == HELP_COMMAND
+
+
+def _is_new_input(task: str) -> bool:
+    return task.strip() == NEW_COMMAND
+
+
+def _is_exit_input(task: str) -> bool:
+    return task.strip() in EXIT_COMMANDS
 
 
 def _print_help() -> None:
@@ -216,6 +226,16 @@ def _startup_info(repo_root: Path, settings: Settings) -> StartupInfo:
     )
 
 
+def _run_display(repo_root: Path, settings: Settings) -> TerminalDisplay:
+    trace = os.getenv("CODE_SQUID_TRACE") == "1"
+    debug = settings.display.debug or trace
+    return TerminalDisplay(
+        debug=debug,
+        show_transcript=trace,
+        startup_info=_startup_info(repo_root, settings),
+    )
+
+
 def _run_loop(
     repo_root: Path,
     loop: AgentLoop,
@@ -245,15 +265,55 @@ def _run_loop(
     return 0
 
 
+def _run_new_session_task(
+    repo_root: Path,
+    task: str,
+    settings: Settings,
+    display: TerminalDisplay,
+) -> tuple[int, str | None]:
+    display.run_started()
+
+    session = Session(repo_root=repo_root)
+    session_store = SessionStore.create(repo_root=repo_root, task=task)
+    undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
+    agent = CodingAgent(task=task)
+    loop = _build_loop(repo_root, session, session_store, agent, undo_store, settings, display)
+
+    status = _run_loop(repo_root, loop, display, session, session_store)
+    return status, session_store.session_id
+
+
+def _run_follow_up_task(
+    repo_root: Path,
+    session_id: str,
+    follow_up_task: str,
+    settings: Settings,
+    display: TerminalDisplay,
+) -> tuple[int, str | None]:
+    session_dir = _session_dir_for_resume(repo_root, session_id)
+    if session_dir is None:
+        return 0, None
+
+    session_store = SessionStore.open(session_dir)
+    session = Session(repo_root=repo_root)
+    session.add_messages(*session_store.load_messages())
+
+    display.run_started()
+    agent = CodingAgent(task=follow_up_task)
+    follow_up_message = agent.follow_up_message(follow_up_task)
+    session.add_message(follow_up_message)
+    session_store.append_message(follow_up_message)
+    session_store.update_status("active")
+
+    undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
+    loop = _build_loop(repo_root, session, session_store, agent, undo_store, settings, display)
+    status = _run_loop(repo_root, loop, display, session, session_store)
+    return status, session_store.session_id
+
+
 def _run_new_session(repo_root: Path) -> int:
     settings = load_settings(repo_root)
-    trace = os.getenv("CODE_SQUID_TRACE") == "1"
-    debug = settings.display.debug or trace
-    display = TerminalDisplay(
-        debug=debug,
-        show_transcript=trace,
-        startup_info=_startup_info(repo_root, settings),
-    )
+    display = _run_display(repo_root, settings)
     display.start()
     task = _prompt_task_or_cancel("Task")
     if task is None:
@@ -265,34 +325,13 @@ def _run_new_session(repo_root: Path) -> int:
         print("No task entered; nothing to run.")
         return 0
 
-    display.run_started()
-
-    session = Session(repo_root=repo_root)
-    session_store = SessionStore.create(repo_root=repo_root, task=task)
-    undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
-    agent = CodingAgent(task=task)
-    loop = _build_loop(repo_root, session, session_store, agent, undo_store, settings, display)
-
-    return _run_loop(repo_root, loop, display, session, session_store)
+    status, _ = _run_new_session_task(repo_root, task, settings, display)
+    return status
 
 
 def _resume_session(repo_root: Path, session_id: str) -> int:
     settings = load_settings(repo_root)
-    trace = os.getenv("CODE_SQUID_TRACE") == "1"
-    debug = settings.display.debug or trace
-    session_dir = _session_dir_for_resume(repo_root, session_id)
-    if session_dir is None:
-        return 0
-
-    session_store = SessionStore.open(session_dir)
-    session = Session(repo_root=repo_root)
-    session.add_messages(*session_store.load_messages())
-
-    display = TerminalDisplay(
-        debug=debug,
-        show_transcript=trace,
-        startup_info=_startup_info(repo_root, settings),
-    )
+    display = _run_display(repo_root, settings)
     display.start()
     follow_up_task = _prompt_task_or_cancel("Follow-up task")
     if follow_up_task is None:
@@ -304,16 +343,52 @@ def _resume_session(repo_root: Path, session_id: str) -> int:
         print("No task entered; nothing to run.")
         return 0
 
-    display.run_started()
-    agent = CodingAgent(task=follow_up_task)
-    follow_up_message = agent.follow_up_message(follow_up_task)
-    session.add_message(follow_up_message)
-    session_store.append_message(follow_up_message)
-    session_store.update_status("active")
+    status, _ = _run_follow_up_task(
+        repo_root,
+        session_id,
+        follow_up_task,
+        settings,
+        display,
+    )
+    return status
 
-    undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
-    loop = _build_loop(repo_root, session, session_store, agent, undo_store, settings, display)
-    return _run_loop(repo_root, loop, display, session, session_store)
+
+def _run_interactive(repo_root: Path) -> int:
+    active_session_id: str | None = None
+
+    while True:
+        settings = load_settings(repo_root)
+        display = _run_display(repo_root, settings)
+        display.start()
+        task = _prompt_task_or_cancel("Task")
+        if task is None:
+            return 0
+        if _is_exit_input(task):
+            return 0
+        if _is_new_input(task):
+            active_session_id = None
+            continue
+        if _is_help_input(task):
+            _print_help()
+            continue
+        if not task.strip():
+            continue
+
+        if active_session_id is None:
+            status, session_id = _run_new_session_task(repo_root, task, settings, display)
+        else:
+            status, session_id = _run_follow_up_task(
+                repo_root,
+                active_session_id,
+                task,
+                settings,
+                display,
+            )
+
+        if session_id is not None:
+            active_session_id = session_id
+        if status != 0:
+            return status
 
 
 def _undo(repo_root: Path) -> None:
@@ -394,7 +469,7 @@ def main() -> int:
         print(USAGE)
         return 0
 
-    return _run_new_session(repo_root)
+    return _run_interactive(repo_root)
 
 
 # Run the app when this file is executed directly.

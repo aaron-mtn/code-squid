@@ -12,6 +12,7 @@ from main import (
     _mode,
     _prompt_task,
     _resume_session,
+    _run_interactive,
     _run_loop,
     _run_new_session,
     main,
@@ -307,6 +308,19 @@ def _fake_prompt_task(response: str):
         print(INPUT_IDENTITY_LINE)
         print(PROMPT_PREFIX, end="")
         return response
+
+    return fake_prompt_task
+
+
+def _fake_prompt_tasks(responses: list[str]):
+    pending = list(responses)
+
+    def fake_prompt_task(label: str) -> str:
+        if not pending:
+            raise AssertionError("No fake prompt responses left")
+        print(INPUT_IDENTITY_LINE)
+        print(PROMPT_PREFIX, end="")
+        return pending.pop(0)
 
     return fake_prompt_task
 
@@ -618,6 +632,70 @@ def test_new_session_trace_threads_effective_debug_to_provider(
     assert _run_new_session(tmp_path) == 0
 
     assert provider_kwargs[0]["debug"] is True
+
+
+def test_interactive_exit_command_exits_without_run(monkeypatch, tmp_path) -> None:
+    def fail_run(*args):
+        raise AssertionError("interactive exit should not start a run")
+
+    monkeypatch.setattr("main.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr("main._prompt_task", _fake_prompt_tasks(["/exit"]))
+    monkeypatch.setattr("main._run_new_session_task", fail_run)
+    monkeypatch.setattr("main._run_follow_up_task", fail_run)
+
+    assert _run_interactive(tmp_path) == 0
+
+
+def test_interactive_new_command_clears_active_session(monkeypatch, tmp_path) -> None:
+    new_tasks = []
+    follow_up_tasks = []
+
+    def fake_new(repo_root, task, settings, display):
+        new_tasks.append(task)
+        return 0, f"session-{len(new_tasks)}"
+
+    def fake_follow_up(repo_root, session_id, task, settings, display):
+        follow_up_tasks.append((session_id, task))
+        return 0, session_id
+
+    monkeypatch.setattr("main.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr(
+        "main._prompt_task",
+        _fake_prompt_tasks(["first task", "/new", "second task", "/exit"]),
+    )
+    monkeypatch.setattr("main._run_new_session_task", fake_new)
+    monkeypatch.setattr("main._run_follow_up_task", fake_follow_up)
+
+    assert _run_interactive(tmp_path) == 0
+
+    assert new_tasks == ["first task", "second task"]
+    assert follow_up_tasks == []
+
+
+def test_interactive_second_input_uses_follow_up_path(monkeypatch, tmp_path) -> None:
+    new_tasks = []
+    follow_up_tasks = []
+
+    def fake_new(repo_root, task, settings, display):
+        new_tasks.append(task)
+        return 0, "active-session"
+
+    def fake_follow_up(repo_root, session_id, task, settings, display):
+        follow_up_tasks.append((session_id, task))
+        return 0, session_id
+
+    monkeypatch.setattr("main.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr(
+        "main._prompt_task",
+        _fake_prompt_tasks(["first task", "follow up", "/exit"]),
+    )
+    monkeypatch.setattr("main._run_new_session_task", fake_new)
+    monkeypatch.setattr("main._run_follow_up_task", fake_follow_up)
+
+    assert _run_interactive(tmp_path) == 0
+
+    assert new_tasks == ["first task"]
+    assert follow_up_tasks == [("active-session", "follow up")]
 
 
 def test_new_session_passes_debug_without_trace_to_terminal_display(
