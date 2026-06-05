@@ -10,6 +10,7 @@ from tools.read_file import execute as read_file
 from tools.read_file import tool_definition as read_file_definition
 from tools._truncation import truncate_head_tail
 from tools.run_command import execute as run_command
+from tools.apply_patch import execute as apply_patch
 from tools.write_file import execute as write_file
 
 
@@ -207,6 +208,67 @@ def test_write_file_rejects_relative_path_succeeds_with_absolute_path_and_is_com
     assert absolute_result["characters_written"] == 7
     assert "content" not in absolute_result
     assert file_path.read_text(encoding="utf-8") == "written"
+
+
+def test_apply_patch_replaces_one_exact_occurrence_and_is_compact(tmp_path: Path) -> None:
+    file_path = tmp_path / "input.txt"
+    file_path.write_text("before middle after", encoding="utf-8")
+
+    result = apply_patch(tmp_path, str(file_path), "middle", "center")
+
+    assert result == {
+        "ok": True,
+        "tool": "apply_patch",
+        "path": str(file_path),
+        "replacements": 1,
+        "chars_before": 19,
+        "chars_after": 19,
+    }
+    assert file_path.read_text(encoding="utf-8") == "before center after"
+    assert "content" not in result
+
+
+def test_apply_patch_fails_when_old_text_missing_and_does_not_modify_file(tmp_path: Path) -> None:
+    file_path = tmp_path / "input.txt"
+    file_path.write_text("original", encoding="utf-8")
+
+    result = apply_patch(tmp_path, str(file_path), "missing", "replacement")
+
+    assert result == {
+        "ok": False,
+        "tool": "apply_patch",
+        "path": str(file_path),
+        "error": "old_text_not_found",
+        "occurrences": 0,
+    }
+    assert file_path.read_text(encoding="utf-8") == "original"
+
+
+def test_apply_patch_fails_when_old_text_is_not_unique_and_does_not_modify_file(tmp_path: Path) -> None:
+    file_path = tmp_path / "input.txt"
+    file_path.write_text("same different same", encoding="utf-8")
+
+    result = apply_patch(tmp_path, str(file_path), "same", "changed")
+
+    assert result == {
+        "ok": False,
+        "tool": "apply_patch",
+        "path": str(file_path),
+        "error": "old_text_not_unique",
+        "occurrences": 2,
+    }
+    assert file_path.read_text(encoding="utf-8") == "same different same"
+
+
+def test_apply_patch_requires_absolute_path(tmp_path: Path) -> None:
+    result = apply_patch(tmp_path, "input.txt", "old", "new")
+
+    assert result == {
+        "ok": False,
+        "tool": "apply_patch",
+        "path": "input.txt",
+        "error": "path_not_absolute",
+    }
 
 
 def test_run_command_timeout_returns_normal_failure_result(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

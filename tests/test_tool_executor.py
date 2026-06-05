@@ -38,6 +38,31 @@ def test_write_file_snapshots_target_before_write(tmp_path: Path) -> None:
     assert undo_store.contents == ["before"]
 
 
+def test_successful_apply_patch_snapshots_and_records_file_written(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("before", encoding="utf-8")
+    undo_store = FakeUndoStore()
+    session = Session(repo_root=tmp_path)
+    executor = ToolExecutor(
+        repo_root=tmp_path,
+        session=session,
+        undo_store=undo_store,
+    )
+
+    result = executor.execute(
+        {
+            "tool": "apply_patch",
+            "args": {"path": str(target), "old_text": "before", "new_text": "after"},
+        }
+    )
+
+    assert result["ok"] is True
+    assert target.read_text(encoding="utf-8") == "after"
+    assert session.files_written == {str(target)}
+    assert undo_store.paths == [str(target)]
+    assert undo_store.contents == ["before"]
+
+
 def test_read_file_and_run_command_do_not_snapshot(tmp_path: Path) -> None:
     target = tmp_path / "target.txt"
     target.write_text("content", encoding="utf-8")
@@ -136,6 +161,41 @@ def test_blocked_write_file_does_not_snapshot_or_call_tool(
     assert calls == []
 
 
+def test_apply_patch_respects_workspace_policy(monkeypatch, tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside.txt"
+    workspace.mkdir()
+    undo_store = FakeUndoStore()
+    calls = []
+
+    def fake_execute(repo_root: Path, **args) -> dict:
+        calls.append((repo_root, args))
+        return {"ok": True, "tool": "apply_patch", "path": args["path"]}
+
+    monkeypatch.setattr(
+        tool_executor_module,
+        "TOOLS",
+        {"apply_patch": {"execute": fake_execute}},
+    )
+    executor = ToolExecutor(
+        repo_root=workspace,
+        session=Session(repo_root=workspace),
+        undo_store=undo_store,
+    )
+
+    result = executor.execute(
+        {
+            "tool": "apply_patch",
+            "args": {"path": str(outside), "old_text": "old", "new_text": "new"},
+        }
+    )
+
+    assert result["ok"] is False
+    assert "outside the workspace root" in result["error"]
+    assert undo_store.paths == []
+    assert calls == []
+
+
 def test_run_command_is_not_restricted_by_workspace_boundary(
     monkeypatch,
     tmp_path: Path,
@@ -187,6 +247,7 @@ def test_allow_outside_workspace_allows_outside_file_paths_through(
         {
             "read_file": {"execute": fake_execute},
             "write_file": {"execute": fake_execute},
+            "apply_patch": {"execute": fake_execute},
         },
     )
     executor = ToolExecutor(
@@ -207,12 +268,20 @@ def test_allow_outside_workspace_allows_outside_file_paths_through(
             "args": {"path": str(outside_write), "content": "outside"},
         }
     )
+    patch_result = executor.execute(
+        {
+            "tool": "apply_patch",
+            "args": {"path": str(outside_write), "old_text": "old", "new_text": "new"},
+        }
+    )
 
     assert result["ok"] is True
     assert write_result["ok"] is True
+    assert patch_result["ok"] is True
     assert calls == [
         (workspace, {"path": str(outside_read)}),
         (workspace, {"path": str(outside_write), "content": "outside"}),
+        (workspace, {"path": str(outside_write), "old_text": "old", "new_text": "new"}),
     ]
 
 

@@ -196,7 +196,7 @@ class TerminalDisplay:
         if not self.debug:
             return
 
-        if action.get("tool") in {"read_file", "write_file"}:
+        if action.get("tool") in {"read_file", "write_file", "apply_patch"}:
             return
 
         print(self._action_text(action))
@@ -269,7 +269,7 @@ class TerminalDisplay:
         tool_name = action.get("tool", "")
         args = action.get("args", {})
 
-        if tool_name in {"read_file", "write_file"}:
+        if tool_name in {"read_file", "write_file", "apply_patch"}:
             return self._approval_panel_line(
                 "Path",
                 self._short_path(self._single_line(args.get("path", ""))),
@@ -382,6 +382,14 @@ class TerminalDisplay:
                 return f"❌ Write failed: {path}"
             return f"📝 Write: {path}"
 
+        if tool_name == "apply_patch":
+            path = self._short_path(args.get("path", ""))
+            if phase == "success":
+                return f"🩹 Patched: {path}"
+            if phase == "failure":
+                return f"❌ Patch failed: {path}"
+            return f"🩹 Patch: {path}"
+
         if tool_name == "run_command":
             return self._command_label(
                 args.get("command", ""),
@@ -409,13 +417,13 @@ class TerminalDisplay:
             return
 
         if result.get("ok", False):
-            if tool_name in {"read_file", "write_file"}:
+            if tool_name in {"read_file", "write_file", "apply_patch"}:
                 self._print_visible_line(self._action_label(action, "success"), dim=True)
             self._print_debug_tool_result(action, result)
             return
 
         error = result.get("error", "unknown error")
-        if tool_name in {"read_file", "write_file"}:
+        if tool_name in {"read_file", "write_file", "apply_patch"}:
             self._print_visible_line(
                 f"{self._action_label(action, 'failure')} - {error}",
                 style=SOFT_RED_STYLE,
@@ -634,7 +642,7 @@ class TerminalDisplay:
         args = action.get("args", {})
         lines = [f"tool: {tool_name}"]
 
-        if tool_name in {"read_file", "write_file"} and args.get("path"):
+        if tool_name in {"read_file", "write_file", "apply_patch"} and args.get("path"):
             lines.append(f"path: {self._short_path(str(args['path']))}")
         if tool_name == "run_command" and args.get("command"):
             lines.append(f"command: {self._truncate_middle(str(args['command']), COMMAND_LABEL_MAX)}")
@@ -687,6 +695,20 @@ class TerminalDisplay:
                 [
                     f"characters_written: {result.get('characters_written', 0)}",
                     f"summary: {result.get('summary', '')}",
+                ]
+            )
+            return lines
+
+        if tool_name == "apply_patch":
+            if args.get("path"):
+                lines.append(f"path: {self._short_path(str(args['path']))}")
+            if not result.get("ok", False) and result.get("error"):
+                lines.append(f"error: {result['error']}")
+                return lines
+            lines.extend(
+                [
+                    f"replacements: {result.get('replacements', 0)}",
+                    f"chars: {result.get('chars_before', 0)} -> {result.get('chars_after', 0)}",
                 ]
             )
             return lines

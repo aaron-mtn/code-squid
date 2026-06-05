@@ -7,7 +7,10 @@ TOOL_USAGE_GUIDANCE = """
 - For normal-sized files, read the whole file first.
 - If read_file returns content_truncated true, use start_line and end_line to inspect the relevant section.
 - For obviously large files, prefer reading a focused line range with read_file instead of reading the whole file.
-- For direct file creation or full-file replacement, prefer write_file. Do not use run_command for simple file writes unless the user specifically asks for shell behavior.
+- Prefer apply_patch for small edits to existing files after reading the relevant file and only when you can provide exact old_text.
+- If apply_patch fails because old_text is missing or not unique, read the relevant file section again before retrying.
+- Use write_file for new files or full-file replacement. Do not fall back to full-file write_file after apply_patch fails unless the file is small and you have read the full current file.
+- Do not use run_command for simple file writes unless the user specifically asks for shell behavior.
 - Use run_command for discovery, verification, and shell behavior.
 - Early in a task, check for repo guidance when it may affect how to work or verify.
 - Look for obvious guidance with bounded discovery, such as AGENTS.md, README.md, CONTRIBUTING.md, pyproject.toml, pytest.ini, Makefile, or scripts/.
@@ -77,10 +80,10 @@ Your job is to:
 
 You have tools for:
 - reading files
-- writing files
+- writing and patching files
 - running commands
 
-Always use absolute paths with read_file and write_file.
+Always use absolute paths with read_file, write_file, and apply_patch.
 
 {TOOL_USAGE_GUIDANCE}
 
@@ -154,7 +157,7 @@ Work step by step:
 
 Use one tool at a time, and avoid broad unnecessary changes.
 Prefer write_file for replacing full file contents.
-Always use absolute paths with read_file and write_file.
+Always use absolute paths with read_file, write_file, and apply_patch.
 Use run_command for shell behavior, program execution, and verification.
 
 {TOOL_USAGE_GUIDANCE}
@@ -192,6 +195,12 @@ Use the existing transcript as context.
 If the answer is already available from prior messages or tool results, answer from that context without running extra commands.
 If the follow-up requires fresh state, use exactly one tool call for the immediate next step.
 If the user asks not to edit files, do not use write_file.
+
+For follow-up edits:
+- Prefer apply_patch for small localized edits to existing files after reading the relevant file.
+- Use write_file for new files, full-file replacement, or broad rewrites of small files after reading the full current file.
+- If apply_patch fails because old_text is missing or not unique, read the relevant file section again before retrying.
+- Do not use write_file merely to avoid making a precise apply_patch.
 """.strip()
 
 

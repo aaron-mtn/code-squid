@@ -11,7 +11,7 @@ class ToolExecutor:
 
     # repo_root is the default working directory for run_command and the workspace
     # boundary for structured file-tool execution guards.
-    # read_file and write_file still use absolute paths directly.
+    # File tools still use absolute paths directly.
     def __init__(
         self,
         repo_root: Path,
@@ -49,7 +49,7 @@ class ToolExecutor:
                 }
 
         try:
-            if self.undo_store is not None and tool_name == "write_file":
+            if self.undo_store is not None and tool_name in {"write_file", "apply_patch"}:
                 path = args.get("path")
                 if isinstance(path, str):
                     self.undo_store.snapshot_file(path)
@@ -75,7 +75,7 @@ class ToolExecutor:
             if path:
                 self.session.mark_file_read(path)
 
-        if tool_name == "write_file":
+        if tool_name in {"write_file", "apply_patch"}:
             path = result.get("path")
             if path:
                 self.session.mark_file_written(path)

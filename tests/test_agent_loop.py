@@ -587,6 +587,45 @@ def test_guarded_allows_inside_workspace_write_file_without_approval(tmp_path) -
     ]
 
 
+def test_guarded_allows_inside_workspace_apply_patch_without_approval(tmp_path) -> None:
+    target = tmp_path / "README.md"
+    target.write_text("hello", encoding="utf-8")
+    prompter = FakePrompter(ApprovalDecision(approved=False))
+
+    _, tool_executor, _, _ = run_loop(
+        [
+            reply(
+                "valid",
+                actions=[
+                    {
+                        "tool": "apply_patch",
+                        "args": {
+                            "path": str(target),
+                            "old_text": "hello",
+                            "new_text": "goodbye",
+                        },
+                    }
+                ],
+            ),
+            reply("TASK COMPLETE"),
+        ],
+        approval_policy=ApprovalPolicy("guarded", prompter=prompter),
+        repo_root=tmp_path,
+    )
+
+    assert prompter.actions == []
+    assert tool_executor.actions == [
+        {
+            "tool": "apply_patch",
+            "args": {
+                "path": str(target),
+                "old_text": "hello",
+                "new_text": "goodbye",
+            },
+        }
+    ]
+
+
 def test_guarded_asks_for_outside_workspace_file_tool(tmp_path) -> None:
     workspace = tmp_path / "workspace"
     outside = tmp_path / "outside.txt"

@@ -218,6 +218,17 @@ def test_failure_message_for_invalid_replies_includes_reason_and_explanation() -
     }
 
 
+def test_tool_definition_exposes_apply_patch_through_coding_agent() -> None:
+    agent = CodingAgent("demo task")
+
+    names = [
+        definition["function"]["name"]
+        for definition in agent.tool_definitions()
+    ]
+
+    assert names == ["read_file", "write_file", "apply_patch", "run_command"]
+
+
 def test_empty_final_correction_mentions_final_content() -> None:
     agent = CodingAgent("demo task")
 

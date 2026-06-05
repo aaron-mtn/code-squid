@@ -1396,7 +1396,7 @@ def test_final_message_renders_report_heading(
     )
 
     output = capsys.readouterr().out
-    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n🦑 Result\n\n")
+    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n🦑 Result:\n\n")
     assert "  Files changed\n    ui/terminal.py" in output
     assert "  What changed\n    polished display" in output
     assert "TASK COMPLETE" not in output
@@ -1411,7 +1411,7 @@ def test_final_message_displays_unlabeled_content_under_report_heading(
     )
 
     output = capsys.readouterr().out
-    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n🦑 Result\n\n")
+    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n🦑 Result:\n\n")
     assert "I ran `pwd`; the workspace is" in output
     assert "`/home/aaron/Desktop/coding_agent_eval_repos`." in output
 
@@ -1431,7 +1431,7 @@ def test_final_summary_colors_report_divider_cyan_in_tty(
 
     assert capsys.readouterr().out.startswith(
         f"{SOFT_CYAN_STYLE}{FINAL_REPORT_DIVIDER}{RESET_STYLE}\n"
-        "🦑 Result\n\n"
+        "🦑 Result:\n\n"
     )
 
 
