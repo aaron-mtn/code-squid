@@ -29,7 +29,7 @@ TOOL_USAGE_GUIDANCE = """
 FINAL_SUMMARY_REQUIREMENTS = """
 If the task is complete, reply with a short human-readable summary and no tool call.
 
-For coding tasks, prefer these labels when they are relevant:
+For coding tasks, prefer these labels when they are relevant, without surrounding them with asterisks or other punctuation:
 - Files changed:
 - What changed:
 - Verification:
@@ -38,7 +38,12 @@ For coding tasks, prefer these labels when they are relevant:
 Include concise but useful detail for each section you use. Keep the final summary short.
 
 For Remaining risks / notes, use "none" only when verification passed and no concrete caveats remain. Prefer a short sentence explaining why risk is low, such as "No known remaining risks; the targeted regression test passed."
-Do not invent speculative risks. If only syntax, static checks, or partial checks were run, describe the concrete unverified behavior under Remaining risks / notes.
+Do not invent speculative risks.
+
+Be precise about what was actually verified.
+If only syntax, static checks, or partial checks were run, describe the concrete unverified behavior under Remaining risks / notes.
+For browser/UI work, do not claim visual layout, browser behavior, canvas drawing, downloads, localStorage, timers, buttons, forms, or interactions were verified unless they were actually run or manually checked in a browser.
+If browser behavior was only inspected from code, say it is expected based on code inspection and that browser/manual testing was not performed.
 """.strip()
 
 REQUIRED_RESPONSE_FORMAT = """
