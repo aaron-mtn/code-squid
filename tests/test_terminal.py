@@ -1389,16 +1389,23 @@ def test_final_message_renders_report_heading(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     TerminalDisplay().final_message(
-        "Files changed: ui/terminal.py\n"
-        "What changed: polished display\n"
-        "Verification: `pytest tests/test_terminal.py`\n"
-        "Remaining risks / notes: No known remaining risks; terminal display tests passed."
+        "## Files changed\n"
+        "- `ui/terminal.py`\n"
+        "\n"
+        "## What changed\n"
+        "- Polished display.\n"
+        "\n"
+        "## Verification\n"
+        "- `pytest tests/test_terminal.py`\n"
+        "\n"
+        "## Remaining risks / notes\n"
+        "- No known remaining risks; terminal display tests passed."
     )
 
     output = capsys.readouterr().out
     assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n🦑 Result:\n\n")
-    assert "  Files changed\n    ui/terminal.py" in output
-    assert "  What changed\n    polished display" in output
+    assert "  Files changed\n- `ui/terminal.py`" in output
+    assert "  What changed\n- Polished display." in output
     assert "TASK COMPLETE" not in output
 
 
@@ -1423,10 +1430,14 @@ def test_final_summary_colors_report_divider_cyan_in_tty(
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
 
     TerminalDisplay().final_message(
-        "Files changed: ui/terminal.py\n"
-        "What changed: polished display\n"
-        "Verification: `pytest tests/test_terminal.py`\n"
-        "Remaining risks / notes: none"
+        "## Files changed\n"
+        "- `ui/terminal.py`\n"
+        "## What changed\n"
+        "- Polished display.\n"
+        "## Verification\n"
+        "- `pytest tests/test_terminal.py`\n"
+        "## Remaining risks / notes\n"
+        "- none"
     )
 
     assert capsys.readouterr().out.startswith(
@@ -1442,35 +1453,61 @@ def test_final_summary_headings_are_bold_in_tty(
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
 
     TerminalDisplay().final_message(
-        "Files changed: ui/terminal.py\n"
-        "What changed: polished display\n"
-        "Verification: `pytest tests/test_terminal.py`\n"
-        "Remaining risks / notes: none"
+        "## Files changed\n"
+        "- `ui/terminal.py`\n"
+        "## What changed\n"
+        "- Polished display.\n"
+        "## Verification\n"
+        "- `pytest tests/test_terminal.py`\n"
+        "## Remaining risks / notes\n"
+        "- none"
     )
 
     output = capsys.readouterr().out
-    assert f"  {BOLD_STYLE}Files changed{RESET_STYLE}\n    ui/terminal.py" in output
-    assert f"  {BOLD_STYLE}What changed{RESET_STYLE}\n    polished display" in output
+    assert f"  {BOLD_STYLE}Files changed{RESET_STYLE}\n- `ui/terminal.py`" in output
+    assert f"  {BOLD_STYLE}What changed{RESET_STYLE}\n- Polished display." in output
     assert f"  {BOLD_STYLE}Verification{RESET_STYLE}\n" in output
-    assert f"  {BOLD_STYLE}Remaining risks / notes{RESET_STYLE}\n    none" in output
+    assert f"  {BOLD_STYLE}Remaining risks / notes{RESET_STYLE}\n- none" in output
 
 
-def test_final_message_with_sections_hides_preamble(
+def test_final_summary_inline_bold_markers_render_as_bold_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    TerminalDisplay().final_message(
+        "## What changed\n"
+        "- Rendered **Markdown headings** and **bold text** in the final summary."
+    )
+
+    output = capsys.readouterr().out
+    assert "**Markdown headings**" not in output
+    assert "**bold text**" not in output
+    assert f"{BOLD_STYLE}Markdown headings{RESET_STYLE}" in output
+    assert f"{BOLD_STYLE}bold text{RESET_STYLE}" in output
+
+
+def test_final_message_with_markdown_sections_preserves_preamble(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     TerminalDisplay().final_message(
         "All tests pass now. Let me provide the final summary.\n"
-        "Files changed: ui/terminal.py\n"
-        "What changed: polished display\n"
-        "Verification: `pytest tests/test_terminal.py`\n"
-        "Remaining risks / notes: No known remaining risks; terminal display tests passed."
+        "## Files changed\n"
+        "- `ui/terminal.py`\n"
+        "## What changed\n"
+        "- Polished display.\n"
+        "## Verification\n"
+        "- `pytest tests/test_terminal.py`\n"
+        "## Remaining risks / notes\n"
+        "- No known remaining risks; terminal display tests passed."
     )
 
     output = capsys.readouterr().out
-    assert "All tests pass now" not in output
-    assert "  Files changed\n    ui/terminal.py" in output
-    assert "  Verification\n    `pytest tests/test_terminal.py`" in output
-    assert "  Remaining risks / notes\n    No known remaining risks" in output
+    assert "All tests pass now" in output
+    assert "  Files changed\n- `ui/terminal.py`" in output
+    assert "  Verification\n- `pytest tests/test_terminal.py`" in output
+    assert "  Remaining risks / notes\n- No known remaining risks" in output
 
 
 def test_final_message_removes_inline_task_complete(
@@ -1478,14 +1515,18 @@ def test_final_message_removes_inline_task_complete(
 ) -> None:
     TerminalDisplay().final_message(
         "TASK COMPLETE\n"
-        "Files changed: ui/terminal.py\n"
-        "What changed: polished display\n"
-        "Verification: `pytest tests/test_terminal.py`\n"
-        "Remaining risks / notes: No known remaining risks; terminal display tests passed. TASK COMPLETE"
+        "## Files changed\n"
+        "- `ui/terminal.py`\n"
+        "## What changed\n"
+        "- Polished display.\n"
+        "## Verification\n"
+        "- `pytest tests/test_terminal.py`\n"
+        "## Remaining risks / notes\n"
+        "- No known remaining risks; terminal display tests passed. TASK COMPLETE"
     )
 
     output = capsys.readouterr().out
-    assert "  Remaining risks / notes\n    No known remaining risks" in output
+    assert "  Remaining risks / notes\n- No known remaining risks" in output
     assert "TASK COMPLETE" not in output
 
 
@@ -1493,20 +1534,24 @@ def test_final_message_preserves_multiline_fields(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     TerminalDisplay().final_message(
-        "Files changed: ui/terminal.py\n"
-        "What changed: polished display\n"
+        "## Files changed\n"
+        "- `ui/terminal.py`\n"
+        "## What changed\n"
+        "Polished display\n"
         "- grouped final files\n"
         "- sectioned summary\n"
-        "Verification: `pytest tests/test_terminal.py`\n"
-        "Remaining risks / notes: none"
+        "## Verification\n"
+        "- `pytest tests/test_terminal.py`\n"
+        "## Remaining risks / notes\n"
+        "- none"
     )
 
     output = capsys.readouterr().out
     assert (
         "  What changed\n"
-        "    polished display\n"
-        "    - grouped final files\n"
-        "    - sectioned summary\n"
+        "Polished display\n"
+        "- grouped final files\n"
+        "- sectioned summary\n"
     ) in output
 
 
@@ -1520,18 +1565,22 @@ def test_final_message_wraps_body_lines(
     )
 
     TerminalDisplay().final_message(
-        "Files changed: ui/terminal.py\n"
-        "What changed: This final summary body line should wrap neatly while keeping its section indentation.\n"
-        "Verification: `pytest tests/test_terminal.py`\n"
-        "Remaining risks / notes: none"
+        "## Files changed\n"
+        "- `ui/terminal.py`\n"
+        "## What changed\n"
+        "This final summary body line should wrap neatly while keeping Markdown display readable.\n"
+        "## Verification\n"
+        "- `pytest tests/test_terminal.py`\n"
+        "## Remaining risks / notes\n"
+        "- none"
     )
 
     output = capsys.readouterr().out
     assert (
         "  What changed\n"
-        "    This final summary body line should wrap\n"
-        "    neatly while keeping its section\n"
-        "    indentation.\n"
+        "This final summary body line should wrap\n"
+        "neatly while keeping Markdown display\n"
+        "readable.\n"
     ) in output
 
 

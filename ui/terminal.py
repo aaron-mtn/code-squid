@@ -779,18 +779,7 @@ class TerminalDisplay:
         self._print_visible_line(self._action_label(action, "success"), dim=True)
 
     def _format_final_summary(self, content: str) -> str:
-        summary_sections = (
-            ("Files changed:", "Files changed"),
-            ("What changed:", "What changed"),
-            ("Verification:", "Verification"),
-            ("Remaining risks / notes:", "Remaining risks / notes"),
-        )
-        section_by_prefix = dict(summary_sections)
-        prefixes = tuple(section_by_prefix)
-        sections: list[tuple[str, list[str]]] = []
-        current_lines: list[str] | None = None
-        plain_lines: list[str] = []
-
+        formatted_lines: list[str] = []
         for line in content.splitlines():
             # Hide legacy completion markers from normal display; debug mode
             # still prints raw content.
@@ -798,48 +787,47 @@ class TerminalDisplay:
                 line = line.replace("TASK COMPLETE", "")
                 if not line.strip():
                     continue
-            stripped = line.strip()
-
-            matching_prefix = next(
-                (prefix for prefix in prefixes if stripped.startswith(prefix)),
-                None,
-            )
-            if matching_prefix is not None:
-                current_lines = [stripped.removeprefix(matching_prefix).strip()]
-                sections.append((section_by_prefix[matching_prefix], current_lines))
-                continue
-
-            if current_lines is None:
-                plain_lines.append(line)
-                continue
-
-            current_lines.append(line)
-
-        formatted_lines: list[str] = []
-        if sections:
-            for heading, lines in sections:
-                if formatted_lines:
-                    formatted_lines.append("")
-                formatted_lines.append(f"  {_styled_text(heading, BOLD_STYLE)}")
-                for line in lines:
-                    formatted_lines.extend(
-                        self._wrapped_display_lines(
-                            line,
-                            initial_indent="    ",
-                            subsequent_indent="    ",
-                        )
-                    )
-        else:
-            for line in plain_lines:
-                formatted_lines.extend(
-                    self._wrapped_display_lines(
-                        line,
-                        initial_indent="",
-                        subsequent_indent="",
-                    )
-                )
+            formatted_lines.extend(self._markdown_display_lines(line))
 
         return "\n".join(formatted_lines).strip("\n")
+
+    def _markdown_display_lines(self, line: str) -> list[str]:
+        heading_match = re.match(r"^\s{0,3}(#{2,3})\s+(.+?)\s*#*\s*$", line)
+        if heading_match:
+            level, heading = heading_match.groups()
+            indent = "  " if level == "##" else "    "
+            return [f"{indent}{_styled_text(heading, BOLD_STYLE)}"]
+
+        rendered = self._render_inline_markdown(line)
+        stripped = rendered.lstrip()
+        leading = rendered[: len(rendered) - len(stripped)]
+        bullet_match = re.match(r"^([-*+]\s+|\d+\.\s+)", stripped)
+        if bullet_match:
+            marker_width = len(bullet_match.group(1))
+            return self._wrapped_display_lines(
+                rendered,
+                initial_indent="",
+                subsequent_indent=f"{leading}{' ' * marker_width}",
+            )
+
+        return self._wrapped_display_lines(
+            rendered,
+            initial_indent="",
+            subsequent_indent=leading,
+        )
+
+    def _render_inline_markdown(self, text: str) -> str:
+        if "**" not in text or not sys.stdout.isatty():
+            return text
+
+        parts = re.split(r"(\*\*[^*\n]+\*\*)", text)
+        rendered_parts: list[str] = []
+        for part in parts:
+            if part.startswith("**") and part.endswith("**") and len(part) > 4:
+                rendered_parts.append(_styled_text(part[2:-2], BOLD_STYLE))
+                continue
+            rendered_parts.append(part)
+        return "".join(rendered_parts)
 
     def _wrapped_display_lines(
         self,

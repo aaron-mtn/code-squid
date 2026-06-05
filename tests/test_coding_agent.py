@@ -24,10 +24,17 @@ def test_validate_reply_accepts_coding_summary_without_task_complete_as_final() 
     reply = {
         "message": {
             "content": (
-                "Files changed: a.py\n"
-                "What changed: fixed the bug\n"
-                "Verification: pytest\n"
-                "Remaining risks / notes: No known remaining risks; pytest passed."
+                "## Files changed\n"
+                "- `a.py`\n"
+                "\n"
+                "## What changed\n"
+                "- Fixed the bug.\n"
+                "\n"
+                "## Verification\n"
+                "- `pytest`\n"
+                "\n"
+                "## Remaining risks / notes\n"
+                "- No known remaining risks; pytest passed."
             ),
         },
         "actions": [],

@@ -29,13 +29,18 @@ TOOL_USAGE_GUIDANCE = """
 FINAL_SUMMARY_REQUIREMENTS = """
 If the task is complete, reply with a short human-readable summary and no tool call.
 
-For coding tasks, prefer these labels when they are relevant, without surrounding them with asterisks or other punctuation:
-- Files changed:
-- What changed:
-- Verification:
-- Remaining risks / notes:
+For coding tasks, write the final summary in simple Markdown.
+Prefer these Markdown headings when they are relevant:
+- ## Files changed
+- ## What changed
+- ## Verification
+- ## Remaining risks / notes
 
 Include concise but useful detail for each section you use. Keep the final summary short.
+Use bullets when they make the summary easier to scan.
+Use backticks for paths, commands, code symbols, selectors, IDs, and literal values.
+Use bold when it helps, but avoid noisy emphasis.
+Do not use HTML, tables, complex nested Markdown, or giant paragraphs.
 
 For Remaining risks / notes, use "none" only when verification passed and no concrete caveats remain. Prefer a short sentence explaining why risk is low, such as "No known remaining risks; the targeted regression test passed."
 Do not invent speculative risks.
@@ -113,10 +118,17 @@ I am running the tests to verify the fix.
 [one real tool call to run verification]
 
 Valid final response:
-Files changed: parser.py
-What changed: accepted the final summary format and preserved the existing tool-call contract
-Verification: `python -m pytest tests/test_parser.py -v`
-Remaining risks / notes: No known remaining risks; the targeted regression test passed.
+## Files changed
+- `parser.py`
+
+## What changed
+- Accepted the final summary format and preserved the existing tool-call contract.
+
+## Verification
+- `python -m pytest tests/test_parser.py -v`
+
+## Remaining risks / notes
+- No known remaining risks; the targeted regression test passed.
 
 ## Invalid examples
 
@@ -185,10 +197,17 @@ I am verifying the fix now.
 [one real tool call to run tests]
 
 Valid final response:
-Files changed: mathlib.py
-What changed: changed `return lower` to `return upper` in `clamp` when `value > upper`
-Verification: `python -m pytest test_mathlib.py -v` (3 passed)
-Remaining risks / notes: No known remaining risks; the targeted regression test passed.
+## Files changed
+- `mathlib.py`
+
+## What changed
+- Changed `return lower` to `return upper` in `clamp` when `value > upper`.
+
+## Verification
+- `python -m pytest test_mathlib.py -v` (3 passed)
+
+## Remaining risks / notes
+- No known remaining risks; the targeted regression test passed.
 """.strip()
 
 
