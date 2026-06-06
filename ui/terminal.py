@@ -479,7 +479,7 @@ class TerminalDisplay:
             print()
 
         print(_structural_text(FINAL_REPORT_DIVIDER))
-        print("🗂️ Session files")
+        print("🗂️  Session files")
         print()
         self._print_file_list("Read", session.files_read)
         print()
@@ -593,7 +593,7 @@ class TerminalDisplay:
             return f"⚠️ Reply rejected: {reason}"
 
         messages = {
-            "empty_final_reply": "↪ Nudging model to write a final answer…",
+            "empty_final_reply": "↪ Asking model to continue or finalize…",
             "non_final_too_many_tool_calls": "⚠️ Reply rejected: expected exactly one tool call.",
             "malformed_tool_call": "⚠️ Reply rejected: could not read the requested tool call.",
         }

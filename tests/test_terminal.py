@@ -661,7 +661,7 @@ def test_reply_rejected_prints_friendly_nudge_for_empty_final_reply(
     TerminalDisplay().reply_rejected("empty_final_reply")
 
     assert capsys.readouterr().out == (
-        f"{RUN_DETAIL_INDENT}↪ Nudging model to write a final answer…\n"
+        f"{RUN_DETAIL_INDENT}↪ Asking model to continue or finalize…\n"
     )
 
 
@@ -674,7 +674,7 @@ def test_reply_rejected_colors_friendly_nudge_yellow_in_tty(
     TerminalDisplay().reply_rejected("empty_final_reply")
 
     assert capsys.readouterr().out == (
-        f"{SOFT_YELLOW_STYLE}{RUN_DETAIL_INDENT}↪ Nudging model to write a final answer…"
+        f"{SOFT_YELLOW_STYLE}{RUN_DETAIL_INDENT}↪ Asking model to continue or finalize…"
         f"{RESET_STYLE}\n"
     )
 
@@ -1300,7 +1300,7 @@ def test_loop_finished_prints_divider_before_file_report(
     assert capsys.readouterr().out == (
         "\n"
         f"{FINAL_REPORT_DIVIDER}\n"
-        "🗂️ Session files\n"
+        "🗂️  Session files\n"
         "\n"
         "  Read\n"
         "    app.py\n"
@@ -1324,7 +1324,7 @@ def test_loop_finished_colors_file_report_divider_cyan_in_tty(
 
     assert capsys.readouterr().out.startswith(
         f"\n{SOFT_CYAN_STYLE}{FINAL_REPORT_DIVIDER}{RESET_STYLE}\n"
-        "🗂️ Session files\n"
+        "🗂️  Session files\n"
     )
 
 
