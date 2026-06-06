@@ -14,7 +14,14 @@ def tool_definition() -> dict:
         "type": "function",
         "function": {
             "name": TOOL_NAME,
-            "description": "Write the full contents of a file",
+            "description": (
+                "Use this to create a new file or replace an entire file when full-file writing is genuinely "
+                "appropriate. For existing files, prefer apply_patch unless the file is small, the intended "
+                "change affects most of the file, or you have read the full current file and full replacement "
+                "is clearer. Before calling write_file, briefly say whether the file is new or why full-file "
+                "replacement is safer/clearer than apply_patch. Do not use write_file merely to avoid making "
+                "a precise patch."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {

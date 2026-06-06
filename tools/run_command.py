@@ -18,7 +18,10 @@ def tool_definition() -> dict:
         "type": "function",
         "function": {
             "name": TOOL_NAME,
-            "description": "Run a shell command in the repo root",
+            "description": (
+                "Use this for discovery, verification, tests, scripts, or shell behavior. Before calling it, "
+                "briefly say what result you need from the command and how it reduces risk."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {

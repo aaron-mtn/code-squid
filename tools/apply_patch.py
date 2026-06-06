@@ -14,7 +14,11 @@ def tool_definition() -> dict:
         "type": "function",
         "function": {
             "name": TOOL_NAME,
-            "description": "Apply one exact text replacement to an existing file",
+            "description": (
+                "Use this for a small exact replacement in an existing file. Prefer this for localized edits "
+                "after reading the relevant content. Before calling it, briefly say what existing code was "
+                "inspected and why this patch is safe and focused."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {

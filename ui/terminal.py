@@ -35,6 +35,7 @@ RAIL_WIDTH = 61
 RUN_STARTED_LABEL = "╰─ starting run "
 RUN_STARTED_DIVIDER = f"{RUN_STARTED_LABEL}{'─' * (RAIL_WIDTH - len(RUN_STARTED_LABEL))}"
 FINAL_REPORT_DIVIDER = "─" * RAIL_WIDTH
+FINAL_SUMMARY_INDENT = "  "
 RUN_EVENT_INDENT = "  "
 RUN_DETAIL_INDENT = "    "
 STARTUP_PANEL_WIDTH = 76
@@ -478,11 +479,11 @@ class TerminalDisplay:
             print()
 
         print(_structural_text(FINAL_REPORT_DIVIDER))
-        print("📚 Session files")
+        print("🗂️ Session files")
         print()
-        self._print_file_list("Files read", session.files_read)
+        self._print_file_list("Read", session.files_read)
         print()
-        self._print_file_list("Files written", session.files_written)
+        self._print_file_list("Written", session.files_written)
         status = getattr(run_result, "status", None)
         if status is None:
             status = "interrupted" if self._interrupted else "complete"
@@ -745,7 +746,7 @@ class TerminalDisplay:
 
         self._print_leading_blank_if_needed()
         print(_structural_text(FINAL_REPORT_DIVIDER))
-        print("🦑 Result:")
+        print("🦑 Report:")
         print()
         print(formatted)
         self._needs_leading_blank = False
@@ -781,12 +782,6 @@ class TerminalDisplay:
     def _format_final_summary(self, content: str) -> str:
         formatted_lines: list[str] = []
         for line in content.splitlines():
-            # Hide legacy completion markers from normal display; debug mode
-            # still prints raw content.
-            if "TASK COMPLETE" in line:
-                line = line.replace("TASK COMPLETE", "")
-                if not line.strip():
-                    continue
             formatted_lines.extend(self._markdown_display_lines(line))
 
         return "\n".join(formatted_lines).strip("\n")
@@ -795,25 +790,34 @@ class TerminalDisplay:
         heading_match = re.match(r"^\s{0,3}(#{2,3})\s+(.+?)\s*#*\s*$", line)
         if heading_match:
             level, heading = heading_match.groups()
-            indent = "  " if level == "##" else "    "
+            indent = FINAL_SUMMARY_INDENT if level == "##" else f"{FINAL_SUMMARY_INDENT}  "
             return [f"{indent}{_styled_text(heading, BOLD_STYLE)}"]
 
         rendered = self._render_inline_markdown(line)
         stripped = rendered.lstrip()
-        leading = rendered[: len(rendered) - len(stripped)]
-        bullet_match = re.match(r"^([-*+]\s+|\d+\.\s+)", stripped)
-        if bullet_match:
-            marker_width = len(bullet_match.group(1))
+        unordered_bullet_match = re.match(r"^([-*+])\s+(.+)$", stripped)
+        if unordered_bullet_match:
+            rendered = f"• {unordered_bullet_match.group(2)}"
             return self._wrapped_display_lines(
                 rendered,
-                initial_indent="",
-                subsequent_indent=f"{leading}{' ' * marker_width}",
+                initial_indent=FINAL_SUMMARY_INDENT,
+                subsequent_indent=f"{FINAL_SUMMARY_INDENT}  ",
+            )
+
+        numbered_bullet_match = re.match(r"^(\d+\.\s+)(.+)$", stripped)
+        if numbered_bullet_match:
+            marker = numbered_bullet_match.group(1)
+            rendered = f"{marker}{numbered_bullet_match.group(2)}"
+            return self._wrapped_display_lines(
+                rendered,
+                initial_indent=FINAL_SUMMARY_INDENT,
+                subsequent_indent=f"{FINAL_SUMMARY_INDENT}{' ' * len(marker)}",
             )
 
         return self._wrapped_display_lines(
-            rendered,
-            initial_indent="",
-            subsequent_indent=leading,
+            stripped,
+            initial_indent=FINAL_SUMMARY_INDENT,
+            subsequent_indent=FINAL_SUMMARY_INDENT,
         )
 
     def _render_inline_markdown(self, text: str) -> str:

@@ -14,6 +14,7 @@ from ui.terminal import (
     CODE_SQUID_BANNER,
     DIM_STYLE,
     FINAL_REPORT_DIVIDER,
+    FINAL_SUMMARY_INDENT,
     INPUT_PROMPT_PREFIX,
     INPUT_PROMPT_STYLE,
     RAIL_WIDTH,
@@ -1299,12 +1300,12 @@ def test_loop_finished_prints_divider_before_file_report(
     assert capsys.readouterr().out == (
         "\n"
         f"{FINAL_REPORT_DIVIDER}\n"
-        "📚 Session files\n"
+        "🗂️ Session files\n"
         "\n"
-        "  Files read\n"
+        "  Read\n"
         "    app.py\n"
         "\n"
-        "  Files written\n"
+        "  Written\n"
         "    app.py\n"
         "\n"
         "✅ Done!\n"
@@ -1323,7 +1324,7 @@ def test_loop_finished_colors_file_report_divider_cyan_in_tty(
 
     assert capsys.readouterr().out.startswith(
         f"\n{SOFT_CYAN_STYLE}{FINAL_REPORT_DIVIDER}{RESET_STYLE}\n"
-        "📚 Session files\n"
+        "🗂️ Session files\n"
     )
 
 
@@ -1403,10 +1404,9 @@ def test_final_message_renders_report_heading(
     )
 
     output = capsys.readouterr().out
-    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n🦑 Result:\n\n")
-    assert "  Files changed\n- `ui/terminal.py`" in output
-    assert "  What changed\n- Polished display." in output
-    assert "TASK COMPLETE" not in output
+    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n🦑 Report:\n\n")
+    assert f"{FINAL_SUMMARY_INDENT}Files changed\n{FINAL_SUMMARY_INDENT}• `ui/terminal.py`" in output
+    assert f"{FINAL_SUMMARY_INDENT}What changed\n{FINAL_SUMMARY_INDENT}• Polished display." in output
 
 
 def test_final_message_displays_unlabeled_content_under_report_heading(
@@ -1418,9 +1418,9 @@ def test_final_message_displays_unlabeled_content_under_report_heading(
     )
 
     output = capsys.readouterr().out
-    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n🦑 Result:\n\n")
-    assert "I ran `pwd`; the workspace is" in output
-    assert "`/home/aaron/Desktop/coding_agent_eval_repos`." in output
+    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n🦑 Report:\n\n")
+    assert f"{FINAL_SUMMARY_INDENT}I ran `pwd`; the workspace is" in output
+    assert f"{FINAL_SUMMARY_INDENT}`/home/aaron/Desktop/coding_agent_eval_repos`." in output
 
 
 def test_final_summary_colors_report_divider_cyan_in_tty(
@@ -1442,7 +1442,7 @@ def test_final_summary_colors_report_divider_cyan_in_tty(
 
     assert capsys.readouterr().out.startswith(
         f"{SOFT_CYAN_STYLE}{FINAL_REPORT_DIVIDER}{RESET_STYLE}\n"
-        "🦑 Result:\n\n"
+        "🦑 Report:\n\n"
     )
 
 
@@ -1464,10 +1464,19 @@ def test_final_summary_headings_are_bold_in_tty(
     )
 
     output = capsys.readouterr().out
-    assert f"  {BOLD_STYLE}Files changed{RESET_STYLE}\n- `ui/terminal.py`" in output
-    assert f"  {BOLD_STYLE}What changed{RESET_STYLE}\n- Polished display." in output
-    assert f"  {BOLD_STYLE}Verification{RESET_STYLE}\n" in output
-    assert f"  {BOLD_STYLE}Remaining risks / notes{RESET_STYLE}\n- none" in output
+    assert (
+        f"{FINAL_SUMMARY_INDENT}{BOLD_STYLE}Files changed{RESET_STYLE}\n"
+        f"{FINAL_SUMMARY_INDENT}• `ui/terminal.py`"
+    ) in output
+    assert (
+        f"{FINAL_SUMMARY_INDENT}{BOLD_STYLE}What changed{RESET_STYLE}\n"
+        f"{FINAL_SUMMARY_INDENT}• Polished display."
+    ) in output
+    assert f"{FINAL_SUMMARY_INDENT}{BOLD_STYLE}Verification{RESET_STYLE}\n" in output
+    assert (
+        f"{FINAL_SUMMARY_INDENT}{BOLD_STYLE}Remaining risks / notes{RESET_STYLE}\n"
+        f"{FINAL_SUMMARY_INDENT}• none"
+    ) in output
 
 
 def test_final_summary_inline_bold_markers_render_as_bold_in_tty(
@@ -1505,29 +1514,40 @@ def test_final_message_with_markdown_sections_preserves_preamble(
 
     output = capsys.readouterr().out
     assert "All tests pass now" in output
-    assert "  Files changed\n- `ui/terminal.py`" in output
-    assert "  Verification\n- `pytest tests/test_terminal.py`" in output
-    assert "  Remaining risks / notes\n- No known remaining risks" in output
+    assert f"{FINAL_SUMMARY_INDENT}Files changed\n{FINAL_SUMMARY_INDENT}• `ui/terminal.py`" in output
+    assert f"{FINAL_SUMMARY_INDENT}Verification\n{FINAL_SUMMARY_INDENT}• `pytest tests/test_terminal.py`" in output
+    assert f"{FINAL_SUMMARY_INDENT}Remaining risks / notes\n{FINAL_SUMMARY_INDENT}• No known remaining risks" in output
 
 
-def test_final_message_removes_inline_task_complete(
+def test_final_message_renders_unordered_bullet_markers_as_terminal_bullets(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     TerminalDisplay().final_message(
-        "TASK COMPLETE\n"
-        "## Files changed\n"
-        "- `ui/terminal.py`\n"
-        "## What changed\n"
-        "- Polished display.\n"
-        "## Verification\n"
-        "- `pytest tests/test_terminal.py`\n"
-        "## Remaining risks / notes\n"
-        "- No known remaining risks; terminal display tests passed. TASK COMPLETE"
+        "- dash item\n"
+        "* star item\n"
+        "+ plus item"
     )
 
     output = capsys.readouterr().out
-    assert "  Remaining risks / notes\n- No known remaining risks" in output
-    assert "TASK COMPLETE" not in output
+    assert f"{FINAL_SUMMARY_INDENT}• dash item" in output
+    assert f"{FINAL_SUMMARY_INDENT}• star item" in output
+    assert f"{FINAL_SUMMARY_INDENT}• plus item" in output
+    assert f"{FINAL_SUMMARY_INDENT}- dash item" not in output
+    assert f"{FINAL_SUMMARY_INDENT}* star item" not in output
+    assert f"{FINAL_SUMMARY_INDENT}+ plus item" not in output
+
+
+def test_final_message_preserves_numbered_bullet_markers(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay().final_message(
+        "1. First item\n"
+        "2. Second item"
+    )
+
+    output = capsys.readouterr().out
+    assert f"{FINAL_SUMMARY_INDENT}1. First item" in output
+    assert f"{FINAL_SUMMARY_INDENT}2. Second item" in output
 
 
 def test_final_message_preserves_multiline_fields(
@@ -1548,10 +1568,10 @@ def test_final_message_preserves_multiline_fields(
 
     output = capsys.readouterr().out
     assert (
-        "  What changed\n"
-        "Polished display\n"
-        "- grouped final files\n"
-        "- sectioned summary\n"
+        f"{FINAL_SUMMARY_INDENT}What changed\n"
+        f"{FINAL_SUMMARY_INDENT}Polished display\n"
+        f"{FINAL_SUMMARY_INDENT}• grouped final files\n"
+        f"{FINAL_SUMMARY_INDENT}• sectioned summary\n"
     ) in output
 
 
@@ -1577,19 +1597,32 @@ def test_final_message_wraps_body_lines(
 
     output = capsys.readouterr().out
     assert (
-        "  What changed\n"
-        "This final summary body line should wrap\n"
-        "neatly while keeping Markdown display\n"
-        "readable.\n"
+        f"{FINAL_SUMMARY_INDENT}What changed\n"
+        f"{FINAL_SUMMARY_INDENT}This final summary body line should wrap\n"
+        f"{FINAL_SUMMARY_INDENT}neatly while keeping Markdown display\n"
+        f"{FINAL_SUMMARY_INDENT}readable.\n"
     ) in output
 
 
-def test_final_message_with_only_task_complete_is_hidden(
+def test_final_message_wraps_unordered_bullet_continuation_under_text(
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    TerminalDisplay().final_message("TASK COMPLETE")
+    monkeypatch.setattr(
+        "ui.terminal.shutil.get_terminal_size",
+        lambda fallback: os.terminal_size((38, 24)),
+    )
 
-    assert capsys.readouterr().out == ""
+    TerminalDisplay().final_message(
+        "- This bullet line should wrap with continuation text aligned beneath the item text."
+    )
+
+    output = capsys.readouterr().out
+    assert (
+        f"{FINAL_SUMMARY_INDENT}• This bullet line should wrap with\n"
+        f"{FINAL_SUMMARY_INDENT}  continuation text aligned beneath\n"
+        f"{FINAL_SUMMARY_INDENT}  the item text."
+    ) in output
 
 
 def test_debug_assistant_message_preserves_raw_task_complete(
