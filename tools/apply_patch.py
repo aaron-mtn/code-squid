@@ -16,8 +16,8 @@ def tool_definition() -> dict:
             "name": TOOL_NAME,
             "description": (
                 "Use this for a small exact replacement in an existing file. Prefer this for localized edits "
-                "after reading the relevant content. Before calling it, briefly say what existing code was "
-                "inspected and why this patch is safe and focused."
+                "after reading the relevant content. Before calling this tool, write a brief action note saying "
+                "what existing code was inspected and why this patch is safe and focused."
             ),
             "parameters": {
                 "type": "object",

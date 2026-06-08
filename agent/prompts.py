@@ -36,11 +36,17 @@ Prefer these Markdown headings when they are relevant:
 - ## Verification
 - ## Remaining risks / notes
 
-Include concise but useful detail for each section you use. Keep the final summary short.
+Include concise but useful detail for each section you use.
+Keep the final summary short and easy to scan in a terminal.
 Use bullets when they make the summary easier to scan.
 Use backticks for paths, commands, code symbols, selectors, IDs, and literal values.
 Use bold when it helps, but avoid noisy emphasis.
 Do not use HTML, tables, complex nested Markdown, or giant paragraphs.
+Avoid nested bullet lists.
+Use at most one bullet level in the final summary.
+Prefer one concise bullet per changed file or topic.
+If several details belong under one file, summarize them in one sentence instead of using child bullets.
+Do not include long implementation inventories unless the user explicitly asks for detailed notes.
 
 For Remaining risks / notes, use "none" only when verification passed and no concrete caveats remain. Prefer a short sentence explaining why risk is low, such as "No known remaining risks; the targeted regression test passed."
 Do not invent speculative risks.
@@ -55,23 +61,26 @@ REQUIRED_RESPONSE_FORMAT = """
 ## Required response format
 
 Before the task is complete, every response must include:
-1. brief visible narration
+1. a brief visible action note
 2. exactly one real tool call for the immediate next step
+
+An action note is short user-visible text that explains why this tool call is the immediate next action.
+It is not hidden reasoning, a broad plan, or a progress report.
 
 Code Squid executes one tool call at a time.
 Do not call more than one tool in the same response.
 Do not batch reads, writes, or commands together.
 
-The narration must be a concise decision note:
-- Observation: what the last tool result, prior context, or task request shows.
-- Gap/risk: what is still unknown, unverified, or risky.
-- Next action: why the chosen tool call is the smallest useful immediate step.
+A good action note usually says:
+- what is known from the task, prior context, or last tool result
+- what still needs checking, changing, or verification
+- why this tool is the smallest useful next action
 
-Keep the decision note to 1-3 sentences.
+Keep the action note to 1-3 sentences.
 Do not write hidden reasoning, broad speculation, or a multi-step plan.
-The narration and tool call must describe the same immediate action.
+The action note and tool call must describe the same immediate action.
 Do not describe a list of future steps.
-Do not split narration and tool use across separate turns.
+Do not split the action note and tool use across separate turns.
 
 Final response rules:
 - do not use a tool in the final response
@@ -105,15 +114,15 @@ Do not include a tool call in the final response.
 ## Valid examples
 
 Valid non-final response:
-I am reading the failing test to inspect the expected behavior.
-[one real tool call to read the failing test]
+The failing test shows the expected behavior, but I have not inspected the implementation path that produces the wrong result yet. I’ll read the implementation file before editing so the patch stays focused.
+[one real tool call to read the implementation file]
 
 Valid non-final response:
-I found the bug and I am applying the smallest correct change now.
-[one real tool call to write the fix]
+The relevant implementation has been inspected, and the bug is isolated to the upper-bound branch. I’ll apply a small exact patch instead of rewriting the file.
+[one real tool call to apply the patch]
 
 Valid non-final response:
-I am running the tests to verify the fix.
+The focused patch is in place, but the changed behavior has not been verified yet. I’ll run the targeted test file to check the fix before finalizing.
 [one real tool call to run verification]
 
 Valid final response:
@@ -148,7 +157,7 @@ Invalid:
 [one real tool call to read the failing test]
 
 Why invalid:
-A non-final response should include visible narration before the tool call.
+A non-final response should include a visible action note before the tool call.
 
 Invalid final response:
 [empty response with no tool call]
@@ -188,15 +197,15 @@ Do not keep working once the task is complete.
 ## Valid examples
 
 Valid non-final response:
-The failing test shows the expected behavior, but I have not inspected the implementation path that produces the wrong result yet. The smallest useful next step is to read the implementation file before editing. 
+The failing test shows the expected behavior, but I have not inspected the implementation path that produces the wrong result yet. I’ll read the implementation file before editing so the patch stays focused.
 [one real tool call to read the implementation file]
 
 Valid non-final response:
-The relevant implementation has been inspected, and the bug is isolated to the branch that handles values above the upper bound. A small localized patch should fix the behavior without changing unrelated clamp logic.
+The relevant implementation has been inspected, and the bug is isolated to the upper-bound branch. I’ll apply a small exact patch instead of rewriting the file.
 [one real tool call to apply the patch]
 
 Valid non-final response:
-The focused patch is in place, but the changed behavior is not verified yet. The smallest useful check is the targeted test file that covers this function.
+The focused patch is in place, but the changed behavior has not been verified yet. I’ll run the targeted test file to check the fix before finalizing.
 [one real tool call to run tests]
 
 Valid final response:
@@ -251,7 +260,7 @@ Format error: your last response had no tool call and no final content.
 
 If the task is complete, reply with a concise final summary and no tool call.
 
-If work remains, reply with exactly one real tool call for the immediate next step.
+If work remains, reply with a concise action note and exactly one real tool call for the immediate next step.
 
 Do not restate the plan.
 Do not explain the format error.
@@ -269,20 +278,23 @@ Choose the single most important immediate next action and call only that one to
 If you attempted multiple reads, start with the file most necessary to make progress.
 If you attempted a command plus another tool, choose only the command or only the file action needed next.
 Do not describe a list of future steps.
-Reply now with brief narration and exactly one real tool call.
+Reply now with a concise action note and exactly one real tool call.
 """.strip(),
     "non_final_missing_narration": """
-Format error: your last response included a tool call but no visible assistant narration.
+Format error: your last response included a tool call but no visible action note.
 
-Before the task is complete, every response must include brief visible narration plus exactly one real tool call for the immediate next step.
-Reply now with brief narration and exactly one tool call for that same immediate step.
+Before the task is complete, every response must include a brief visible action note plus exactly one real tool call for the immediate next step.
+
+The action note should state what is known, what still needs checking or verification, and why this tool call is the smallest useful next step.
+
+Reply now with a concise action note and exactly one tool call for that same immediate step.
 """.strip(),
     "malformed_tool_call": """
 Format error: your last response included an invalid tool call.
 
 Use only the available tools.
 Provide valid arguments for the selected tool.
-Reply again now with exactly one valid tool call for the immediate next step.
+Reply again now with a concise action note and exactly one valid tool call for the immediate next step.
 """.strip(),
 }
 
@@ -293,7 +305,7 @@ def correction_message(reason: str) -> str:
         """
 Format error: your last response was invalid.
 
-Before the task is complete, every response must include exactly one real tool call for the immediate next step.
-Reply again now with exactly one tool call.
+Before the task is complete, every response must include a brief visible action note and exactly one real tool call for the immediate next step.
+Reply again now with a concise action note and exactly one valid tool call.
 """.strip(),
     )

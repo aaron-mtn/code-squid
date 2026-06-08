@@ -19,8 +19,9 @@ def tool_definition() -> dict:
         "function": {
             "name": TOOL_NAME,
             "description": (
-                "Use this for discovery, verification, tests, scripts, or shell behavior. Before calling it, "
-                "briefly say what result you need from the command and how it reduces risk."
+                "Use this for discovery, verification, tests, scripts, or shell behavior. Before calling this "
+                "tool, write a brief action note saying what result you need from the command and how it "
+                "reduces risk."
             ),
             "parameters": {
                 "type": "object",

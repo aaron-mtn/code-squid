@@ -17,8 +17,8 @@ def tool_definition() -> dict:
         "function": {
             "name": TOOL_NAME,
             "description": (
-                "Use this to inspect a known file. Before calling it, briefly say what you need to learn "
-                "from this file and why it is the smallest useful next read."
+                "Use this to inspect a known file. Before calling this tool, write a brief action note saying "
+                "what you need to learn from this file and why it is the smallest useful next read."
             ),
             "parameters": {
                 "type": "object",
