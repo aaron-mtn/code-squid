@@ -24,6 +24,8 @@ TOOL_USAGE_GUIDANCE = """
 - For browser/UI work, do not claim visual layout or interactive behavior was fully verified unless it was actually run or manually checked.
 - Do not use more than one action or tool call in the same response. 
 - Do not batch multiple reads, writes, or commands together. If you want to inspect multiple files, choose the single most important file first. If you want to run a command and inspect a file, choose the one action that should happen first.
+- Do not re-read the same file unless the prior read was truncated, stale, range-limited, or did not include the needed section.
+- If the relevant content is already visible in the current context, use it instead of reading the same file again.
 """.strip()
 
 FINAL_SUMMARY_REQUIREMENTS = """
