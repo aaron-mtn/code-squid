@@ -31,7 +31,8 @@ settings -> provider -> model adapter -> coding-agent policy -> agent loop -> ap
   - Loads settings and wires provider, model adapter, compactor, session state,
     session storage, undo storage, tool executor, tool-result formatter,
     terminal display, approval policy, coding agent, and loop.
-  - Dispatches new runs, saved-session listing/showing, resume, and undo.
+  - Dispatches interactive runs, saved-session listing/showing, resume, undo,
+    and approval-mode commands.
   - Catches `KeyboardInterrupt`, marks the session interrupted, and prints the
     final session display.
   - Catches `ModelRequestError`, marks the session failed, writes a diagnostic
@@ -63,6 +64,10 @@ settings -> provider -> model adapter -> coding-agent policy -> agent loop -> ap
     shallow tool-call validation, provider replay message shaping, usage
     normalization, and `ModelRequestError`.
   - `approval.py` owns UI-agnostic approval decisions and denied tool results.
+  - `command_safety.py` owns conservative guarded-mode checks for
+    `run_command`.
+  - `workspace_boundary.py` owns preflight checks for structured file tools
+    that target paths outside the selected workspace root.
   - `compaction.py` owns pre-request transcript compaction.
   - `token_estimate.py` owns rough transcript token estimates.
   - `tool_executor.py` owns tool dispatch, exception-to-result conversion,
@@ -92,7 +97,8 @@ settings -> provider -> model adapter -> coding-agent policy -> agent loop -> ap
 
 - `tools/`
   - Local tool schemas and implementations.
-  - Current active tools are `read_file`, `write_file`, and `run_command`.
+  - Current active tools are `read_file`, `write_file`, `apply_patch`, and
+    `run_command`.
   - `_truncation.py` owns shared head/tail truncation for large file and command
     outputs.
   - `tools/__init__.py` owns the static tool registry.
@@ -158,9 +164,9 @@ Supported settings sections and fields:
 - `compaction.keep_recent_turns`
 
 Supported provider values are `openai_compatible`, `openrouter`, and `ollama`.
-Supported approval modes are `never` and `always`. `runtime.max_tool_steps` is
-either `null` or a positive integer. `model.temperature` is `null` or a number
-from 0 through 2.
+Supported approval modes are `never`, `guarded`, and `always`.
+`runtime.max_tool_steps` is either `null` or a positive integer.
+`model.temperature` is `null` or a number from 0 through 2.
 
 Environment overrides exist for current model/debug/temperature/provider-related
 settings:
@@ -187,17 +193,37 @@ Current commands:
 
 ```bash
 python main.py
+python main.py --cwd /path/to/project
 python main.py sessions
 python main.py show latest
 python main.py show <session_id>
 python main.py resume latest
 python main.py resume <session_id>
 python main.py undo
+python main.py mode
+python main.py mode strict
+python main.py mode balanced
+python main.py mode yolo
 ```
 
-Running with no arguments starts a new interactive task. Resume loads a saved
-session, appends a follow-up user message, marks the session active, creates a
-fresh latest-only undo buffer, and continues the same saved session.
+Running with no arguments starts an interactive prompt. A first task starts a
+new session; later tasks in the same process continue the active session as
+follow-ups unless the user enters `/new`. `/help` prints prompt help, and
+`/exit`, `exit`, or `quit` exits the interactive prompt.
+
+`--cwd` selects the workspace/repo root. It defaults to the current directory
+and must point at an existing directory.
+
+Resume loads a saved session, appends a follow-up user message, marks the
+session active, creates a fresh latest-only undo buffer, and continues the same
+saved session.
+
+`mode` prints or writes the configured approval mode. Friendly CLI mode names
+map to settings values this way:
+
+- `strict` -> `runtime.approval_mode = "always"`
+- `balanced` -> `runtime.approval_mode = "guarded"`
+- `yolo` -> `runtime.approval_mode = "never"`
 
 ## Provider Model
 
@@ -230,8 +256,9 @@ writes diagnostic traceback details to `.code-squid/logs/latest.log`.
 
 ### Turn Contract
 
-Before completion, a valid assistant reply must include exactly one normalized
-tool action. Visible narration is expected before the tool call.
+Before completion, prompts require a brief visible action note plus exactly one
+tool call. An action note is the user-facing text before a non-final tool call
+that explains why the tool call is the immediate next action.
 
 The runtime enforces:
 
@@ -246,9 +273,9 @@ stores a correction user message instead. A valid reply resets the invalid-reply
 counter. Repeated invalid replies stop after the configured hard-coded loop
 limit, currently 3 consecutive invalid replies.
 
-The prompts require non-final visible narration. Current runtime validation does
-not independently reject a one-tool non-final reply solely because the assistant
-content is empty.
+The prompts require non-final action notes. Current runtime validation does not
+independently reject a one-tool non-final reply solely because the assistant
+content is empty or the action-note content is low quality.
 
 If `runtime.max_tool_steps` is set, reaching the limit records a failed session
 status and stops the loop.
@@ -258,13 +285,14 @@ status and stops the loop.
 A valid final assistant reply must include no tool calls and must have
 non-empty content.
 
-For coding tasks, prompts ask the agent to prefer these summary labels when
-they are relevant:
+For coding tasks, prompts ask the agent to keep final summaries compact,
+terminal-friendly, and free of nested bullet lists. They also ask the agent to
+prefer these Markdown headings when they are relevant:
 
-- `Files changed:`
-- `What changed:`
-- `Verification:`
-- `Remaining risks / notes:`
+- `## Files changed`
+- `## What changed`
+- `## Verification`
+- `## Remaining risks / notes`
 
 These labels are guidance only, not runtime-enforced. The terminal display still
 hides a legacy `TASK COMPLETE` marker if a model includes it, but finalization no
@@ -291,8 +319,13 @@ Approval is a runtime gate in the tool execution path, not a prompt convention.
 Current modes:
 
 - `approval_mode = "never"` means trusted/yolo mode; all tool actions are
-  approved.
-- `approval_mode = "always"` asks before every tool action.
+  approved. In this mode `ToolExecutor` is also configured to allow structured
+  file tools outside the workspace without an approval preflight.
+- `approval_mode = "guarded"` means balanced mode. Actions with no approval
+  reason are approved automatically; actions with an approval reason ask the
+  user before execution.
+- `approval_mode = "always"` means strict mode and asks before every tool
+  action.
 
 The policy is UI-agnostic and receives normalized tool actions before
 execution. `TerminalDisplay` is the current prompter used by the CLI.
@@ -300,9 +333,43 @@ execution. `TerminalDisplay` is the current prompter used by the CLI.
 If a user denies an action, the action is not executed. Denial returns a normal
 failed tool result to the model with `user denied tool action`.
 
-Approval is not a sandbox. In `always` mode the user can decline a proposed
-action, but approved `run_command` actions still execute through the shell and
-approved file tools still use absolute paths.
+Guarded command safety is partial and only affects `run_command` in
+`approval_mode = "guarded"`. It allowlists simple low-risk commands such as
+`pwd`, `ls`, `find`, `rg`, `grep`, `git status`, `git diff`, `pytest`,
+`python -m pytest`, and `node --check` when obvious path arguments remain inside
+the workspace. It asks for approval for shell syntax, known mutating commands,
+unknown commands, package installs, destructive git commands, and obvious paths
+outside the workspace.
+
+Approval is not a hardened sandbox. Approved `run_command` actions still execute
+through the shell, and approved file tools still use absolute paths.
+
+## Workspace Boundary
+
+`core/workspace_boundary.py` checks structured file-tool actions before
+execution. It applies to:
+
+- `read_file`
+- `write_file`
+- `apply_patch`
+
+For those tools, an absolute `path` is considered outside the workspace when
+its resolved path is not under the resolved workspace root selected by `--cwd`
+or the current directory. Relative paths are not classified by the workspace
+boundary because the file tools themselves require absolute paths.
+
+In `guarded` and `always` modes, outside-workspace file paths require approval
+before execution. If approval is granted, the loop marks that one action as
+outside-workspace approved and `ToolExecutor` lets it through. If the executor
+sees an outside-workspace file action without either trusted mode or an
+approval marker, it returns a failed tool result instead of executing it.
+
+In `never`/yolo mode, outside-workspace file paths are allowed without approval.
+
+This is an approval and preflight boundary, not a process sandbox. It does not
+contain `run_command`; shell commands can still read or mutate outside the
+workspace if the command itself does so. Guarded mode only adds conservative
+approval prompts for some obvious `run_command` cases.
 
 ## Compaction
 
@@ -379,11 +446,11 @@ Compaction events are not printed as transcript messages by the viewer.
 .code-squid/undo/
 ```
 
-Starting a new run or resume replaces the undo buffer. Before `write_file`
-mutates a target, `ToolExecutor` asks `UndoStore` to snapshot the file's
-pre-change state. Repeated writes to the same path keep the first pre-change
-snapshot. `python main.py undo` restores existing-file snapshots and deletes
-files that did not exist before the write.
+Starting a new run or resume replaces the undo buffer. Before `write_file` or
+`apply_patch` mutates a target, `ToolExecutor` asks `UndoStore` to snapshot the
+file's pre-change state. Repeated writes or patches to the same path keep the
+first pre-change snapshot. `python main.py undo` restores existing-file
+snapshots and deletes files that did not exist before the write.
 
 Ctrl+C marks the current session `interrupted` and prints the normal final
 session display. Model request failures mark the session `failed` and write a
@@ -400,6 +467,7 @@ The active tool surface is:
 
 - `read_file(path, start_line=None, end_line=None)`
 - `write_file(path, content)`
+- `apply_patch(path, old_text, new_text)`
 - `run_command(command)`
 
 `read_file`:
@@ -412,7 +480,8 @@ The active tool surface is:
   large
 - does not truncate ranged reads
 - returns content plus truncation, range, and line-count metadata
-- can read any absolute path reachable by the process
+- is checked against the workspace boundary before execution unless trusted
+  outside-workspace access is configured or approved
 
 `write_file`:
 
@@ -420,7 +489,21 @@ The active tool surface is:
 - writes the full file content as UTF-8 text
 - returns compact metadata instead of echoing full written content
 - does not create parent directories explicitly
-- can write any absolute path reachable by the process
+- is checked against the workspace boundary before execution unless trusted
+  outside-workspace access is configured or approved
+- is snapshotted by `ToolExecutor` before mutation when undo storage is wired
+
+`apply_patch`:
+
+- requires an absolute path
+- reads and writes UTF-8 text
+- performs exactly one exact text replacement
+- requires `old_text` to occur exactly once in the current file
+- fails without modifying the file when `old_text` is missing or not unique
+- returns compact replacement and character-count metadata
+- is preferred for small localized edits to existing files
+- is checked against the workspace boundary before execution unless trusted
+  outside-workspace access is configured or approved
 - is snapshotted by `ToolExecutor` before mutation when undo storage is wired
 
 `run_command`:
@@ -428,16 +511,16 @@ The active tool surface is:
 - runs a shell command with `shell=True`
 - uses `repo_root` as the working directory
 - merges stderr into stdout
-- times out after 10 seconds
+- times out after 15 seconds
 - returns `ok` based on process return code
 - returns a normalized timeout failure with `timed_out: True`
 - truncates large output with shared head/tail truncation
 - is used for discovery, verification, and shell behavior
 - is not undo-protected, even if it mutates files
 
-There is no patch/edit tool, structured search tool, repo-policy tool,
-dedicated test runner, browser tool, or plugin-provided tool. Discovery,
-verification, and most shell behavior go through `run_command`.
+There is no structured search tool, repo-policy tool, dedicated test runner,
+browser tool, or plugin-provided tool. Discovery, verification, and most shell
+behavior go through `run_command`.
 
 ## Ownership Boundaries
 
@@ -466,6 +549,13 @@ workspace memory.
 `core/approval.py` owns approval decisions without depending on a concrete UI.
 The loop enforces those decisions before tool execution.
 
+`core/command_safety.py` owns guarded-mode command classification. It should
+stay conservative and limited to deciding whether approval is required.
+
+`core/workspace_boundary.py` owns structured file-tool workspace checks. It
+should remain a preflight/approval boundary unless a real sandbox is added
+elsewhere.
+
 `core/tool_executor.py` owns mechanical tool dispatch and side-effect tracking.
 Individual tool behavior stays in `tools/`.
 
@@ -480,13 +570,12 @@ layer for what happened, while model-native narration is encouraged by prompts.
 - OpenRouter may produce invalid multi-tool replies despite
   `parallel_tool_calls=False`; current handling is reject-and-retry through
   correction messages.
-- Model-native narration is encouraged, but terminal tool-event display is the
-  reliable UX layer.
+- Action notes are prompt-guided. Runtime rejects empty non-final replies and
+  multi-tool replies, but it does not fully enforce action-note quality.
+- Command and file access is not a hardened sandbox. Workspace checks and
+  guarded command checks are approval/preflight mechanisms.
 - Compaction uses rough JSON/text length estimates, not exact tokenization.
 - Compaction should remain separate from future workspace memory.
-- Approval mode currently only supports `never` and `always`.
-- File access policy should remain explicit if stricter sandboxing is added
-  later; current file tools use absolute paths reachable by the process.
 - Future tool libraries should stay small per active agent/task, even if more
   tools exist globally.
 - Do not turn Code Squid into a broad framework prematurely.
