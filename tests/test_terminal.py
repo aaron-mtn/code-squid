@@ -1537,6 +1537,82 @@ def test_final_message_renders_unordered_bullet_markers_as_terminal_bullets(
     assert f"{FINAL_SUMMARY_INDENT}+ plus item" not in output
 
 
+def test_final_summary_separates_consecutive_top_level_bullets() -> None:
+    formatted = TerminalDisplay()._format_final_summary(
+        "## Files changed\n"
+        "- `app.py`\n"
+        "- `test_app.py`\n"
+        "\n"
+        "## Verification\n"
+        "- `pytest`\n"
+        "- `node --check app.js`"
+    )
+
+    assert (
+        f"{FINAL_SUMMARY_INDENT}Files changed\n"
+        f"{FINAL_SUMMARY_INDENT}• `app.py`\n"
+        "\n"
+        f"{FINAL_SUMMARY_INDENT}• `test_app.py`\n"
+        "\n"
+        f"{FINAL_SUMMARY_INDENT}Verification\n"
+        f"{FINAL_SUMMARY_INDENT}• `pytest`\n"
+        "\n"
+        f"{FINAL_SUMMARY_INDENT}• `node --check app.js`"
+    ) == formatted
+
+
+def test_final_summary_first_top_level_bullet_has_no_leading_blank() -> None:
+    formatted = TerminalDisplay()._format_final_summary(
+        "- first item\n"
+        "- second item"
+    )
+
+    assert formatted.startswith(f"{FINAL_SUMMARY_INDENT}• first item\n\n")
+
+
+def test_final_summary_wrapped_bullet_continuation_is_not_spaced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "ui.terminal.shutil.get_terminal_size",
+        lambda fallback: os.terminal_size((38, 24)),
+    )
+
+    formatted = TerminalDisplay()._format_final_summary(
+        "- This bullet line should wrap with continuation text aligned beneath the item text.\n"
+        "- second item"
+    )
+
+    assert (
+        f"{FINAL_SUMMARY_INDENT}• This bullet line should wrap with\n"
+        f"{FINAL_SUMMARY_INDENT}  continuation text aligned beneath\n"
+        f"{FINAL_SUMMARY_INDENT}  the item text.\n"
+        "\n"
+        f"{FINAL_SUMMARY_INDENT}• second item"
+    ) == formatted
+
+
+def test_final_summary_indented_bullets_rendered_as_bullets_get_spacing() -> None:
+    formatted = TerminalDisplay()._format_final_summary(
+        "## What changed\n"
+        "- Parent item:\n"
+        "  - Child one\n"
+        "  - Child two\n"
+        "  - Child three"
+    )
+
+    assert (
+        f"{FINAL_SUMMARY_INDENT}What changed\n"
+        f"{FINAL_SUMMARY_INDENT}• Parent item:\n"
+        "\n"
+        f"{FINAL_SUMMARY_INDENT}• Child one\n"
+        "\n"
+        f"{FINAL_SUMMARY_INDENT}• Child two\n"
+        "\n"
+        f"{FINAL_SUMMARY_INDENT}• Child three"
+    ) == formatted
+
+
 def test_final_message_preserves_numbered_bullet_markers(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1571,6 +1647,7 @@ def test_final_message_preserves_multiline_fields(
         f"{FINAL_SUMMARY_INDENT}What changed\n"
         f"{FINAL_SUMMARY_INDENT}Polished display\n"
         f"{FINAL_SUMMARY_INDENT}• grouped final files\n"
+        "\n"
         f"{FINAL_SUMMARY_INDENT}• sectioned summary\n"
     ) in output
 

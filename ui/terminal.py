@@ -781,10 +781,19 @@ class TerminalDisplay:
 
     def _format_final_summary(self, content: str) -> str:
         formatted_lines: list[str] = []
+        previous_rendered_bullet = False
         for line in content.splitlines():
-            formatted_lines.extend(self._markdown_display_lines(line))
+            rendered_lines = self._markdown_display_lines(line)
+            is_rendered_bullet = self._is_rendered_unordered_bullet_block(rendered_lines)
+            if is_rendered_bullet and previous_rendered_bullet:
+                formatted_lines.append("")
+            formatted_lines.extend(rendered_lines)
+            previous_rendered_bullet = is_rendered_bullet
 
         return "\n".join(formatted_lines).strip("\n")
+
+    def _is_rendered_unordered_bullet_block(self, lines: list[str]) -> bool:
+        return bool(lines) and lines[0].startswith(f"{FINAL_SUMMARY_INDENT}• ")
 
     def _markdown_display_lines(self, line: str) -> list[str]:
         heading_match = re.match(r"^\s{0,3}(#{2,3})\s+(.+?)\s*#*\s*$", line)
