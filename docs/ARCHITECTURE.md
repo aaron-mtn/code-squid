@@ -17,22 +17,25 @@ boundaries are small enough to inspect directly.
 The runtime shape is:
 
 ```text
-settings -> provider -> model adapter -> coding-agent policy -> agent loop -> approval -> tools -> transcript/session storage
+settings -> runner/wiring -> provider -> model adapter -> coding-agent policy -> agent loop -> approval -> tools -> transcript/session storage
 ```
+
+`AgentLoop -> on_event callback` is an optional observer path for compact
+machine-readable runtime facts.
 
 `.code-squid/` is local runtime state and should be gitignored.
 
 ## Component Layout
 
 - `main.py`
-  - Thin CLI entry point, object wiring, and small command dispatch.
+  - Standalone CLI entry point, interactive prompt loop, command dispatch, and
+    user-facing error handling.
   - Uses the selected workspace directory as `repo_root`; by default this is
     the current directory.
-  - Loads settings and wires provider, model adapter, compactor, session state,
-    session storage, undo storage, tool executor, tool-result formatter,
-    terminal display, approval policy, coding agent, and loop.
+  - New coding task construction delegates to `core.runner`.
   - Dispatches interactive runs, saved-session listing/showing, resume, undo,
     and approval-mode commands.
+  - Resume/follow-up wiring may still live here unless it is moved later.
   - Catches `KeyboardInterrupt`, marks the session interrupted, and prints the
     final session display.
   - Catches `ModelRequestError`, marks the session failed, writes a diagnostic
@@ -57,7 +60,11 @@ settings -> provider -> model adapter -> coding-agent policy -> agent loop -> ap
   - Generic runtime machinery.
   - `agent_loop.py` owns turn flow, invalid-reply retry handling, compaction
     hooks, approval gating, tool execution sequencing, transcript writes, and
-    session status updates.
+    session status updates. It also emits compact runtime events through an
+    optional `on_event` callback.
+  - `events.py` owns the tiny best-effort event callback helper.
+  - `runner.py` owns reusable coding-task run wiring for Python callers and the
+    CLI new-task flow.
   - `session.py` owns in-memory transcript state and lightweight read/write
     side-effect tracking.
   - `model_adapter.py` owns provider response normalization, tool-call parsing,
@@ -125,6 +132,51 @@ settings -> provider -> model adapter -> coding-agent policy -> agent loop -> ap
   - `README.md` is the user-facing overview and basic usage entry point.
   - `requirements.txt` is the Python dependency list for the CLI/test
     environment.
+
+## Events And External Wrappers
+
+Code Squid can emit small runtime event dictionaries through optional
+`on_event(event)` callbacks. If no callback is supplied, nothing changes.
+
+This path is intended for external Python wrappers and tiny host applications,
+such as local event viewers. Events are machine-readable facts, not terminal
+output. Terminal display is still separate and wrappers should not scrape it.
+
+Current loop-level event types include:
+
+- `run_started`
+- `assistant_message`
+- `tool_started`
+- `tool_finished`
+- `reply_rejected`
+- `final_message`
+- `run_failed`
+- `run_finished`
+
+Event payloads should stay compact. They must not include raw file contents,
+full command output, prompts, provider payloads, API keys, headers, or secrets.
+
+Callback delivery is best-effort. Observer failures must not crash the run.
+
+## Runner / Python Wrapping
+
+`core.runner.run_coding_task(...)` is the reusable Python entry point for
+starting a new coding task. It accepts `repo_root`, `task`, optional `settings`,
+optional `display`, and optional `on_event`, and returns the existing
+`RunResult`.
+
+`core.runner.build_coding_task_run(...)` constructs the session, session store,
+undo store, coding agent, and loop without starting the loop. The CLI uses this
+shape when it needs access to the session and session store for interactive
+follow-ups.
+
+`core.runner.build_agent_loop(...)` owns the shared provider, model adapter,
+tool executor, tool-result formatter, approval, compaction, and `AgentLoop`
+wiring.
+
+This runner layer is not a plugin system, orchestration layer, daemon, or
+server mode. It gives external Python code a clean way to call Code Squid
+without copying `main.py` wiring. `main.py` remains the standalone CLI.
 
 ## Settings
 
@@ -233,10 +285,10 @@ chat-completions requests through the OpenAI Python client.
 
 OpenRouter is supported through the OpenAI-compatible provider path by setting
 `model.provider` or `CODE_SQUID_PROVIDER` to `openrouter`. It still uses
-`OpenAICompatibleProvider`, but `main.py` configures assistant tool-call replay
-with `content: null` for assistant messages that have `tool_calls` and no
-content. This provider-specific behavior is handled before messages are sent to
-the provider.
+`OpenAICompatibleProvider`, but runner wiring configures assistant tool-call
+replay with `content: null` for assistant messages that have `tool_calls` and
+no content. This provider-specific behavior is handled before messages are sent
+to the provider.
 
 The OpenAI-compatible provider sends `parallel_tool_calls: false` whenever tools
 are present. OpenRouter may still return multiple tool calls. Code Squid handles
@@ -524,10 +576,11 @@ behavior go through `run_command`.
 
 ## Ownership Boundaries
 
-`main.py` owns wiring and command dispatch. It should stay thin and should not
-grow agent policy, tool behavior, provider-specific response parsing, session
-storage internals, approval logic, undo mechanics, compaction strategy, or
-terminal formatting.
+`main.py` owns CLI parsing, interactive prompt behavior, command dispatch,
+resume/show/undo/mode flows, and user-facing errors. It should stay thin and
+should not grow agent policy, tool behavior, provider-specific response
+parsing, session storage internals, approval logic, undo mechanics, compaction
+strategy, or terminal formatting.
 
 `agent/` owns coding-agent behavior and prompt text. It decides which tools are
 exposed, which replies are valid, when the loop should stop, and what
@@ -539,6 +592,10 @@ does not decide how settings are enforced.
 `core/agent_loop.py` owns generic turn flow. It is the sequencing layer, not the
 place for provider transport, terminal rendering, tool implementation, or
 coding-task prompt text.
+
+`core/runner.py` owns reusable new-task wiring for Python callers and CLI
+new-task runs. It is not a plugin system, event bus, daemon, server, or future
+orchestration layer.
 
 `core/model_adapter.py` owns provider response normalization and replay message
 shaping. Provider-specific HTTP/API calls stay in `providers/`.
@@ -576,6 +633,14 @@ layer for what happened, while model-native narration is encouraged by prompts.
   guarded command checks are approval/preflight mechanisms.
 - Compaction uses rough JSON/text length estimates, not exact tokenization.
 - Compaction should remain separate from future workspace memory.
+- Event callback support currently covers normal loop-level events. Outer
+  CLI-caught failures such as some model request errors or keyboard interrupts
+  may need explicit wrapper handling depending on the caller path.
+- The default runner uses `TerminalDisplay`, so external wrappers may see
+  terminal output unless they pass a different display later.
+- Resume support is still primarily CLI/`main.py`-owned unless it is moved
+  later.
+- JSONL/file event output is intentionally not implemented yet.
 - Future tool libraries should stay small per active agent/task, even if more
   tools exist globally.
 - Do not turn Code Squid into a broad framework prematurely.

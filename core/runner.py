@@ -1,6 +1,12 @@
 # core/runner.py
 
-"""Reusable wiring for starting a normal Code Squid coding task."""
+"""Reusable wiring for starting a normal Code Squid coding task from Python.
+
+This module owns the shared provider/model/tool/approval/compaction/loop setup
+for new coding-task runs. ``main.py`` remains the standalone CLI entry point and
+keeps CLI parsing, command dispatch, resume/show/undo/mode behavior,
+interactive prompting, and user-facing error handling.
+"""
 
 from __future__ import annotations
 
@@ -47,7 +53,10 @@ def run_coding_task(
     settings: Settings | None = None,
     display: TerminalDisplay | None = None,
 ) -> RunResult:
-    """Build and run a new coding task, returning the loop's RunResult."""
+    """Simple call-and-run entry point for a new coding task.
+
+    ``on_event`` is passed through to ``AgentLoop`` for external wrappers.
+    """
 
     run = build_coding_task_run(
         repo_root=repo_root,
@@ -68,7 +77,11 @@ def build_coding_task_run(
     settings: Settings | None = None,
     display: TerminalDisplay | None = None,
 ) -> CodingTaskRun:
-    """Construct the objects for a new coding task without starting the loop."""
+    """Construct a new coding-task run without starting it.
+
+    CLI code uses this when it needs direct access to the session and
+    ``SessionStore`` for interactive follow-ups after the first run.
+    """
 
     repo_root = Path(repo_root).resolve()
     settings = load_settings(repo_root) if settings is None else settings
@@ -107,6 +120,8 @@ def build_agent_loop(
     *,
     on_event: EventCallback | None = None,
 ) -> AgentLoop:
+    """Build the shared provider/model/tool/approval/compaction/loop wiring."""
+
     provider = build_provider(settings, debug=display.debug)
 
     model_adapter = ModelAdapter(

@@ -37,6 +37,9 @@ class AgentLoop:
         compactor=None,
         max_tool_steps: int | None = None,
         approval_policy: ApprovalPolicy | None = None,
+        # Optional observer callback for compact runtime facts. Terminal
+        # display remains separate; external Python wrappers should listen here
+        # instead of scraping human-facing output.
         on_event: EventCallback | None = None,
     ) -> None:
         self.session = session
@@ -81,6 +84,9 @@ class AgentLoop:
         return getattr(self.session_store, "session_id", None)
 
     def _emit_event(self, event: dict[str, Any]) -> None:
+        # AgentLoop events are small machine-readable facts for wrappers and
+        # observers. Keep payloads compact: no raw file contents, full command
+        # output, provider payloads, prompts, API keys, headers, or secrets.
         emit_event(
             self.on_event,
             {

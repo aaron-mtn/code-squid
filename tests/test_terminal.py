@@ -226,7 +226,7 @@ def test_approve_action_uses_boxed_panel_for_common_tools(
             "tool": "write_file",
             "args": {
                 "path": (
-                    "/home/aaron/Desktop/projects/very/deep/example/"
+                    "/tmp/code-squid-workspace/projects/very/deep/example/"
                     "kanban_toy2/subdirectory/index.html"
                 )
             },
@@ -330,7 +330,7 @@ def test_approve_action_compacts_denied_panel_with_short_path_in_interactive_tty
         "tool": "write_file",
         "args": {
             "path": (
-                "/home/aaron/Desktop/projects/very/deep/example/"
+                "/tmp/code-squid-workspace/projects/very/deep/example/"
                 "kanban_toy2/subdirectory/index.html"
             )
         },
@@ -716,7 +716,7 @@ def test_outside_absolute_path_uses_parent_file_label(
         {
             "tool": "read_file",
             "args": {
-                "path": "/home/aaron/Desktop/coding_agent_eval_repos/pomodoro_timer/index.html",
+                "path": "/tmp/code-squid-workspace/pomodoro_timer/index.html",
             },
         },
         {"ok": True},
@@ -1170,15 +1170,15 @@ def test_approval_prompt_shows_short_outside_workspace_reason(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     reason = (
-        "Requested path is outside the workspace root: /home/aaron/Desktop/circus.md "
-        "(workspace root: /home/aaron/Desktop/coding_agent_eval_repos). "
+        "Requested path is outside the workspace root: /tmp/code-squid-workspace/circus.md "
+        "(workspace root: /tmp/code-squid-workspace/projects). "
         "Approval is required unless approval_mode=never."
     )
     monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: "")
 
     TerminalDisplay(
         startup_info=StartupInfo(
-            directory=Path("/home/aaron/Desktop/coding_agent_eval_repos"),
+            directory=Path("/tmp/code-squid-workspace/projects"),
             provider="openai",
             model="gpt-5",
             approval_mode="on-request",
@@ -1186,7 +1186,7 @@ def test_approval_prompt_shows_short_outside_workspace_reason(
     ).approve_action(
         {
             "tool": "read_file",
-            "args": {"path": "/home/aaron/Desktop/circus.md"},
+            "args": {"path": "/tmp/code-squid-workspace/circus.md"},
             "approval_reason": reason,
         }
     )
@@ -1195,7 +1195,7 @@ def test_approval_prompt_shows_short_outside_workspace_reason(
     assert "Reason:" in output
     assert "Outside workspace" in output
     assert "Path:" in output
-    assert "Desktop/circus.md" in output
+    assert "code-squid-workspace/circus.md" in output
     assert "Requested path is outside the workspace root" not in output
     assert "Approval is required unless approval_mode=never" not in output
     assert "Requested path:" not in output
@@ -1336,7 +1336,7 @@ def test_loop_finished_colors_file_report_divider_cyan_in_tty(
 def test_loop_finished_prints_shortened_paths_in_final_file_report(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    full_path = "/home/aaron/Desktop/coding_agent_eval_repos/pomodoro_timer/index.html"
+    full_path = "/tmp/code-squid-workspace/pomodoro_timer/index.html"
     session = SimpleNamespace(
         files_read={full_path},
         files_written={full_path},
@@ -1421,13 +1421,13 @@ def test_final_message_displays_unlabeled_content_under_report_heading(
 ) -> None:
     TerminalDisplay().final_message(
         "I ran `pwd`; the workspace is "
-        "`/home/aaron/Desktop/coding_agent_eval_repos`."
+        "`/tmp/code-squid-workspace/projects`."
     )
 
     output = capsys.readouterr().out
     assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n🦑 Report:\n\n")
     assert f"{FINAL_SUMMARY_INDENT}I ran `pwd`; the workspace is" in output
-    assert f"{FINAL_SUMMARY_INDENT}`/home/aaron/Desktop/coding_agent_eval_repos`." in output
+    assert f"{FINAL_SUMMARY_INDENT}`/tmp/code-squid-workspace/projects`." in output
 
 
 def test_final_summary_colors_report_divider_cyan_in_tty(

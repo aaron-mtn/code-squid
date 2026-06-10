@@ -1,6 +1,6 @@
 # main.py
 
-"""Owns thin application wiring for standalone Code Squid; must not own core architecture, agent policy, or tool logic."""
+"""Standalone Code Squid CLI entry point and command dispatcher."""
 
 import os
 import sys
@@ -371,7 +371,7 @@ def _mode(repo_root: Path, args: list[str]) -> int:
     return 0
 
 
-# Create the app objects, wire them together, and run one coding task.
+# Parse CLI commands and run the selected standalone Code Squid flow.
 def main() -> int:
     args = sys.argv[1:]
     try:
