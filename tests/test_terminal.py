@@ -249,7 +249,10 @@ def test_approval_panel_truncates_long_command_or_path(
     TerminalDisplay().approve_action(action)
 
     out = capsys.readouterr().out
-    assert "…" in out
+    if action["tool"] == "run_command":
+        assert "…" in out
+    else:
+        assert "subdirectory/index.html" in out
     for line in out.splitlines():
         assert len(line) <= len(RUN_DETAIL_INDENT) + APPROVAL_PANEL_WIDTH
     assert len(prompts) == 1
@@ -706,19 +709,21 @@ def test_approve_action_still_prints_requested_action(
     )
 
 
-def test_long_outside_path_uses_ellipsis(capsys: pytest.CaptureFixture[str]) -> None:
+def test_outside_absolute_path_uses_parent_file_label(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     TerminalDisplay().tool_result(
         {
             "tool": "read_file",
             "args": {
-                "path": "/home/aaron/Desktop/coding_agent_eval_repos/01_single_bug/test_calculator.py",
+                "path": "/home/aaron/Desktop/coding_agent_eval_repos/pomodoro_timer/index.html",
             },
         },
         {"ok": True},
     )
 
     assert capsys.readouterr().out == (
-        f"{RUN_DETAIL_INDENT}📖 Read: …/01_single_bug/test_calculator.py\n"
+        f"{RUN_DETAIL_INDENT}📖 Read: pomodoro_timer/index.html\n"
     )
 
 
@@ -726,13 +731,13 @@ def test_repo_local_path_becomes_relative(capsys: pytest.CaptureFixture[str]) ->
     TerminalDisplay().tool_result(
         {
             "tool": "read_file",
-            "args": {"path": str(Path.cwd() / "tests/test_terminal.py")},
+            "args": {"path": str(Path.cwd() / "ui/terminal.py")},
         },
         {"ok": True},
     )
 
     assert capsys.readouterr().out == (
-        f"{RUN_DETAIL_INDENT}📖 Read: tests/test_terminal.py\n"
+        f"{RUN_DETAIL_INDENT}📖 Read: ui/terminal.py\n"
     )
 
 
@@ -1190,7 +1195,7 @@ def test_approval_prompt_shows_short_outside_workspace_reason(
     assert "Reason:" in output
     assert "Outside workspace" in output
     assert "Path:" in output
-    assert "/home/aaron/Desktop/circus.md" in output
+    assert "Desktop/circus.md" in output
     assert "Requested path is outside the workspace root" not in output
     assert "Approval is required unless approval_mode=never" not in output
     assert "Requested path:" not in output
@@ -1328,10 +1333,10 @@ def test_loop_finished_colors_file_report_divider_cyan_in_tty(
     )
 
 
-def test_loop_finished_prints_full_stored_paths_in_final_file_report(
+def test_loop_finished_prints_shortened_paths_in_final_file_report(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    full_path = "/home/aaron/Desktop/coding_agent_eval_repos/01_single_bug/calculator.py"
+    full_path = "/home/aaron/Desktop/coding_agent_eval_repos/pomodoro_timer/index.html"
     session = SimpleNamespace(
         files_read={full_path},
         files_written={full_path},
@@ -1341,9 +1346,9 @@ def test_loop_finished_prints_full_stored_paths_in_final_file_report(
     TerminalDisplay().loop_finished(session)
 
     output = capsys.readouterr().out
-    assert f"    {full_path}\n" in output
+    assert "    pomodoro_timer/index.html\n" in output
     assert "\033]8" not in output
-    assert "…/01_single_bug/calculator.py" not in output
+    assert full_path not in output
 
 
 def test_loop_finished_prints_clickable_file_links_in_tty(
@@ -1352,8 +1357,9 @@ def test_loop_finished_prints_clickable_file_links_in_tty(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    full_path = str(tmp_path / "calculator.py")
+    full_path = str(tmp_path / "pomodoro_timer" / "index.html")
     file_uri = Path(full_path).expanduser().resolve().as_uri()
+    label = "pomodoro_timer/index.html"
     session = SimpleNamespace(
         files_read={full_path},
         files_written={full_path},
@@ -1363,7 +1369,8 @@ def test_loop_finished_prints_clickable_file_links_in_tty(
     TerminalDisplay().loop_finished(session)
 
     output = capsys.readouterr().out
-    assert f"    \033]8;;{file_uri}\033\\{full_path}\033]8;;\033\\\n" in output
+    assert f"    \033]8;;{file_uri}\033\\{label}\033]8;;\033\\\n" in output
+    assert f"\033\\{full_path}\033]8" not in output
 
 
 def test_debug_loop_finished_keeps_file_paths_plain_in_tty(

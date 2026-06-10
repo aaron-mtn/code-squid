@@ -71,16 +71,17 @@ def _terminal_link(label: str, uri: str) -> str:
     return f"\033]8;;{uri}\033\\{label}\033]8;;\033\\"
 
 
-def _file_link(path: str) -> str:
+def _file_link(path: str, label: str | None = None) -> str:
+    label = path if label is None else label
     if not sys.stdout.isatty():
-        return path
+        return label
 
     try:
         uri = Path(path).expanduser().resolve().as_uri()
     except (OSError, RuntimeError, ValueError):
-        return path
+        return label
 
-    return _terminal_link(path, uri)
+    return _terminal_link(label, uri)
 
 
 @dataclass(frozen=True)
@@ -878,7 +879,7 @@ class TerminalDisplay:
             return
 
         for path in sorted(paths):
-            display_path = path if self.debug else _file_link(path)
+            display_path = path if self.debug else _file_link(path, self._short_path(path))
             print(f"    {display_path}")
 
     def _short_path(self, path: str) -> str:
@@ -889,7 +890,11 @@ class TerminalDisplay:
         try:
             path_obj = Path(raw_path).expanduser()
             if path_obj.is_absolute():
-                display_path = str(path_obj.resolve().relative_to(self._display_root()))
+                resolved_path = path_obj.resolve()
+                try:
+                    display_path = str(resolved_path.relative_to(self._display_root()))
+                except ValueError:
+                    display_path = self._parent_file_label(resolved_path)
             else:
                 display_path = raw_path
         except (OSError, ValueError):
@@ -903,6 +908,12 @@ class TerminalDisplay:
             return self._truncate_middle("/".join(("…", *parts[-2:])), PATH_LABEL_MAX)
 
         return self._truncate_middle(display_path, PATH_LABEL_MAX)
+
+    def _parent_file_label(self, path: Path) -> str:
+        parent = path.parent.name
+        if not parent:
+            return path.name
+        return str(Path(parent) / path.name)
 
     def _display_root(self) -> Path:
         if self.startup_info is not None:
