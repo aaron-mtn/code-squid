@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from core.approval import ApprovalPolicy, denied_result
 from core.command_safety import guarded_run_command_reason
+from core.events import EventCallback, emit_event
 from core.workspace_boundary import workspace_boundary_reason
 
 
@@ -36,6 +37,7 @@ class AgentLoop:
         compactor=None,
         max_tool_steps: int | None = None,
         approval_policy: ApprovalPolicy | None = None,
+        on_event: EventCallback | None = None,
     ) -> None:
         self.session = session
         self.model_adapter = model_adapter
@@ -47,6 +49,7 @@ class AgentLoop:
         self.compactor = compactor
         self.max_tool_steps = max_tool_steps
         self.approval_policy = approval_policy or ApprovalPolicy("never")
+        self.on_event = on_event
 
     # Add one accepted transcript message to memory and optional disk storage.
     #
@@ -71,6 +74,32 @@ class AgentLoop:
     def _update_status(self, status: str) -> None:
         if self.session_store is not None:
             self.session_store.update_status(status)
+
+    def _session_id(self) -> str | None:
+        if self.session_store is None:
+            return None
+        return getattr(self.session_store, "session_id", None)
+
+    def _emit_event(self, event: dict[str, Any]) -> None:
+        emit_event(
+            self.on_event,
+            {
+                "session_id": self._session_id(),
+                **event,
+            },
+        )
+
+    def _action_event_fields(self, action: dict) -> dict[str, Any]:
+        event = {
+            "tool": action.get("tool", ""),
+        }
+        args = action.get("args", {})
+        if isinstance(args, dict):
+            if "path" in args:
+                event["path"] = args["path"]
+            if "command" in args:
+                event["command"] = args["command"]
+        return event
 
     # Ensure a brand-new in-memory session has the initial agent messages.
     #
@@ -99,6 +128,13 @@ class AgentLoop:
         # Resumed sessions can already contain transcript history, so do not
         # blindly append another kickoff.
         self._ensure_initial_messages()
+        self._emit_event(
+            {
+                "type": "run_started",
+                "repo_root": str(self.session.repo_root),
+                "task": getattr(self.agent, "task", ""),
+            }
+        )
 
         consecutive_invalid_replies = 0
         stopped_after_repeated_invalid_replies = False
@@ -144,6 +180,12 @@ class AgentLoop:
                 if getattr(self.display, "debug", False):
                     self.display.assistant_message(reply["message"]["content"])
                 self.display.reply_rejected(validation["reason"])
+                self._emit_event(
+                    {
+                        "type": "reply_rejected",
+                        "reason": validation["reason"],
+                    }
+                )
 
                 if consecutive_invalid_replies == MAX_CONSECUTIVE_INVALID_REPLIES:
                     self.display.repeated_invalid_replies(
@@ -168,8 +210,20 @@ class AgentLoop:
             consecutive_invalid_replies = 0
             if reply["actions"]:
                 self.display.assistant_message(reply["message"]["content"])
+                self._emit_event(
+                    {
+                        "type": "assistant_message",
+                        "text": reply["message"]["content"],
+                    }
+                )
             else:
                 self.display.final_message(reply["message"]["content"])
+                self._emit_event(
+                    {
+                        "type": "final_message",
+                        "text": reply["message"]["content"],
+                    }
+                )
             self._add_message(reply["message"], usage=reply.get("usage"))
 
             # Execute each requested tool action and collect the raw results.
@@ -194,12 +248,25 @@ class AgentLoop:
                         else action
                     )
                     self.display.action_started(approval_action)
+                    self._emit_event(
+                        {
+                            "type": "tool_started",
+                            **self._action_event_fields(action),
+                        }
+                    )
                     result = self.tool_executor.execute(execute_action)
                 else:
                     result = denied_result(action, decision.reason)
                     if decision.instruction.strip():
                         approval_instructions.append(decision.instruction)
                 self.display.tool_result(approval_action, result)
+                self._emit_event(
+                    {
+                        "type": "tool_finished",
+                        "ok": bool(result.get("ok", False)),
+                        **self._action_event_fields(action),
+                    }
+                )
                 results.append(result)
 
             # Convert tool results into transcript messages and store them.
@@ -219,9 +286,18 @@ class AgentLoop:
                 tool_steps_used += 1
 
         if stopped_after_repeated_invalid_replies or stopped_after_step_limit:
+            self._emit_event(
+                {
+                    "type": "run_failed",
+                    "status": "failed",
+                    "reason": failure_reason,
+                }
+            )
+            self._emit_event({"type": "run_finished", "status": "failed"})
             return RunResult(status="failed", reason=failure_reason)
 
         self._update_status("complete")
+        self._emit_event({"type": "run_finished", "status": "complete"})
         return RunResult(status="complete")
 
     def _workspace_boundary_reason(self, action: dict) -> str | None:

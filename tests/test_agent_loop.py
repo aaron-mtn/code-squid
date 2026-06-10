@@ -164,6 +164,7 @@ def run_loop(
     approval_policy: ApprovalPolicy | None = None,
     compactor: FakeCompactor | None = None,
     repo_root=None,
+    on_event=None,
 ) -> tuple[Session, FakeToolExecutor, FakeModelAdapter, NullDisplay]:
     session = Session(repo_root=repo_root)
     tool_executor = FakeToolExecutor(repo_root=repo_root)
@@ -179,6 +180,7 @@ def run_loop(
         compactor=compactor,
         max_tool_steps=max_tool_steps,
         approval_policy=approval_policy,
+        on_event=on_event,
     )
 
     loop.run()
@@ -459,6 +461,67 @@ def test_one_tool_reply_uses_normal_assistant_display_path() -> None:
 
     assert display.assistant_messages == ["Using read_file."]
     assert display.final_messages == ["TASK COMPLETE"]
+
+
+def test_loop_emits_basic_run_events(tmp_path) -> None:
+    events = []
+    target = tmp_path / "README.md"
+
+    run_loop(
+        [
+            reply(
+                "Reading file.",
+                actions=[{"tool": "read_file", "args": {"path": str(target)}}],
+            ),
+            reply("TASK COMPLETE"),
+        ],
+        repo_root=tmp_path,
+        on_event=events.append,
+    )
+
+    event_types = [event["type"] for event in events]
+    assert event_types == [
+        "run_started",
+        "assistant_message",
+        "tool_started",
+        "tool_finished",
+        "final_message",
+        "run_finished",
+    ]
+    assert events[0]["repo_root"] == str(tmp_path)
+    assert events[0]["task"] == ""
+    assert events[1]["text"] == "Reading file."
+    assert events[2]["tool"] == "read_file"
+    assert events[2]["path"] == str(target)
+    assert events[3]["ok"] is True
+    assert events[3]["path"] == str(target)
+    assert events[4]["text"] == "TASK COMPLETE"
+    assert events[5]["status"] == "complete"
+    assert all("timestamp" in event for event in events)
+
+
+def test_loop_emits_reply_rejected_event() -> None:
+    events = []
+
+    run_loop(
+        [
+            reply("bad 1", reason="empty_final_reply"),
+            reply("TASK COMPLETE"),
+        ],
+        on_event=events.append,
+    )
+
+    rejected_events = [
+        event for event in events if event["type"] == "reply_rejected"
+    ]
+    assert rejected_events == [
+        {
+            "type": "reply_rejected",
+            "session_id": None,
+            "reason": "empty_final_reply",
+            "timestamp": rejected_events[0]["timestamp"],
+        }
+    ]
 
 
 def test_invalid_assistant_reply_is_displayed_in_debug_mode() -> None:
