@@ -3,7 +3,7 @@ import json
 import pytest
 
 from config.settings import ModelSettings, RuntimeSettings, Settings, DisplaySettings
-from core.runner import build_provider, tool_call_content_mode
+from providers.factory import build_provider, tool_call_content_mode
 from providers.ollama import OllamaProvider, adapt_response, convert_messages
 from providers.openai_compatible import OpenAICompatibleProvider
 

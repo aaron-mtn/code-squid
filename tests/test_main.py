@@ -625,7 +625,7 @@ def test_new_session_trace_threads_effective_debug_to_provider(
 
     monkeypatch.setenv("CODE_SQUID_TRACE", "1")
     monkeypatch.setattr("main.TerminalDisplay", CapturingDisplay)
-    monkeypatch.setattr("core.runner.OpenAICompatibleProvider", CapturingProvider)
+    monkeypatch.setattr("providers.factory.OpenAICompatibleProvider", CapturingProvider)
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task("Do the thing"))
     monkeypatch.setattr("main._run_loop", lambda *args: 0)
 

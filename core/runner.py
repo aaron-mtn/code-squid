@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent.coding import CodingAgent
-from config.settings import DEFAULT_BASE_URL, Settings, load_settings
+from config.settings import Settings, load_settings
 from core.agent_loop import AgentLoop, RunResult
 from core.approval import ApprovalPolicy
 from core.compaction import Compactor
@@ -24,8 +24,7 @@ from core.model_adapter import ModelAdapter
 from core.session import Session
 from core.tool_executor import ToolExecutor
 from core.tool_results import ToolResults
-from providers.openai_compatible import OpenAICompatibleProvider
-from providers.ollama import OllamaProvider
+from providers.factory import build_provider, tool_call_content_mode
 from storage.session_store import SessionStore
 from storage.undo_store import UndoStore
 from ui.terminal import StartupInfo, TerminalDisplay
@@ -156,31 +155,6 @@ def build_agent_loop(
         approval_policy=approval_policy,
         on_event=on_event,
     )
-
-
-def build_provider(settings: Settings, debug: bool | None = None):
-    provider_debug = settings.display.debug if debug is None else debug
-
-    if settings.model.provider == "ollama":
-        if settings.model.base_url == DEFAULT_BASE_URL:
-            return OllamaProvider(temperature=settings.model.temperature)
-        return OllamaProvider(
-            base_url=settings.model.base_url,
-            temperature=settings.model.temperature,
-        )
-
-    return OpenAICompatibleProvider(
-        base_url=settings.model.base_url,
-        api_key=settings.model.api_key,
-        temperature=settings.model.temperature,
-        debug=provider_debug,
-    )
-
-
-def tool_call_content_mode(settings: Settings) -> str:
-    if settings.model.provider == "openrouter":
-        return "null"
-    return "empty"
 
 
 def startup_info(repo_root: Path, settings: Settings) -> StartupInfo:

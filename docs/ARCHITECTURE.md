@@ -64,7 +64,8 @@ machine-readable runtime facts.
     optional `on_event` callback.
   - `events.py` owns the tiny best-effort event callback helper.
   - `runner.py` owns reusable coding-task run wiring for Python callers and the
-    CLI new-task flow.
+    CLI new-task flow. It wires the selected provider into the model adapter
+    but does not own provider-specific construction details.
   - `session.py` owns in-memory transcript state and lightweight read/write
     side-effect tracking.
   - `model_adapter.py` owns provider response normalization, tool-call parsing,
@@ -83,13 +84,18 @@ machine-readable runtime facts.
     `role: "tool"` messages.
 
 - `providers/`
-  - Raw provider transport.
+  - Provider construction and raw provider transport.
+  - `factory.py` owns provider selection/construction and provider-specific
+    replay-mode choices, including OpenRouter's assistant tool-call content
+    shape.
+  - `base.py` owns only the provider contract/interface.
   - `openai_compatible.py` owns OpenAI-compatible chat-completions calls through
     the OpenAI Python client.
   - `ollama.py` owns native Ollama `/api/chat` calls and adapts native Ollama
     responses to the OpenAI-like shape expected by `ModelAdapter`.
-  - Provider transport does not own loop control, coding-agent policy, tool
-    execution, or final reply validation.
+  - Concrete provider files own transport behavior. Provider transport does not
+    own loop control, coding-agent policy, tool execution, or final reply
+    validation.
 
 - `storage/`
   - Local runtime persistence.
@@ -170,9 +176,10 @@ undo store, coding agent, and loop without starting the loop. The CLI uses this
 shape when it needs access to the session and session store for interactive
 follow-ups.
 
-`core.runner.build_agent_loop(...)` owns the shared provider, model adapter,
-tool executor, tool-result formatter, approval, compaction, and `AgentLoop`
-wiring.
+`core.runner.build_agent_loop(...)` owns the shared runtime wiring for provider,
+model adapter, tool executor, tool-result formatter, approval, compaction, and
+`AgentLoop`. Provider-specific construction and replay-mode decisions are
+delegated to `providers.factory`.
 
 This runner layer is not a plugin system, orchestration layer, daemon, or
 server mode. It gives external Python code a clean way to call Code Squid
@@ -285,10 +292,10 @@ chat-completions requests through the OpenAI Python client.
 
 OpenRouter is supported through the OpenAI-compatible provider path by setting
 `model.provider` or `CODE_SQUID_PROVIDER` to `openrouter`. It still uses
-`OpenAICompatibleProvider`, but runner wiring configures assistant tool-call
-replay with `content: null` for assistant messages that have `tool_calls` and
-no content. This provider-specific behavior is handled before messages are sent
-to the provider.
+`OpenAICompatibleProvider`, but `providers.factory` configures assistant
+tool-call replay with `content: null` for assistant messages that have
+`tool_calls` and no content. This provider-specific behavior is handled before
+messages are sent to the provider.
 
 The OpenAI-compatible provider sends `parallel_tool_calls: false` whenever tools
 are present. OpenRouter may still return multiple tool calls. Code Squid handles
