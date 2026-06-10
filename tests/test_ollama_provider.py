@@ -3,7 +3,7 @@ import json
 import pytest
 
 from config.settings import ModelSettings, RuntimeSettings, Settings, DisplaySettings
-from main import _build_provider, _tool_call_content_mode
+from core.runner import build_provider, tool_call_content_mode
 from providers.ollama import OllamaProvider, adapt_response, convert_messages
 from providers.openai_compatible import OpenAICompatibleProvider
 
@@ -168,7 +168,7 @@ def test_provider_selection_defaults_to_openai_compatible() -> None:
         runtime=RuntimeSettings(),
     )
 
-    provider = _build_provider(settings)
+    provider = build_provider(settings)
 
     assert isinstance(provider, OpenAICompatibleProvider)
     assert provider.temperature is None
@@ -185,7 +185,7 @@ def test_provider_selection_uses_native_ollama_when_configured() -> None:
         runtime=RuntimeSettings(),
     )
 
-    provider = _build_provider(settings)
+    provider = build_provider(settings)
 
     assert isinstance(provider, OllamaProvider)
     assert provider.base_url == "http://127.0.0.1:11434"
@@ -199,7 +199,7 @@ def test_provider_selection_uses_native_ollama_default_base_url() -> None:
         runtime=RuntimeSettings(),
     )
 
-    provider = _build_provider(settings)
+    provider = build_provider(settings)
 
     assert isinstance(provider, OllamaProvider)
     assert provider.base_url == "http://127.0.0.1:11434"
@@ -212,7 +212,7 @@ def test_provider_selection_threads_temperature() -> None:
         runtime=RuntimeSettings(),
     )
 
-    provider = _build_provider(settings)
+    provider = build_provider(settings)
 
     assert isinstance(provider, OpenAICompatibleProvider)
     assert provider.temperature == 0
@@ -225,7 +225,7 @@ def test_provider_selection_uses_openai_compatible_for_openrouter() -> None:
         runtime=RuntimeSettings(),
     )
 
-    provider = _build_provider(settings)
+    provider = build_provider(settings)
 
     assert isinstance(provider, OpenAICompatibleProvider)
     assert provider.temperature == 0
@@ -239,7 +239,7 @@ def test_openrouter_uses_null_tool_call_content_mode() -> None:
         runtime=RuntimeSettings(),
     )
 
-    assert _tool_call_content_mode(settings) == "null"
+    assert tool_call_content_mode(settings) == "null"
 
 
 def test_openai_compatible_preserves_default_tool_call_content_mode() -> None:
@@ -249,7 +249,7 @@ def test_openai_compatible_preserves_default_tool_call_content_mode() -> None:
         runtime=RuntimeSettings(),
     )
 
-    assert _tool_call_content_mode(settings) == "empty"
+    assert tool_call_content_mode(settings) == "empty"
 
 
 def test_provider_selection_threads_temperature_to_ollama() -> None:
@@ -259,7 +259,7 @@ def test_provider_selection_threads_temperature_to_ollama() -> None:
         runtime=RuntimeSettings(),
     )
 
-    provider = _build_provider(settings)
+    provider = build_provider(settings)
 
     assert isinstance(provider, OllamaProvider)
     assert provider.temperature == 0

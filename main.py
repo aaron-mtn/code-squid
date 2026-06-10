@@ -9,21 +9,17 @@ from pathlib import Path
 from prompt_toolkit.formatted_text import FormattedText
 
 from agent.coding import CodingAgent
-from config.settings import (
-    DEFAULT_BASE_URL,
-    Settings,
-    load_settings,
-    write_approval_mode,
-)
+from config.settings import Settings, load_settings, write_approval_mode
 from core.agent_loop import AgentLoop, RunResult
-from core.approval import ApprovalPolicy
-from core.compaction import Compactor
-from core.model_adapter import ModelAdapter, ModelRequestError
+from core.events import EventCallback
+from core.model_adapter import ModelRequestError
+from core.runner import (
+    FRIENDLY_MODES,
+    build_agent_loop,
+    build_coding_task_run,
+    startup_info,
+)
 from core.session import Session
-from core.tool_executor import ToolExecutor
-from core.tool_results import ToolResults
-from providers.openai_compatible import OpenAICompatibleProvider
-from providers.ollama import OllamaProvider
 from storage.error_log import write_error_log
 from storage.session_index import latest_session_id, session_dir_for
 from storage.session_store import SessionStore
@@ -34,7 +30,6 @@ from ui.terminal import (
     INPUT_IDENTITY_LINE,
     INPUT_PROMPT_PREFIX,
     INPUT_PROMPT_STYLE,
-    StartupInfo,
     TerminalDisplay,
 )
 
@@ -66,11 +61,6 @@ Shell commands:
   python main.py resume latest
   python main.py resume <session_id>"""
 
-FRIENDLY_MODES = {
-    "always": "strict",
-    "guarded": "balanced",
-    "never": "yolo",
-}
 APPROVAL_MODES = {
     "strict": "always",
     "balanced": "guarded",
@@ -154,75 +144,17 @@ def _build_loop(
     undo_store: UndoStore,
     settings: Settings,
     display: TerminalDisplay,
+    on_event: EventCallback | None = None,
 ) -> AgentLoop:
-    provider = _build_provider(settings, debug=display.debug)
-
-    model_adapter = ModelAdapter(
-        provider=provider,
-        model_name=settings.model.name,
-        tool_call_content_mode=_tool_call_content_mode(settings),
-    )
-    compactor = Compactor(settings.compaction, model_adapter)
-
-    tool_executor = ToolExecutor(
+    return build_agent_loop(
         repo_root=repo_root,
         session=session,
-        undo_store=undo_store,
-        allow_outside_workspace=settings.runtime.approval_mode == "never",
-    )
-    tool_results = ToolResults()
-    approval_policy = ApprovalPolicy(
-        mode=settings.runtime.approval_mode,
-        prompter=display,
-    )
-
-    loop = AgentLoop(
-        session=session,
-        model_adapter=model_adapter,
-        tool_executor=tool_executor,
-        tool_results=tool_results,
-        agent=agent,
-        display=display,
         session_store=session_store,
-        compactor=compactor,
-        max_tool_steps=settings.runtime.max_tool_steps,
-        approval_policy=approval_policy,
-    )
-
-    return loop
-
-
-def _build_provider(settings: Settings, debug: bool | None = None):
-    provider_debug = settings.display.debug if debug is None else debug
-
-    if settings.model.provider == "ollama":
-        if settings.model.base_url == DEFAULT_BASE_URL:
-            return OllamaProvider(temperature=settings.model.temperature)
-        return OllamaProvider(
-            base_url=settings.model.base_url,
-            temperature=settings.model.temperature,
-        )
-
-    return OpenAICompatibleProvider(
-        base_url=settings.model.base_url,
-        api_key=settings.model.api_key,
-        temperature=settings.model.temperature,
-        debug=provider_debug,
-    )
-
-
-def _tool_call_content_mode(settings: Settings) -> str:
-    if settings.model.provider == "openrouter":
-        return "null"
-    return "empty"
-
-
-def _startup_info(repo_root: Path, settings: Settings) -> StartupInfo:
-    return StartupInfo(
-        directory=repo_root,
-        provider=settings.model.provider,
-        model=settings.model.name,
-        approval_mode=FRIENDLY_MODES[settings.runtime.approval_mode],
+        agent=agent,
+        undo_store=undo_store,
+        display=display,
+        settings=settings,
+        on_event=on_event,
     )
 
 
@@ -232,7 +164,7 @@ def _run_display(repo_root: Path, settings: Settings) -> TerminalDisplay:
     return TerminalDisplay(
         debug=debug,
         show_transcript=trace,
-        startup_info=_startup_info(repo_root, settings),
+        startup_info=startup_info(repo_root, settings),
     )
 
 
@@ -273,14 +205,15 @@ def _run_new_session_task(
 ) -> tuple[int, str | None]:
     display.run_started()
 
-    session = Session(repo_root=repo_root)
-    session_store = SessionStore.create(repo_root=repo_root, task=task)
-    undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
-    agent = CodingAgent(task=task)
-    loop = _build_loop(repo_root, session, session_store, agent, undo_store, settings, display)
+    run = build_coding_task_run(
+        repo_root=repo_root,
+        task=task,
+        settings=settings,
+        display=display,
+    )
 
-    status = _run_loop(repo_root, loop, display, session, session_store)
-    return status, session_store.session_id
+    status = _run_loop(repo_root, run.loop, display, run.session, run.session_store)
+    return status, run.session_store.session_id
 
 
 def _run_follow_up_task(
