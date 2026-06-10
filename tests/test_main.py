@@ -358,13 +358,8 @@ def test_new_session_prints_banner_before_task_prompt(monkeypatch, tmp_path, cap
         displays.append(display)
         return display
 
-    def fake_build_loop(*args):
-        assert args[-1] is displays[0]
-        return NoopLoop()
-
     monkeypatch.setattr("main.TerminalDisplay", fake_display)
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task("Do the thing"))
-    monkeypatch.setattr("main._build_loop", fake_build_loop)
     monkeypatch.setattr("main._run_loop", lambda *args: 0)
 
     assert _run_new_session(tmp_path) == 0
@@ -387,12 +382,8 @@ def test_new_session_empty_task_exits_without_run(monkeypatch, tmp_path, capsys)
         displays.append(display)
         return display
 
-    def fail_build_loop(*args):
-        raise AssertionError("_build_loop should not run for an empty task")
-
     monkeypatch.setattr("main.TerminalDisplay", fake_display)
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task("  \n\t"))
-    monkeypatch.setattr("main._build_loop", fail_build_loop)
 
     assert _run_new_session(tmp_path) == 0
 
@@ -411,12 +402,8 @@ def test_new_session_help_exits_without_session_or_run(monkeypatch, tmp_path, ca
         displays.append(display)
         return display
 
-    def fail_build_loop(*args):
-        raise AssertionError("_build_loop should not run for help")
-
     monkeypatch.setattr("main.TerminalDisplay", fake_display)
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task(" /help \n"))
-    monkeypatch.setattr("main._build_loop", fail_build_loop)
 
     assert _run_new_session(tmp_path) == 0
 
@@ -435,12 +422,8 @@ def test_new_session_cancelled_task_exits_without_run(monkeypatch, tmp_path, cap
         displays.append(display)
         return display
 
-    def fail_build_loop(*args):
-        raise AssertionError("_build_loop should not run for a cancelled task")
-
     monkeypatch.setattr("main.TerminalDisplay", fake_display)
     monkeypatch.setattr("main._prompt_task", _cancel_prompt_task)
-    monkeypatch.setattr("main._build_loop", fail_build_loop)
 
     assert _run_new_session(tmp_path) == 0
 
@@ -464,8 +447,8 @@ def test_resume_session_prints_banner_before_follow_up_prompt(
         displays.append(display)
         return display
 
-    def fake_build_loop(*args):
-        assert args[-1] is displays[0]
+    def fake_build_agent_loop(**kwargs):
+        assert kwargs["display"] is displays[0]
         return NoopLoop()
 
     monkeypatch.setattr("main.TerminalDisplay", fake_display)
@@ -474,7 +457,7 @@ def test_resume_session_prints_banner_before_follow_up_prompt(
         lambda repo_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task("Continue the thing"))
-    monkeypatch.setattr("main._build_loop", fake_build_loop)
+    monkeypatch.setattr("main.build_agent_loop", fake_build_agent_loop)
     monkeypatch.setattr("main._run_loop", lambda *args: 0)
 
     assert _resume_session(tmp_path, session_store.session_id) == 0
@@ -498,16 +481,12 @@ def test_resume_session_empty_task_exits_without_run(monkeypatch, tmp_path, caps
         displays.append(display)
         return display
 
-    def fail_build_loop(*args):
-        raise AssertionError("_build_loop should not run for an empty follow-up")
-
     monkeypatch.setattr("main.TerminalDisplay", fake_display)
     monkeypatch.setattr(
         "main._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task(""))
-    monkeypatch.setattr("main._build_loop", fail_build_loop)
 
     assert _resume_session(tmp_path, session_store.session_id) == 0
 
@@ -527,16 +506,12 @@ def test_resume_session_help_exits_without_follow_up_or_run(monkeypatch, tmp_pat
         displays.append(display)
         return display
 
-    def fail_build_loop(*args):
-        raise AssertionError("_build_loop should not run for help")
-
     monkeypatch.setattr("main.TerminalDisplay", fake_display)
     monkeypatch.setattr(
         "main._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task("/help"))
-    monkeypatch.setattr("main._build_loop", fail_build_loop)
 
     assert _resume_session(tmp_path, session_store.session_id) == 0
 
@@ -557,16 +532,12 @@ def test_resume_session_cancelled_task_exits_without_run(monkeypatch, tmp_path, 
         displays.append(display)
         return display
 
-    def fail_build_loop(*args):
-        raise AssertionError("_build_loop should not run for a cancelled follow-up")
-
     monkeypatch.setattr("main.TerminalDisplay", fake_display)
     monkeypatch.setattr(
         "main._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr("main._prompt_task", _cancel_prompt_task)
-    monkeypatch.setattr("main._build_loop", fail_build_loop)
 
     assert _resume_session(tmp_path, session_store.session_id) == 0
 
@@ -591,7 +562,6 @@ def test_new_session_passes_trace_and_friendly_mode_to_terminal_display(
     monkeypatch.setenv("CODE_SQUID_TRACE", "1")
     monkeypatch.setattr("main.TerminalDisplay", fake_display)
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task("Do the thing"))
-    monkeypatch.setattr("main._build_loop", lambda *args: NoopLoop())
     monkeypatch.setattr("main._run_loop", lambda *args: 0)
 
     assert _run_new_session(tmp_path) == 0
@@ -711,7 +681,6 @@ def test_new_session_passes_debug_without_trace_to_terminal_display(
     monkeypatch.setenv("CODE_SQUID_DEBUG", "1")
     monkeypatch.setattr("main.TerminalDisplay", fake_display)
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task("Do the thing"))
-    monkeypatch.setattr("main._build_loop", lambda *args: NoopLoop())
     monkeypatch.setattr("main._run_loop", lambda *args: 0)
 
     assert _run_new_session(tmp_path) == 0
@@ -748,7 +717,7 @@ def test_resume_session_passes_trace_to_terminal_display(
         lambda repo_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task("Continue the thing"))
-    monkeypatch.setattr("main._build_loop", lambda *args: NoopLoop())
+    monkeypatch.setattr("main.build_agent_loop", lambda **kwargs: NoopLoop())
     monkeypatch.setattr("main._run_loop", lambda *args: 0)
 
     assert _resume_session(tmp_path, session_store.session_id) == 0

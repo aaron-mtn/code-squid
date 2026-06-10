@@ -11,7 +11,6 @@ from prompt_toolkit.formatted_text import FormattedText
 from agent.coding import CodingAgent
 from config.settings import Settings, load_settings, write_approval_mode
 from core.agent_loop import AgentLoop, RunResult
-from core.events import EventCallback
 from core.model_adapter import ModelRequestError
 from core.runner import (
     FRIENDLY_MODES,
@@ -136,28 +135,6 @@ def _session_dir_for_resume(repo_root: Path, session_id: str) -> Path | None:
     return session_dir_for(repo_root, session_id)
 
 
-def _build_loop(
-    repo_root: Path,
-    session: Session,
-    session_store: SessionStore,
-    agent: CodingAgent,
-    undo_store: UndoStore,
-    settings: Settings,
-    display: TerminalDisplay,
-    on_event: EventCallback | None = None,
-) -> AgentLoop:
-    return build_agent_loop(
-        repo_root=repo_root,
-        session=session,
-        session_store=session_store,
-        agent=agent,
-        undo_store=undo_store,
-        display=display,
-        settings=settings,
-        on_event=on_event,
-    )
-
-
 def _run_display(repo_root: Path, settings: Settings) -> TerminalDisplay:
     trace = os.getenv("CODE_SQUID_TRACE") == "1"
     debug = settings.display.debug or trace
@@ -239,7 +216,15 @@ def _run_follow_up_task(
     session_store.update_status("active")
 
     undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
-    loop = _build_loop(repo_root, session, session_store, agent, undo_store, settings, display)
+    loop = build_agent_loop(
+        repo_root=repo_root,
+        session=session,
+        session_store=session_store,
+        agent=agent,
+        undo_store=undo_store,
+        settings=settings,
+        display=display,
+    )
     status = _run_loop(repo_root, loop, display, session, session_store)
     return status, session_store.session_id
 
