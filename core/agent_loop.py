@@ -38,6 +38,7 @@ class AgentLoop:
         compactor=None,
         max_tool_steps: int | None = None,
         approval_policy: ApprovalPolicy | None = None,
+        stream_assistant_text: bool = False,
         # Optional observer callback for compact runtime facts. Terminal
         # display remains separate; external Python wrappers should listen here
         # instead of scraping human-facing output.
@@ -53,6 +54,7 @@ class AgentLoop:
         self.compactor = compactor
         self.max_tool_steps = max_tool_steps
         self.approval_policy = approval_policy or ApprovalPolicy("never")
+        self.stream_assistant_text = stream_assistant_text
         self.on_event = on_event
 
     # Add one accepted transcript message to memory and optional disk storage.
@@ -116,6 +118,36 @@ class AgentLoop:
         suffix = "... [truncated]"
         return f"{value[: max_chars - len(suffix)]}{suffix}"
 
+    def _should_stream_assistant_text(self) -> bool:
+        if not self.stream_assistant_text:
+            return False
+
+        supports_streaming = getattr(self.model_adapter, "supports_streaming", None)
+        return callable(supports_streaming) and bool(supports_streaming())
+
+    def _respond(self, tool_definitions: list[dict]) -> dict:
+        if not self._should_stream_assistant_text():
+            return self.model_adapter.respond(
+                messages=self.session.messages,
+                tool_definitions=tool_definitions,
+            )
+
+        self._emit_event({"type": "assistant_message_started"})
+
+        def on_text_delta(delta: str) -> None:
+            self._emit_event(
+                {
+                    "type": "assistant_delta",
+                    "delta": delta,
+                }
+            )
+
+        return self.model_adapter.respond_streaming(
+            messages=self.session.messages,
+            tool_definitions=tool_definitions,
+            on_text_delta=on_text_delta,
+        )
+
     # Ensure a brand-new in-memory session has the initial agent messages.
     #
     # Future resume support can load saved messages before run() is called.
@@ -176,10 +208,7 @@ class AgentLoop:
 
             # Ask the model for the next assistant reply and any tool actions.
             self.display.thinking()
-            reply = self.model_adapter.respond(
-                messages=self.session.messages,
-                tool_definitions=self.agent.tool_definitions(),
-            )
+            reply = self._respond(self.agent.tool_definitions())
 
             self.display.debug_reply(reply)
 

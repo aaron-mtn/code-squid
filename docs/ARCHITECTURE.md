@@ -151,6 +151,8 @@ output. Terminal display is still separate and wrappers should not scrape it.
 Current loop-level event types include:
 
 - `run_started`
+- `assistant_message_started`
+- `assistant_delta`
 - `assistant_message`
 - `tool_started`
 - `tool_finished`
@@ -204,6 +206,7 @@ OpenAI-compatible server, especially LM Studio:
 - display debug: `false`
 - approval mode: `never`
 - max tool steps: unlimited
+- assistant text streaming: disabled
 - compaction: enabled at an estimated 48,000 input tokens, keeping 8 recent
   chunks verbatim
 
@@ -218,6 +221,7 @@ Supported settings sections and fields:
 - `display.debug`
 - `runtime.approval_mode`
 - `runtime.max_tool_steps`
+- `runtime.stream_assistant_text`
 - `compaction.enabled`
 - `compaction.trigger_input_tokens`
 - `compaction.keep_recent_turns`
@@ -225,6 +229,12 @@ Supported settings sections and fields:
 Supported provider values are `openai_compatible`, `openrouter`, and `ollama`.
 Supported approval modes are `never`, `guarded`, and `always`.
 `runtime.max_tool_steps` is either `null` or a positive integer.
+`runtime.stream_assistant_text` is a boolean. When enabled with a streaming
+provider, the loop emits `assistant_message_started` before generation and
+`assistant_delta` events for visible text chunks, then emits the normal full
+`assistant_message` or `final_message` after the complete reply is assembled and
+validated. Streamed deltas are UI events only; tool execution still waits for
+the full validated assistant response.
 `model.temperature` is `null` or a number from 0 through 2.
 
 Environment overrides exist for current model/debug/temperature/provider-related
@@ -236,10 +246,12 @@ settings:
 - `CODE_SQUID_PROVIDER`
 - `CODE_SQUID_TEMPERATURE`
 - `CODE_SQUID_DEBUG`
+- `CODE_SQUID_STREAM_ASSISTANT_TEXT`
 
 `CODE_SQUID_API_KEY` wins over `model.api_key_env`, which wins over
-`model.api_key`. There are no compaction environment overrides in the current
-code.
+`model.api_key`. `CODE_SQUID_STREAM_ASSISTANT_TEXT=1` enables assistant text
+streaming and `0` disables it. There are no compaction environment overrides in
+the current code.
 
 Invalid settings JSON, invalid section shapes, invalid provider names, unknown
 approval modes, missing configured API-key environment variables, invalid
@@ -301,6 +313,11 @@ The OpenAI-compatible provider sends `parallel_tool_calls: false` whenever tools
 are present. OpenRouter may still return multiple tool calls. Code Squid handles
 that by rejecting invalid multi-tool replies before they enter normal assistant
 history and retrying with correction messages.
+
+The OpenAI-compatible provider also supports optional assistant text streaming.
+Streaming assembles text and tool-call fragments into the same raw response
+shape used by non-streaming responses before `ModelAdapter` normalizes and
+validates the reply.
 
 The native Ollama provider exists and is experimental. `providers/ollama.py`
 uses Ollama `/api/chat`, converts replayed messages into Ollama's expected

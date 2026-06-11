@@ -48,6 +48,33 @@ class FakeProvider:
         return self.response
 
 
+class StreamingProvider(FakeProvider):
+    def __init__(self, response: FakeResponse, deltas: list[str]) -> None:
+        super().__init__(response)
+        self.deltas = deltas
+
+    def supports_streaming(self) -> bool:
+        return True
+
+    def stream_chat(
+        self,
+        model: str,
+        messages: list[dict],
+        tools: list[dict],
+        on_text_delta,
+    ) -> FakeResponse:
+        self.requests.append(
+            {
+                "model": model,
+                "messages": messages,
+                "tools": tools,
+            }
+        )
+        for delta in self.deltas:
+            on_text_delta(delta)
+        return self.response
+
+
 class FailingProvider:
     def __init__(self, error: Exception) -> None:
         self.error = error
@@ -316,3 +343,32 @@ def test_complete_text_includes_normalized_usage_when_provider_usage_exists() ->
         "output_tokens": 6,
         "total_tokens": 26,
     }
+
+
+def test_supports_streaming_delegates_to_provider() -> None:
+    provider = StreamingProvider(
+        FakeResponse(FakeMessage(content="done", tool_calls=[])),
+        deltas=[],
+    )
+    adapter = ModelAdapter(provider=provider, model_name="test-model")
+
+    assert adapter.supports_streaming() is True
+
+
+def test_respond_streaming_emits_deltas_and_returns_normalized_reply() -> None:
+    deltas = []
+    provider = StreamingProvider(
+        FakeResponse(FakeMessage(content="hello world", tool_calls=[])),
+        deltas=["hello ", "world"],
+    )
+    adapter = ModelAdapter(provider=provider, model_name="test-model")
+
+    reply = adapter.respond_streaming(
+        messages=[{"role": "user", "content": "hi"}],
+        tool_definitions=[],
+        on_text_delta=deltas.append,
+    )
+
+    assert deltas == ["hello ", "world"]
+    assert reply["message"]["content"] == "hello world"
+    assert reply["actions"] == []

@@ -39,10 +39,18 @@ class FakeAgent:
 
 
 class FakeModelAdapter:
-    def __init__(self, replies: list[dict], events: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        replies: list[dict],
+        events: list[str] | None = None,
+        streaming: bool = False,
+        deltas: list[str] | None = None,
+    ) -> None:
         self.replies = replies
         self.index = 0
         self.events = events
+        self.streaming = streaming
+        self.deltas = deltas or []
 
     def respond(self, messages: list[dict], tool_definitions: list[dict]) -> dict:
         if self.events is not None:
@@ -51,13 +59,36 @@ class FakeModelAdapter:
         self.index += 1
         return reply
 
+    def supports_streaming(self) -> bool:
+        return self.streaming
+
+    def respond_streaming(
+        self,
+        messages: list[dict],
+        tool_definitions: list[dict],
+        on_text_delta,
+    ) -> dict:
+        if self.events is not None:
+            self.events.append("respond_streaming:start")
+        for delta in self.deltas:
+            on_text_delta(delta)
+        self.deltas = []
+        if self.events is not None:
+            self.events.append("respond_streaming:end")
+        reply = self.replies[self.index]
+        self.index += 1
+        return reply
+
 
 class FakeToolExecutor:
-    def __init__(self, repo_root=None) -> None:
+    def __init__(self, repo_root=None, events: list[str] | None = None) -> None:
         self.repo_root = repo_root
         self.actions = []
+        self.events = events
 
     def execute(self, action: dict) -> dict:
+        if self.events is not None:
+            self.events.append(f"execute:{action['tool']}")
         self.actions.append(action)
         return {"ok": True, "tool": action["tool"]}
 
@@ -500,6 +531,118 @@ def test_loop_emits_basic_run_events(tmp_path) -> None:
     assert events[4]["text"] == "TASK COMPLETE"
     assert events[5]["status"] == "complete"
     assert all("timestamp" in event for event in events)
+
+
+def test_streaming_enabled_emits_started_deltas_and_full_assistant_message() -> None:
+    events = []
+    session = Session(repo_root=None)
+    model_adapter = FakeModelAdapter(
+        [
+            reply("Reading file.", actions=[{"tool": "read_file"}]),
+            reply("TASK COMPLETE"),
+        ],
+        streaming=True,
+        deltas=["Reading ", "file."],
+    )
+    loop = AgentLoop(
+        session=session,
+        model_adapter=model_adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        stream_assistant_text=True,
+        on_event=events.append,
+    )
+
+    loop.run()
+
+    event_types = [event["type"] for event in events]
+    assert event_types[:5] == [
+        "run_started",
+        "assistant_message_started",
+        "assistant_delta",
+        "assistant_delta",
+        "assistant_message",
+    ]
+    assert [event["delta"] for event in events if event["type"] == "assistant_delta"] == [
+        "Reading ",
+        "file.",
+    ]
+    assert next(event for event in events if event["type"] == "assistant_message")[
+        "message"
+    ] == "Reading file."
+
+
+def test_streaming_enabled_does_not_execute_tool_until_full_reply_returns_and_validates() -> None:
+    events = []
+    callback_events = []
+
+    def on_event(event: dict) -> None:
+        events.append(event)
+        callback_events.append(event["type"])
+
+    session = Session(repo_root=None)
+    model_adapter = FakeModelAdapter(
+        [
+            reply("Using read_file.", actions=[{"tool": "read_file"}]),
+            reply("TASK COMPLETE"),
+        ],
+        events=callback_events,
+        streaming=True,
+        deltas=["Using ", "read_file."],
+    )
+    tool_executor = FakeToolExecutor(events=callback_events)
+    loop = AgentLoop(
+        session=session,
+        model_adapter=model_adapter,
+        tool_executor=tool_executor,
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        stream_assistant_text=True,
+        on_event=on_event,
+    )
+
+    loop.run()
+
+    assert callback_events.index("respond_streaming:end") < callback_events.index(
+        "assistant_message"
+    )
+    assert callback_events.index("assistant_message") < callback_events.index(
+        "tool_started"
+    )
+    assert callback_events.index("tool_started") < callback_events.index(
+        "execute:read_file"
+    )
+    assert tool_executor.actions == [{"tool": "read_file"}]
+
+
+def test_streaming_enabled_but_unsupported_provider_falls_back_to_non_streaming() -> None:
+    events = []
+    model_events = []
+    session = Session(repo_root=None)
+    model_adapter = FakeModelAdapter(
+        [reply("TASK COMPLETE")],
+        events=model_events,
+        streaming=False,
+    )
+    loop = AgentLoop(
+        session=session,
+        model_adapter=model_adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        stream_assistant_text=True,
+        on_event=events.append,
+    )
+
+    loop.run()
+
+    assert model_events == ["respond"]
+    assert "assistant_message_started" not in [event["type"] for event in events]
+    assert "assistant_delta" not in [event["type"] for event in events]
 
 
 def test_assistant_message_event_includes_full_message() -> None:

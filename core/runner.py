@@ -153,6 +153,7 @@ def build_agent_loop(
         compactor=compactor,
         max_tool_steps=settings.runtime.max_tool_steps,
         approval_policy=approval_policy,
+        stream_assistant_text=settings.runtime.stream_assistant_text,
         on_event=on_event,
     )
 

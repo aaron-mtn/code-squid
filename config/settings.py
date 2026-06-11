@@ -30,6 +30,7 @@ VALID_APPROVAL_MODES = {"never", "always", "guarded"}
 # None means unlimited tool steps. Users can set a positive integer if they want
 # a loop guard for smaller or less reliable models.
 DEFAULT_MAX_TOOL_STEPS = None
+DEFAULT_STREAM_ASSISTANT_TEXT = False
 
 DEFAULT_COMPACTION_ENABLED = True
 DEFAULT_COMPACTION_TRIGGER_INPUT_TOKENS = 48000
@@ -55,6 +56,7 @@ class DisplaySettings:
 class RuntimeSettings:
     approval_mode: str = DEFAULT_APPROVAL_MODE
     max_tool_steps: int | None = DEFAULT_MAX_TOOL_STEPS
+    stream_assistant_text: bool = DEFAULT_STREAM_ASSISTANT_TEXT
 
 
 @dataclass(frozen=True)
@@ -143,6 +145,23 @@ def _max_tool_steps(runtime_settings: dict[str, Any], settings_path: Path) -> in
         )
 
     return max_tool_steps
+
+
+def _stream_assistant_text(runtime_settings: dict[str, Any], settings_path: Path) -> bool:
+    stream_assistant_text = runtime_settings.get(
+        "stream_assistant_text",
+        DEFAULT_STREAM_ASSISTANT_TEXT,
+    )
+    if not isinstance(stream_assistant_text, bool):
+        raise ValueError(
+            f"Invalid settings JSON in {settings_path}: runtime.stream_assistant_text must be a boolean"
+        )
+
+    stream_env = os.getenv("CODE_SQUID_STREAM_ASSISTANT_TEXT")
+    if stream_env is None:
+        return stream_assistant_text
+
+    return stream_env == "1"
 
 
 def _positive_int(value: Any, field_path: str, settings_path: Path) -> int:
@@ -245,6 +264,7 @@ def load_settings(repo_root: Path) -> Settings:
     debug = display_settings.get("debug", DEFAULT_DEBUG)
     approval_mode = _approval_mode(runtime_settings, settings_path)
     max_tool_steps = _max_tool_steps(runtime_settings, settings_path)
+    stream_assistant_text = _stream_assistant_text(runtime_settings, settings_path)
     compaction = _compaction_settings(compaction_settings, settings_path)
 
     debug_env = os.getenv("CODE_SQUID_DEBUG")
@@ -264,6 +284,7 @@ def load_settings(repo_root: Path) -> Settings:
         runtime=RuntimeSettings(
             approval_mode=approval_mode,
             max_tool_steps=max_tool_steps,
+            stream_assistant_text=stream_assistant_text,
         ),
         compaction=compaction,
     )

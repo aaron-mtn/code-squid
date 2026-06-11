@@ -55,6 +55,38 @@ class ModelAdapter:
                 "format_error": str(e),
             }
 
+    def supports_streaming(self) -> bool:
+        return bool(getattr(self.provider, "supports_streaming", lambda: False)())
+
+    def respond_streaming(
+        self,
+        messages: list[dict],
+        tool_definitions: list[dict],
+        on_text_delta,
+    ) -> dict:
+        tool_metadata = self._tool_metadata_from_definitions(tool_definitions)
+        try:
+            raw_response = self.provider.stream_chat(
+                model=self.model_name,
+                messages=self._messages_for_provider(messages),
+                tools=tool_definitions,
+                on_text_delta=on_text_delta,
+            )
+        except Exception as exc:
+            raise ModelRequestError("Model request failed") from exc
+
+        try:
+            return self._normalize_response(raw_response, tool_metadata)
+        except ValueError as e:
+            return {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                },
+                "actions": [],
+                "format_error": str(e),
+            }
+
     def complete_text(self, messages: list[dict]) -> dict:
         try:
             raw_response = self.provider.create_response(

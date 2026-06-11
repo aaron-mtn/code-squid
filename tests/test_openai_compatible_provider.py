@@ -1,13 +1,16 @@
+from types import SimpleNamespace
+
 from providers.openai_compatible import OpenAICompatibleProvider
 
 
 class FakeCompletions:
     def __init__(self) -> None:
         self.payloads = []
+        self.response = object()
 
     def create(self, **payload):
         self.payloads.append(payload)
-        return object()
+        return self.response
 
 
 class FakeChat:
@@ -116,6 +119,85 @@ def test_debug_on_prints_parallel_tool_calls_false_without_message_contents(caps
     assert "│ messages: 4" in output
     assert "│ tools: 1" in output
     assert "│ temperature: <missing>" in output
+    assert "│ stream: <missing>" in output
     assert "│ parallel_tool_calls: false" in output
     assert "│ tool_choice: <missing>" in output
     assert "secret task" not in output
+
+
+def chunk(content=None, tool_calls=None):
+    delta = SimpleNamespace(content=content)
+    if tool_calls is not None:
+        delta.tool_calls = tool_calls
+    return SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+
+
+def tool_call_delta(index, id=None, name=None, arguments=None):
+    return SimpleNamespace(
+        index=index,
+        id=id,
+        type="function",
+        function=SimpleNamespace(name=name, arguments=arguments),
+    )
+
+
+def test_stream_chat_requests_stream_true_and_assembles_text() -> None:
+    provider, client = provider_with_fake_client()
+    client.chat.completions.response = [
+        chunk(content="hello "),
+        chunk(content="world"),
+    ]
+    deltas = []
+
+    response = provider.stream_chat(
+        model="test-model",
+        messages=[],
+        tools=[],
+        on_text_delta=deltas.append,
+    )
+
+    assert client.chat.completions.payloads[0]["stream"] is True
+    assert deltas == ["hello ", "world"]
+    assert response.choices[0].message.content == "hello world"
+    assert response.choices[0].message.tool_calls == []
+
+
+def test_stream_chat_assembles_tool_call_fragments() -> None:
+    provider, client = provider_with_fake_client()
+    client.chat.completions.response = [
+        chunk(content="Reading file."),
+        chunk(
+            tool_calls=[
+                tool_call_delta(
+                    0,
+                    id="call_1",
+                    name="read_",
+                    arguments='{"path": ',
+                )
+            ]
+        ),
+        chunk(
+            tool_calls=[
+                tool_call_delta(
+                    0,
+                    name="file",
+                    arguments='"/tmp/a.txt"}',
+                )
+            ]
+        ),
+    ]
+    deltas = []
+
+    response = provider.stream_chat(
+        model="test-model",
+        messages=[],
+        tools=[{"type": "function", "function": {"name": "read_file"}}],
+        on_text_delta=deltas.append,
+    )
+
+    tool_call = response.choices[0].message.tool_calls[0]
+    assert deltas == ["Reading file."]
+    assert response.choices[0].message.content == "Reading file."
+    assert tool_call.id == "call_1"
+    assert tool_call.function.name == "read_file"
+    assert tool_call.function.arguments == '{"path": "/tmp/a.txt"}'

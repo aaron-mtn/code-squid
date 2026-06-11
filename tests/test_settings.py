@@ -13,6 +13,7 @@ ENV_VARS = [
     "CODE_SQUID_PROVIDER",
     "CODE_SQUID_TEMPERATURE",
     "CODE_SQUID_DEBUG",
+    "CODE_SQUID_STREAM_ASSISTANT_TEXT",
 ]
 
 
@@ -40,6 +41,7 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert settings.display.debug is False
     assert settings.runtime.approval_mode == "never"
     assert settings.runtime.max_tool_steps is None
+    assert settings.runtime.stream_assistant_text is False
     assert settings.compaction.enabled is True
     assert settings.compaction.trigger_input_tokens == 48000
     assert settings.compaction.keep_recent_turns == 8
@@ -62,6 +64,7 @@ def test_settings_file_overrides_defaults(tmp_path: Path) -> None:
             "runtime": {
                 "approval_mode": "always",
                 "max_tool_steps": 3,
+                "stream_assistant_text": True,
             },
             "compaction": {
                 "enabled": False,
@@ -82,6 +85,7 @@ def test_settings_file_overrides_defaults(tmp_path: Path) -> None:
     assert settings.display.debug is True
     assert settings.runtime.approval_mode == "always"
     assert settings.runtime.max_tool_steps == 3
+    assert settings.runtime.stream_assistant_text is True
     assert settings.compaction.enabled is False
     assert settings.compaction.trigger_input_tokens == 24000
     assert settings.compaction.keep_recent_turns == 4
@@ -210,6 +214,29 @@ def test_debug_env_var_zero_disables_debug(tmp_path: Path, monkeypatch: pytest.M
     assert settings.display.debug is False
 
 
+def test_stream_assistant_text_env_var_enables_streaming(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CODE_SQUID_STREAM_ASSISTANT_TEXT", "1")
+
+    settings = load_settings(tmp_path)
+
+    assert settings.runtime.stream_assistant_text is True
+
+
+def test_stream_assistant_text_env_var_zero_disables_streaming(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    write_settings(tmp_path, {"runtime": {"stream_assistant_text": True}})
+    monkeypatch.setenv("CODE_SQUID_STREAM_ASSISTANT_TEXT", "0")
+
+    settings = load_settings(tmp_path)
+
+    assert settings.runtime.stream_assistant_text is False
+
+
 def test_invalid_approval_mode_raises(tmp_path: Path) -> None:
     write_settings(tmp_path, {"runtime": {"approval_mode": "sometimes"}})
 
@@ -222,6 +249,17 @@ def test_invalid_max_tool_steps_raises(tmp_path: Path, max_tool_steps: object) -
     write_settings(tmp_path, {"runtime": {"max_tool_steps": max_tool_steps}})
 
     with pytest.raises(ValueError, match="runtime\\.max_tool_steps"):
+        load_settings(tmp_path)
+
+
+@pytest.mark.parametrize("stream_assistant_text", [None, 1, 0, "true"])
+def test_invalid_stream_assistant_text_raises(
+    tmp_path: Path,
+    stream_assistant_text: object,
+) -> None:
+    write_settings(tmp_path, {"runtime": {"stream_assistant_text": stream_assistant_text}})
+
+    with pytest.raises(ValueError, match="runtime\\.stream_assistant_text"):
         load_settings(tmp_path)
 
 
