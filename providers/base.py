@@ -21,6 +21,7 @@ class BaseProvider:
         messages: list[dict],
         tools: list[dict],
         on_text_delta,
+        on_tool_preparing=None,
         tool_choice=None,
     ) -> object:
         raise NotImplementedError

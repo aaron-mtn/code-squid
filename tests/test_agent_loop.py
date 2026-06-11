@@ -45,12 +45,14 @@ class FakeModelAdapter:
         events: list[str] | None = None,
         streaming: bool = False,
         deltas: list[str] | None = None,
+        tool_preparing_events: list[dict] | None = None,
     ) -> None:
         self.replies = replies
         self.index = 0
         self.events = events
         self.streaming = streaming
         self.deltas = deltas or []
+        self.tool_preparing_events = tool_preparing_events or []
 
     def respond(self, messages: list[dict], tool_definitions: list[dict]) -> dict:
         if self.events is not None:
@@ -67,12 +69,17 @@ class FakeModelAdapter:
         messages: list[dict],
         tool_definitions: list[dict],
         on_text_delta,
+        on_tool_preparing=None,
     ) -> dict:
         if self.events is not None:
             self.events.append("respond_streaming:start")
         for delta in self.deltas:
             on_text_delta(delta)
         self.deltas = []
+        if on_tool_preparing is not None:
+            for event in self.tool_preparing_events:
+                on_tool_preparing(event)
+        self.tool_preparing_events = []
         if self.events is not None:
             self.events.append("respond_streaming:end")
         reply = self.replies[self.index]
@@ -109,12 +116,15 @@ class FakePrompter:
 
 
 class FakeSessionStore:
-    def __init__(self) -> None:
+    def __init__(self, events: list[str] | None = None) -> None:
         self.messages = []
         self.compactions = []
         self.statuses = []
+        self.events = events
 
     def append_message(self, message: dict, usage: dict | None = None) -> None:
+        if self.events is not None:
+            self.events.append("append_message")
         self.messages.append({"message": message, "usage": usage})
 
     def append_compaction(self, metadata: dict) -> None:
@@ -574,6 +584,61 @@ def test_streaming_enabled_emits_started_deltas_and_full_assistant_message() -> 
     ] == "Reading file."
 
 
+def test_streaming_enabled_emits_tool_preparing_before_message_and_tool_started() -> None:
+    events = []
+    session = Session(repo_root=None)
+    model_adapter = FakeModelAdapter(
+        [
+            reply(
+                "Writing file.",
+                actions=[
+                    {
+                        "tool": "write_file",
+                        "tool_call_id": "call_1",
+                        "args": {"path": "/tmp/a.txt", "content": "secret"},
+                    }
+                ],
+            ),
+            reply("TASK COMPLETE"),
+        ],
+        streaming=True,
+        deltas=["Writing file."],
+        tool_preparing_events=[
+            {
+                "tool": "write_file",
+                "tool_call_index": 0,
+                "tool_call_id": "call_1",
+            }
+        ],
+    )
+    loop = AgentLoop(
+        session=session,
+        model_adapter=model_adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        stream_assistant_text=True,
+        on_event=events.append,
+    )
+
+    loop.run()
+
+    event_types = [event["type"] for event in events]
+    preparing_index = event_types.index("tool_preparing")
+    assistant_index = event_types.index("assistant_message")
+    started_index = event_types.index("tool_started")
+    assert preparing_index < assistant_index
+    assert preparing_index < started_index
+
+    tool_preparing = events[preparing_index]
+    assert tool_preparing["tool"] == "write_file"
+    assert tool_preparing["tool_call_index"] == 0
+    assert tool_preparing["tool_call_id"] == "call_1"
+    assert "args" not in tool_preparing
+    assert "content" not in tool_preparing
+
+
 def test_streaming_enabled_does_not_execute_tool_until_full_reply_returns_and_validates() -> None:
     events = []
     callback_events = []
@@ -643,6 +708,7 @@ def test_streaming_enabled_but_unsupported_provider_falls_back_to_non_streaming(
     assert model_events == ["respond"]
     assert "assistant_message_started" not in [event["type"] for event in events]
     assert "assistant_delta" not in [event["type"] for event in events]
+    assert "tool_preparing" not in [event["type"] for event in events]
 
 
 def test_assistant_message_event_includes_full_message() -> None:
@@ -1251,3 +1317,92 @@ def test_final_reply_without_tool_actions_does_not_count_toward_tool_step_limit(
     assert model_adapter.index == 1
     assert session_store.statuses == ["complete"]
     assert display.step_limits_reached == []
+
+
+def test_invalid_reply_does_not_emit_tool_started() -> None:
+    events = []
+    run_loop(
+        [
+            reply("bad", reason="empty_final_reply"),
+            reply("TASK COMPLETE"),
+        ],
+        on_event=events.append,
+    )
+
+    event_types = [event["type"] for event in events]
+    assert "tool_started" not in event_types
+    assert "reply_rejected" in event_types
+
+
+def test_final_reply_without_actions_does_not_emit_tool_started() -> None:
+    events = []
+    run_loop(
+        [reply("TASK COMPLETE")],
+        on_event=events.append,
+    )
+
+    event_types = [event["type"] for event in events]
+    assert "tool_started" not in event_types
+
+
+def test_tool_started_and_finished_include_tool_call_id() -> None:
+    events = []
+    run_loop(
+        [
+            reply(
+                "valid",
+                actions=[{"tool": "read_file", "tool_call_id": "call_123"}],
+            ),
+            reply("TASK COMPLETE"),
+        ],
+        on_event=events.append,
+    )
+
+    tool_started = next(event for event in events if event["type"] == "tool_started")
+    tool_finished = next(event for event in events if event["type"] == "tool_finished")
+    assert tool_started["tool_call_id"] == "call_123"
+    assert tool_finished["tool_call_id"] == "call_123"
+
+
+def test_event_order_with_persistence() -> None:
+    all_events: list[str] = []
+    session = Session(repo_root=None)
+    session_store = FakeSessionStore(events=all_events)
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter(
+            [
+                reply(
+                    "Using read_file.",
+                    actions=[{"tool": "read_file", "tool_call_id": "call_1"}],
+                ),
+                reply("TASK COMPLETE"),
+            ]
+        ),
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        session_store=session_store,
+        on_event=lambda e: all_events.append(e["type"]),
+    )
+
+    loop.run()
+
+    # With a session_store, _ensure_initial_messages appends the system message first.
+    # Expected order around the tool-call turn:
+    #   ... append_message (system), run_started,
+    #       assistant_message, tool_started, append_message (assistant),
+    #       tool_finished, append_message (tool result),
+    #       final_message, append_message (TASK COMPLETE),
+    #       run_finished
+    event_types = all_events
+    # The first turn with actions:
+    asst_idx = event_types.index("assistant_message")
+    ts_idx = event_types.index("tool_started")
+    # The first append_message after tool_started is the assistant message persist
+    am_idx = next(i for i in range(ts_idx + 1, len(event_types)) if event_types[i] == "append_message")
+    tf_idx = event_types.index("tool_finished")
+    assert asst_idx < ts_idx, "assistant_message must come before tool_started"
+    assert ts_idx < am_idx, "tool_started must come before assistant message persistence"
+    assert ts_idx < tf_idx, "tool_started must come before tool_finished"

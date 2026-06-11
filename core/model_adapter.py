@@ -63,6 +63,7 @@ class ModelAdapter:
         messages: list[dict],
         tool_definitions: list[dict],
         on_text_delta,
+        on_tool_preparing=None,
     ) -> dict:
         tool_metadata = self._tool_metadata_from_definitions(tool_definitions)
         try:
@@ -71,6 +72,7 @@ class ModelAdapter:
                 messages=self._messages_for_provider(messages),
                 tools=tool_definitions,
                 on_text_delta=on_text_delta,
+                on_tool_preparing=on_tool_preparing,
             )
         except Exception as exc:
             raise ModelRequestError("Model request failed") from exc

@@ -201,3 +201,79 @@ def test_stream_chat_assembles_tool_call_fragments() -> None:
     assert tool_call.id == "call_1"
     assert tool_call.function.name == "read_file"
     assert tool_call.function.arguments == '{"path": "/tmp/a.txt"}'
+
+
+def test_stream_chat_notifies_tool_preparing_once_when_name_appears() -> None:
+    provider, client = provider_with_fake_client()
+    client.chat.completions.response = [
+        chunk(
+            tool_calls=[
+                tool_call_delta(
+                    0,
+                    id="call_1",
+                    name="read_file",
+                    arguments='{"path": ',
+                )
+            ]
+        ),
+        chunk(
+            tool_calls=[
+                tool_call_delta(
+                    0,
+                    arguments='"/tmp/a.txt"}',
+                )
+            ]
+        ),
+    ]
+    preparing_events = []
+
+    provider.stream_chat(
+        model="test-model",
+        messages=[],
+        tools=[{"type": "function", "function": {"name": "read_file"}}],
+        on_text_delta=lambda _delta: None,
+        on_tool_preparing=preparing_events.append,
+    )
+
+    assert preparing_events == [
+        {
+            "tool": "read_file",
+            "tool_call_index": 0,
+            "tool_call_id": "call_1",
+        }
+    ]
+
+
+def test_stream_chat_tool_preparing_does_not_include_arguments() -> None:
+    provider, client = provider_with_fake_client()
+    client.chat.completions.response = [
+        chunk(
+            tool_calls=[
+                tool_call_delta(
+                    0,
+                    id="call_1",
+                    name="write_file",
+                    arguments='{"path": "/tmp/a.txt", "content": "secret"}',
+                )
+            ]
+        ),
+    ]
+    preparing_events = []
+
+    provider.stream_chat(
+        model="test-model",
+        messages=[],
+        tools=[{"type": "function", "function": {"name": "write_file"}}],
+        on_text_delta=lambda _delta: None,
+        on_tool_preparing=preparing_events.append,
+    )
+
+    assert preparing_events == [
+        {
+            "tool": "write_file",
+            "tool_call_index": 0,
+            "tool_call_id": "call_1",
+        }
+    ]
+    assert "arguments" not in preparing_events[0]
+    assert "args" not in preparing_events[0]

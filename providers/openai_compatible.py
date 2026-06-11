@@ -54,6 +54,7 @@ class OpenAICompatibleProvider(BaseProvider):
         messages: list[dict],
         tools: list[dict],
         on_text_delta,
+        on_tool_preparing=None,
         tool_choice=None,
     ) -> object:
         payload = self._payload(
@@ -69,6 +70,7 @@ class OpenAICompatibleProvider(BaseProvider):
 
         content_parts = []
         tool_call_parts = {}
+        prepared_tool_call_indexes = set()
         usage = None
 
         for chunk in self.client.chat.completions.create(**payload):
@@ -88,6 +90,12 @@ class OpenAICompatibleProvider(BaseProvider):
 
                 for tool_call_delta in getattr(delta, "tool_calls", None) or []:
                     self._accumulate_tool_call_delta(tool_call_parts, tool_call_delta)
+                    self._notify_tool_preparing(
+                        tool_call_parts=tool_call_parts,
+                        tool_call_delta=tool_call_delta,
+                        prepared_tool_call_indexes=prepared_tool_call_indexes,
+                        on_tool_preparing=on_tool_preparing,
+                    )
 
         return self._assembled_stream_response(
             content="".join(content_parts),
@@ -149,6 +157,35 @@ class OpenAICompatibleProvider(BaseProvider):
         arguments = getattr(function, "arguments", None)
         if arguments:
             part["arguments"].append(arguments)
+
+    def _notify_tool_preparing(
+        self,
+        tool_call_parts: dict,
+        tool_call_delta,
+        prepared_tool_call_indexes: set,
+        on_tool_preparing,
+    ) -> None:
+        if on_tool_preparing is None:
+            return
+
+        index = getattr(tool_call_delta, "index", None)
+        if index is None:
+            index = len(tool_call_parts) - 1
+        if index in prepared_tool_call_indexes:
+            return
+
+        part = tool_call_parts.get(index)
+        if not part or not part["name"]:
+            return
+
+        prepared_tool_call_indexes.add(index)
+        event = {
+            "tool": part["name"],
+            "tool_call_index": index,
+        }
+        if part["id"]:
+            event["tool_call_id"] = part["id"]
+        on_tool_preparing(event)
 
     def _assembled_stream_response(
         self,

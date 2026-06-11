@@ -49,9 +49,15 @@ class FakeProvider:
 
 
 class StreamingProvider(FakeProvider):
-    def __init__(self, response: FakeResponse, deltas: list[str]) -> None:
+    def __init__(
+        self,
+        response: FakeResponse,
+        deltas: list[str],
+        tool_preparing_events: list[dict] | None = None,
+    ) -> None:
         super().__init__(response)
         self.deltas = deltas
+        self.tool_preparing_events = tool_preparing_events or []
 
     def supports_streaming(self) -> bool:
         return True
@@ -62,6 +68,7 @@ class StreamingProvider(FakeProvider):
         messages: list[dict],
         tools: list[dict],
         on_text_delta,
+        on_tool_preparing=None,
     ) -> FakeResponse:
         self.requests.append(
             {
@@ -72,6 +79,9 @@ class StreamingProvider(FakeProvider):
         )
         for delta in self.deltas:
             on_text_delta(delta)
+        if on_tool_preparing is not None:
+            for event in self.tool_preparing_events:
+                on_tool_preparing(event)
         return self.response
 
 
@@ -372,3 +382,34 @@ def test_respond_streaming_emits_deltas_and_returns_normalized_reply() -> None:
     assert deltas == ["hello ", "world"]
     assert reply["message"]["content"] == "hello world"
     assert reply["actions"] == []
+
+
+def test_respond_streaming_forwards_tool_preparing_callback() -> None:
+    preparing_events = []
+    provider = StreamingProvider(
+        FakeResponse(FakeMessage(content="", tool_calls=[])),
+        deltas=[],
+        tool_preparing_events=[
+            {
+                "tool": "write_file",
+                "tool_call_index": 0,
+                "tool_call_id": "call_1",
+            }
+        ],
+    )
+    adapter = ModelAdapter(provider=provider, model_name="test-model")
+
+    adapter.respond_streaming(
+        messages=[{"role": "user", "content": "hi"}],
+        tool_definitions=[],
+        on_text_delta=lambda _delta: None,
+        on_tool_preparing=preparing_events.append,
+    )
+
+    assert preparing_events == [
+        {
+            "tool": "write_file",
+            "tool_call_index": 0,
+            "tool_call_id": "call_1",
+        }
+    ]

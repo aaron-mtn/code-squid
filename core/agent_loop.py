@@ -102,6 +102,8 @@ class AgentLoop:
         event = {
             "tool": action.get("tool", ""),
         }
+        if "tool_call_id" in action:
+            event["tool_call_id"] = action["tool_call_id"]
         args = action.get("args", {})
         if isinstance(args, dict):
             if "path" in args:
@@ -142,10 +144,22 @@ class AgentLoop:
                 }
             )
 
+        def on_tool_preparing(tool_call: dict[str, Any]) -> None:
+            event = {
+                "type": "tool_preparing",
+                "tool": tool_call.get("tool", ""),
+            }
+            if "tool_call_index" in tool_call:
+                event["tool_call_index"] = tool_call["tool_call_index"]
+            if "tool_call_id" in tool_call:
+                event["tool_call_id"] = tool_call["tool_call_id"]
+            self._emit_event(event)
+
         return self.model_adapter.respond_streaming(
             messages=self.session.messages,
             tool_definitions=tool_definitions,
             on_text_delta=on_text_delta,
+            on_tool_preparing=on_tool_preparing,
         )
 
     # Ensure a brand-new in-memory session has the initial agent messages.
@@ -266,6 +280,18 @@ class AgentLoop:
                         "text": assistant_content,
                     }
                 )
+                # Emit tool_started for each validated action before persistence, so
+                # external UIs can show pending/active tool progress without waiting
+                # for potentially slow _add_message (e.g. large write_file args).
+                # tool_started means "validated tool action pending/active", not
+                # necessarily that execute() has been entered.
+                for action in reply["actions"]:
+                    self._emit_event(
+                        {
+                            "type": "tool_started",
+                            **self._action_event_fields(action),
+                        }
+                    )
             else:
                 self.display.final_message(assistant_content)
                 self._emit_event(
@@ -299,12 +325,6 @@ class AgentLoop:
                         else action
                     )
                     self.display.action_started(approval_action)
-                    self._emit_event(
-                        {
-                            "type": "tool_started",
-                            **self._action_event_fields(action),
-                        }
-                    )
                     result = self.tool_executor.execute(execute_action)
                 else:
                     result = denied_result(action, decision.reason)
