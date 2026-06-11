@@ -490,14 +490,57 @@ def test_loop_emits_basic_run_events(tmp_path) -> None:
     ]
     assert events[0]["repo_root"] == str(tmp_path)
     assert events[0]["task"] == ""
+    assert events[1]["message"] == "Reading file."
     assert events[1]["text"] == "Reading file."
     assert events[2]["tool"] == "read_file"
     assert events[2]["path"] == str(target)
     assert events[3]["ok"] is True
     assert events[3]["path"] == str(target)
+    assert events[4]["message"] == "TASK COMPLETE"
     assert events[4]["text"] == "TASK COMPLETE"
     assert events[5]["status"] == "complete"
     assert all("timestamp" in event for event in events)
+
+
+def test_assistant_message_event_includes_full_message() -> None:
+    events = []
+    assistant_text = f"  {'a' * 2100}  "
+
+    _, _, _, display = run_loop(
+        [
+            reply(
+                assistant_text,
+                actions=[{"tool": "read_file"}],
+            ),
+            reply("TASK COMPLETE"),
+        ],
+        on_event=events.append,
+    )
+
+    assistant_event = next(
+        event for event in events if event["type"] == "assistant_message"
+    )
+    assert assistant_event["message"] == assistant_text
+    assert assistant_event["text"] == assistant_event["message"]
+    assert assistant_event["message"] == display.assistant_messages[0]
+
+
+def test_final_message_event_includes_full_message() -> None:
+    events = []
+    final_text = f"  Long final summary\n{'f' * 4100}  "
+
+    _, _, _, display = run_loop(
+        [
+            reply(final_text),
+            reply("TASK COMPLETE"),
+        ],
+        on_event=events.append,
+    )
+
+    final_event = next(event for event in events if event["type"] == "final_message")
+    assert final_event["message"] == final_text
+    assert final_event["text"] == final_event["message"]
+    assert final_event["message"] == display.final_messages[0]
 
 
 def test_loop_emits_reply_rejected_event() -> None:
@@ -522,6 +565,19 @@ def test_loop_emits_reply_rejected_event() -> None:
             "timestamp": rejected_events[0]["timestamp"],
         }
     ]
+
+
+def test_event_callback_failure_does_not_crash_loop() -> None:
+    def raise_error(event: dict) -> None:
+        raise RuntimeError("boom")
+
+    session, _, _, display = run_loop(
+        [reply("TASK COMPLETE")],
+        on_event=raise_error,
+    )
+
+    assert session.messages[-1] == {"role": "assistant", "content": "TASK COMPLETE"}
+    assert display.final_messages == ["TASK COMPLETE"]
 
 
 def test_invalid_assistant_reply_is_displayed_in_debug_mode() -> None:

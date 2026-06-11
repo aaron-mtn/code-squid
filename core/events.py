@@ -1,3 +1,5 @@
+# core/events.py
+
 """Tiny best-effort event callback helper.
 
 This module only normalizes and delivers in-process event dictionaries. It does

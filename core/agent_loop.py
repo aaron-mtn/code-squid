@@ -10,6 +10,7 @@ from core.workspace_boundary import workspace_boundary_reason
 
 
 MAX_CONSECUTIVE_INVALID_REPLIES = 3
+REJECTION_REASON_EVENT_MAX_CHARS = 500
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,14 @@ class AgentLoop:
                 event["command"] = args["command"]
         return event
 
+    def _compact_event_text(self, text: object, max_chars: int) -> str:
+        value = str(text).strip()
+        if len(value) <= max_chars:
+            return value
+
+        suffix = "... [truncated]"
+        return f"{value[: max_chars - len(suffix)]}{suffix}"
+
     # Ensure a brand-new in-memory session has the initial agent messages.
     #
     # Future resume support can load saved messages before run() is called.
@@ -186,10 +195,14 @@ class AgentLoop:
                 if getattr(self.display, "debug", False):
                     self.display.assistant_message(reply["message"]["content"])
                 self.display.reply_rejected(validation["reason"])
+                rejection_reason = self._compact_event_text(
+                    validation["reason"],
+                    REJECTION_REASON_EVENT_MAX_CHARS,
+                )
                 self._emit_event(
                     {
                         "type": "reply_rejected",
-                        "reason": validation["reason"],
+                        "reason": rejection_reason,
                     }
                 )
 
@@ -214,20 +227,23 @@ class AgentLoop:
 
             # Only valid assistant replies are added to normal transcript history.
             consecutive_invalid_replies = 0
+            assistant_content = reply["message"]["content"]
             if reply["actions"]:
-                self.display.assistant_message(reply["message"]["content"])
+                self.display.assistant_message(assistant_content)
                 self._emit_event(
                     {
                         "type": "assistant_message",
-                        "text": reply["message"]["content"],
+                        "message": assistant_content,
+                        "text": assistant_content,
                     }
                 )
             else:
-                self.display.final_message(reply["message"]["content"])
+                self.display.final_message(assistant_content)
                 self._emit_event(
                     {
                         "type": "final_message",
-                        "text": reply["message"]["content"],
+                        "message": assistant_content,
+                        "text": assistant_content,
                     }
                 )
             self._add_message(reply["message"], usage=reply.get("usage"))
