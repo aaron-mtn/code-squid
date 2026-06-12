@@ -28,11 +28,20 @@ TOOL_USAGE_GUIDANCE = """
 - If the relevant content is already visible in the current context, use it instead of reading the same file again.
 """.strip()
 
+VISIBLE_NARRATION_REQUIREMENTS = """
+Write visible action notes in concise lightweight Markdown.
+Prefer short paragraphs and keep narration to 2-4 sentences unless the situation genuinely needs more.
+Use inline code for file names, paths, commands, functions, selectors, IDs, symbols, and literal values.
+Use bullets only when they make the immediate next step clearer.
+Do not use `#` headings, large section headings, tables, long bullet lists, or code fences unless a code block is absolutely necessary.
+Do not over-format narration.
+""".strip()
+
 FINAL_SUMMARY_REQUIREMENTS = """
 If the task is complete, reply with a short human-readable summary and no tool call.
 
 For coding tasks, write the final summary in simple Markdown.
-Prefer these Markdown headings when they are relevant:
+Prefer short Markdown headings such as these when they are relevant:
 - ## Files changed
 - ## What changed
 - ## Verification
@@ -106,6 +115,8 @@ You have tools for:
 Always use absolute paths with read_file, write_file, and apply_patch.
 
 {TOOL_USAGE_GUIDANCE}
+
+{VISIBLE_NARRATION_REQUIREMENTS}
 
 {REQUIRED_RESPONSE_FORMAT}
 
@@ -188,6 +199,8 @@ Always use absolute paths with read_file, write_file, and apply_patch.
 Use run_command for shell behavior, program execution, and verification.
 
 {TOOL_USAGE_GUIDANCE}
+
+{VISIBLE_NARRATION_REQUIREMENTS}
 
 {REQUIRED_RESPONSE_FORMAT}
 

@@ -255,3 +255,23 @@ def test_follow_up_message_returns_user_message() -> None:
     assert "existing transcript" in message["content"]
     assert "without running extra commands" in message["content"]
     assert "do not use write_file" in message["content"]
+
+
+def test_initial_prompts_encourage_compact_markdown_narration() -> None:
+    messages = CodingAgent(task="Update the UI").initial_messages()
+    combined_prompt = "\n".join(message["content"] for message in messages)
+
+    assert "Write visible action notes in concise lightweight Markdown." in combined_prompt
+    assert "keep narration to 2-4 sentences" in combined_prompt
+    assert "Use inline code for file names, paths, commands" in combined_prompt
+    assert "Do not use `#` headings" in combined_prompt
+
+
+def test_initial_prompts_keep_markdown_final_summary_guidance() -> None:
+    messages = CodingAgent(task="Update the UI").initial_messages()
+    combined_prompt = "\n".join(message["content"] for message in messages)
+
+    assert "write the final summary in simple Markdown" in combined_prompt
+    assert "Prefer short Markdown headings" in combined_prompt
+    assert "Use bullets when they make the summary easier to scan." in combined_prompt
+    assert "Use backticks for paths, commands, code symbols" in combined_prompt
