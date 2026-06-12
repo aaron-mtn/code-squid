@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from agent.coding import CodingAgent
 from config.settings import Settings, load_settings
@@ -49,6 +50,7 @@ def run_coding_task(
     task: str,
     *,
     on_event: EventCallback | None = None,
+    should_cancel: Callable[[], bool] | None = None,
     settings: Settings | None = None,
     display: TerminalDisplay | None = None,
 ) -> RunResult:
@@ -61,6 +63,7 @@ def run_coding_task(
         repo_root=repo_root,
         task=task,
         on_event=on_event,
+        should_cancel=should_cancel,
         settings=settings,
         display=display,
     )
@@ -73,6 +76,7 @@ def build_coding_task_run(
     task: str,
     *,
     on_event: EventCallback | None = None,
+    should_cancel: Callable[[], bool] | None = None,
     settings: Settings | None = None,
     display: TerminalDisplay | None = None,
 ) -> CodingTaskRun:
@@ -99,6 +103,7 @@ def build_coding_task_run(
         settings=settings,
         display=display,
         on_event=on_event,
+        should_cancel=should_cancel,
     )
 
     return CodingTaskRun(
@@ -118,6 +123,7 @@ def build_agent_loop(
     display: TerminalDisplay,
     *,
     on_event: EventCallback | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> AgentLoop:
     """Build the shared provider/model/tool/approval/compaction/loop wiring."""
 
@@ -155,6 +161,7 @@ def build_agent_loop(
         approval_policy=approval_policy,
         stream_assistant_text=settings.runtime.stream_assistant_text,
         on_event=on_event,
+        should_cancel=should_cancel,
     )
 
 

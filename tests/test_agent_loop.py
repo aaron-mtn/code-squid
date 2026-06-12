@@ -324,6 +324,78 @@ def test_normal_completion_returns_complete_run_result() -> None:
     assert result == RunResult(status="complete")
 
 
+def test_cancellation_before_model_call_returns_interrupted() -> None:
+    events = []
+    session_store = FakeSessionStore()
+    model_adapter = FakeModelAdapter([reply("TASK COMPLETE")])
+    loop = AgentLoop(
+        session=Session(repo_root=None),
+        model_adapter=model_adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        session_store=session_store,
+        on_event=events.append,
+        should_cancel=lambda: True,
+    )
+
+    result = loop.run()
+
+    assert result == RunResult(status="interrupted", reason="cancelled")
+    assert model_adapter.index == 0
+    assert session_store.statuses == ["interrupted"]
+    assert [event["type"] for event in events] == ["run_cancelled", "run_finished"]
+    assert events[0]["status"] == "interrupted"
+    assert events[0]["reason"] == "cancelled"
+    assert events[1]["status"] == "interrupted"
+
+
+def test_cancellation_after_validated_model_reply_prevents_tool_turn() -> None:
+    events = []
+    cancelled = False
+
+    class CancellingAgent(FakeAgent):
+        def validate_reply(self, reply: dict) -> dict:
+            nonlocal cancelled
+            validation = super().validate_reply(reply)
+            cancelled = True
+            return validation
+
+    session = Session(repo_root=None)
+    session_store = FakeSessionStore()
+    tool_executor = FakeToolExecutor()
+    display = NullDisplay()
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter(
+            [reply("Using read_file.", actions=[{"tool": "read_file"}])]
+        ),
+        tool_executor=tool_executor,
+        tool_results=FakeToolResults(),
+        agent=CancellingAgent(),
+        display=display,
+        session_store=session_store,
+        on_event=events.append,
+        should_cancel=lambda: cancelled,
+    )
+
+    result = loop.run()
+
+    event_types = [event["type"] for event in events]
+    assert result == RunResult(status="interrupted", reason="cancelled")
+    assert "assistant_message" not in event_types
+    assert "tool_started" not in event_types
+    assert tool_executor.actions == []
+    assert display.assistant_messages == []
+    assert session.messages == [{"role": "system", "content": "system"}]
+    assert [entry["message"] for entry in session_store.messages] == [
+        {"role": "system", "content": "system"}
+    ]
+    assert session_store.statuses == ["interrupted"]
+    assert event_types[-2:] == ["run_cancelled", "run_finished"]
+
+
 def test_repeated_invalid_replies_return_failed_run_result() -> None:
     session = Session(repo_root=None)
     loop = AgentLoop(

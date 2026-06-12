@@ -14,12 +14,18 @@ class FakeDisplay:
         self.run_starts += 1
 
 
-def test_run_coding_task_passes_on_event_to_agent_loop(monkeypatch, tmp_path) -> None:
+def test_run_coding_task_passes_callbacks_to_agent_loop(monkeypatch, tmp_path) -> None:
     callbacks = []
 
     class FakeAgentLoop:
-        def __init__(self, *args, on_event=None, **kwargs) -> None:
-            callbacks.append(on_event)
+        def __init__(
+            self,
+            *args,
+            on_event=None,
+            should_cancel=None,
+            **kwargs,
+        ) -> None:
+            callbacks.append((on_event, should_cancel))
             self.display = kwargs["display"]
 
         def run(self) -> RunResult:
@@ -28,6 +34,9 @@ def test_run_coding_task_passes_on_event_to_agent_loop(monkeypatch, tmp_path) ->
     def on_event(event: dict) -> None:
         pass
 
+    def should_cancel() -> bool:
+        return False
+
     monkeypatch.setattr("core.runner.build_provider", lambda *args, **kwargs: object())
     monkeypatch.setattr("core.runner.AgentLoop", FakeAgentLoop)
 
@@ -35,10 +44,11 @@ def test_run_coding_task_passes_on_event_to_agent_loop(monkeypatch, tmp_path) ->
         repo_root=tmp_path,
         task="Do the thing",
         on_event=on_event,
+        should_cancel=should_cancel,
         display=FakeDisplay(),
     )
 
-    assert callbacks == [on_event]
+    assert callbacks == [(on_event, should_cancel)]
 
 
 def test_run_coding_task_returns_loop_run_result(monkeypatch, tmp_path: Path) -> None:
