@@ -1,8 +1,31 @@
 """Reads Code Squid session folders without owning agent behavior."""
 
 import json
+import os
 from pathlib import Path
 from typing import Any
+
+
+# Return the small global registry that points at workspace-local session indexes.
+def session_indexes_path() -> Path:
+    configured_path = os.environ.get("CODE_SQUID_SESSION_INDEXES", "").strip()
+    if configured_path:
+        return Path(configured_path).expanduser()
+    return Path.home() / ".code-squid" / "session-indexes.jsonl"
+
+
+# Remember a workspace index without moving session data out of the workspace.
+def register_session_index(repo_root: Path) -> None:
+    index_path = session_indexes_path()
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_root = str(repo_root.resolve())
+
+    known_roots = _registered_repo_roots(index_path) if index_path.exists() else []
+    if resolved_root in known_roots:
+        return
+
+    with index_path.open("a", encoding="utf-8") as file:
+        file.write(json.dumps({"repo_root": resolved_root}) + "\n")
 
 
 # Return the folder that contains all saved session directories.
@@ -35,6 +58,30 @@ def list_sessions(repo_root: Path) -> list[dict]:
 
         if isinstance(metadata, dict):
             sessions.append(metadata)
+
+    return sorted(sessions, key=_updated_at, reverse=True)
+
+
+# Load sessions across every workspace index registered by Code Squid.
+#
+# Workspace-local storage remains the source of truth. A missing, moved, or
+# unreadable workspace is skipped so one stale registry entry cannot break the
+# global session viewer.
+def list_all_sessions() -> list[dict]:
+    index_path = session_indexes_path()
+    if not index_path.exists():
+        return []
+
+    sessions = []
+    for repo_root in _registered_repo_roots(index_path):
+        try:
+            for metadata in list_sessions(Path(repo_root)):
+                normalized = dict(metadata)
+                if not normalized.get("repo_root"):
+                    normalized["repo_root"] = repo_root
+                sessions.append(normalized)
+        except OSError:
+            continue
 
     return sorted(sessions, key=_updated_at, reverse=True)
 
@@ -78,3 +125,24 @@ def _updated_at(metadata: dict[str, Any]) -> str:
         return updated_at
 
     return ""
+
+
+def _registered_repo_roots(index_path: Path) -> list[str]:
+    roots = []
+    seen = set()
+
+    with index_path.open(encoding="utf-8") as file:
+        for line in file:
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            repo_root = entry.get("repo_root") if isinstance(entry, dict) else None
+            if not isinstance(repo_root, str) or not repo_root or repo_root in seen:
+                continue
+            seen.add(repo_root)
+            roots.append(repo_root)
+
+    return roots

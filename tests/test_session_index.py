@@ -7,8 +7,10 @@ import pytest
 
 from storage.session_index import (
     latest_session_id,
+    list_all_sessions,
     list_sessions,
     load_session_entries,
+    register_session_index,
     session_dir_for,
     sessions_dir,
 )
@@ -61,6 +63,74 @@ def test_list_sessions_skips_invalid_and_missing_metadata_folders(tmp_path: Path
     (invalid_metadata / "metadata.json").write_text("{broken", encoding="utf-8")
 
     assert list_sessions(tmp_path) == [valid]
+
+
+def test_list_all_sessions_returns_registered_workspaces_newest_first(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    index_path = tmp_path / "global" / "session-indexes.jsonl"
+    monkeypatch.setenv("CODE_SQUID_SESSION_INDEXES", str(index_path))
+    older_workspace = tmp_path / "older-workspace"
+    newer_workspace = tmp_path / "newer-workspace"
+    write_session(
+        older_workspace,
+        "older",
+        {
+            "session_id": "older",
+            "repo_root": str(older_workspace),
+            "updated_at": "2026-05-14T15:00:00+00:00",
+        },
+    )
+    write_session(
+        newer_workspace,
+        "newer",
+        {
+            "session_id": "newer",
+            "repo_root": str(newer_workspace),
+            "updated_at": "2026-05-14T16:00:00+00:00",
+        },
+    )
+    register_session_index(older_workspace)
+    register_session_index(newer_workspace)
+
+    assert [session["session_id"] for session in list_all_sessions()] == [
+        "newer",
+        "older",
+    ]
+
+
+def test_list_all_sessions_skips_bad_registered_workspace(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    index_path = tmp_path / "session-indexes.jsonl"
+    monkeypatch.setenv("CODE_SQUID_SESSION_INDEXES", str(index_path))
+    valid_workspace = tmp_path / "valid"
+    broken_workspace = tmp_path / "broken"
+    write_session(
+        valid_workspace,
+        "valid",
+        {
+            "session_id": "valid",
+            "repo_root": str(valid_workspace),
+            "updated_at": "2026-05-14T16:00:00+00:00",
+        },
+    )
+    register_session_index(valid_workspace)
+    register_session_index(broken_workspace)
+    sessions_dir(broken_workspace).mkdir(parents=True)
+
+    original_iterdir = Path.iterdir
+
+    def fail_for_broken(path):
+        if path == sessions_dir(broken_workspace):
+            raise OSError("unreadable workspace")
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", fail_for_broken)
+
+    assert [session["session_id"] for session in list_all_sessions()] == ["valid"]
 
 
 def test_latest_session_id_returns_newest_session_id(tmp_path: Path) -> None:

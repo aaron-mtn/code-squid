@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from storage.session_index import register_session_index
+
 
 # Status values allowed in metadata.json.
 # Keep this list small until the app has real UX that needs more states.
@@ -66,6 +68,12 @@ class SessionStore:
         store = cls(session_dir)
         store._write_metadata(metadata)
         store.jsonl_path.write_text("", encoding="utf-8")
+        try:
+            register_session_index(repo_root)
+        except Exception:
+            # Global discovery is supplementary. A local session must still be
+            # usable when the home-level registry cannot be written.
+            pass
         return store
 
     # Open an existing session folder without creating or modifying files.
