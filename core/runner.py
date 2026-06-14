@@ -88,7 +88,7 @@ def build_coding_task_run(
 
     repo_root = Path(repo_root).resolve()
     settings = load_settings(repo_root) if settings is None else settings
-    display = _run_display(repo_root, settings) if display is None else display
+    display = build_run_display(repo_root, settings) if display is None else display
 
     session = Session(repo_root=repo_root)
     session_store = SessionStore.create(repo_root=repo_root, task=task)
@@ -174,7 +174,7 @@ def startup_info(repo_root: Path, settings: Settings) -> StartupInfo:
     )
 
 
-def _run_display(repo_root: Path, settings: Settings) -> TerminalDisplay:
+def build_run_display(repo_root: Path, settings: Settings) -> TerminalDisplay:
     trace = os.getenv("CODE_SQUID_TRACE") == "1"
     debug = settings.display.debug or trace
     return TerminalDisplay(

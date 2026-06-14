@@ -8,15 +8,6 @@ import pytest
 from storage.session_store import SessionStore
 
 
-@pytest.fixture(autouse=True)
-def isolated_session_indexes(monkeypatch, tmp_path: Path) -> None:
-    """Keep SessionStore.create tests out of the user's real global registry."""
-    monkeypatch.setenv(
-        "CODE_SQUID_SESSION_INDEXES",
-        str(tmp_path / "global-session-indexes.jsonl"),
-    )
-
-
 def read_metadata(store: SessionStore) -> dict:
     return json.loads(store.metadata_path.read_text(encoding="utf-8"))
 

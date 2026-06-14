@@ -12,6 +12,7 @@ from storage.session_index import (
     load_session_entries,
     register_session_index,
     session_dir_for,
+    session_indexes_path,
     sessions_dir,
 )
 
@@ -25,6 +26,28 @@ def write_session(repo_root: Path, session_id: str, metadata: dict) -> Path:
     )
     (session_dir / "session.jsonl").write_text("", encoding="utf-8")
     return session_dir
+
+
+def test_session_registry_uses_configured_override(
+    isolated_session_indexes: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    fake_home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+    register_session_index(tmp_path)
+
+    assert session_indexes_path() == isolated_session_indexes
+    registered = [
+        json.loads(line)
+        for line in isolated_session_indexes.read_text(
+            encoding="utf-8",
+        ).splitlines()
+        if line.strip()
+    ]
+    assert {"repo_root": str(tmp_path.resolve())} in registered
+    assert not (fake_home / ".code-squid" / "session-indexes.jsonl").exists()
 
 
 def test_list_sessions_returns_metadata_sorted_by_updated_at_descending(tmp_path: Path) -> None:

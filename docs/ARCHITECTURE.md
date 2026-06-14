@@ -168,6 +168,11 @@ Callback delivery is best-effort. Observer failures must not crash the run.
 
 ## Runner / Python Wrapping
 
+`core/runner.py` is the public Python wiring layer for apps and wrappers that
+embed Code Squid. Wrappers should use public helpers such as
+`build_coding_task_run(...)`, `build_agent_loop(...)`, and
+`build_run_display(...)` instead of underscore-prefixed internals.
+
 `core.runner.run_coding_task(...)` is the reusable Python entry point for
 starting a new coding task. It accepts `repo_root`, `task`, optional `settings`,
 optional `display`, and optional `on_event`, and returns the existing
@@ -182,6 +187,12 @@ follow-ups.
 model adapter, tool executor, tool-result formatter, approval, compaction, and
 `AgentLoop`. Provider-specific construction and replay-mode decisions are
 delegated to `providers.factory`.
+
+`storage/session_index.py` owns read-only session discovery across registered
+workspaces. `SessionStore` owns persistence for one session. App-specific UIs
+own their presentation projection, such as turning persisted messages into
+feeds, cards, or views, while core owns reusable run, session, model, and tool
+wiring.
 
 This runner layer is not a plugin system, orchestration layer, daemon, or
 server mode. It gives external Python code a clean way to call Code Squid
