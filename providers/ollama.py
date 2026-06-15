@@ -26,6 +26,9 @@ class OllamaProvider(BaseProvider):
         self.base_url = _native_base_url(base_url)
         self.temperature = temperature
 
+    def supports_streaming(self) -> bool:
+        return True
+
     def create_response(
         self,
         model: str,
@@ -48,6 +51,43 @@ class OllamaProvider(BaseProvider):
         raw_response = self._post_chat(payload)
         return adapt_response(raw_response)
 
+    def stream_chat(
+        self,
+        model: str,
+        messages: list[dict],
+        tools: list[dict],
+        on_text_delta,
+        on_tool_preparing=None,
+        tool_choice=None,
+    ) -> object:
+        payload = {
+            "model": model,
+            "messages": convert_messages(messages),
+            "tools": tools,
+            "stream": True,
+            "think": False,
+        }
+        if self.temperature is not None:
+            payload["options"] = {"temperature": self.temperature}
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
+
+        assembled = _empty_stream_response()
+        prepared_tool_call_indexes = set()
+
+        for chunk in self._post_chat_stream(payload):
+            _accumulate_stream_chunk(
+                assembled,
+                chunk,
+                on_text_delta=on_text_delta,
+                on_tool_preparing=on_tool_preparing,
+                prepared_tool_call_indexes=prepared_tool_call_indexes,
+            )
+            if chunk.get("done") is True:
+                break
+
+        return adapt_response(assembled)
+
     def _post_chat(self, payload: dict) -> dict:
         body = json.dumps(payload).encode("utf-8")
         http_request = request.Request(
@@ -60,6 +100,28 @@ class OllamaProvider(BaseProvider):
         try:
             with request.urlopen(http_request) as response:
                 return json.loads(response.read().decode("utf-8"))
+        except HTTPError as error:
+            details = error.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Ollama request failed with HTTP {error.code}: {details}") from error
+        except URLError as error:
+            raise RuntimeError(f"Ollama request failed: {error.reason}") from error
+
+    def _post_chat_stream(self, payload: dict):
+        body = json.dumps(payload).encode("utf-8")
+        http_request = request.Request(
+            f"{self.base_url}/api/chat",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with request.urlopen(http_request) as response:
+                for line in response:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    yield json.loads(line.decode("utf-8"))
         except HTTPError as error:
             details = error.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"Ollama request failed with HTTP {error.code}: {details}") from error
@@ -155,7 +217,10 @@ def adapt_response(raw_response: dict) -> object:
         content=message.get("content") or "",
         tool_calls=tool_calls,
     )
-    return SimpleNamespace(choices=[SimpleNamespace(message=adapted_message)])
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=adapted_message)],
+        usage=_adapt_usage(raw_response),
+    )
 
 
 def _adapt_tool_call(index: int, tool_call: dict) -> object:
@@ -170,4 +235,133 @@ def _adapt_tool_call(index: int, tool_call: dict) -> object:
             name=function.get("name"),
             arguments=arguments,
         ),
+    )
+
+
+def _empty_stream_response() -> dict:
+    return {
+        "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [],
+        },
+    }
+
+
+def _accumulate_stream_chunk(
+    assembled: dict,
+    chunk: dict,
+    on_text_delta,
+    on_tool_preparing,
+    prepared_tool_call_indexes: set,
+) -> None:
+    message = chunk.get("message") or {}
+    assembled_message = assembled["message"]
+
+    content_delta = message.get("content")
+    if content_delta:
+        assembled_message["content"] += content_delta
+        on_text_delta(content_delta)
+
+    for index, tool_call in enumerate(message.get("tool_calls") or []):
+        _accumulate_tool_call(assembled_message["tool_calls"], index, tool_call)
+        _notify_tool_preparing(
+            assembled_message["tool_calls"],
+            index,
+            prepared_tool_call_indexes,
+            on_tool_preparing,
+        )
+
+    for name in (
+        "done",
+        "done_reason",
+        "total_duration",
+        "load_duration",
+        "prompt_eval_count",
+        "prompt_eval_duration",
+        "eval_count",
+        "eval_duration",
+    ):
+        if name in chunk:
+            assembled[name] = chunk[name]
+
+
+def _accumulate_tool_call(tool_calls: list[dict], index: int, tool_call: dict) -> None:
+    while len(tool_calls) <= index:
+        tool_calls.append({"type": "function", "function": {"name": "", "arguments": {}}})
+
+    existing = tool_calls[index]
+    if tool_call.get("id"):
+        existing["id"] = tool_call["id"]
+    if tool_call.get("type"):
+        existing["type"] = tool_call["type"]
+
+    function = tool_call.get("function") or {}
+    existing_function = existing.setdefault("function", {})
+    if function.get("name"):
+        existing_function["name"] = _append_or_set(existing_function.get("name"), function["name"])
+    if "arguments" in function:
+        existing_function["arguments"] = _merge_arguments(
+            existing_function.get("arguments"),
+            function["arguments"],
+        )
+
+
+def _append_or_set(existing, value):
+    if not existing:
+        return value
+    if isinstance(existing, str) and isinstance(value, str) and value not in existing:
+        return f"{existing}{value}"
+    return existing
+
+
+def _merge_arguments(existing, value):
+    if existing in (None, {}, ""):
+        return value
+    if isinstance(existing, dict) and isinstance(value, dict):
+        return {**existing, **value}
+    if isinstance(existing, str) and isinstance(value, str):
+        return f"{existing}{value}"
+    return value
+
+
+def _notify_tool_preparing(
+    tool_calls: list[dict],
+    index: int,
+    prepared_tool_call_indexes: set,
+    on_tool_preparing,
+) -> None:
+    if on_tool_preparing is None or index in prepared_tool_call_indexes:
+        return
+
+    function = tool_calls[index].get("function") or {}
+    tool_name = function.get("name")
+    if not tool_name:
+        return
+
+    prepared_tool_call_indexes.add(index)
+    event = {
+        "tool": tool_name,
+        "tool_call_index": index,
+    }
+    call_id = tool_calls[index].get("id")
+    if call_id:
+        event["tool_call_id"] = call_id
+    on_tool_preparing(event)
+
+
+def _adapt_usage(raw_response: dict) -> object | None:
+    prompt_tokens = raw_response.get("prompt_eval_count")
+    completion_tokens = raw_response.get("eval_count")
+    if prompt_tokens is None and completion_tokens is None:
+        return None
+
+    total_tokens = None
+    if prompt_tokens is not None and completion_tokens is not None:
+        total_tokens = prompt_tokens + completion_tokens
+
+    return SimpleNamespace(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
     )

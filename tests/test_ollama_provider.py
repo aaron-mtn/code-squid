@@ -3,6 +3,7 @@ import json
 import pytest
 
 from config.settings import ModelSettings, RuntimeSettings, Settings, DisplaySettings
+from core.model_adapter import ModelAdapter
 from providers.factory import build_provider, tool_call_content_mode
 from providers.ollama import OllamaProvider, adapt_response, convert_messages
 from providers.openai_compatible import OpenAICompatibleProvider
@@ -16,6 +17,17 @@ class CapturingOllamaProvider(OllamaProvider):
     def _post_chat(self, payload: dict) -> dict:
         self.payloads.append(payload)
         return {"message": {"role": "assistant", "content": "Done."}}
+
+
+class StreamingOllamaProvider(OllamaProvider):
+    def __init__(self, chunks: list[dict]) -> None:
+        super().__init__()
+        self.chunks = chunks
+        self.payloads = []
+
+    def _post_chat_stream(self, payload: dict):
+        self.payloads.append(payload)
+        yield from self.chunks
 
 
 def test_assistant_tool_call_arguments_are_converted_to_dict() -> None:
@@ -159,6 +171,76 @@ def test_native_ollama_payload_does_not_include_parallel_tool_calls() -> None:
     )
 
     assert "parallel_tool_calls" not in provider.payloads[0]
+
+
+def test_native_ollama_streaming_accumulates_text_and_tool_calls_once() -> None:
+    provider = StreamingOllamaProvider(
+        [
+            {"message": {"role": "assistant", "content": "I will "}, "done": False},
+            {"message": {"role": "assistant", "content": "read the file."}, "done": False},
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "function": {
+                                "name": "read_file",
+                                "arguments": {"path": "/tmp/example.py"},
+                            }
+                        }
+                    ],
+                },
+                "done": False,
+            },
+            {"done": True, "done_reason": "stop"},
+        ]
+    )
+    adapter = ModelAdapter(provider, model_name="test-model")
+    deltas = []
+    preparing_events = []
+
+    reply = adapter.respond_streaming(
+        messages=[],
+        tool_definitions=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "parameters": {
+                        "type": "object",
+                        "required": ["path"],
+                        "properties": {"path": {"type": "string"}},
+                    },
+                },
+            }
+        ],
+        on_text_delta=deltas.append,
+        on_tool_preparing=preparing_events.append,
+    )
+
+    assert provider.payloads[0]["stream"] is True
+    assert deltas == ["I will ", "read the file."]
+    assert reply["message"]["content"] == "I will read the file."
+    assert reply["actions"] == [
+        {
+            "tool": "read_file",
+            "args": {"path": "/tmp/example.py"},
+            "tool_call_id": "ollama_call_0",
+            "raw_arguments": '{"path": "/tmp/example.py"}',
+        }
+    ]
+    assert reply["message"]["tool_calls"] == [
+        {
+            "id": "ollama_call_0",
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "arguments": '{"path": "/tmp/example.py"}',
+            },
+        }
+    ]
+    assert preparing_events == [{"tool": "read_file", "tool_call_index": 0}]
 
 
 def test_provider_selection_defaults_to_openai_compatible() -> None:
