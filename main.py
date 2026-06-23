@@ -16,9 +16,11 @@ from core.runner import (
     FRIENDLY_MODES,
     build_agent_loop,
     build_coding_task_run,
+    resolve_skill_tools,
     startup_info,
 )
 from core.session import Session
+from core.skills import discover_builtin_skills
 from storage.error_log import write_error_log
 from storage.session_index import latest_session_id, session_dir_for
 from storage.session_store import SessionStore
@@ -55,6 +57,8 @@ Shell commands:
   python main.py mode strict
   python main.py mode balanced
   python main.py mode yolo
+  python main.py skills
+  python main.py --skill bug-fix
   python main.py sessions
   python main.py show latest
   python main.py resume latest
@@ -94,6 +98,19 @@ def _extract_cwd_arg(args: list[str]) -> tuple[str | None, list[str]]:
     cwd_arg = args[cwd_index + 1]
     remaining_args = args[:cwd_index] + args[cwd_index + 2 :]
     return cwd_arg, remaining_args
+
+
+def _extract_skill_arg(args: list[str]) -> tuple[str | None, list[str]]:
+    if "--skill" not in args:
+        return None, args
+
+    skill_index = args.index("--skill")
+    if skill_index + 1 >= len(args):
+        raise ValueError("--skill requires a skill name")
+
+    skill_name = args[skill_index + 1]
+    remaining_args = args[:skill_index] + args[skill_index + 2 :]
+    return skill_name, remaining_args
 
 
 def _resolve_workspace_root(cwd_arg: str | None) -> Path:
@@ -179,6 +196,7 @@ def _run_new_session_task(
     task: str,
     settings: Settings,
     display: TerminalDisplay,
+    skill_name: str | None = None,
 ) -> tuple[int, str | None]:
     display.run_started()
 
@@ -187,6 +205,7 @@ def _run_new_session_task(
         task=task,
         settings=settings,
         display=display,
+        skill_name=skill_name,
     )
 
     status = _run_loop(repo_root, run.loop, display, run.session, run.session_store)
@@ -199,6 +218,7 @@ def _run_follow_up_task(
     follow_up_task: str,
     settings: Settings,
     display: TerminalDisplay,
+    skill_name: str | None = None,
 ) -> tuple[int, str | None]:
     session_dir = _session_dir_for_resume(repo_root, session_id)
     if session_dir is None:
@@ -209,7 +229,8 @@ def _run_follow_up_task(
     session.add_messages(*session_store.load_messages())
 
     display.run_started()
-    agent = CodingAgent(task=follow_up_task)
+    skill, active_tools = resolve_skill_tools(skill_name)
+    agent = CodingAgent(task=follow_up_task, skill=skill, tools=active_tools)
     follow_up_message = agent.follow_up_message(follow_up_task)
     session.add_message(follow_up_message)
     session_store.append_message(follow_up_message)
@@ -224,12 +245,13 @@ def _run_follow_up_task(
         undo_store=undo_store,
         settings=settings,
         display=display,
+        tools=active_tools,
     )
     status = _run_loop(repo_root, loop, display, session, session_store)
     return status, session_store.session_id
 
 
-def _run_new_session(repo_root: Path) -> int:
+def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
     settings = load_settings(repo_root)
     display = _run_display(repo_root, settings)
     display.start()
@@ -243,11 +265,11 @@ def _run_new_session(repo_root: Path) -> int:
         print("No task entered; nothing to run.")
         return 0
 
-    status, _ = _run_new_session_task(repo_root, task, settings, display)
+    status, _ = _run_new_session_task(repo_root, task, settings, display, skill_name)
     return status
 
 
-def _resume_session(repo_root: Path, session_id: str) -> int:
+def _resume_session(repo_root: Path, session_id: str, skill_name: str | None = None) -> int:
     settings = load_settings(repo_root)
     display = _run_display(repo_root, settings)
     display.start()
@@ -267,11 +289,12 @@ def _resume_session(repo_root: Path, session_id: str) -> int:
         follow_up_task,
         settings,
         display,
+        skill_name,
     )
     return status
 
 
-def _run_interactive(repo_root: Path) -> int:
+def _run_interactive(repo_root: Path, skill_name: str | None = None) -> int:
     settings = load_settings(repo_root)
     display = _run_display(repo_root, settings)
     display.start()
@@ -293,15 +316,34 @@ def _run_interactive(repo_root: Path) -> int:
             continue
 
         if active_session_id is None:
-            status, session_id = _run_new_session_task(repo_root, task, settings, display)
+            if skill_name is None:
+                status, session_id = _run_new_session_task(repo_root, task, settings, display)
+            else:
+                status, session_id = _run_new_session_task(
+                    repo_root,
+                    task,
+                    settings,
+                    display,
+                    skill_name,
+                )
         else:
-            status, session_id = _run_follow_up_task(
-                repo_root,
-                active_session_id,
-                task,
-                settings,
-                display,
-            )
+            if skill_name is None:
+                status, session_id = _run_follow_up_task(
+                    repo_root,
+                    active_session_id,
+                    task,
+                    settings,
+                    display,
+                )
+            else:
+                status, session_id = _run_follow_up_task(
+                    repo_root,
+                    active_session_id,
+                    task,
+                    settings,
+                    display,
+                    skill_name,
+                )
 
         if session_id is not None:
             active_session_id = session_id
@@ -356,15 +398,30 @@ def _mode(repo_root: Path, args: list[str]) -> int:
     return 0
 
 
+def _skills() -> int:
+    skills = discover_builtin_skills()
+    if not skills:
+        print("No built-in skills found.")
+        return 0
+
+    for skill in skills.values():
+        print(f"{skill.name}: {skill.description}")
+    return 0
+
+
 # Parse CLI commands and run the selected standalone Code Squid flow.
 def main() -> int:
     args = sys.argv[1:]
     try:
         cwd_arg, args = _extract_cwd_arg(args)
+        skill_name, args = _extract_skill_arg(args)
         repo_root = _resolve_workspace_root(cwd_arg)
     except ValueError as error:
         print(error)
         return 1
+
+    if args == ["skills"]:
+        return _skills()
 
     if args == ["undo"]:
         _undo(repo_root)
@@ -378,7 +435,10 @@ def main() -> int:
 
     if len(args) == 2 and args[0] == "resume":
         try:
-            return _resume_session(repo_root, args[1])
+            return _resume_session(repo_root, args[1], skill_name)
+        except ValueError as error:
+            print(error)
+            return 1
         except FileNotFoundError as error:
             print(error)
         return 0
@@ -387,7 +447,11 @@ def main() -> int:
         print(USAGE)
         return 0
 
-    return _run_interactive(repo_root)
+    try:
+        return _run_interactive(repo_root, skill_name)
+    except ValueError as error:
+        print(error)
+        return 1
 
 
 # Run the app when this file is executed directly.

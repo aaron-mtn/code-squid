@@ -18,11 +18,13 @@ class ToolExecutor:
         session,
         undo_store=None,
         allow_outside_workspace: bool = False,
+        tools: dict | None = None,
     ) -> None:
         self.repo_root = repo_root
         self.session = session
         self.undo_store = undo_store
         self.allow_outside_workspace = allow_outside_workspace
+        self.tools = TOOLS if tools is None else tools
 
     # Execute one tool action by looking up the tool and calling its execute function.
     # If the tool runs successfully, record any simple side effects in the session.
@@ -30,7 +32,7 @@ class ToolExecutor:
         tool_name = action["tool"]
         args = action.get("args", {})
 
-        tool = TOOLS.get(tool_name)
+        tool = self.tools.get(tool_name)
         if tool is None:
             return {
                 "ok": False,

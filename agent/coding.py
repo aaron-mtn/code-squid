@@ -1,6 +1,7 @@
 # agent/coding.py
 
-from agent.prompts import SYSTEM_PROMPT, correction_message, follow_up_prompt, task_prompt
+from agent.prompts import correction_message, follow_up_prompt, system_prompt, task_prompt
+from core.skills import Skill
 from tools import TOOLS
 
 INVALID_REPLY_EXPLANATIONS = {
@@ -14,23 +15,25 @@ class CodingAgent:
     """Owns coding-agent behavior, allowed tools, and completion rules; must not own low-level loop machinery, provider transport, or tool implementation."""
 
     # Store the task this coding agent is trying to solve.
-    def __init__(self, task: str) -> None:
+    def __init__(self, task: str, skill: Skill | None = None, tools: dict | None = None) -> None:
         self.task = task
+        self.skill = skill
+        self.tools = TOOLS if tools is None else tools
 
     # Return the initial system and user messages for a new session.
     def initial_messages(self) -> list[dict]:
         return [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": task_prompt(self.task)},
+            {"role": "system", "content": system_prompt(self.skill)},
+            {"role": "user", "content": task_prompt(self.task, self.skill)},
         ]
 
     # Return the user message that continues an existing saved session.
     def follow_up_message(self, task: str) -> dict:
-        return {"role": "user", "content": follow_up_prompt(task)}
+        return {"role": "user", "content": follow_up_prompt(task, self.skill)}
 
     # Return the tool definitions available to this agent.
     def tool_definitions(self) -> list[dict]:
-        return [tool["definition"]() for tool in TOOLS.values()]
+        return [tool["definition"]() for tool in self.tools.values()]
 
     # Decide whether the loop should stop.
     # Look backward through the transcript for the most recent assistant message.

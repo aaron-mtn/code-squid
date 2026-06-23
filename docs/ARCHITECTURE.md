@@ -198,6 +198,92 @@ This runner layer is not a plugin system, orchestration layer, daemon, or
 server mode. It gives external Python code a clean way to call Code Squid
 without copying `main.py` wiring. `main.py` remains the standalone CLI.
 
+## Skill System
+
+Skills are currently built-in, file-backed prompt/tool profiles. Built-in
+skills live under:
+
+```text
+skills/builtin/<skill-name>/SKILL.md
+```
+
+Each skill is a `SKILL.md` file with simple frontmatter followed by Markdown
+instructions. The supported frontmatter fields are:
+
+- `name`
+- `description`
+- `allowed-tools`
+
+The Markdown body before any recognized prompt-section override heading becomes
+`skill.instructions`. When a skill is active, those instructions are inserted
+into the system prompt under `## Active Skill` along with the skill name and
+description.
+
+`allowed-tools` limits both sides of the tool boundary: which tools are exposed
+to the model and which tool names `ToolExecutor` may execute for that run. For
+example:
+
+```yaml
+allowed-tools: read_file run_command
+```
+
+If `allowed-tools` is missing or empty, the skill uses the default full tool
+set. Unknown tool names should fail clearly during run construction before any
+tool action is executed.
+
+Code Squid supports normal Agent Skills-style Markdown instructions plus
+Code Squid-native prompt-section overrides. Overrides are written as Markdown
+headings:
+
+```md
+## TASK_PROMPT replace
+
+...
+
+## TOOL_USAGE_GUIDANCE append
+
+...
+```
+
+Supported override modes are:
+
+- `replace`
+- `append`
+
+Supported override sections are:
+
+- `SYSTEM_PROMPT_INTRO`
+- `TASK_PROMPT`
+- `FOLLOW_UP_PROMPT`
+- `TOOL_USAGE_GUIDANCE`
+- `FINAL_SUMMARY_REQUIREMENTS`
+
+Some prompt sections are intentionally not overrideable because they define the
+runtime contract:
+
+- `VISIBLE_NARRATION_REQUIREMENTS`
+- `REQUIRED_RESPONSE_FORMAT`
+- `CORRECTION_MESSAGES`
+- `COMPACTION_PROMPT`
+
+Skills can change the task mode, inspection style, tool guidance, and final
+summary shape, but they cannot override the core one-tool-call contract,
+correction mechanics, compaction prompt, or final-response/no-tool mechanics.
+
+`TASK_PROMPT` and `FOLLOW_UP_PROMPT` may use `{task}`. The default
+`TASK_PROMPT` also renders section placeholders such as
+`{TOOL_USAGE_GUIDANCE}` and `{FINAL_SUMMARY_REQUIREMENTS}`. Prompt rendering
+uses explicit `.replace()` calls rather than `.format()` so user tasks
+containing braces do not break prompt rendering.
+
+The current built-in example is `architecture-review`, an inspection-only review
+skill. It allows only `read_file` and `run_command`, replaces `TASK_PROMPT`,
+replaces `FINAL_SUMMARY_REQUIREMENTS`, and appends `TOOL_USAGE_GUIDANCE`.
+
+User/custom skills are not implemented yet. Interactive `/skill` switching is
+planned next. New tools such as repo tree/search helpers are out of scope for
+this documentation pass.
+
 ## Settings
 
 Code Squid reads settings from:

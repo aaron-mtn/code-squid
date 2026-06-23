@@ -1,0 +1,87 @@
+from pathlib import Path
+
+from agent.coding import CodingAgent
+from core.runner import build_coding_task_run, resolve_skill_tools
+from core.skills import Skill
+
+
+def test_selecting_skill_filters_tool_definitions(monkeypatch, tmp_path: Path) -> None:
+    skill = Skill(
+        name="read-only",
+        description="Read only.",
+        instructions="Do not write.",
+        allowed_tools=("read_file", "run_command"),
+        path=tmp_path / "SKILL.md",
+    )
+
+    monkeypatch.setattr("core.runner.discover_builtin_skills", lambda: {"read-only": skill})
+
+    selected_skill, tools = resolve_skill_tools("read-only")
+    agent = CodingAgent("review this", skill=selected_skill, tools=tools)
+    names = [definition["function"]["name"] for definition in agent.tool_definitions()]
+
+    assert selected_skill is skill
+    assert names == ["read_file", "run_command"]
+
+
+def test_no_selected_skill_preserves_full_tool_behavior() -> None:
+    skill, tools = resolve_skill_tools(None)
+    agent = CodingAgent("do this", skill=skill, tools=tools)
+    names = [definition["function"]["name"] for definition in agent.tool_definitions()]
+
+    assert skill is None
+    assert names == ["read_file", "write_file", "apply_patch", "run_command"]
+
+
+def test_unknown_tool_in_allowed_tools_fails_clearly(monkeypatch, tmp_path: Path) -> None:
+    skill = Skill(
+        name="bad",
+        description="Bad tool list.",
+        instructions="Use a missing tool.",
+        allowed_tools=("read_file", "missing_tool"),
+        path=tmp_path / "SKILL.md",
+    )
+
+    monkeypatch.setattr("core.runner.discover_builtin_skills", lambda: {"bad": skill})
+
+    try:
+        resolve_skill_tools("bad")
+    except ValueError as error:
+        assert str(error) == "Skill bad lists unknown tool(s): missing_tool"
+    else:
+        raise AssertionError("Expected unknown skill tool to fail")
+
+
+def test_build_coding_task_run_passes_filtered_tools_to_executor(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    skill = Skill(
+        name="review",
+        description="Review only.",
+        instructions="Only inspect.",
+        allowed_tools=("read_file",),
+        path=tmp_path / "SKILL.md",
+    )
+    captured = {}
+
+    class FakeAgentLoop:
+        def __init__(self, **kwargs) -> None:
+            captured["agent"] = kwargs["agent"]
+            captured["tool_executor"] = kwargs["tool_executor"]
+            self.display = kwargs["display"]
+
+    monkeypatch.setattr("core.runner.discover_builtin_skills", lambda: {"review": skill})
+    monkeypatch.setattr("core.runner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("core.runner.AgentLoop", FakeAgentLoop)
+
+    build_coding_task_run(
+        repo_root=tmp_path,
+        task="review this",
+        display=type("FakeDisplay", (), {"debug": False})(),
+        skill_name="review",
+    )
+
+    assert captured["agent"].skill is skill
+    assert list(captured["agent"].tools) == ["read_file"]
+    assert list(captured["tool_executor"].tools) == ["read_file"]

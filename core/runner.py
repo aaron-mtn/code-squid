@@ -23,11 +23,13 @@ from core.compaction import Compactor
 from core.events import EventCallback
 from core.model_adapter import ModelAdapter
 from core.session import Session
+from core.skills import Skill, discover_builtin_skills
 from core.tool_executor import ToolExecutor
 from core.tool_results import ToolResults
 from providers.factory import build_provider, tool_call_content_mode
 from storage.session_store import SessionStore
 from storage.undo_store import UndoStore
+from tools import TOOLS
 from ui.terminal import StartupInfo, TerminalDisplay
 
 
@@ -53,6 +55,7 @@ def run_coding_task(
     should_cancel: Callable[[], bool] | None = None,
     settings: Settings | None = None,
     display: TerminalDisplay | None = None,
+    skill_name: str | None = None,
 ) -> RunResult:
     """Simple call-and-run entry point for a new coding task.
 
@@ -66,6 +69,7 @@ def run_coding_task(
         should_cancel=should_cancel,
         settings=settings,
         display=display,
+        skill_name=skill_name,
     )
     run.loop.display.run_started()
     return run.loop.run()
@@ -79,6 +83,7 @@ def build_coding_task_run(
     should_cancel: Callable[[], bool] | None = None,
     settings: Settings | None = None,
     display: TerminalDisplay | None = None,
+    skill_name: str | None = None,
 ) -> CodingTaskRun:
     """Construct a new coding-task run without starting it.
 
@@ -93,7 +98,8 @@ def build_coding_task_run(
     session = Session(repo_root=repo_root)
     session_store = SessionStore.create(repo_root=repo_root, task=task)
     undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
-    agent = CodingAgent(task=task)
+    skill, active_tools = resolve_skill_tools(skill_name)
+    agent = CodingAgent(task=task, skill=skill, tools=active_tools)
     loop = build_agent_loop(
         repo_root=repo_root,
         session=session,
@@ -102,6 +108,7 @@ def build_coding_task_run(
         undo_store=undo_store,
         settings=settings,
         display=display,
+        tools=active_tools,
         on_event=on_event,
         should_cancel=should_cancel,
     )
@@ -122,6 +129,7 @@ def build_agent_loop(
     settings: Settings,
     display: TerminalDisplay,
     *,
+    tools: dict | None = None,
     on_event: EventCallback | None = None,
     should_cancel: Callable[[], bool] | None = None,
 ) -> AgentLoop:
@@ -141,6 +149,7 @@ def build_agent_loop(
         session=session,
         undo_store=undo_store,
         allow_outside_workspace=settings.runtime.approval_mode == "never",
+        tools=tools,
     )
     tool_results = ToolResults()
     approval_policy = ApprovalPolicy(
@@ -163,6 +172,27 @@ def build_agent_loop(
         on_event=on_event,
         should_cancel=should_cancel,
     )
+
+
+def resolve_skill_tools(skill_name: str | None) -> tuple[Skill | None, dict]:
+    if skill_name is None:
+        return None, TOOLS
+
+    skills = discover_builtin_skills()
+    skill = skills.get(skill_name)
+    if skill is None:
+        available = ", ".join(sorted(skills)) or "none"
+        raise ValueError(f"Unknown skill: {skill_name}. Available skills: {available}")
+
+    if not skill.allowed_tools:
+        return skill, TOOLS
+
+    unknown_tools = [tool_name for tool_name in skill.allowed_tools if tool_name not in TOOLS]
+    if unknown_tools:
+        unknown = ", ".join(unknown_tools)
+        raise ValueError(f"Skill {skill.name} lists unknown tool(s): {unknown}")
+
+    return skill, {tool_name: TOOLS[tool_name] for tool_name in skill.allowed_tools}
 
 
 def startup_info(repo_root: Path, settings: Settings) -> StartupInfo:

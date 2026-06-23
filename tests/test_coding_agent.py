@@ -1,5 +1,9 @@
+from pathlib import Path
+
 from agent.coding import CodingAgent
+from agent.prompts import follow_up_prompt, task_prompt
 from core.session import Session
+from core.skills import PromptSectionOverride, Skill, parse_skill_file
 
 
 def test_validate_reply_accepts_no_tool_normal_answer_as_final() -> None:
@@ -253,8 +257,8 @@ def test_follow_up_message_returns_user_message() -> None:
     assert message["role"] == "user"
     assert "show me what changed" in message["content"]
     assert "existing transcript" in message["content"]
-    assert "without running extra commands" in message["content"]
-    assert "do not use write_file" in message["content"]
+    assert "without using another tool" in message["content"]
+    assert "If fresh repo state is needed, use exactly one available tool" in message["content"]
 
 
 def test_initial_prompts_encourage_compact_markdown_narration() -> None:
@@ -275,3 +279,177 @@ def test_initial_prompts_keep_markdown_final_summary_guidance() -> None:
     assert "Prefer short Markdown headings" in combined_prompt
     assert "Use bullets when they make the summary easier to scan." in combined_prompt
     assert "Use backticks for paths, commands, code symbols" in combined_prompt
+
+
+def test_default_task_prompt_renders_section_placeholders() -> None:
+    prompt = task_prompt("fix bug")
+
+    assert "{TOOL_USAGE_GUIDANCE}" not in prompt
+    assert "{VISIBLE_NARRATION_REQUIREMENTS}" not in prompt
+    assert "{REQUIRED_RESPONSE_FORMAT}" not in prompt
+    assert "{FINAL_SUMMARY_REQUIREMENTS}" not in prompt
+    assert "## Tool usage guidance" in prompt
+    assert "Write visible action notes in concise lightweight Markdown." in prompt
+    assert "## Required response format" in prompt
+    assert "write the final summary in simple Markdown" in prompt
+
+
+def test_initial_prompt_includes_selected_skill_instructions() -> None:
+    skill = Skill(
+        name="bug-fix",
+        description="Fix bugs with small targeted edits.",
+        instructions="Prefer small patches.",
+        allowed_tools=("read_file", "apply_patch", "run_command"),
+        path=Path("SKILL.md"),
+    )
+
+    messages = CodingAgent(task="Fix it", skill=skill).initial_messages()
+
+    assert "## Active Skill: bug-fix" in messages[0]["content"]
+    assert "Fix bugs with small targeted edits." in messages[0]["content"]
+    assert "Prefer small patches." in messages[0]["content"]
+
+
+def test_selected_skill_can_override_prompt_sections() -> None:
+    skill = Skill(
+        name="architecture-review",
+        description="Review architecture.",
+        instructions="Review only.",
+        allowed_tools=("read_file", "run_command"),
+        path=Path("SKILL.md"),
+        prompt_sections={
+            "TASK_PROMPT": PromptSectionOverride(
+                section="TASK_PROMPT",
+                mode="replace",
+                content="Review this code area: {task}",
+            ),
+            "TOOL_USAGE_GUIDANCE": PromptSectionOverride(
+                section="TOOL_USAGE_GUIDANCE",
+                mode="append",
+                content="Use inspection tools only.",
+            ),
+            "FINAL_SUMMARY_REQUIREMENTS": PromptSectionOverride(
+                section="FINAL_SUMMARY_REQUIREMENTS",
+                mode="replace",
+                content="Write an architecture review.",
+            ),
+        },
+    )
+
+    messages = CodingAgent(task="agent/", skill=skill).initial_messages()
+
+    assert messages[1]["content"] == "Review this code area: agent/"
+    assert "Use inspection tools only." in messages[0]["content"]
+    assert "Write an architecture review." in messages[0]["content"]
+    assert "write the final summary in simple Markdown" not in messages[0]["content"]
+
+
+def test_architecture_review_task_prompt_replace_avoids_default_coding_prompt() -> None:
+    skill = parse_skill_file(Path("skills/builtin/architecture-review/SKILL.md"))
+
+    prompt = task_prompt("agent/")
+
+    assert prompt.startswith("Solve this coding task: agent/")
+
+    prompt = task_prompt("agent/", skill)
+
+    assert prompt.startswith("Review this repository or code area: agent/")
+    assert "Solve this coding task" not in prompt
+    assert "## Tool usage guidance" not in prompt
+    assert "## Required response format" not in prompt
+
+
+def test_default_task_prompt_renders_skill_section_overrides() -> None:
+    skill = Skill(
+        name="focused-review",
+        description="Review with custom guidance.",
+        instructions="Use the default task prompt.",
+        allowed_tools=("read_file",),
+        path=Path("SKILL.md"),
+        prompt_sections={
+            "TOOL_USAGE_GUIDANCE": PromptSectionOverride(
+                section="TOOL_USAGE_GUIDANCE",
+                mode="append",
+                content="Use custom inspection guidance.",
+            ),
+            "FINAL_SUMMARY_REQUIREMENTS": PromptSectionOverride(
+                section="FINAL_SUMMARY_REQUIREMENTS",
+                mode="replace",
+                content="Write a custom final summary.",
+            ),
+        },
+    )
+
+    prompt = task_prompt("fix bug", skill)
+
+    assert "## Tool usage guidance" in prompt
+    assert "Use custom inspection guidance." in prompt
+    assert "Write a custom final summary." in prompt
+    assert "write the final summary in simple Markdown" not in prompt
+    assert "{TOOL_USAGE_GUIDANCE}" not in prompt
+    assert "{FINAL_SUMMARY_REQUIREMENTS}" not in prompt
+
+
+def test_selected_skill_can_override_follow_up_prompt() -> None:
+    skill = Skill(
+        name="architecture-review",
+        description="Review architecture.",
+        instructions="Review only.",
+        allowed_tools=("read_file", "run_command"),
+        path=Path("SKILL.md"),
+        prompt_sections={
+            "FOLLOW_UP_PROMPT": PromptSectionOverride(
+                section="FOLLOW_UP_PROMPT",
+                mode="replace",
+                content="Continue review: {task}",
+            ),
+        },
+    )
+
+    message = CodingAgent(task="agent/", skill=skill).follow_up_message("focus prompts")
+
+    assert message["content"] == "Continue review: focus prompts"
+
+
+def test_prompt_rendering_strips_replaced_task_text() -> None:
+    skill = Skill(
+        name="test",
+        description="Test prompts.",
+        instructions="Test only.",
+        allowed_tools=(),
+        path=Path("SKILL.md"),
+        prompt_sections={
+            "TASK_PROMPT": PromptSectionOverride(
+                section="TASK_PROMPT",
+                mode="replace",
+                content="\nTask: {task}\n",
+            ),
+            "FOLLOW_UP_PROMPT": PromptSectionOverride(
+                section="FOLLOW_UP_PROMPT",
+                mode="replace",
+                content="\nFollow up: {task}\n",
+            ),
+        },
+    )
+
+    assert task_prompt("x", skill) == "Task: x"
+    assert follow_up_prompt("x", skill) == "Follow up: x"
+
+
+def test_default_follow_up_prompt_uses_generic_session_continuation_wording() -> None:
+    message = CodingAgent(task="agent/").follow_up_message("x")
+
+    assert message["content"].startswith(
+        "Continue this saved Code Squid session with this follow-up request:\n\nx"
+    )
+    assert "Preserve the current task mode, active skill, workspace, constraints, and available tools." in message[
+        "content"
+    ]
+    assert "Keep the response aligned with the active skill." in message["content"]
+    assert "{task}" not in message["content"]
+
+
+def test_default_follow_up_prompt_output_is_stripped() -> None:
+    message = CodingAgent(task="agent/").follow_up_message("x")
+
+    assert message["content"] == message["content"].strip()

@@ -1,5 +1,23 @@
 """Owns coding-agent prompt text and tool-usage guidance; must not own loop mechanics, provider logic, or tool implementation."""
 
+from core.skills import Skill
+
+SYSTEM_PROMPT_INTRO = """
+You are Code Squid, a coding agent working inside a repository.
+
+Your job is to:
+- read the relevant code and tests
+- make the smallest correct change
+- verify the result before finishing
+
+You have tools for:
+- reading files
+- writing and patching files
+- running commands
+
+Always use absolute paths with read_file, write_file, and apply_patch.
+""".strip()
+
 TOOL_USAGE_GUIDANCE = """
 ## Tool usage guidance
 
@@ -99,20 +117,21 @@ Final response rules:
 - finalize only when the task is complete, verification was run or honestly cannot be run, and no next action would materially reduce risk
 """.strip()
 
-SYSTEM_PROMPT = f"""
-You are Code Squid, a coding agent working inside a repository.
 
-Your job is to:
-- read the relevant code and tests
-- make the smallest correct change
-- verify the result before finishing
+DEFAULT_TASK_PROMPT = """
+Solve this coding task: {task}
 
-You have tools for:
-- reading files
-- writing and patching files
-- running commands
+Work step by step:
+1. Inspect relevant files, tests, or repo guidance only when the task requires it.
+2. Understand the requested change.
+3. Make the smallest clean change.
+4. Run the strongest practical verification.
+5. Finish only when the task is complete.
 
+Use one tool at a time, and avoid broad unnecessary changes.
+Prefer write_file for replacing full file contents.
 Always use absolute paths with read_file, write_file, and apply_patch.
+Use run_command for shell behavior, program execution, and verification.
 
 {TOOL_USAGE_GUIDANCE}
 
@@ -121,6 +140,108 @@ Always use absolute paths with read_file, write_file, and apply_patch.
 {REQUIRED_RESPONSE_FORMAT}
 
 {FINAL_SUMMARY_REQUIREMENTS}
+
+Do not use any tool in the final response.
+Do not keep working once the task is complete.
+
+## Valid examples
+
+Valid non-final response:
+The failing test shows the expected behavior, but I have not inspected the implementation path that produces the wrong result yet. I’ll read the implementation file before editing so the patch stays focused.
+[one real tool call to read the implementation file]
+
+Valid non-final response:
+The relevant implementation has been inspected, and the bug is isolated to the upper-bound branch. I’ll apply a small exact patch instead of rewriting the file.
+[one real tool call to apply the patch]
+
+Valid non-final response:
+The focused patch is in place, but the changed behavior has not been verified yet. I’ll run the targeted test file to check the fix before finalizing.
+[one real tool call to run tests]
+
+Valid final response:
+## Files changed
+- `mathlib.py`
+
+## What changed
+- Changed `return lower` to `return upper` in `clamp` when `value > upper`.
+
+## Verification
+- `python -m pytest test_mathlib.py -v` (3 passed)
+
+## Remaining risks / notes
+- No known remaining risks; the targeted regression test passed.
+""".strip()
+
+
+DEFAULT_FOLLOW_UP_PROMPT = """
+Continue this saved Code Squid session with this follow-up request:
+
+{task}
+
+Use the existing transcript as context. Preserve the current task mode, active skill, workspace, constraints, and available tools.
+
+If the follow-up can be answered from the existing transcript or prior tool results, answer directly without using another tool.
+
+If fresh repo state is needed, use exactly one available tool for the immediate next step. Do not repeat earlier inspection unless the prior result was truncated, stale, incomplete, or the new request changes what matters.
+
+Keep the response aligned with the active skill. For example, a review skill should keep reviewing, a coding skill should keep coding, and a docs skill should keep working on docs.
+
+Do not reset the session, restate the original task, or switch back to generic bug-fix behavior unless the user explicitly asks for that.
+""".strip()
+
+
+def prompt_section(section_name: str, default: str, skill: Skill | None = None) -> str:
+    if skill is None:
+        return default
+
+    override = skill.prompt_sections.get(section_name)
+    if override is None:
+        return default
+    if override.mode == "replace":
+        return override.content
+    if override.mode == "append":
+        return f"{default}\n\n{override.content}"
+
+    raise ValueError(f"Unsupported prompt section override mode: {override.mode}")
+
+
+def skill_prompt_block(skill: Skill | None = None) -> str:
+    if skill is None:
+        return ""
+
+    return f"""
+## Active Skill: {skill.name}
+
+Description:
+{skill.description}
+
+Skill instructions:
+{skill.instructions}
+""".strip()
+
+
+def system_prompt(skill: Skill | None = None) -> str:
+    skill_block = skill_prompt_block(skill)
+    intro = prompt_section("SYSTEM_PROMPT_INTRO", SYSTEM_PROMPT_INTRO, skill)
+    tool_usage_guidance = prompt_section("TOOL_USAGE_GUIDANCE", TOOL_USAGE_GUIDANCE, skill)
+    final_summary_requirements = prompt_section(
+        "FINAL_SUMMARY_REQUIREMENTS",
+        FINAL_SUMMARY_REQUIREMENTS,
+        skill,
+    )
+
+    return f"""
+{intro}
+
+{skill_block}
+
+{tool_usage_guidance}
+
+{VISIBLE_NARRATION_REQUIREMENTS}
+
+{REQUIRED_RESPONSE_FORMAT}
+
+{final_summary_requirements}
 
 Do not include a tool call in the final response.
 
@@ -182,77 +303,40 @@ Failure to follow this format will cause your response to be rejected.
 """.strip()
 
 
-def task_prompt(task: str) -> str:
-    return f"""
-Solve this coding task: {task}
-
-Work step by step:
-1. Inspect relevant files, tests, or repo guidance only when the task requires it.
-2. Understand the requested change.
-3. Make the smallest clean change.
-4. Run the strongest practical verification.
-5. Finish only when the task is complete.
-
-Use one tool at a time, and avoid broad unnecessary changes.
-Prefer write_file for replacing full file contents.
-Always use absolute paths with read_file, write_file, and apply_patch.
-Use run_command for shell behavior, program execution, and verification.
-
-{TOOL_USAGE_GUIDANCE}
-
-{VISIBLE_NARRATION_REQUIREMENTS}
-
-{REQUIRED_RESPONSE_FORMAT}
-
-{FINAL_SUMMARY_REQUIREMENTS}
-
-Do not use any tool in the final response.
-Do not keep working once the task is complete.
-
-## Valid examples
-
-Valid non-final response:
-The failing test shows the expected behavior, but I have not inspected the implementation path that produces the wrong result yet. I’ll read the implementation file before editing so the patch stays focused.
-[one real tool call to read the implementation file]
-
-Valid non-final response:
-The relevant implementation has been inspected, and the bug is isolated to the upper-bound branch. I’ll apply a small exact patch instead of rewriting the file.
-[one real tool call to apply the patch]
-
-Valid non-final response:
-The focused patch is in place, but the changed behavior has not been verified yet. I’ll run the targeted test file to check the fix before finalizing.
-[one real tool call to run tests]
-
-Valid final response:
-## Files changed
-- `mathlib.py`
-
-## What changed
-- Changed `return lower` to `return upper` in `clamp` when `value > upper`.
-
-## Verification
-- `python -m pytest test_mathlib.py -v` (3 passed)
-
-## Remaining risks / notes
-- No known remaining risks; the targeted regression test passed.
-""".strip()
+SYSTEM_PROMPT = system_prompt()
 
 
-def follow_up_prompt(task: str) -> str:
-    return f"""
-Continue this saved Code Squid session with this follow-up task: {task}
+def task_prompt(task: str, skill: Skill | None = None) -> str:
+    prompt = prompt_section("TASK_PROMPT", DEFAULT_TASK_PROMPT, skill)
+    return (
+        prompt.replace("{task}", task)
+        .replace(
+            "{TOOL_USAGE_GUIDANCE}",
+            prompt_section("TOOL_USAGE_GUIDANCE", TOOL_USAGE_GUIDANCE, skill),
+        )
+        .replace(
+            "{VISIBLE_NARRATION_REQUIREMENTS}",
+            VISIBLE_NARRATION_REQUIREMENTS,
+        )
+        .replace(
+            "{REQUIRED_RESPONSE_FORMAT}",
+            REQUIRED_RESPONSE_FORMAT,
+        )
+        .replace(
+            "{FINAL_SUMMARY_REQUIREMENTS}",
+            prompt_section(
+                "FINAL_SUMMARY_REQUIREMENTS",
+                FINAL_SUMMARY_REQUIREMENTS,
+                skill,
+            ),
+        )
+        .strip()
+    )
 
-Use the existing transcript as context.
-If the answer is already available from prior messages or tool results, answer from that context without running extra commands.
-If the follow-up requires fresh state, use exactly one tool call for the immediate next step.
-If the user asks not to edit files, do not use write_file.
 
-For follow-up edits:
-- Prefer apply_patch for small localized edits to existing files after reading the relevant file.
-- Use write_file for new files, full-file replacement, or broad rewrites of small files after reading the full current file.
-- If apply_patch fails because old_text is missing or not unique, read the relevant file section again before retrying.
-- Do not use write_file merely to avoid making a precise apply_patch.
-""".strip()
+def follow_up_prompt(task: str, skill: Skill | None = None) -> str:
+    prompt = prompt_section("FOLLOW_UP_PROMPT", DEFAULT_FOLLOW_UP_PROMPT, skill)
+    return prompt.replace("{task}", task).strip()
 
 
 def compaction_prompt(prior_context: str) -> str:
