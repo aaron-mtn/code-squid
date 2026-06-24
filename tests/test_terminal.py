@@ -460,6 +460,20 @@ def test_startup_panel_includes_controls() -> None:
     assert f"Controls:      {STARTUP_CONTROLS}" in panel
 
 
+def test_startup_panel_includes_active_skill_when_set() -> None:
+    panel = TerminalDisplay()._startup_info_panel(
+        StartupInfo(
+            directory=Path("/tmp/project"),
+            provider="openai_compatible",
+            model="qwen3.5-9b",
+            approval_mode="yolo",
+            skill_name="architecture-review",
+        )
+    )
+
+    assert "Skill:         architecture-review" in panel
+
+
 def test_startup_panel_colors_only_structural_borders_in_tty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

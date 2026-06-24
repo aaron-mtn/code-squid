@@ -93,7 +93,7 @@ def build_coding_task_run(
 
     repo_root = Path(repo_root).resolve()
     settings = load_settings(repo_root) if settings is None else settings
-    display = build_run_display(repo_root, settings) if display is None else display
+    display = build_run_display(repo_root, settings, skill_name) if display is None else display
 
     session = Session(repo_root=repo_root)
     session_store = SessionStore.create(repo_root=repo_root, task=task)
@@ -195,20 +195,29 @@ def resolve_skill_tools(skill_name: str | None) -> tuple[Skill | None, dict]:
     return skill, {tool_name: TOOLS[tool_name] for tool_name in skill.allowed_tools}
 
 
-def startup_info(repo_root: Path, settings: Settings) -> StartupInfo:
+def startup_info(
+    repo_root: Path,
+    settings: Settings,
+    skill_name: str | None = None,
+) -> StartupInfo:
     return StartupInfo(
         directory=repo_root,
         provider=settings.model.provider,
         model=settings.model.name,
         approval_mode=FRIENDLY_MODES[settings.runtime.approval_mode],
+        skill_name=skill_name,
     )
 
 
-def build_run_display(repo_root: Path, settings: Settings) -> TerminalDisplay:
+def build_run_display(
+    repo_root: Path,
+    settings: Settings,
+    skill_name: str | None = None,
+) -> TerminalDisplay:
     trace = os.getenv("CODE_SQUID_TRACE") == "1"
     debug = settings.display.debug or trace
     return TerminalDisplay(
         debug=debug,
         show_transcript=trace,
-        startup_info=startup_info(repo_root, settings),
+        startup_info=startup_info(repo_root, settings, skill_name),
     )

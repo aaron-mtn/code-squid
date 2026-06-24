@@ -8,6 +8,7 @@ from main import (
     INPUT_IDENTITY_LINE,
     PROMPT_STYLE,
     PROMPT_PREFIX,
+    _format_skill_status,
     _resolve_workspace_root,
     _mode,
     _prompt_task,
@@ -129,6 +130,26 @@ def test_main_passes_selected_cwd_to_existing_commands(
     assert calls == [(tmp_path.resolve(), [])]
 
 
+def test_main_passes_selected_skill_to_interactive(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    calls = []
+
+    def fake_interactive(repo_root: Path, skill_name: str | None = None) -> int:
+        calls.append((repo_root, skill_name))
+        return 0
+
+    monkeypatch.setattr(
+        "sys.argv",
+        ["main.py", "--cwd", str(tmp_path), "--skill", "architecture-review"],
+    )
+    monkeypatch.setattr("main._run_interactive", fake_interactive)
+
+    assert main() == 0
+    assert calls == [(tmp_path.resolve(), "architecture-review")]
+
+
 def test_main_missing_cwd_value_fails_clearly(monkeypatch, capsys) -> None:
     monkeypatch.setattr("sys.argv", ["main.py", "--cwd"])
 
@@ -233,8 +254,31 @@ def test_help_text_lists_new_friendly_modes() -> None:
     assert "  python main.py mode strict\n" in HELP_TEXT
     assert "  python main.py mode balanced\n" in HELP_TEXT
     assert "  python main.py mode yolo\n" in HELP_TEXT
+    assert "  /skill shows the active skill and available built-in skills.\n" in HELP_TEXT
+    assert "  /skill <name> sets the active skill for future tasks and follow-ups.\n" in HELP_TEXT
+    assert "  /skill none clears the active skill.\n" in HELP_TEXT
     assert "  python main.py mode safe\n" not in HELP_TEXT
     assert "  python main.py mode guarded\n" not in HELP_TEXT
+
+
+def test_format_skill_status_lists_current_skill_and_available_skills() -> None:
+    status = _format_skill_status(None)
+
+    assert "Current skill: none" in status
+    assert "Available skills:" in status
+    assert "- architecture-review: Review architecture and design without modifying files." in status
+    assert "- bug-fix: Fix bugs with small targeted edits." in status
+
+
+def test_format_skill_status_includes_active_skill_details() -> None:
+    status = _format_skill_status("architecture-review")
+
+    assert "Current skill: architecture-review" in status
+    assert "Tools: read_file, run_command" in status
+    assert (
+        "Prompt overrides: TASK_PROMPT, FINAL_SUMMARY_REQUIREMENTS, TOOL_USAGE_GUIDANCE"
+        in status
+    )
 
 
 def test_run_loop_handles_model_request_error_with_log_and_status(tmp_path) -> None:
@@ -620,11 +664,11 @@ def test_interactive_new_command_clears_active_session(monkeypatch, tmp_path) ->
     new_tasks = []
     follow_up_tasks = []
 
-    def fake_new(repo_root, task, settings, display):
+    def fake_new(repo_root, task, settings, display, skill_name=None):
         new_tasks.append(task)
         return 0, f"session-{len(new_tasks)}"
 
-    def fake_follow_up(repo_root, session_id, task, settings, display):
+    def fake_follow_up(repo_root, session_id, task, settings, display, skill_name=None):
         follow_up_tasks.append((session_id, task))
         return 0, session_id
 
@@ -646,11 +690,11 @@ def test_interactive_second_input_uses_follow_up_path(monkeypatch, tmp_path) -> 
     new_tasks = []
     follow_up_tasks = []
 
-    def fake_new(repo_root, task, settings, display):
+    def fake_new(repo_root, task, settings, display, skill_name=None):
         new_tasks.append(task)
         return 0, "active-session"
 
-    def fake_follow_up(repo_root, session_id, task, settings, display):
+    def fake_follow_up(repo_root, session_id, task, settings, display, skill_name=None):
         follow_up_tasks.append((session_id, task))
         return 0, session_id
 
@@ -666,6 +710,115 @@ def test_interactive_second_input_uses_follow_up_path(monkeypatch, tmp_path) -> 
 
     assert new_tasks == ["first task"]
     assert follow_up_tasks == [("active-session", "follow up")]
+
+
+def test_interactive_skill_command_lists_current_and_available_skills(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    def fail_run(*args):
+        raise AssertionError("interactive /skill should not start a run")
+
+    monkeypatch.setattr("main.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr("main._prompt_task", _fake_prompt_tasks(["/skill", "/exit"]))
+    monkeypatch.setattr("main._run_new_session_task", fail_run)
+    monkeypatch.setattr("main._run_follow_up_task", fail_run)
+
+    assert _run_interactive(tmp_path) == 0
+
+    output = capsys.readouterr().out
+    assert "Current skill: none" in output
+    assert "Available skills:" in output
+    assert "- architecture-review: Review architecture and design without modifying files." in output
+
+
+def test_interactive_skill_command_sets_active_skill_for_new_and_follow_up(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    new_runs = []
+    follow_up_runs = []
+
+    def fake_new(repo_root, task, settings, display, skill_name=None):
+        new_runs.append((task, skill_name))
+        return 0, "active-session"
+
+    def fake_follow_up(repo_root, session_id, task, settings, display, skill_name=None):
+        follow_up_runs.append((session_id, task, skill_name))
+        return 0, session_id
+
+    monkeypatch.setattr("main.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr(
+        "main._prompt_task",
+        _fake_prompt_tasks(
+            ["/skill architecture-review", "first task", "follow up", "/exit"]
+        ),
+    )
+    monkeypatch.setattr("main._run_new_session_task", fake_new)
+    monkeypatch.setattr("main._run_follow_up_task", fake_follow_up)
+
+    assert _run_interactive(tmp_path) == 0
+
+    output = capsys.readouterr().out
+    assert "Active skill set to: architecture-review" in output
+    assert "Tools: read_file, run_command" in output
+    assert new_runs == [("first task", "architecture-review")]
+    assert follow_up_runs == [("active-session", "follow up", "architecture-review")]
+
+
+def test_interactive_skill_none_clears_active_skill(monkeypatch, tmp_path, capsys) -> None:
+    new_runs = []
+    follow_up_runs = []
+
+    def fake_new(repo_root, task, settings, display, skill_name=None):
+        new_runs.append((task, skill_name))
+        return 0, "active-session"
+
+    def fake_follow_up(repo_root, session_id, task, settings, display, skill_name=None):
+        follow_up_runs.append((session_id, task, skill_name))
+        return 0, session_id
+
+    monkeypatch.setattr("main.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr(
+        "main._prompt_task",
+        _fake_prompt_tasks(["first task", "/skill none", "follow up", "/exit"]),
+    )
+    monkeypatch.setattr("main._run_new_session_task", fake_new)
+    monkeypatch.setattr("main._run_follow_up_task", fake_follow_up)
+
+    assert _run_interactive(tmp_path, "architecture-review") == 0
+
+    assert "Active skill cleared." in capsys.readouterr().out
+    assert new_runs == [("first task", "architecture-review")]
+    assert follow_up_runs == [("active-session", "follow up", None)]
+
+
+def test_interactive_unknown_skill_does_not_change_active_skill(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    new_runs = []
+
+    def fake_new(repo_root, task, settings, display, skill_name=None):
+        new_runs.append((task, skill_name))
+        return 0, "active-session"
+
+    monkeypatch.setattr("main.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr(
+        "main._prompt_task",
+        _fake_prompt_tasks(["/skill some-skill", "first task", "/exit"]),
+    )
+    monkeypatch.setattr("main._run_new_session_task", fake_new)
+
+    assert _run_interactive(tmp_path, "architecture-review") == 0
+
+    output = capsys.readouterr().out
+    assert "Unknown skill: some-skill" in output
+    assert "Run /skill to see available skills." in output
+    assert new_runs == [("first task", "architecture-review")]
 
 
 def test_new_session_passes_debug_without_trace_to_terminal_display(

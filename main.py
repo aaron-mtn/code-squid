@@ -40,12 +40,16 @@ PROMPT_STYLE = INPUT_PROMPT_STYLE
 CANCELLED_BEFORE_RUN_MESSAGE = "⏹️ Cancelled before task started"
 HELP_COMMAND = "/help"
 NEW_COMMAND = "/new"
+SKILL_COMMAND = "/skill"
 EXIT_COMMANDS = {"/exit", "exit", "quit"}
 HELP_TEXT = """\
 Code Squid help
 
 At the task prompt:
   Normal input runs a coding task.
+  /skill shows the active skill and available built-in skills.
+  /skill <name> sets the active skill for future tasks and follow-ups.
+  /skill none clears the active skill.
   Enter sends.
   Alt+Enter inserts a newline.
   Ctrl+C cancels before a run or interrupts an active run.
@@ -79,12 +83,86 @@ def _is_new_input(task: str) -> bool:
     return task.strip() == NEW_COMMAND
 
 
+def _is_skill_input(task: str) -> bool:
+    stripped = task.strip()
+    return stripped == SKILL_COMMAND or stripped.startswith(f"{SKILL_COMMAND} ")
+
+
 def _is_exit_input(task: str) -> bool:
     return task.strip() in EXIT_COMMANDS
 
 
 def _print_help() -> None:
     print(HELP_TEXT)
+
+
+def _format_skill_details(skill_name: str | None) -> list[str]:
+    if skill_name is None:
+        return ["Current skill: none"]
+
+    skill = discover_builtin_skills().get(skill_name)
+    lines = [f"Current skill: {skill_name}"]
+    if skill is None:
+        return lines
+
+    if skill.allowed_tools:
+        lines.append(f"Tools: {', '.join(skill.allowed_tools)}")
+    if skill.prompt_sections:
+        lines.append(f"Prompt overrides: {', '.join(skill.prompt_sections)}")
+    return lines
+
+
+def _format_available_skills() -> list[str]:
+    skills = discover_builtin_skills()
+    if not skills:
+        return ["Available skills:", "none"]
+
+    lines = ["Available skills:"]
+    for skill in skills.values():
+        lines.append(f"- {skill.name}: {skill.description}")
+    return lines
+
+
+def _format_skill_status(skill_name: str | None) -> str:
+    return "\n".join(
+        [
+            *_format_skill_details(skill_name),
+            "",
+            *_format_available_skills(),
+        ]
+    )
+
+
+def _print_skill_status(skill_name: str | None) -> None:
+    print(_format_skill_status(skill_name))
+
+
+def _handle_skill_input(task: str, skill_name: str | None) -> str | None:
+    parts = task.strip().split()
+    if len(parts) == 1:
+        _print_skill_status(skill_name)
+        return skill_name
+
+    if len(parts) != 2:
+        print("Usage: /skill [name|none]")
+        return skill_name
+
+    requested_skill = parts[1]
+    if requested_skill in {"none", "default"}:
+        print("Active skill cleared.")
+        return None
+
+    skills = discover_builtin_skills()
+    skill = skills.get(requested_skill)
+    if skill is None:
+        print(f"Unknown skill: {requested_skill}")
+        print("Run /skill to see available skills.")
+        return skill_name
+
+    print(f"Active skill set to: {skill.name}")
+    if skill.allowed_tools:
+        print(f"Tools: {', '.join(skill.allowed_tools)}")
+    return skill.name
 
 
 def _extract_cwd_arg(args: list[str]) -> tuple[str | None, list[str]]:
@@ -152,13 +230,17 @@ def _session_dir_for_resume(repo_root: Path, session_id: str) -> Path | None:
     return session_dir_for(repo_root, session_id)
 
 
-def _run_display(repo_root: Path, settings: Settings) -> TerminalDisplay:
+def _run_display(
+    repo_root: Path,
+    settings: Settings,
+    skill_name: str | None = None,
+) -> TerminalDisplay:
     trace = os.getenv("CODE_SQUID_TRACE") == "1"
     debug = settings.display.debug or trace
     return TerminalDisplay(
         debug=debug,
         show_transcript=trace,
-        startup_info=startup_info(repo_root, settings),
+        startup_info=startup_info(repo_root, settings, skill_name),
     )
 
 
@@ -253,7 +335,7 @@ def _run_follow_up_task(
 
 def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
     settings = load_settings(repo_root)
-    display = _run_display(repo_root, settings)
+    display = _run_display(repo_root, settings, skill_name)
     display.start()
     task = _prompt_task_or_cancel("Task")
     if task is None:
@@ -271,7 +353,7 @@ def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
 
 def _resume_session(repo_root: Path, session_id: str, skill_name: str | None = None) -> int:
     settings = load_settings(repo_root)
-    display = _run_display(repo_root, settings)
+    display = _run_display(repo_root, settings, skill_name)
     display.start()
     follow_up_task = _prompt_task_or_cancel("Follow-up task")
     if follow_up_task is None:
@@ -296,7 +378,7 @@ def _resume_session(repo_root: Path, session_id: str, skill_name: str | None = N
 
 def _run_interactive(repo_root: Path, skill_name: str | None = None) -> int:
     settings = load_settings(repo_root)
-    display = _run_display(repo_root, settings)
+    display = _run_display(repo_root, settings, skill_name)
     display.start()
     active_session_id: str | None = None
 
@@ -312,38 +394,29 @@ def _run_interactive(repo_root: Path, skill_name: str | None = None) -> int:
         if _is_help_input(task):
             _print_help()
             continue
+        if _is_skill_input(task):
+            skill_name = _handle_skill_input(task, skill_name)
+            continue
         if not task.strip():
             continue
 
         if active_session_id is None:
-            if skill_name is None:
-                status, session_id = _run_new_session_task(repo_root, task, settings, display)
-            else:
-                status, session_id = _run_new_session_task(
-                    repo_root,
-                    task,
-                    settings,
-                    display,
-                    skill_name,
-                )
+            status, session_id = _run_new_session_task(
+                repo_root,
+                task,
+                settings,
+                display,
+                skill_name,
+            )
         else:
-            if skill_name is None:
-                status, session_id = _run_follow_up_task(
-                    repo_root,
-                    active_session_id,
-                    task,
-                    settings,
-                    display,
-                )
-            else:
-                status, session_id = _run_follow_up_task(
-                    repo_root,
-                    active_session_id,
-                    task,
-                    settings,
-                    display,
-                    skill_name,
-                )
+            status, session_id = _run_follow_up_task(
+                repo_root,
+                active_session_id,
+                task,
+                settings,
+                display,
+                skill_name,
+            )
 
         if session_id is not None:
             active_session_id = session_id
@@ -399,13 +472,7 @@ def _mode(repo_root: Path, args: list[str]) -> int:
 
 
 def _skills() -> int:
-    skills = discover_builtin_skills()
-    if not skills:
-        print("No built-in skills found.")
-        return 0
-
-    for skill in skills.values():
-        print(f"{skill.name}: {skill.description}")
+    print("\n".join(_format_available_skills()))
     return 0
 
 

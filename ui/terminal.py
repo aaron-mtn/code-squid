@@ -90,6 +90,7 @@ class StartupInfo:
     provider: str
     model: str
     approval_mode: str
+    skill_name: str | None = None
 
 
 def _styled_text(text: str, *styles: str) -> str:
@@ -543,8 +544,10 @@ class TerminalDisplay:
             ("Provider", startup_info.provider),
             ("Model", startup_info.model),
             ("Approval mode", startup_info.approval_mode),
-            ("Controls", STARTUP_CONTROLS),
         ]
+        if startup_info.skill_name is not None:
+            lines.append(("Skill", startup_info.skill_name))
+        lines.append(("Controls", STARTUP_CONTROLS))
         return "\n".join(
             [
                 _structural_text(top),
