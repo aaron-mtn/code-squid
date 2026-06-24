@@ -99,6 +99,7 @@ def build_coding_task_run(
     session_store = SessionStore.create(repo_root=repo_root, task=task)
     undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
     skill, active_tools = resolve_skill_tools(skill_name)
+    append_run_context(session_store, skill, active_tools)
     agent = CodingAgent(task=task, skill=skill, tools=active_tools)
     loop = build_agent_loop(
         repo_root=repo_root,
@@ -193,6 +194,18 @@ def resolve_skill_tools(skill_name: str | None) -> tuple[Skill | None, dict]:
         raise ValueError(f"Skill {skill.name} lists unknown tool(s): {unknown}")
 
     return skill, {tool_name: TOOLS[tool_name] for tool_name in skill.allowed_tools}
+
+
+def append_run_context(
+    session_store: SessionStore,
+    skill: Skill | None,
+    active_tools: dict,
+) -> dict:
+    return session_store.append_run_context(
+        skill_name=skill.name if skill is not None else None,
+        allowed_tools=sorted(active_tools),
+        prompt_overrides=sorted(skill.prompt_sections) if skill is not None else [],
+    )
 
 
 def startup_info(

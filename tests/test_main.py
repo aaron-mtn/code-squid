@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from config.settings import load_settings
 from core.agent_loop import RunResult
 from core.model_adapter import ModelRequestError
 from main import (
@@ -15,6 +16,7 @@ from main import (
     _resume_session,
     _run_interactive,
     _run_loop,
+    _run_follow_up_task,
     _run_new_session,
     main,
 )
@@ -72,6 +74,14 @@ def _write_settings(repo_root: Path, settings: dict) -> Path:
     settings_path = settings_dir / "settings.json"
     settings_path.write_text(json.dumps(settings), encoding="utf-8")
     return settings_path
+
+
+def _read_entries(session_store: SessionStore) -> list[dict]:
+    return [
+        json.loads(line)
+        for line in session_store.jsonl_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def test_resolve_workspace_root_omitted_uses_current_directory(
@@ -267,7 +277,7 @@ def test_format_skill_status_lists_current_skill_and_available_skills() -> None:
     assert "Current skill: none" in status
     assert "Available skills:" in status
     assert "- architecture-review: Review architecture and design without modifying files." in status
-    assert "- bug-fix: Fix bugs with small targeted edits." in status
+    assert "- bug-fix: Fix bugs with small targeted edits." not in status
 
 
 def test_format_skill_status_includes_active_skill_details() -> None:
@@ -514,6 +524,53 @@ def test_resume_session_prints_banner_before_follow_up_prompt(
     assert len(displays) == 1
     assert displays[0].starts == 1
     assert displays[0].run_starts == 1
+
+
+def test_follow_up_records_current_skill_run_context(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    session_store = SessionStore.create(tmp_path, "original task")
+    session_store.append_run_context(
+        skill_name=None,
+        allowed_tools=["apply_patch", "read_file", "run_command", "write_file"],
+        prompt_overrides=[],
+    )
+
+    monkeypatch.setattr(
+        "main._session_dir_for_resume",
+        lambda repo_root, session_id: session_store.session_dir,
+    )
+    monkeypatch.setattr("main.build_agent_loop", lambda **kwargs: NoopLoop())
+    monkeypatch.setattr("main._run_loop", lambda *args: 0)
+
+    status, session_id = _run_follow_up_task(
+        tmp_path,
+        session_store.session_id,
+        "review the architecture",
+        load_settings(tmp_path),
+        FakeDisplay(),
+        skill_name="architecture-review",
+    )
+
+    entries = _read_entries(session_store)
+    contexts = [entry for entry in entries if entry["type"] == "run_context"]
+    assert status == 0
+    assert session_id == session_store.session_id
+    assert contexts[0]["skill_name"] is None
+    assert contexts[0]["allowed_tools"] == [
+        "apply_patch",
+        "read_file",
+        "run_command",
+        "write_file",
+    ]
+    assert contexts[1]["skill_name"] == "architecture-review"
+    assert contexts[1]["allowed_tools"] == ["read_file", "run_command"]
+    assert contexts[1]["prompt_overrides"] == [
+        "FINAL_SUMMARY_REQUIREMENTS",
+        "TASK_PROMPT",
+        "TOOL_USAGE_GUIDANCE",
+    ]
 
 
 def test_resume_session_empty_task_exits_without_run(monkeypatch, tmp_path, capsys) -> None:

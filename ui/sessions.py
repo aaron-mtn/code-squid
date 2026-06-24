@@ -57,6 +57,15 @@ def print_session(repo_root: Path, session_id: str) -> None:
     print(f"repo: {metadata_dict.get('repo_root', '')}")
 
     for entry in entries:
+        if entry.get("type") == "run_context":
+            print()
+            print("[run context]")
+            skill_name = entry.get("skill_name")
+            print(f"skill: {skill_name if skill_name is not None else 'none'}")
+            print(f"tools: {', '.join(entry.get('allowed_tools', []))}")
+            print(f"prompt overrides: {', '.join(entry.get('prompt_overrides', []))}")
+            continue
+
         if entry.get("type") != "message":
             continue
 

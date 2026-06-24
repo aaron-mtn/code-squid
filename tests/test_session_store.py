@@ -114,6 +114,50 @@ def test_load_messages_ignores_compaction_entries(tmp_path: Path) -> None:
     assert store.load_messages() == messages
 
 
+def test_append_run_context_writes_sorted_non_message_entry_and_updates_active_leaf(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore.create(tmp_path, "context")
+
+    entry = store.append_run_context(
+        skill_name="architecture-review",
+        allowed_tools=["run_command", "read_file"],
+        prompt_overrides=["TOOL_USAGE_GUIDANCE", "TASK_PROMPT"],
+    )
+    entries = read_entries(store)
+    metadata = read_metadata(store)
+
+    assert entry == entries[0]
+    assert entries[0]["id"] == "e_000001"
+    assert entries[0]["parent_id"] is None
+    assert entries[0]["type"] == "run_context"
+    assert entries[0]["skill_name"] == "architecture-review"
+    assert entries[0]["allowed_tools"] == ["read_file", "run_command"]
+    assert entries[0]["prompt_overrides"] == [
+        "TASK_PROMPT",
+        "TOOL_USAGE_GUIDANCE",
+    ]
+    assert metadata["active_leaf_id"] == "e_000001"
+
+
+def test_load_messages_ignores_run_context_entries(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path, "context")
+    messages = [
+        {"role": "user", "content": "one"},
+        {"role": "assistant", "content": "two"},
+    ]
+
+    store.append_message(messages[0])
+    store.append_run_context(
+        skill_name=None,
+        allowed_tools=["write_file", "read_file"],
+        prompt_overrides=[],
+    )
+    store.append_message(messages[1])
+
+    assert store.load_messages() == messages
+
+
 def test_compaction_parent_id_links_to_previous_active_leaf(tmp_path: Path) -> None:
     store = SessionStore.create(tmp_path, "compact")
 

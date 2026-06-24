@@ -1,8 +1,17 @@
+import json
 from pathlib import Path
 
 from agent.coding import CodingAgent
 from core.runner import build_coding_task_run, resolve_skill_tools
 from core.skills import Skill
+
+
+def read_entries(path: Path) -> list[dict]:
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def test_selecting_skill_filters_tool_definitions(monkeypatch, tmp_path: Path) -> None:
@@ -85,3 +94,61 @@ def test_build_coding_task_run_passes_filtered_tools_to_executor(
     assert captured["agent"].skill is skill
     assert list(captured["agent"].tools) == ["read_file"]
     assert list(captured["tool_executor"].tools) == ["read_file"]
+
+
+def test_build_coding_task_run_records_architecture_review_run_context(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class FakeAgentLoop:
+        def __init__(self, **kwargs) -> None:
+            self.display = kwargs["display"]
+
+    monkeypatch.setattr("core.runner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("core.runner.AgentLoop", FakeAgentLoop)
+
+    run = build_coding_task_run(
+        repo_root=tmp_path,
+        task="review this",
+        display=type("FakeDisplay", (), {"debug": False})(),
+        skill_name="architecture-review",
+    )
+
+    entries = read_entries(run.session_store.jsonl_path)
+    assert entries[0]["type"] == "run_context"
+    assert entries[0]["skill_name"] == "architecture-review"
+    assert entries[0]["allowed_tools"] == ["read_file", "run_command"]
+    assert entries[0]["prompt_overrides"] == [
+        "FINAL_SUMMARY_REQUIREMENTS",
+        "TASK_PROMPT",
+        "TOOL_USAGE_GUIDANCE",
+    ]
+
+
+def test_build_coding_task_run_records_default_run_context(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class FakeAgentLoop:
+        def __init__(self, **kwargs) -> None:
+            self.display = kwargs["display"]
+
+    monkeypatch.setattr("core.runner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("core.runner.AgentLoop", FakeAgentLoop)
+
+    run = build_coding_task_run(
+        repo_root=tmp_path,
+        task="fix this",
+        display=type("FakeDisplay", (), {"debug": False})(),
+    )
+
+    entries = read_entries(run.session_store.jsonl_path)
+    assert entries[0]["type"] == "run_context"
+    assert entries[0]["skill_name"] is None
+    assert entries[0]["allowed_tools"] == [
+        "apply_patch",
+        "read_file",
+        "run_command",
+        "write_file",
+    ]
+    assert entries[0]["prompt_overrides"] == []

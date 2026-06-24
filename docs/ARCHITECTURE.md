@@ -200,7 +200,7 @@ without copying `main.py` wiring. `main.py` remains the standalone CLI.
 
 ## Skill System
 
-Skills are currently built-in, file-backed prompt/tool profiles. Built-in
+Skills are currently built-in-only, file-backed prompt/tool profiles. Built-in
 skills live under:
 
 ```text
@@ -271,18 +271,62 @@ summary shape, but they cannot override the core one-tool-call contract,
 correction mechanics, compaction prompt, or final-response/no-tool mechanics.
 
 `TASK_PROMPT` and `FOLLOW_UP_PROMPT` may use `{task}`. The default
-`TASK_PROMPT` also renders section placeholders such as
-`{TOOL_USAGE_GUIDANCE}` and `{FINAL_SUMMARY_REQUIREMENTS}`. Prompt rendering
-uses explicit `.replace()` calls rather than `.format()` so user tasks
-containing braces do not break prompt rendering.
+`TASK_PROMPT` also renders section placeholders:
+
+- `{TOOL_USAGE_GUIDANCE}`
+- `{VISIBLE_NARRATION_REQUIREMENTS}`
+- `{REQUIRED_RESPONSE_FORMAT}`
+- `{FINAL_SUMMARY_REQUIREMENTS}`
+
+Prompt rendering uses explicit `.replace()` calls rather than `.format()` so
+user tasks or prompt text containing braces do not break rendering. The default
+follow-up prompt is generic and skill-friendly: it preserves the current task
+mode, active skill, workspace, constraints, and available tools.
+
+The active skill can be selected from the CLI. Current support is:
+
+```bash
+python main.py skills
+python main.py --skill <name>
+```
+
+Inside the interactive CLI:
+
+- `/skill` shows the current active skill and available built-in skills.
+- `/skill <name>` sets the active skill for future tasks and follow-ups in the
+  current CLI process.
+- `/skill none` clears the active skill.
+- `/skill default` is an alias for clearing the active skill.
+
+The active skill is process-local CLI state. Changing it does not rewrite older
+persisted transcript messages. New tasks and follow-ups use the currently
+active skill when they are submitted. The startup panel shows `Skill: <name>`
+when the CLI is launched with an active skill.
+
+Each new run and follow-up appends a non-transcript `run_context` event to
+`session.jsonl`. This records the active `skill_name`, the actual filtered
+`allowed_tools`, and the `prompt_overrides` for that run:
+
+```json
+{
+  "type": "run_context",
+  "skill_name": "architecture-review",
+  "allowed_tools": ["read_file", "run_command"],
+  "prompt_overrides": ["FINAL_SUMMARY_REQUIREMENTS", "TASK_PROMPT", "TOOL_USAGE_GUIDANCE"]
+}
+```
+
+`run_context` is debug metadata, not model memory. It is not replayed to the
+model, and `SessionStore.load_messages()` ignores non-message events.
+`python main.py show <session_id>` displays compact `[run context]` blocks so
+tool exposure and prompt overrides can be inspected after a run.
 
 The current built-in example is `architecture-review`, an inspection-only review
 skill. It allows only `read_file` and `run_command`, replaces `TASK_PROMPT`,
 replaces `FINAL_SUMMARY_REQUIREMENTS`, and appends `TOOL_USAGE_GUIDANCE`.
 
-User/custom skills are not implemented yet. Interactive `/skill` switching is
-planned next. New tools such as repo tree/search helpers are out of scope for
-this documentation pass.
+User/custom skills, desktop skill picker/API integration, and new discovery
+tools such as repo tree/search helpers are not implemented yet.
 
 ## Settings
 
@@ -362,6 +406,8 @@ Current commands:
 ```bash
 python main.py
 python main.py --cwd /path/to/project
+python main.py skills
+python main.py --skill architecture-review
 python main.py sessions
 python main.py show latest
 python main.py show <session_id>
@@ -377,7 +423,8 @@ python main.py mode yolo
 Running with no arguments starts an interactive prompt. A first task starts a
 new session; later tasks in the same process continue the active session as
 follow-ups unless the user enters `/new`. `/help` prints prompt help, and
-`/exit`, `exit`, or `quit` exits the interactive prompt.
+`/exit`, `exit`, or `quit` exits the interactive prompt. Interactive skill
+commands are `/skill`, `/skill <name>`, `/skill none`, and `/skill default`.
 
 `--cwd` selects the workspace/repo root. It defaults to the current directory
 and must point at an existing directory.
@@ -594,8 +641,8 @@ Each session folder contains:
 
 `metadata.json` stores run-level metadata: session id, timestamps, repo root,
 task, status, and active leaf id. `session.jsonl` stores append-only entries for
-messages and compaction events. Message entries include `id`, `parent_id`,
-`type`, `timestamp`, `message`, and optional `usage`.
+messages, compaction events, and run-context debug events. Message entries
+include `id`, `parent_id`, `type`, `timestamp`, `message`, and optional `usage`.
 
 Current session statuses are:
 
@@ -612,6 +659,8 @@ continue the same saved session. `latest` resolves through
 
 The saved-session viewer can list sessions and show message transcripts.
 Compaction events are not printed as transcript messages by the viewer.
+Run-context events are shown as compact `[run context]` blocks with the skill,
+filtered tools, and prompt overrides used for that run.
 
 `UndoStore` stores the latest undo buffer under:
 
@@ -762,6 +811,12 @@ layer for what happened, while model-native narration is encouraged by prompts.
 - Resume support is still primarily CLI/`main.py`-owned unless it is moved
   later.
 - JSONL/file event output is intentionally not implemented yet.
+- User/custom skills are not implemented yet.
+- Desktop skill picker/API integration is not implemented yet.
+- `allowed-tools: none` is not a supported special case.
+- New discovery tools such as repo tree/search helpers are not part of
+  Skills v1.
+- Run-context events are debug metadata, not model memory.
 - Future tool libraries should stay small per active agent/task, even if more
   tools exist globally.
 - Do not turn Code Squid into a broad framework prematurely.
