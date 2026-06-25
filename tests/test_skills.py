@@ -1,9 +1,12 @@
 from pathlib import Path
 
-from core.skills import parse_skill_file
+import pytest
+
+from core.skills import discover_builtin_skills, discover_skills, parse_skill_file
 
 
 def _write_skill(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
 
@@ -28,6 +31,8 @@ Focus on the requested bug.
     assert skill.allowed_tools == ("read_file", "apply_patch", "run_command")
     assert skill.instructions == "Focus on the requested bug."
     assert skill.path == path
+    assert skill.source == "builtin"
+    assert skill.editable is False
 
 
 def test_missing_required_skill_fields_fail(tmp_path: Path) -> None:
@@ -64,6 +69,96 @@ Review the code.
     skill = parse_skill_file(path)
 
     assert skill.allowed_tools == ()
+
+
+def test_allowed_tools_may_be_empty(tmp_path: Path) -> None:
+    path = _write_skill(
+        tmp_path / "SKILL.md",
+        """---
+name: review
+description: Review only.
+allowed-tools:
+---
+
+Review the code.
+""",
+    )
+
+    skill = parse_skill_file(path)
+
+    assert skill.allowed_tools == ()
+
+
+def test_allowed_tools_parse_yaml_style_list(tmp_path: Path) -> None:
+    path = _write_skill(
+        tmp_path / "SKILL.md",
+        """---
+name: review
+description: Review only.
+allowed-tools:
+  - read_file
+  - run_command
+---
+
+Review the code.
+""",
+    )
+
+    skill = parse_skill_file(path)
+
+    assert skill.allowed_tools == ("read_file", "run_command")
+
+
+def test_allowed_tools_list_item_must_be_list_syntax(tmp_path: Path) -> None:
+    path = _write_skill(
+        tmp_path / "SKILL.md",
+        """---
+name: review
+description: Review only.
+allowed-tools:
+  read_file
+---
+
+Review the code.
+""",
+    )
+
+    with pytest.raises(ValueError, match="invalid frontmatter list item"):
+        parse_skill_file(path)
+
+
+def test_allowed_tools_list_item_must_be_single_tool_name(tmp_path: Path) -> None:
+    path = _write_skill(
+        tmp_path / "SKILL.md",
+        """---
+name: review
+description: Review only.
+allowed-tools:
+  - read_file run_command
+---
+
+Review the code.
+""",
+    )
+
+    with pytest.raises(ValueError, match="allowed-tools list items must be single tool names"):
+        parse_skill_file(path)
+
+
+def test_invalid_frontmatter_line_fails(tmp_path: Path) -> None:
+    path = _write_skill(
+        tmp_path / "SKILL.md",
+        """---
+name: review
+description Review only.
+---
+
+Review the code.
+""",
+    )
+
+    with pytest.raises(ValueError, match="invalid frontmatter line"):
+        parse_skill_file(path)
 
 
 def test_parse_skill_prompt_section_overrides(tmp_path: Path) -> None:
@@ -126,6 +221,76 @@ def test_architecture_review_parses_without_follow_up_prompt_override() -> None:
     assert skill.prompt_sections["TASK_PROMPT"].mode == "replace"
     assert skill.prompt_sections["FINAL_SUMMARY_REQUIREMENTS"].mode == "replace"
     assert skill.prompt_sections["TOOL_USAGE_GUIDANCE"].mode == "append"
+
+
+def test_builtin_skills_are_still_discovered() -> None:
+    skills = discover_builtin_skills()
+
+    assert "architecture-review" in skills
+    assert skills["architecture-review"].source == "builtin"
+    assert skills["architecture-review"].editable is False
+
+
+def test_discover_skills_includes_builtin_and_user_skills(tmp_path: Path) -> None:
+    _write_skill(
+        tmp_path / "skills" / "builtin" / "architecture-review" / "SKILL.md",
+        """---
+name: architecture-review
+description: Review architecture.
+allowed-tools: read_file
+---
+
+Review architecture.
+""",
+    )
+    _write_skill(
+        tmp_path / "skills" / "user" / "my-skill" / "SKILL.md",
+        """---
+name: my-skill
+description: User skill.
+allowed-tools: run_command
+---
+
+Use my workflow.
+""",
+    )
+
+    skills = discover_skills(tmp_path / "skills")
+
+    assert set(skills) == {"architecture-review", "my-skill"}
+    assert skills["architecture-review"].source == "builtin"
+    assert skills["architecture-review"].editable is False
+    assert skills["my-skill"].source == "user"
+    assert skills["my-skill"].editable is True
+
+
+def test_discover_skills_preserves_builtin_on_duplicate_names(tmp_path: Path) -> None:
+    _write_skill(
+        tmp_path / "skills" / "builtin" / "architecture-review" / "SKILL.md",
+        """---
+name: architecture-review
+description: Built-in review.
+---
+
+Built-in instructions.
+""",
+    )
+    _write_skill(
+        tmp_path / "skills" / "user" / "architecture-review" / "SKILL.md",
+        """---
+name: architecture-review
+description: User review.
+---
+
+User instructions.
+""",
+    )
+
+    skills = discover_skills(tmp_path / "skills")
+
+    assert skills["architecture-review"].description == "Built-in review."
+    assert skills["architecture-review"].source == "builtin"
+    assert skills["architecture-review"].editable is False
 
 
 def test_unknown_prompt_section_override_fails(tmp_path: Path) -> None:

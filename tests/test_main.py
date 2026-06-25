@@ -264,7 +264,7 @@ def test_help_text_lists_new_friendly_modes() -> None:
     assert "  python main.py mode strict\n" in HELP_TEXT
     assert "  python main.py mode balanced\n" in HELP_TEXT
     assert "  python main.py mode yolo\n" in HELP_TEXT
-    assert "  /skill shows the active skill and available built-in skills.\n" in HELP_TEXT
+    assert "  /skill shows the active skill and available skills.\n" in HELP_TEXT
     assert "  /skill <name> sets the active skill for future tasks and follow-ups.\n" in HELP_TEXT
     assert "  /skill none clears the active skill.\n" in HELP_TEXT
     assert "  python main.py mode safe\n" not in HELP_TEXT

@@ -23,7 +23,7 @@ from core.compaction import Compactor
 from core.events import EventCallback
 from core.model_adapter import ModelAdapter
 from core.session import Session
-from core.skills import Skill, discover_builtin_skills
+from core.skills import Skill, discover_skills
 from core.tool_executor import ToolExecutor
 from core.tool_results import ToolResults
 from providers.factory import build_provider, tool_call_content_mode
@@ -179,7 +179,7 @@ def resolve_skill_tools(skill_name: str | None) -> tuple[Skill | None, dict]:
     if skill_name is None:
         return None, TOOLS
 
-    skills = discover_builtin_skills()
+    skills = discover_skills()
     skill = skills.get(skill_name)
     if skill is None:
         available = ", ".join(sorted(skills)) or "none"

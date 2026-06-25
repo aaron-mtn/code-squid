@@ -1,11 +1,13 @@
 # Code Squid Skills
 
-Code Squid skills are built-in prompt/tool profiles stored as `SKILL.md` files.
+Code Squid skills are file-backed prompt/tool profiles stored as `SKILL.md`
+files.
 
 ## Location
 
 ```text
 skills/builtin/<skill-name>/SKILL.md
+skills/user/<skill-name>/SKILL.md
 ```
 
 ## Frontmatter
@@ -107,7 +109,6 @@ Default/no skill = normal Code Squid coding behavior.
 
 ## Not implemented yet
 
-- User/custom skill directories
 - Desktop skill picker/API support
 - Skill builder
 - New skill-specific tools

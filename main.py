@@ -21,7 +21,7 @@ from core.runner import (
     startup_info,
 )
 from core.session import Session
-from core.skills import discover_builtin_skills
+from core.skills import discover_skills
 from storage.error_log import write_error_log
 from storage.session_index import latest_session_id, session_dir_for
 from storage.session_store import SessionStore
@@ -48,7 +48,7 @@ Code Squid help
 
 At the task prompt:
   Normal input runs a coding task.
-  /skill shows the active skill and available built-in skills.
+  /skill shows the active skill and available skills.
   /skill <name> sets the active skill for future tasks and follow-ups.
   /skill none clears the active skill.
   Enter sends.
@@ -101,7 +101,7 @@ def _format_skill_details(skill_name: str | None) -> list[str]:
     if skill_name is None:
         return ["Current skill: none"]
 
-    skill = discover_builtin_skills().get(skill_name)
+    skill = discover_skills().get(skill_name)
     lines = [f"Current skill: {skill_name}"]
     if skill is None:
         return lines
@@ -114,7 +114,7 @@ def _format_skill_details(skill_name: str | None) -> list[str]:
 
 
 def _format_available_skills() -> list[str]:
-    skills = discover_builtin_skills()
+    skills = discover_skills()
     if not skills:
         return ["Available skills:", "none"]
 
@@ -153,7 +153,7 @@ def _handle_skill_input(task: str, skill_name: str | None) -> str | None:
         print("Active skill cleared.")
         return None
 
-    skills = discover_builtin_skills()
+    skills = discover_skills()
     skill = skills.get(requested_skill)
     if skill is None:
         print(f"Unknown skill: {requested_skill}")

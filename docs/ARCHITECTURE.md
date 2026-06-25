@@ -200,11 +200,12 @@ without copying `main.py` wiring. `main.py` remains the standalone CLI.
 
 ## Skill System
 
-Skills are currently built-in-only, file-backed prompt/tool profiles. Built-in
-skills live under:
+Skills are file-backed prompt/tool profiles. Built-in and user skills live
+under:
 
 ```text
 skills/builtin/<skill-name>/SKILL.md
+skills/user/<skill-name>/SKILL.md
 ```
 
 Each skill is a `SKILL.md` file with simple frontmatter followed by Markdown
@@ -292,7 +293,7 @@ python main.py --skill <name>
 
 Inside the interactive CLI:
 
-- `/skill` shows the current active skill and available built-in skills.
+- `/skill` shows the current active skill and available skills.
 - `/skill <name>` sets the active skill for future tasks and follow-ups in the
   current CLI process.
 - `/skill none` clears the active skill.
@@ -321,11 +322,16 @@ model, and `SessionStore.load_messages()` ignores non-message events.
 `python main.py show <session_id>` displays compact `[run context]` blocks so
 tool exposure and prompt overrides can be inspected after a run.
 
+Discovered skills include source metadata: built-in skills have
+`source="builtin"` and `editable=false`; user skills have `source="user"` and
+`editable=true`. Both sources use the same parsing, prompt override, selection,
+and tool filtering path once discovered.
+
 The current built-in example is `architecture-review`, an inspection-only review
 skill. It allows only `read_file` and `run_command`, replaces `TASK_PROMPT`,
 replaces `FINAL_SUMMARY_REQUIREMENTS`, and appends `TOOL_USAGE_GUIDANCE`.
 
-User/custom skills, desktop skill picker/API integration, and new discovery
+Desktop skill picker/API integration, skill creation/editing, and new discovery
 tools such as repo tree/search helpers are not implemented yet.
 
 ## Settings
@@ -811,7 +817,8 @@ layer for what happened, while model-native narration is encouraged by prompts.
 - Resume support is still primarily CLI/`main.py`-owned unless it is moved
   later.
 - JSONL/file event output is intentionally not implemented yet.
-- User/custom skills are not implemented yet.
+- User skill discovery is implemented for `skills/user/*/SKILL.md`; skill
+  creation/editing is not implemented yet.
 - Desktop skill picker/API integration is not implemented yet.
 - `allowed-tools: none` is not a supported special case.
 - New discovery tools such as repo tree/search helpers are not part of

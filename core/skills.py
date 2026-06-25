@@ -1,6 +1,6 @@
 # core/skills.py
 
-"""Minimal built-in Code Squid skill loading."""
+"""Minimal Code Squid skill loading."""
 
 from __future__ import annotations
 
@@ -8,7 +8,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-BUILTIN_SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills" / "builtin"
+SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
+BUILTIN_SKILLS_DIR = SKILLS_DIR / "builtin"
+USER_SKILLS_DIR = SKILLS_DIR / "user"
 PROMPT_SECTION_MODES = {"replace", "append"}
 SUPPORTED_PROMPT_SECTIONS = {
     "SYSTEM_PROMPT_INTRO",
@@ -39,23 +41,24 @@ class Skill:
     instructions: str
     allowed_tools: tuple[str, ...]
     path: Path
+    source: str = "builtin"
+    editable: bool = False
     prompt_sections: dict[str, PromptSectionOverride] = field(default_factory=dict)
 
 
-def parse_skill_file(path: Path) -> Skill:
+def parse_skill_file(path: Path, *, source: str = "builtin", editable: bool = False) -> Skill:
     text = path.read_text(encoding="utf-8")
     frontmatter, instructions = _split_frontmatter(text, path)
     data = _parse_simple_frontmatter(frontmatter, path)
 
-    name = data.get("name", "").strip()
-    description = data.get("description", "").strip()
+    name = _frontmatter_scalar(data, "name").strip()
+    description = _frontmatter_scalar(data, "description").strip()
     if not name:
         raise ValueError(f"{path}: missing required frontmatter field: name")
     if not description:
         raise ValueError(f"{path}: missing required frontmatter field: description")
 
-    allowed_tools_text = data.get("allowed-tools", "").strip()
-    allowed_tools = tuple(allowed_tools_text.split()) if allowed_tools_text else ()
+    allowed_tools = _parse_allowed_tools(data.get("allowed-tools", ""), path)
 
     instructions, prompt_sections = _parse_prompt_section_overrides(instructions, path)
 
@@ -65,17 +68,31 @@ def parse_skill_file(path: Path) -> Skill:
         instructions=instructions.strip(),
         allowed_tools=allowed_tools,
         path=path,
+        source=source,
+        editable=editable,
         prompt_sections=prompt_sections,
     )
 
 
+def discover_skills(skills_dir: Path = SKILLS_DIR) -> dict[str, Skill]:
+    skills = {}
+    skills.update(_discover_skills_in(skills_dir / "builtin", source="builtin", editable=False))
+    for name, skill in _discover_skills_in(skills_dir / "user", source="user", editable=True).items():
+        skills.setdefault(name, skill)
+    return skills
+
+
 def discover_builtin_skills() -> dict[str, Skill]:
-    if not BUILTIN_SKILLS_DIR.exists():
+    return _discover_skills_in(BUILTIN_SKILLS_DIR, source="builtin", editable=False)
+
+
+def _discover_skills_in(directory: Path, *, source: str, editable: bool) -> dict[str, Skill]:
+    if not directory.exists():
         return {}
 
     skills = {}
-    for skill_file in sorted(BUILTIN_SKILLS_DIR.glob("*/SKILL.md")):
-        skill = parse_skill_file(skill_file)
+    for skill_file in sorted(directory.glob("*/SKILL.md")):
+        skill = parse_skill_file(skill_file, source=source, editable=editable)
         skills[skill.name] = skill
     return skills
 
@@ -92,12 +109,28 @@ def _split_frontmatter(text: str, path: Path) -> tuple[str, str]:
     return text[4:end], text[end + len(end_marker) :]
 
 
-def _parse_simple_frontmatter(frontmatter: str, path: Path) -> dict[str, str]:
-    data = {}
+def _parse_simple_frontmatter(frontmatter: str, path: Path) -> dict[str, str | list[str]]:
+    data: dict[str, str | list[str]] = {}
+    current_list_key: str | None = None
     for line_number, line in enumerate(frontmatter.splitlines(), start=2):
         stripped = line.strip()
         if not stripped:
             continue
+
+        if current_list_key is not None and line[:1].isspace():
+            if not stripped.startswith("- "):
+                raise ValueError(f"{path}:{line_number}: invalid frontmatter list item")
+            item = stripped[2:].strip().strip("\"'")
+            if not item:
+                raise ValueError(f"{path}:{line_number}: invalid empty frontmatter list item")
+            current_value = data[current_list_key]
+            if not isinstance(current_value, list):
+                current_value = []
+                data[current_list_key] = current_value
+            current_value.append(item)
+            continue
+
+        current_list_key = None
         if ":" not in stripped:
             raise ValueError(f"{path}:{line_number}: invalid frontmatter line")
         key, value = stripped.split(":", 1)
@@ -105,7 +138,27 @@ def _parse_simple_frontmatter(frontmatter: str, path: Path) -> dict[str, str]:
         if not key:
             raise ValueError(f"{path}:{line_number}: invalid empty frontmatter key")
         data[key] = value.strip().strip("\"'")
+        if not data[key]:
+            current_list_key = key
     return data
+
+
+def _frontmatter_scalar(data: dict[str, str | list[str]], key: str) -> str:
+    value = data.get(key, "")
+    if isinstance(value, list):
+        return ""
+    return value
+
+
+def _parse_allowed_tools(value: str | list[str], path: Path) -> tuple[str, ...]:
+    if isinstance(value, list):
+        invalid_items = [item for item in value if len(item.split()) != 1]
+        if invalid_items:
+            raise ValueError(f"{path}: allowed-tools list items must be single tool names")
+        return tuple(value)
+
+    allowed_tools_text = value.strip()
+    return tuple(allowed_tools_text.split()) if allowed_tools_text else ()
 
 
 def _parse_prompt_section_overrides(

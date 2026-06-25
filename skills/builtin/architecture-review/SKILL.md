@@ -1,7 +1,9 @@
 ---
 name: architecture-review
 description: Review architecture and design without modifying files.
-allowed-tools: read_file run_command
+allowed-tools:
+  - read_file
+  - run_command
 ---
 
 # Architecture Review
