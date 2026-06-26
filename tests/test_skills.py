@@ -29,6 +29,7 @@ Focus on the requested bug.
     assert skill.name == "bug-fix"
     assert skill.description == "Fix bugs with small targeted edits."
     assert skill.allowed_tools == ("read_file", "apply_patch", "run_command")
+    assert skill.allowed_tools_explicit is True
     assert skill.instructions == "Focus on the requested bug."
     assert skill.path == path
     assert skill.source == "builtin"
@@ -69,9 +70,10 @@ Review the code.
     skill = parse_skill_file(path)
 
     assert skill.allowed_tools == ()
+    assert skill.allowed_tools_explicit is False
 
 
-def test_allowed_tools_may_be_empty(tmp_path: Path) -> None:
+def test_allowed_tools_empty_block_is_explicit(tmp_path: Path) -> None:
     path = _write_skill(
         tmp_path / "SKILL.md",
         """---
@@ -87,6 +89,26 @@ Review the code.
     skill = parse_skill_file(path)
 
     assert skill.allowed_tools == ()
+    assert skill.allowed_tools_explicit is True
+
+
+def test_allowed_tools_empty_inline_list_is_explicit(tmp_path: Path) -> None:
+    path = _write_skill(
+        tmp_path / "SKILL.md",
+        """---
+name: review
+description: Review only.
+allowed-tools: []
+---
+
+Review the code.
+""",
+    )
+
+    skill = parse_skill_file(path)
+
+    assert skill.allowed_tools == ()
+    assert skill.allowed_tools_explicit is True
 
 
 def test_allowed_tools_parse_yaml_style_list(tmp_path: Path) -> None:

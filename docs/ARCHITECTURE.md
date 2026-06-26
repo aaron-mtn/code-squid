@@ -228,9 +228,21 @@ example:
 allowed-tools: read_file run_command
 ```
 
-If `allowed-tools` is missing or empty, the skill uses the default full tool
-set. Unknown tool names should fail clearly during run construction before any
-tool action is executed.
+`allowed-tools` has three current meanings:
+
+- omitted `allowed-tools` keeps the existing default/full tool set behavior.
+- explicit `allowed-tools: []` means the skill intentionally has no tools.
+- listed `allowed-tools` restricts the run to that tool set.
+
+Unknown tool names should fail clearly during run construction before any tool
+action is executed.
+
+Explicit no-tool skills are useful for future chat-only, planning-only,
+review-only, or explanation-only profiles, but the prompt and loop contract is
+not fully tool-aware yet. Prompt assembly and/or loop validation should become
+aware of empty active tool sets; no-tool skills likely need a no-tool/chat-style
+response contract, and non-final "exactly one tool call" requirements should not
+apply when the active tool set is empty.
 
 Code Squid supports normal Agent Skills-style Markdown instructions plus
 Code Squid-native prompt-section overrides. Overrides are written as Markdown

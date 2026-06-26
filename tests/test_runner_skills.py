@@ -54,6 +54,44 @@ def test_selecting_user_skill_uses_same_resolution_path(monkeypatch, tmp_path: P
     assert list(tools) == ["read_file"]
 
 
+def test_skill_with_explicit_empty_tools_resolves_to_no_tools(monkeypatch, tmp_path: Path) -> None:
+    skill = Skill(
+        name="chat-only",
+        description="Chat only.",
+        instructions="Do not use tools.",
+        allowed_tools=(),
+        allowed_tools_explicit=True,
+        path=tmp_path / "SKILL.md",
+    )
+
+    monkeypatch.setattr("core.runner.discover_skills", lambda: {"chat-only": skill})
+
+    selected_skill, tools = resolve_skill_tools("chat-only")
+    agent = CodingAgent("plan this", skill=selected_skill, tools=tools)
+
+    assert selected_skill is skill
+    assert tools == {}
+    assert agent.tool_definitions() == []
+
+
+def test_skill_with_omitted_tools_keeps_full_tool_default(monkeypatch, tmp_path: Path) -> None:
+    skill = Skill(
+        name="legacy",
+        description="Legacy default.",
+        instructions="Use default tools.",
+        allowed_tools=(),
+        allowed_tools_explicit=False,
+        path=tmp_path / "SKILL.md",
+    )
+
+    monkeypatch.setattr("core.runner.discover_skills", lambda: {"legacy": skill})
+
+    selected_skill, tools = resolve_skill_tools("legacy")
+
+    assert selected_skill is skill
+    assert list(tools) == ["read_file", "write_file", "apply_patch", "run_command"]
+
+
 def test_no_selected_skill_preserves_full_tool_behavior() -> None:
     skill, tools = resolve_skill_tools(None)
     agent = CodingAgent("do this", skill=skill, tools=tools)

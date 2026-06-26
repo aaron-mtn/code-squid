@@ -185,6 +185,9 @@ def resolve_skill_tools(skill_name: str | None) -> tuple[Skill | None, dict]:
         available = ", ".join(sorted(skills)) or "none"
         raise ValueError(f"Unknown skill: {skill_name}. Available skills: {available}")
 
+    if not skill.allowed_tools and getattr(skill, "allowed_tools_explicit", False):
+        return skill, {}
+
     if not skill.allowed_tools:
         return skill, TOOLS
 

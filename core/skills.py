@@ -41,6 +41,7 @@ class Skill:
     instructions: str
     allowed_tools: tuple[str, ...]
     path: Path
+    allowed_tools_explicit: bool = False
     source: str = "builtin"
     editable: bool = False
     prompt_sections: dict[str, PromptSectionOverride] = field(default_factory=dict)
@@ -58,6 +59,7 @@ def parse_skill_file(path: Path, *, source: str = "builtin", editable: bool = Fa
     if not description:
         raise ValueError(f"{path}: missing required frontmatter field: description")
 
+    allowed_tools_explicit = "allowed-tools" in data
     allowed_tools = _parse_allowed_tools(data.get("allowed-tools", ""), path)
 
     instructions, prompt_sections = _parse_prompt_section_overrides(instructions, path)
@@ -68,6 +70,7 @@ def parse_skill_file(path: Path, *, source: str = "builtin", editable: bool = Fa
         instructions=instructions.strip(),
         allowed_tools=allowed_tools,
         path=path,
+        allowed_tools_explicit=allowed_tools_explicit,
         source=source,
         editable=editable,
         prompt_sections=prompt_sections,
@@ -158,6 +161,8 @@ def _parse_allowed_tools(value: str | list[str], path: Path) -> tuple[str, ...]:
         return tuple(value)
 
     allowed_tools_text = value.strip()
+    if allowed_tools_text == "[]":
+        return ()
     return tuple(allowed_tools_text.split()) if allowed_tools_text else ()
 
 
