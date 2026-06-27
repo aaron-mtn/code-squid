@@ -205,6 +205,17 @@ def prompt_section(section_name: str, default: str, skill: Skill | None = None) 
     raise ValueError(f"Unsupported prompt section override mode: {override.mode}")
 
 
+def tool_usage_guidance(skill: Skill | None = None) -> str:
+    if skill is None:
+        return TOOL_USAGE_GUIDANCE
+
+    override = skill.prompt_sections.get("TOOL_USAGE_GUIDANCE")
+    if override is None:
+        return ""
+
+    return override.content
+
+
 def skill_prompt_block(skill: Skill | None = None) -> str:
     if skill is None:
         return ""
@@ -223,7 +234,7 @@ Skill instructions:
 def system_prompt(skill: Skill | None = None) -> str:
     skill_block = skill_prompt_block(skill)
     intro = prompt_section("SYSTEM_PROMPT_INTRO", SYSTEM_PROMPT_INTRO, skill)
-    tool_usage_guidance = prompt_section("TOOL_USAGE_GUIDANCE", TOOL_USAGE_GUIDANCE, skill)
+    tool_guidance = tool_usage_guidance(skill)
     final_summary_requirements = prompt_section(
         "FINAL_SUMMARY_REQUIREMENTS",
         FINAL_SUMMARY_REQUIREMENTS,
@@ -235,7 +246,7 @@ def system_prompt(skill: Skill | None = None) -> str:
 
 {skill_block}
 
-{tool_usage_guidance}
+{tool_guidance}
 
 {VISIBLE_NARRATION_REQUIREMENTS}
 
@@ -312,7 +323,7 @@ def task_prompt(task: str, skill: Skill | None = None) -> str:
         prompt.replace("{task}", task)
         .replace(
             "{TOOL_USAGE_GUIDANCE}",
-            prompt_section("TOOL_USAGE_GUIDANCE", TOOL_USAGE_GUIDANCE, skill),
+            tool_usage_guidance(skill),
         )
         .replace(
             "{VISIBLE_NARRATION_REQUIREMENTS}",

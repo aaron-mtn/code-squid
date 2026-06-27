@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from agent.coding import CodingAgent
-from agent.prompts import follow_up_prompt, task_prompt
+from agent.prompts import TOOL_USAGE_GUIDANCE, follow_up_prompt, system_prompt, task_prompt
 from core.session import Session
 from core.skills import PromptSectionOverride, Skill, parse_skill_file
 
@@ -310,6 +310,41 @@ def test_initial_prompt_includes_selected_skill_instructions() -> None:
     assert "Prefer small patches." in messages[0]["content"]
 
 
+def test_default_tool_usage_guidance_is_used_without_skill() -> None:
+    assert TOOL_USAGE_GUIDANCE in system_prompt()
+    assert TOOL_USAGE_GUIDANCE in task_prompt("fix bug")
+
+
+def test_active_skill_without_tool_usage_guidance_omits_default_guidance_from_system_prompt() -> None:
+    skill = Skill(
+        name="bug-fix",
+        description="Fix bugs with small targeted edits.",
+        instructions="Prefer small patches.",
+        allowed_tools=("read_file", "apply_patch", "run_command"),
+        path=Path("SKILL.md"),
+    )
+
+    prompt = system_prompt(skill)
+
+    assert "## Tool usage guidance" not in prompt
+    assert TOOL_USAGE_GUIDANCE not in prompt
+
+
+def test_active_skill_without_tool_usage_guidance_omits_default_guidance_from_task_prompt() -> None:
+    skill = Skill(
+        name="bug-fix",
+        description="Fix bugs with small targeted edits.",
+        instructions="Prefer small patches.",
+        allowed_tools=("read_file", "apply_patch", "run_command"),
+        path=Path("SKILL.md"),
+    )
+
+    prompt = task_prompt("fix bug", skill)
+
+    assert "## Tool usage guidance" not in prompt
+    assert TOOL_USAGE_GUIDANCE not in prompt
+
+
 def test_selected_skill_can_override_prompt_sections() -> None:
     skill = Skill(
         name="architecture-review",
@@ -340,6 +375,7 @@ def test_selected_skill_can_override_prompt_sections() -> None:
 
     assert messages[1]["content"] == "Review this code area: agent/"
     assert "Use inspection tools only." in messages[0]["content"]
+    assert TOOL_USAGE_GUIDANCE not in messages[0]["content"]
     assert "Write an architecture review." in messages[0]["content"]
     assert "write the final summary in simple Markdown" not in messages[0]["content"]
 
@@ -382,12 +418,62 @@ def test_default_task_prompt_renders_skill_section_overrides() -> None:
 
     prompt = task_prompt("fix bug", skill)
 
-    assert "## Tool usage guidance" in prompt
     assert "Use custom inspection guidance." in prompt
+    assert TOOL_USAGE_GUIDANCE not in prompt
     assert "Write a custom final summary." in prompt
     assert "write the final summary in simple Markdown" not in prompt
     assert "{TOOL_USAGE_GUIDANCE}" not in prompt
     assert "{FINAL_SUMMARY_REQUIREMENTS}" not in prompt
+
+
+def test_active_skill_tool_usage_replace_includes_only_custom_guidance() -> None:
+    skill = Skill(
+        name="focused-review",
+        description="Review with custom guidance.",
+        instructions="Use custom guidance.",
+        allowed_tools=("read_file",),
+        path=Path("SKILL.md"),
+        prompt_sections={
+            "TOOL_USAGE_GUIDANCE": PromptSectionOverride(
+                section="TOOL_USAGE_GUIDANCE",
+                mode="replace",
+                content="Use replacement inspection guidance.",
+            ),
+        },
+    )
+
+    system = system_prompt(skill)
+    task = task_prompt("fix bug", skill)
+
+    assert "Use replacement inspection guidance." in system
+    assert "Use replacement inspection guidance." in task
+    assert TOOL_USAGE_GUIDANCE not in system
+    assert TOOL_USAGE_GUIDANCE not in task
+
+
+def test_active_skill_tool_usage_append_includes_only_custom_guidance() -> None:
+    skill = Skill(
+        name="focused-review",
+        description="Review with custom guidance.",
+        instructions="Use custom guidance.",
+        allowed_tools=("read_file",),
+        path=Path("SKILL.md"),
+        prompt_sections={
+            "TOOL_USAGE_GUIDANCE": PromptSectionOverride(
+                section="TOOL_USAGE_GUIDANCE",
+                mode="append",
+                content="Use appended inspection guidance.",
+            ),
+        },
+    )
+
+    system = system_prompt(skill)
+    task = task_prompt("fix bug", skill)
+
+    assert "Use appended inspection guidance." in system
+    assert "Use appended inspection guidance." in task
+    assert TOOL_USAGE_GUIDANCE not in system
+    assert TOOL_USAGE_GUIDANCE not in task
 
 
 def test_selected_skill_can_override_follow_up_prompt() -> None:
