@@ -21,6 +21,7 @@ from core.agent_loop import AgentLoop, RunResult
 from core.approval import ApprovalPolicy
 from core.compaction import Compactor
 from core.events import EventCallback
+from core.hooks import HookRunner
 from core.model_adapter import ModelAdapter
 from core.session import Session
 from core.skills import Skill, discover_skills
@@ -56,6 +57,8 @@ def run_coding_task(
     settings: Settings | None = None,
     display: TerminalDisplay | None = None,
     skill_name: str | None = None,
+    hooks: list[object] | None = None,
+    hook_runner: HookRunner | None = None,
 ) -> RunResult:
     """Simple call-and-run entry point for a new coding task.
 
@@ -70,6 +73,8 @@ def run_coding_task(
         settings=settings,
         display=display,
         skill_name=skill_name,
+        hooks=hooks,
+        hook_runner=hook_runner,
     )
     run.loop.display.run_started()
     return run.loop.run()
@@ -84,6 +89,8 @@ def build_coding_task_run(
     settings: Settings | None = None,
     display: TerminalDisplay | None = None,
     skill_name: str | None = None,
+    hooks: list[object] | None = None,
+    hook_runner: HookRunner | None = None,
 ) -> CodingTaskRun:
     """Construct a new coding-task run without starting it.
 
@@ -101,6 +108,7 @@ def build_coding_task_run(
     skill, active_tools = resolve_skill_tools(skill_name)
     append_run_context(session_store, skill, active_tools)
     agent = CodingAgent(task=task, skill=skill, tools=active_tools)
+    hook_runner = hook_runner if hook_runner is not None else HookRunner(hooks)
     loop = build_agent_loop(
         repo_root=repo_root,
         session=session,
@@ -112,6 +120,7 @@ def build_coding_task_run(
         tools=active_tools,
         on_event=on_event,
         should_cancel=should_cancel,
+        hook_runner=hook_runner,
     )
 
     return CodingTaskRun(
@@ -133,6 +142,8 @@ def build_agent_loop(
     tools: dict | None = None,
     on_event: EventCallback | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    hooks: list[object] | None = None,
+    hook_runner: HookRunner | None = None,
 ) -> AgentLoop:
     """Build the shared provider/model/tool/approval/compaction/loop wiring."""
 
@@ -157,6 +168,7 @@ def build_agent_loop(
         mode=settings.runtime.approval_mode,
         prompter=display,
     )
+    hook_runner = hook_runner if hook_runner is not None else HookRunner(hooks)
 
     return AgentLoop(
         session=session,
@@ -172,6 +184,7 @@ def build_agent_loop(
         stream_assistant_text=settings.runtime.stream_assistant_text,
         on_event=on_event,
         should_cancel=should_cancel,
+        hook_runner=hook_runner,
     )
 
 

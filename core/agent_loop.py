@@ -6,6 +6,12 @@ from typing import Any, Callable, Literal
 from core.approval import ApprovalPolicy, denied_result
 from core.command_safety import guarded_run_command_reason
 from core.events import EventCallback, emit_event
+from core.hooks import (
+    BeforeModelTurnContext,
+    BeforeRunContext,
+    HookRunner,
+    PromptContextBlock,
+)
 from core.workspace_boundary import workspace_boundary_reason
 
 
@@ -48,6 +54,7 @@ class AgentLoop:
         # instead of scraping human-facing output.
         on_event: EventCallback | None = None,
         should_cancel: Callable[[], bool] | None = None,
+        hook_runner: HookRunner | None = None,
     ) -> None:
         self.session = session
         self.model_adapter = model_adapter
@@ -62,6 +69,8 @@ class AgentLoop:
         self.stream_assistant_text = stream_assistant_text
         self.on_event = on_event
         self.should_cancel = should_cancel or (lambda: False)
+        self.hook_runner = hook_runner if hook_runner is not None else HookRunner()
+        self._run_context_blocks: list[PromptContextBlock] = []
 
     def _check_cancelled(self) -> None:
         if self.should_cancel():
@@ -85,6 +94,26 @@ class AgentLoop:
 
     def _user_instruction_message(self, instruction: str) -> dict[str, str]:
         return {"role": "user", "content": instruction}
+
+    def _context_message(self, blocks) -> dict[str, str] | None:
+        if not blocks:
+            return None
+
+        parts = ["# Additional Context For This Turn"]
+
+        for block in blocks:
+            title = block.title.strip() or "Context"
+            source = f" ({block.source})" if block.source else ""
+            body = block.body.strip()
+            if body:
+                parts.append(f"\n## {title}{source}\n{body}")
+
+        content = "\n".join(parts).strip()
+
+        if content == "# Additional Context For This Turn":
+            return None
+
+        return {"role": "user", "content": content}
 
     # Update durable session status when persistence is wired in.
     def _update_status(self, status: str) -> None:
@@ -137,10 +166,14 @@ class AgentLoop:
         supports_streaming = getattr(self.model_adapter, "supports_streaming", None)
         return callable(supports_streaming) and bool(supports_streaming())
 
-    def _respond(self, tool_definitions: list[dict]) -> dict:
+    def _respond(self, tool_definitions: list[dict], extra_messages=None) -> dict:
+        messages = self.session.messages
+        if extra_messages:
+            messages = [*messages, *extra_messages]
+
         if not self._should_stream_assistant_text():
             return self.model_adapter.respond(
-                messages=self.session.messages,
+                messages=messages,
                 tool_definitions=tool_definitions,
             )
 
@@ -166,7 +199,7 @@ class AgentLoop:
             self._emit_event(event)
 
         return self.model_adapter.respond_streaming(
-            messages=self.session.messages,
+            messages=messages,
             tool_definitions=tool_definitions,
             on_text_delta=on_text_delta,
             on_tool_preparing=on_tool_preparing,
@@ -182,6 +215,20 @@ class AgentLoop:
             return
 
         self._add_messages(*self.agent.initial_messages())
+
+    def _allowed_tools_from_definitions(self, tool_definitions: list[dict]) -> tuple[str, ...]:
+        names = []
+        for definition in tool_definitions:
+            if not isinstance(definition, dict):
+                return ()
+            name = definition.get("name")
+            if not isinstance(name, str):
+                function = definition.get("function")
+                if isinstance(function, dict):
+                    name = function.get("name")
+            if isinstance(name, str):
+                names.append(name)
+        return tuple(names)
 
     # Run the agent loop until the agent says it should stop.
     # Each loop iteration:
@@ -208,6 +255,33 @@ class AgentLoop:
                     "task": getattr(self.agent, "task", ""),
                 }
             )
+            tool_definitions = self.agent.tool_definitions()
+            before_run = self.hook_runner.before_run(
+                BeforeRunContext(
+                    session_id=self._session_id(),
+                    repo_root=str(self.session.repo_root),
+                    task=getattr(self.agent, "task", ""),
+                    skill_name=getattr(self.agent, "skill_name", None),
+                    allowed_tools=self._allowed_tools_from_definitions(tool_definitions),
+                )
+            )
+            if before_run.block:
+                reason = (
+                    before_run.reason
+                    or before_run.guidance
+                    or "blocked by before_run hook"
+                )
+                self._update_status("failed")
+                self._emit_event(
+                    {
+                        "type": "run_failed",
+                        "status": "failed",
+                        "reason": reason,
+                    }
+                )
+                self._emit_event({"type": "run_finished", "status": "failed"})
+                return RunResult(status="failed", reason=reason)
+            self._run_context_blocks = list(before_run.context_blocks)
 
             consecutive_invalid_replies = 0
             stopped_after_repeated_invalid_replies = False
@@ -238,7 +312,23 @@ class AgentLoop:
                 # Ask the model for the next assistant reply and any tool actions.
                 self.display.thinking()
                 self._check_cancelled()
-                reply = self._respond(self.agent.tool_definitions())
+                turn_context_blocks = self.hook_runner.before_model_turn(
+                    BeforeModelTurnContext(
+                        session_id=self._session_id(),
+                        repo_root=str(self.session.repo_root),
+                        task=getattr(self.agent, "task", ""),
+                        messages=tuple(self.session.messages),
+                        tool_steps_used=tool_steps_used,
+                    )
+                )
+                context_message = self._context_message(
+                    [
+                        *self._run_context_blocks,
+                        *turn_context_blocks,
+                    ]
+                )
+                extra_messages = [context_message] if context_message is not None else None
+                reply = self._respond(tool_definitions, extra_messages=extra_messages)
                 self._check_cancelled()
 
                 self.display.debug_reply(reply)
