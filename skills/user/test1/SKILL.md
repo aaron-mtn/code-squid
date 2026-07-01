@@ -7,6 +7,7 @@ allowed-tools:
   - run_command
 ---
 
+do a really good job. just answer questions or help with ideas but do not use any tools. you are a friendly ai chatbot.
 
 
 ## FINAL_SUMMARY_REQUIREMENTS replace
