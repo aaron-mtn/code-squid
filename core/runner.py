@@ -21,6 +21,7 @@ from core.agent_loop import AgentLoop, RunResult
 from core.approval import ApprovalPolicy
 from core.compaction import Compactor
 from core.events import EventCallback
+from core.hook_loader import load_user_hooks
 from core.hooks import HookRunner
 from core.model_adapter import ModelAdapter
 from core.session import Session
@@ -59,6 +60,7 @@ def run_coding_task(
     skill_name: str | None = None,
     hooks: list[object] | None = None,
     hook_runner: HookRunner | None = None,
+    include_user_hooks: bool = False,
 ) -> RunResult:
     """Simple call-and-run entry point for a new coding task.
 
@@ -75,6 +77,7 @@ def run_coding_task(
         skill_name=skill_name,
         hooks=hooks,
         hook_runner=hook_runner,
+        include_user_hooks=include_user_hooks,
     )
     run.loop.display.run_started()
     return run.loop.run()
@@ -91,6 +94,7 @@ def build_coding_task_run(
     skill_name: str | None = None,
     hooks: list[object] | None = None,
     hook_runner: HookRunner | None = None,
+    include_user_hooks: bool = False,
 ) -> CodingTaskRun:
     """Construct a new coding-task run without starting it.
 
@@ -108,7 +112,11 @@ def build_coding_task_run(
     skill, active_tools = resolve_skill_tools(skill_name)
     append_run_context(session_store, skill, active_tools)
     agent = CodingAgent(task=task, skill=skill, tools=active_tools)
-    hook_runner = hook_runner if hook_runner is not None else HookRunner(hooks)
+    hook_runner = build_hook_runner(
+        hooks=hooks,
+        hook_runner=hook_runner,
+        include_user_hooks=include_user_hooks,
+    )
     loop = build_agent_loop(
         repo_root=repo_root,
         session=session,
@@ -144,6 +152,7 @@ def build_agent_loop(
     should_cancel: Callable[[], bool] | None = None,
     hooks: list[object] | None = None,
     hook_runner: HookRunner | None = None,
+    include_user_hooks: bool = False,
 ) -> AgentLoop:
     """Build the shared provider/model/tool/approval/compaction/loop wiring."""
 
@@ -168,7 +177,11 @@ def build_agent_loop(
         mode=settings.runtime.approval_mode,
         prompter=display,
     )
-    hook_runner = hook_runner if hook_runner is not None else HookRunner(hooks)
+    hook_runner = build_hook_runner(
+        hooks=hooks,
+        hook_runner=hook_runner,
+        include_user_hooks=include_user_hooks,
+    )
 
     return AgentLoop(
         session=session,
@@ -186,6 +199,22 @@ def build_agent_loop(
         should_cancel=should_cancel,
         hook_runner=hook_runner,
     )
+
+
+def build_hook_runner(
+    *,
+    hooks: list[object] | None = None,
+    hook_runner: HookRunner | None = None,
+    include_user_hooks: bool = False,
+) -> HookRunner:
+    if hook_runner is not None:
+        return hook_runner
+
+    combined_hooks = list(hooks or [])
+    if include_user_hooks:
+        combined_hooks.extend(load_user_hooks())
+
+    return HookRunner(combined_hooks)
 
 
 def resolve_skill_tools(skill_name: str | None) -> tuple[Skill | None, dict]:
