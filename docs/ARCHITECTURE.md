@@ -59,13 +59,15 @@ machine-readable runtime facts.
 - `core/`
   - Generic runtime machinery.
   - `agent_loop.py` owns turn flow, invalid-reply retry handling, compaction
-    hooks, approval gating, tool execution sequencing, transcript writes, and
-    session status updates. It also emits compact runtime events through an
-    optional `on_event` callback.
-  - `events.py` owns the tiny best-effort event callback helper.
+    hooks, hook call placement, approval gating, tool execution sequencing,
+    transcript writes, and session status updates. It also emits compact
+    runtime events through an optional `on_event` callback.
+  - `events.py` owns the tiny best-effort observer callback helper.
+  - `hooks.py` owns hook context/decision dataclasses and `HookRunner`.
   - `runner.py` owns reusable coding-task run wiring for Python callers and the
-    CLI new-task flow. It wires the selected provider into the model adapter
-    but does not own provider-specific construction details.
+    CLI new-task flow. It wires optional hooks or a `HookRunner`, and wires the
+    selected provider into the model adapter but does not own provider-specific
+    construction details.
   - `session.py` owns in-memory transcript state and lightweight read/write
     side-effect tracking.
   - `model_adapter.py` owns provider response normalization, tool-call parsing,
@@ -165,6 +167,116 @@ Event payloads should stay compact. They must not include raw file contents,
 full command output, prompts, provider payloads, API keys, headers, or secrets.
 
 Callback delivery is best-effort. Observer failures must not crash the run.
+
+## Hooks And Interceptors
+
+Hooks are minimal in-process extension seams for hosts that need to influence a
+run at specific lifecycle points. They are not a marketplace, plugin ecosystem,
+pack system, settings system, or user hook discovery mechanism. Current hooks
+are Python objects passed by callers through `core.runner` and `AgentLoop`
+wiring. Code Squid core calls supported hook methods directly as the loop runs.
+
+Hooks are deliberately narrower than passing whole runtime objects around. They
+receive typed context dataclasses and return structured decisions or context.
+They should not receive `AgentLoop`, `SessionStore`, `ToolExecutor`, or
+`ModelAdapter` instances.
+
+Events:
+
+- observe what happened
+- one-way callback
+- best-effort
+- cannot change behavior
+- failures swallowed
+
+Hooks:
+
+- run at specific lifecycle seams
+- return structured decisions/context
+- can influence the current run within narrow limits
+- failures are not swallowed
+- no disk loading or plugin registry yet
+
+### before_run
+
+Runs once after the initial transcript exists and the `run_started` event has
+been emitted, before the first model call.
+
+Can block the run or add run-level context blocks. A blocked run becomes a
+failed run and still reaches the normal `run_finished` handoff.
+
+### before_model_turn
+
+Runs before each model request.
+
+Can add transient prompt/context blocks. This context is model-visible for that
+request, but is not appended to `session.messages` and is not persisted.
+
+### before_tool_execute
+
+Runs after the model response has been normalized and validated as a real tool
+action, before workspace checks, guarded command checks, approval, and
+execution.
+
+Can block, mutate the normalized action, or add approval reasons. It does not
+run for narration-only invalid replies. Assistant narration/action-note text is
+not treated as tool execution; only normalized `reply["actions"]` entries count
+as tool actions.
+
+### tool_result
+
+Runs after a tool result exists, including executed, denied, or blocked results,
+before display/events/transcript formatting.
+
+Can modify, redact, or summarize the result before the model sees it.
+
+### before_accept_final
+
+Runs only after a no-tool assistant reply has passed existing final validation
+as a final candidate, before final display, `final_message` event, transcript
+storage, and completion.
+
+Can block finalization by adding guidance for the model to continue. Can append
+a report note to an accepted final.
+
+### run_finished
+
+Runs after a terminal state is reached: `complete`, `failed`, or `interrupted`.
+
+Returns structured follow-up requests through `RunResult.follow_up_requests`.
+It does not directly start another run. This is a handoff seam for
+hosts/orchestrators such as Desktop or a future Squid OS.
+
+The compact loop shape is:
+
+```text
+model request
+-> validate reply
+-> invalid replies use correction path
+-> final candidates go through before_accept_final
+-> valid tool actions go through before_tool_execute
+-> approval/execution
+-> tool_result
+-> transcript update
+-> terminal status
+-> run_finished handoff
+```
+
+`core/hooks.py` owns the hook context and decision dataclasses plus
+`HookRunner`. `core/agent_loop.py` owns where hook calls happen in the loop.
+`core/runner.py` wires optional `hooks` or an explicit `hook_runner`.
+`core/events.py` remains observer-only.
+
+Known limitations:
+
+- no hook file loading yet
+- no hook builder yet
+- no pack import/export yet
+- no settings-driven hook activation yet
+- hooks are in-process developer/host-provided objects
+- future user-loaded hooks will need review/enable/disable/safety boundaries
+- `run_finished` follow-up requests are returned to the host; core does not
+  orchestrate them
 
 ## Runner / Python Wrapping
 
