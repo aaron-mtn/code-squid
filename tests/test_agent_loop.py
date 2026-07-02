@@ -922,6 +922,7 @@ def test_tool_result_messages_are_persisted() -> None:
 
 
 def test_approval_denial_does_not_execute_tool_action() -> None:
+    events = []
     session, tool_executor, _, _ = run_loop(
         [
             reply(
@@ -934,10 +935,16 @@ def test_approval_denial_does_not_execute_tool_action() -> None:
             "always",
             prompter=FakePrompter(ApprovalDecision(approved=False)),
         ),
+        on_event=events.append,
     )
 
     assert tool_executor.actions == []
     assert session.messages[-1]["content"] == "TASK COMPLETE"
+    event_types = [event["type"] for event in events]
+    assert "tool_started" not in event_types
+    tool_finished = next(event for event in events if event["type"] == "tool_finished")
+    assert tool_finished["ok"] is False
+    assert tool_finished["tool_call_id"] == "call_1"
 
 
 def test_guarded_allows_inside_workspace_read_file_without_approval(tmp_path) -> None:
@@ -1464,7 +1471,7 @@ def test_event_order_with_persistence() -> None:
     # With a session_store, _ensure_initial_messages appends the system message first.
     # Expected order around the tool-call turn:
     #   ... append_message (system), run_started,
-    #       assistant_message, tool_started, append_message (assistant),
+    #       assistant_message, append_message (assistant), tool_started,
     #       tool_finished, append_message (tool result),
     #       final_message, append_message (TASK COMPLETE),
     #       run_finished
@@ -1472,9 +1479,11 @@ def test_event_order_with_persistence() -> None:
     # The first turn with actions:
     asst_idx = event_types.index("assistant_message")
     ts_idx = event_types.index("tool_started")
-    # The first append_message after tool_started is the assistant message persist
-    am_idx = next(i for i in range(ts_idx + 1, len(event_types)) if event_types[i] == "append_message")
+    # The first append_message after assistant_message is the assistant message persist.
+    am_idx = next(
+        i for i in range(asst_idx + 1, len(event_types)) if event_types[i] == "append_message"
+    )
     tf_idx = event_types.index("tool_finished")
     assert asst_idx < ts_idx, "assistant_message must come before tool_started"
-    assert ts_idx < am_idx, "tool_started must come before assistant message persistence"
+    assert am_idx < ts_idx, "assistant message persistence must come before tool_started"
     assert ts_idx < tf_idx, "tool_started must come before tool_finished"

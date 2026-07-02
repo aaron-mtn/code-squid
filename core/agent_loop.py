@@ -9,8 +9,10 @@ from core.events import EventCallback, emit_event
 from core.hooks import (
     BeforeModelTurnContext,
     BeforeRunContext,
+    BeforeToolExecuteContext,
     HookRunner,
     PromptContextBlock,
+    ToolResultContext,
 )
 from core.workspace_boundary import workspace_boundary_reason
 
@@ -393,16 +395,6 @@ class AgentLoop:
                             "text": assistant_content,
                         }
                     )
-                    # tool_started means "validated tool action pending/active", not
-                    # necessarily that execute() has been entered.
-                    for action in reply["actions"]:
-                        self._check_cancelled()
-                        self._emit_event(
-                            {
-                                "type": "tool_started",
-                                **self._action_event_fields(action),
-                            }
-                        )
                 else:
                     self.display.final_message(assistant_content)
                     self._check_cancelled()
@@ -417,39 +409,83 @@ class AgentLoop:
                 self._add_message(reply["message"], usage=reply.get("usage"))
 
                 # Execute each requested tool action and collect the raw results.
+                executed_actions = []
                 results = []
                 approval_instructions = []
                 for action in reply["actions"]:
                     self._check_cancelled()
-                    workspace_boundary_reason_value = self._workspace_boundary_reason(
-                        action
+                    tool_decision = self.hook_runner.before_tool_execute(
+                        BeforeToolExecuteContext(
+                            session_id=self._session_id(),
+                            repo_root=str(self.session.repo_root),
+                            action=action,
+                            tool_steps_used=tool_steps_used,
+                        )
                     )
-                    approval_reason = (
-                        workspace_boundary_reason_value
-                        or self._guarded_run_command_reason(action)
-                    )
-                    approval_action = (
-                        {**action, "approval_reason": approval_reason}
-                        if approval_reason is not None
-                        else action
-                    )
-                    self._check_cancelled()
-                    decision = self.approval_policy.check(approval_action)
-                    self._check_cancelled()
-                    if decision.approved:
-                        execute_action = (
-                            {**action, "outside_workspace_approved": True}
-                            if workspace_boundary_reason_value is not None
+                    if tool_decision.block:
+                        action = tool_decision.action or action
+                        reason = (
+                            tool_decision.reason
+                            or tool_decision.guidance
+                            or "blocked by before_tool_execute hook"
+                        )
+                        result = {
+                            "ok": False,
+                            "error": "blocked_by_hook",
+                            "reason": reason,
+                            "guidance": tool_decision.guidance,
+                        }
+                        approval_action = action
+                    else:
+                        action = tool_decision.action or action
+                        workspace_boundary_reason_value = self._workspace_boundary_reason(
+                            action
+                        )
+                        approval_reasons = [
+                            tool_decision.approval_reason,
+                            workspace_boundary_reason_value,
+                            self._guarded_run_command_reason(action),
+                        ]
+                        approval_reason = "; ".join(
+                            reason for reason in approval_reasons if reason
+                        ) or None
+                        approval_action = (
+                            {**action, "approval_reason": approval_reason}
+                            if approval_reason is not None
                             else action
                         )
-                        self.display.action_started(approval_action)
                         self._check_cancelled()
-                        result = self.tool_executor.execute(execute_action)
+                        decision = self.approval_policy.check(approval_action)
                         self._check_cancelled()
-                    else:
-                        result = denied_result(action, decision.reason)
-                        if decision.instruction.strip():
-                            approval_instructions.append(decision.instruction)
+                        if decision.approved:
+                            execute_action = (
+                                {**action, "outside_workspace_approved": True}
+                                if workspace_boundary_reason_value is not None
+                                else action
+                            )
+                            self.display.action_started(approval_action)
+                            self._check_cancelled()
+                            self._emit_event(
+                                {
+                                    "type": "tool_started",
+                                    **self._action_event_fields(action),
+                                }
+                            )
+                            self._check_cancelled()
+                            result = self.tool_executor.execute(execute_action)
+                            self._check_cancelled()
+                        else:
+                            result = denied_result(action, decision.reason)
+                            if decision.instruction.strip():
+                                approval_instructions.append(decision.instruction)
+                    result = self.hook_runner.tool_result(
+                        ToolResultContext(
+                            session_id=self._session_id(),
+                            repo_root=str(self.session.repo_root),
+                            action=action,
+                            result=result,
+                        )
+                    )
                     self.display.tool_result(approval_action, result)
                     self._check_cancelled()
                     self._emit_event(
@@ -459,11 +495,12 @@ class AgentLoop:
                             **self._action_event_fields(action),
                         }
                     )
+                    executed_actions.append(action)
                     results.append(result)
 
                 # Convert tool results into transcript messages and store them.
                 result_messages = self.tool_results.messages_from_action_results(
-                    reply["actions"],
+                    executed_actions,
                     results,
                 )
                 self._check_cancelled()

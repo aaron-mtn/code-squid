@@ -34,11 +34,36 @@ class BeforeModelTurnContext:
 
 
 @dataclass(frozen=True)
+class BeforeToolExecuteContext:
+    session_id: str | None
+    repo_root: str
+    action: dict[str, Any]
+    tool_steps_used: int
+
+
+@dataclass(frozen=True)
+class ToolResultContext:
+    session_id: str | None
+    repo_root: str
+    action: dict[str, Any]
+    result: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class RunHookDecision:
     block: bool = False
     reason: str = ""
     guidance: str = ""
     context_blocks: tuple[PromptContextBlock, ...] = ()
+
+
+@dataclass(frozen=True)
+class ToolHookDecision:
+    block: bool = False
+    reason: str = ""
+    guidance: str = ""
+    action: dict[str, Any] | None = None
+    approval_reason: str = ""
 
 
 class HookRunner:
@@ -84,6 +109,71 @@ class HookRunner:
 
         return context_blocks
 
+    def before_tool_execute(self, ctx: BeforeToolExecuteContext) -> ToolHookDecision:
+        action = ctx.action
+        approval_reasons: list[str] = []
+
+        for hook in self.hooks:
+            handler = getattr(hook, "before_tool_execute", None)
+            if handler is None:
+                continue
+
+            decision = handler(
+                BeforeToolExecuteContext(
+                    session_id=ctx.session_id,
+                    repo_root=ctx.repo_root,
+                    action=action,
+                    tool_steps_used=ctx.tool_steps_used,
+                )
+            )
+            if decision is None:
+                continue
+
+            if decision.approval_reason:
+                approval_reasons.append(decision.approval_reason)
+            if decision.block:
+                return ToolHookDecision(
+                    block=True,
+                    reason=decision.reason,
+                    guidance=decision.guidance,
+                    action=(
+                        _preserve_tool_call_id(action, decision.action)
+                        if decision.action is not None
+                        else action
+                    ),
+                    approval_reason="; ".join(approval_reasons),
+                )
+            if decision.action is not None:
+                action = _preserve_tool_call_id(action, decision.action)
+
+        return ToolHookDecision(
+            action=action,
+            approval_reason="; ".join(approval_reasons),
+        )
+
+    def tool_result(self, ctx: ToolResultContext) -> dict[str, Any]:
+        result = ctx.result
+
+        for hook in self.hooks:
+            handler = getattr(hook, "tool_result", None)
+            if handler is None:
+                continue
+
+            hook_result = handler(
+                ToolResultContext(
+                    session_id=ctx.session_id,
+                    repo_root=ctx.repo_root,
+                    action=ctx.action,
+                    result=result,
+                )
+            )
+            if hook_result is None:
+                continue
+
+            result = hook_result
+
+        return result
+
 
 def _prompt_context_blocks(value: object) -> tuple[PromptContextBlock, ...]:
     if isinstance(value, PromptContextBlock):
@@ -93,3 +183,10 @@ def _prompt_context_blocks(value: object) -> tuple[PromptContextBlock, ...]:
         return tuple(value)
 
     return ()
+
+
+def _preserve_tool_call_id(previous: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
+    if "tool_call_id" not in previous:
+        return action
+
+    return {**action, "tool_call_id": previous["tool_call_id"]}
