@@ -1,8 +1,10 @@
 from core.agent_loop import AgentLoop, RunResult
 from core.hooks import (
+    BeforeAcceptFinalContext,
     BeforeModelTurnContext,
     BeforeRunContext,
     BeforeToolExecuteContext,
+    FinalHookDecision,
     HookRunner,
     PromptContextBlock,
     RunHookDecision,
@@ -35,10 +37,10 @@ class FakeAgent:
 class FakeModelAdapter:
     def __init__(self, reply: dict | None = None) -> None:
         self.calls = []
-        self.reply = reply or {
+        self.replies = [reply or {
             "message": {"role": "assistant", "content": "TASK COMPLETE"},
             "actions": [],
-        }
+        }]
 
     def respond(self, messages: list[dict], tool_definitions: list[dict]) -> dict:
         self.calls.append(
@@ -47,7 +49,15 @@ class FakeModelAdapter:
                 "tool_definitions": tool_definitions,
             }
         )
-        return self.reply
+        if len(self.calls) <= len(self.replies):
+            return self.replies[len(self.calls) - 1]
+        return self.replies[-1]
+
+
+class SequenceModelAdapter(FakeModelAdapter):
+    def __init__(self, replies: list[dict]) -> None:
+        super().__init__(replies[0])
+        self.replies = replies
 
 
 class FakeToolExecutor:
@@ -82,6 +92,8 @@ class NullDisplay:
     debug = False
 
     def __init__(self) -> None:
+        self.final_messages = []
+        self.rejected_replies = []
         self.tool_results = []
 
     def thinking(self) -> None:
@@ -91,10 +103,13 @@ class NullDisplay:
         pass
 
     def final_message(self, content: str) -> None:
-        pass
+        self.final_messages.append(content)
 
     def assistant_message(self, content: str) -> None:
         pass
+
+    def reply_rejected(self, reason: str) -> None:
+        self.rejected_replies.append(reason)
 
     def action_started(self, action: dict) -> None:
         pass
@@ -103,7 +118,7 @@ class NullDisplay:
         self.tool_results.append((action, result))
 
 
-def build_loop(hook_runner=None, on_event=None, model_reply=None):
+def build_loop(hook_runner=None, on_event=None, model_reply=None, agent=None):
     session = Session(repo_root=None)
     model_adapter = FakeModelAdapter(model_reply)
     session_store = FakeSessionStore()
@@ -113,13 +128,31 @@ def build_loop(hook_runner=None, on_event=None, model_reply=None):
         model_adapter=model_adapter,
         tool_executor=tool_executor,
         tool_results=FakeToolResults(),
-        agent=FakeAgent(),
+        agent=agent or FakeAgent(),
         display=NullDisplay(),
         session_store=session_store,
         on_event=on_event,
         hook_runner=hook_runner,
     )
     return loop, session, model_adapter, session_store, tool_executor
+
+
+def build_loop_with_model(model_adapter, hook_runner=None, on_event=None, agent=None):
+    session = Session(repo_root=None)
+    session_store = FakeSessionStore()
+    tool_executor = FakeToolExecutor()
+    loop = AgentLoop(
+        session=session,
+        model_adapter=model_adapter,
+        tool_executor=tool_executor,
+        tool_results=FakeToolResults(),
+        agent=agent or FakeAgent(),
+        display=NullDisplay(),
+        session_store=session_store,
+        on_event=on_event,
+        hook_runner=hook_runner,
+    )
+    return loop, session, session_store, tool_executor
 
 
 def test_hook_runner_noop_returns_empty_decisions() -> None:
@@ -145,12 +178,55 @@ def test_hook_runner_noop_returns_empty_decisions() -> None:
             tool_steps_used=0,
         )
     )
+    before_accept_final = runner.before_accept_final(
+        BeforeAcceptFinalContext(
+            session_id=None,
+            repo_root="",
+            message={"role": "assistant", "content": "done"},
+            content="done",
+        )
+    )
 
     assert before_run == RunHookDecision()
     assert before_model_turn == []
     assert before_tool_execute == ToolHookDecision(
         action={"tool": "read_file"},
         approval_reason="",
+    )
+    assert before_accept_final == FinalHookDecision()
+
+
+def test_before_accept_final_block_stops_later_hooks() -> None:
+    calls = []
+
+    class BlockingHook:
+        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> FinalHookDecision:
+            calls.append("block")
+            return FinalHookDecision(
+                block=True,
+                reason="blocked",
+                report_note="first note",
+            )
+
+    class LaterHook:
+        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> FinalHookDecision:
+            calls.append("later")
+            return FinalHookDecision()
+
+    decision = HookRunner([BlockingHook(), LaterHook()]).before_accept_final(
+        BeforeAcceptFinalContext(
+            session_id=None,
+            repo_root="",
+            message={"role": "assistant", "content": "done"},
+            content="done",
+        )
+    )
+
+    assert calls == ["block"]
+    assert decision == FinalHookDecision(
+        block=True,
+        reason="blocked",
+        report_note="first note",
     )
 
 
@@ -177,6 +253,159 @@ def test_before_run_block_fails_without_calling_model() -> None:
         "run_finished",
     ]
     assert events[1]["reason"] == "blocked"
+
+
+def test_agent_loop_final_hook_blocks_and_retries_without_storing_final() -> None:
+    events = []
+
+    class BlockingOnceHook:
+        def __init__(self) -> None:
+            self.contents = []
+
+        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> FinalHookDecision:
+            self.contents.append(ctx.content)
+            if ctx.content == "not enough yet":
+                return FinalHookDecision(
+                    block=True,
+                    reason="missing verification",
+                    guidance="Run the verification before finalizing.",
+                )
+            return FinalHookDecision()
+
+    hook = BlockingOnceHook()
+    model_adapter = SequenceModelAdapter(
+        [
+            {
+                "message": {"role": "assistant", "content": "not enough yet"},
+                "actions": [],
+            },
+            {
+                "message": {"role": "assistant", "content": "TASK COMPLETE"},
+                "actions": [],
+            },
+        ]
+    )
+    loop, session, session_store, _ = build_loop_with_model(
+        model_adapter,
+        hook_runner=HookRunner([hook]),
+        on_event=events.append,
+    )
+
+    result = loop.run()
+
+    assert result == RunResult(status="complete")
+    assert hook.contents == ["not enough yet", "TASK COMPLETE"]
+    assert loop.display.final_messages == ["TASK COMPLETE"]
+    assert session.messages == [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "Run the verification before finalizing."},
+        {"role": "assistant", "content": "TASK COMPLETE"},
+    ]
+    assert session_store.messages == session.messages
+    assert [event["type"] for event in events] == [
+        "run_started",
+        "reply_rejected",
+        "final_message",
+        "run_finished",
+    ]
+    assert events[1]["reason"] == "final_blocked_by_hook"
+    assert events[1]["detail"] == "Run the verification before finalizing."
+
+
+def test_agent_loop_final_hook_allows_existing_final_behavior() -> None:
+    seen = []
+
+    class AllowingHook:
+        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> FinalHookDecision:
+            seen.append(ctx)
+            return FinalHookDecision()
+
+    loop, session, _, _, _ = build_loop(hook_runner=HookRunner([AllowingHook()]))
+    session.mark_file_read("b.txt")
+    session.mark_file_read("a.txt")
+    session.mark_file_written("out.txt")
+
+    result = loop.run()
+
+    assert result == RunResult(status="complete")
+    assert loop.display.final_messages == ["TASK COMPLETE"]
+    assert session.messages == [
+        {"role": "system", "content": "system"},
+        {"role": "assistant", "content": "TASK COMPLETE"},
+    ]
+    assert seen[0].content == "TASK COMPLETE"
+    assert seen[0].files_read == ("a.txt", "b.txt")
+    assert seen[0].files_written == ("out.txt",)
+
+
+def test_before_accept_final_does_not_run_for_invalid_no_tool_reply() -> None:
+    class InvalidThenValidAgent(FakeAgent):
+        def __init__(self) -> None:
+            self.validation_calls = 0
+
+        def validate_reply(self, reply: dict) -> dict:
+            self.validation_calls += 1
+            if self.validation_calls == 1:
+                return {"ok": False, "reason": "invalid narration"}
+            return {"ok": True, "reason": ""}
+
+        def correction_message_for(self, reason: str) -> dict:
+            return {"role": "user", "content": f"Correction: {reason}"}
+
+    class RecordingHook:
+        def __init__(self) -> None:
+            self.contents = []
+
+        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> FinalHookDecision:
+            self.contents.append(ctx.content)
+            return FinalHookDecision()
+
+    hook = RecordingHook()
+    model_adapter = SequenceModelAdapter(
+        [
+            {
+                "message": {"role": "assistant", "content": "just chatting"},
+                "actions": [],
+            },
+            {
+                "message": {"role": "assistant", "content": "TASK COMPLETE"},
+                "actions": [],
+            },
+        ]
+    )
+    loop, session, _, _ = build_loop_with_model(
+        model_adapter,
+        hook_runner=HookRunner([hook]),
+        agent=InvalidThenValidAgent(),
+    )
+
+    result = loop.run()
+
+    assert result == RunResult(status="complete")
+    assert hook.contents == ["TASK COMPLETE"]
+    assert loop.display.rejected_replies == ["invalid narration"]
+    assert session.messages == [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "Correction: invalid narration"},
+        {"role": "assistant", "content": "TASK COMPLETE"},
+    ]
+
+
+def test_before_accept_final_report_note_is_appended_once() -> None:
+    class NoteHook:
+        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> FinalHookDecision:
+            return FinalHookDecision(report_note="Report note.")
+
+    loop, session, _, _, _ = build_loop(hook_runner=HookRunner([NoteHook()]))
+
+    result = loop.run()
+
+    assert result == RunResult(status="complete")
+    assert loop.display.final_messages == ["TASK COMPLETE\n\nReport note."]
+    assert session.messages == [
+        {"role": "system", "content": "system"},
+        {"role": "assistant", "content": "TASK COMPLETE\n\nReport note."},
+    ]
 
 
 def test_before_run_block_uses_guidance_when_reason_is_empty() -> None:

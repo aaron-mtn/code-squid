@@ -7,6 +7,7 @@ from core.approval import ApprovalPolicy, denied_result
 from core.command_safety import guarded_run_command_reason
 from core.events import EventCallback, emit_event
 from core.hooks import (
+    BeforeAcceptFinalContext,
     BeforeModelTurnContext,
     BeforeRunContext,
     BeforeToolExecuteContext,
@@ -385,6 +386,51 @@ class AgentLoop:
                 consecutive_invalid_replies = 0
                 assistant_content = reply["message"]["content"]
                 self._check_cancelled()
+                if not reply["actions"]:
+                    final_decision = self.hook_runner.before_accept_final(
+                        BeforeAcceptFinalContext(
+                            session_id=self._session_id(),
+                            repo_root=str(self.session.repo_root),
+                            message=reply["message"],
+                            content=assistant_content,
+                            files_read=tuple(
+                                sorted(getattr(self.session, "files_read", set()))
+                            ),
+                            files_written=tuple(
+                                sorted(getattr(self.session, "files_written", set()))
+                            ),
+                            tool_steps_used=tool_steps_used,
+                        )
+                    )
+                    if final_decision.block:
+                        guidance = (
+                            final_decision.guidance
+                            or final_decision.reason
+                            or "Final response was blocked by before_accept_final hook. Continue the task."
+                        )
+                        self.display.reply_rejected("final_blocked_by_hook")
+                        self._emit_event(
+                            {
+                                "type": "reply_rejected",
+                                "reason": "final_blocked_by_hook",
+                                "detail": self._compact_event_text(
+                                    guidance,
+                                    REJECTION_REASON_EVENT_MAX_CHARS,
+                                ),
+                            }
+                        )
+                        self._add_message(self._user_instruction_message(guidance))
+                        continue
+                    if final_decision.report_note:
+                        assistant_content = (
+                            f"{assistant_content.rstrip()}\n\n"
+                            f"{final_decision.report_note.strip()}"
+                        )
+                        reply["message"] = {
+                            **reply["message"],
+                            "content": assistant_content,
+                        }
+
                 if reply["actions"]:
                     self.display.assistant_message(assistant_content)
                     self._check_cancelled()

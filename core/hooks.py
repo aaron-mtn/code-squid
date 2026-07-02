@@ -50,6 +50,17 @@ class ToolResultContext:
 
 
 @dataclass(frozen=True)
+class BeforeAcceptFinalContext:
+    session_id: str | None
+    repo_root: str
+    message: dict[str, Any]
+    content: str
+    files_read: tuple[str, ...] = ()
+    files_written: tuple[str, ...] = ()
+    tool_steps_used: int = 0
+
+
+@dataclass(frozen=True)
 class RunHookDecision:
     block: bool = False
     reason: str = ""
@@ -64,6 +75,14 @@ class ToolHookDecision:
     guidance: str = ""
     action: dict[str, Any] | None = None
     approval_reason: str = ""
+
+
+@dataclass(frozen=True)
+class FinalHookDecision:
+    block: bool = False
+    reason: str = ""
+    guidance: str = ""
+    report_note: str = ""
 
 
 class HookRunner:
@@ -173,6 +192,30 @@ class HookRunner:
             result = hook_result
 
         return result
+
+    def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> FinalHookDecision:
+        report_notes: list[str] = []
+
+        for hook in self.hooks:
+            handler = getattr(hook, "before_accept_final", None)
+            if handler is None:
+                continue
+
+            decision = handler(ctx)
+            if decision is None:
+                continue
+
+            if decision.report_note:
+                report_notes.append(decision.report_note)
+            if decision.block:
+                return FinalHookDecision(
+                    block=True,
+                    reason=decision.reason,
+                    guidance=decision.guidance,
+                    report_note="\n\n".join(report_notes),
+                )
+
+        return FinalHookDecision(report_note="\n\n".join(report_notes))
 
 
 def _prompt_context_blocks(value: object) -> tuple[PromptContextBlock, ...]:
