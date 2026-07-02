@@ -11,8 +11,11 @@ from core.hooks import (
     BeforeModelTurnContext,
     BeforeRunContext,
     BeforeToolExecuteContext,
+    FollowUpRunRequest,
     HookRunner,
     PromptContextBlock,
+    RunFinishedContext,
+    RunFinishedDecision,
     ToolResultContext,
 )
 from core.workspace_boundary import workspace_boundary_reason
@@ -30,6 +33,7 @@ class _CancellationRequested(Exception):
 class RunResult:
     status: Literal["complete", "failed", "interrupted"]
     reason: str = ""
+    follow_up_requests: tuple[FollowUpRunRequest, ...] = ()
 
 
 class AgentLoop:
@@ -127,6 +131,29 @@ class AgentLoop:
         if self.session_store is None:
             return None
         return getattr(self.session_store, "session_id", None)
+
+    def _run_finished_decision(
+        self,
+        *,
+        status: str,
+        reason: str = "",
+        final_message: str = "",
+        tool_steps_used: int = 0,
+    ) -> RunFinishedDecision:
+        return self.hook_runner.run_finished(
+            RunFinishedContext(
+                session_id=self._session_id(),
+                repo_root=str(self.session.repo_root),
+                status=status,
+                reason=reason,
+                final_message=final_message,
+                files_read=tuple(sorted(getattr(self.session, "files_read", set()))),
+                files_written=tuple(
+                    sorted(getattr(self.session, "files_written", set()))
+                ),
+                tool_steps_used=tool_steps_used,
+            )
+        )
 
     def _emit_event(self, event: dict[str, Any]) -> None:
         # AgentLoop events are small machine-readable facts for wrappers and
@@ -282,14 +309,23 @@ class AgentLoop:
                         "reason": reason,
                     }
                 )
+                run_finished = self._run_finished_decision(
+                    status="failed",
+                    reason=reason,
+                )
                 self._emit_event({"type": "run_finished", "status": "failed"})
-                return RunResult(status="failed", reason=reason)
+                return RunResult(
+                    status="failed",
+                    reason=reason,
+                    follow_up_requests=run_finished.follow_up_requests,
+                )
             self._run_context_blocks = list(before_run.context_blocks)
 
             consecutive_invalid_replies = 0
             stopped_after_repeated_invalid_replies = False
             stopped_after_step_limit = False
             failure_reason = ""
+            final_message = ""
             tool_steps_used = 0
 
             # Keep going until the agent says the task is complete.
@@ -451,6 +487,7 @@ class AgentLoop:
                             "text": assistant_content,
                         }
                     )
+                    final_message = assistant_content
                 self._check_cancelled()
                 self._add_message(reply["message"], usage=reply.get("usage"))
 
@@ -569,13 +606,30 @@ class AgentLoop:
                         "reason": failure_reason,
                     }
                 )
+                run_finished = self._run_finished_decision(
+                    status="failed",
+                    reason=failure_reason,
+                    tool_steps_used=tool_steps_used,
+                )
                 self._emit_event({"type": "run_finished", "status": "failed"})
-                return RunResult(status="failed", reason=failure_reason)
+                return RunResult(
+                    status="failed",
+                    reason=failure_reason,
+                    follow_up_requests=run_finished.follow_up_requests,
+                )
 
             self._check_cancelled()
             self._update_status("complete")
+            run_finished = self._run_finished_decision(
+                status="complete",
+                final_message=final_message,
+                tool_steps_used=tool_steps_used,
+            )
             self._emit_event({"type": "run_finished", "status": "complete"})
-            return RunResult(status="complete")
+            return RunResult(
+                status="complete",
+                follow_up_requests=run_finished.follow_up_requests,
+            )
         except _CancellationRequested:
             self._update_status("interrupted")
             self._emit_event(
@@ -585,8 +639,16 @@ class AgentLoop:
                     "reason": "cancelled",
                 }
             )
+            run_finished = self._run_finished_decision(
+                status="interrupted",
+                reason="cancelled",
+            )
             self._emit_event({"type": "run_finished", "status": "interrupted"})
-            return RunResult(status="interrupted", reason="cancelled")
+            return RunResult(
+                status="interrupted",
+                reason="cancelled",
+                follow_up_requests=run_finished.follow_up_requests,
+            )
 
     def _workspace_boundary_reason(self, action: dict) -> str | None:
         repo_root = getattr(self.tool_executor, "repo_root", None)

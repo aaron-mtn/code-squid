@@ -5,8 +5,11 @@ from core.hooks import (
     BeforeRunContext,
     BeforeToolExecuteContext,
     FinalHookDecision,
+    FollowUpRunRequest,
     HookRunner,
     PromptContextBlock,
+    RunFinishedContext,
+    RunFinishedDecision,
     RunHookDecision,
     ToolHookDecision,
     ToolResultContext,
@@ -118,7 +121,13 @@ class NullDisplay:
         self.tool_results.append((action, result))
 
 
-def build_loop(hook_runner=None, on_event=None, model_reply=None, agent=None):
+def build_loop(
+    hook_runner=None,
+    on_event=None,
+    model_reply=None,
+    agent=None,
+    should_cancel=None,
+):
     session = Session(repo_root=None)
     model_adapter = FakeModelAdapter(model_reply)
     session_store = FakeSessionStore()
@@ -132,6 +141,7 @@ def build_loop(hook_runner=None, on_event=None, model_reply=None, agent=None):
         display=NullDisplay(),
         session_store=session_store,
         on_event=on_event,
+        should_cancel=should_cancel,
         hook_runner=hook_runner,
     )
     return loop, session, model_adapter, session_store, tool_executor
@@ -186,6 +196,9 @@ def test_hook_runner_noop_returns_empty_decisions() -> None:
             content="done",
         )
     )
+    run_finished = runner.run_finished(
+        RunFinishedContext(session_id=None, repo_root="", status="complete")
+    )
 
     assert before_run == RunHookDecision()
     assert before_model_turn == []
@@ -194,6 +207,40 @@ def test_hook_runner_noop_returns_empty_decisions() -> None:
         approval_reason="",
     )
     assert before_accept_final == FinalHookDecision()
+    assert run_finished == RunFinishedDecision()
+
+
+def test_run_finished_aggregates_follow_ups_and_notes_in_hook_order() -> None:
+    first_request = FollowUpRunRequest(task="Run architecture review.")
+    second_request = FollowUpRunRequest(
+        task="Update docs/dev-log.md.",
+        reason="Keep handoff notes current.",
+    )
+
+    class FirstHook:
+        def run_finished(self, ctx: RunFinishedContext) -> RunFinishedDecision:
+            return RunFinishedDecision(
+                follow_up_requests=(first_request,),
+                notes=("first note",),
+            )
+
+    class NoopHook:
+        def run_finished(self, ctx: RunFinishedContext) -> None:
+            return None
+
+    class SecondHook:
+        def run_finished(self, ctx: RunFinishedContext) -> RunFinishedDecision:
+            return RunFinishedDecision(
+                follow_up_requests=(second_request,),
+                notes=("second note",),
+            )
+
+    decision = HookRunner([FirstHook(), NoopHook(), SecondHook()]).run_finished(
+        RunFinishedContext(session_id=None, repo_root="", status="complete")
+    )
+
+    assert decision.follow_up_requests == (first_request, second_request)
+    assert decision.notes == ("first note", "second note")
 
 
 def test_before_accept_final_block_stops_later_hooks() -> None:
@@ -253,6 +300,90 @@ def test_before_run_block_fails_without_calling_model() -> None:
         "run_finished",
     ]
     assert events[1]["reason"] == "blocked"
+
+
+def test_run_finished_complete_receives_context_after_final_is_stored() -> None:
+    request = FollowUpRunRequest(task="Run architecture-review skill next.")
+
+    class FinishedHook:
+        def __init__(self) -> None:
+            self.contexts = []
+            self.session_store = None
+
+        def run_finished(self, ctx: RunFinishedContext) -> RunFinishedDecision:
+            self.contexts.append(ctx)
+            assert self.session_store.statuses == ["complete"]
+            assert self.session_store.messages[-1] == {
+                "role": "assistant",
+                "content": "TASK COMPLETE",
+            }
+            return RunFinishedDecision(follow_up_requests=(request,))
+
+    hook = FinishedHook()
+    loop, _, _, session_store, _ = build_loop(hook_runner=HookRunner([hook]))
+    hook.session_store = session_store
+
+    result = loop.run()
+
+    assert result == RunResult(
+        status="complete",
+        follow_up_requests=(request,),
+    )
+    assert hook.contexts[0].status == "complete"
+    assert hook.contexts[0].final_message == "TASK COMPLETE"
+
+
+def test_run_finished_before_run_failure_receives_reason_and_returns_follow_up() -> None:
+    request = FollowUpRunRequest(task="Ask user whether to continue.")
+
+    class BlockingHook:
+        def before_run(self, ctx: BeforeRunContext) -> RunHookDecision:
+            return RunHookDecision(block=True, reason="blocked")
+
+        def run_finished(self, ctx: RunFinishedContext) -> RunFinishedDecision:
+            assert ctx.status == "failed"
+            assert ctx.reason == "blocked"
+            return RunFinishedDecision(follow_up_requests=(request,))
+
+    loop, _, _, _, _ = build_loop(hook_runner=HookRunner([BlockingHook()]))
+
+    result = loop.run()
+
+    assert result == RunResult(
+        status="failed",
+        reason="blocked",
+        follow_up_requests=(request,),
+    )
+
+
+def test_run_finished_interrupted_returns_follow_up() -> None:
+    request = FollowUpRunRequest(task="Retry this task with a smaller scope.")
+
+    class FinishedHook:
+        def __init__(self) -> None:
+            self.contexts = []
+
+        def run_finished(self, ctx: RunFinishedContext) -> RunFinishedDecision:
+            self.contexts.append(ctx)
+            return RunFinishedDecision(follow_up_requests=(request,))
+
+    hook = FinishedHook()
+    loop, _, model_adapter, session_store, _ = build_loop(
+        hook_runner=HookRunner([hook]),
+        should_cancel=lambda: True,
+    )
+
+    result = loop.run()
+
+    assert result == RunResult(
+        status="interrupted",
+        reason="cancelled",
+        follow_up_requests=(request,),
+    )
+    assert model_adapter.calls == []
+    assert session_store.statuses == ["interrupted"]
+    assert hook.contexts[0].status == "interrupted"
+    assert hook.contexts[0].reason == "cancelled"
 
 
 def test_agent_loop_final_hook_blocks_and_retries_without_storing_final() -> None:

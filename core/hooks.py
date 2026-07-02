@@ -61,6 +61,26 @@ class BeforeAcceptFinalContext:
 
 
 @dataclass(frozen=True)
+class FollowUpRunRequest:
+    task: str
+    reason: str = ""
+    context_blocks: tuple[PromptContextBlock, ...] = ()
+    require_user_approval: bool = True
+
+
+@dataclass(frozen=True)
+class RunFinishedContext:
+    session_id: str | None
+    repo_root: str
+    status: str
+    reason: str = ""
+    final_message: str = ""
+    files_read: tuple[str, ...] = ()
+    files_written: tuple[str, ...] = ()
+    tool_steps_used: int = 0
+
+
+@dataclass(frozen=True)
 class RunHookDecision:
     block: bool = False
     reason: str = ""
@@ -83,6 +103,12 @@ class FinalHookDecision:
     reason: str = ""
     guidance: str = ""
     report_note: str = ""
+
+
+@dataclass(frozen=True)
+class RunFinishedDecision:
+    follow_up_requests: tuple[FollowUpRunRequest, ...] = ()
+    notes: tuple[str, ...] = ()
 
 
 class HookRunner:
@@ -216,6 +242,27 @@ class HookRunner:
                 )
 
         return FinalHookDecision(report_note="\n\n".join(report_notes))
+
+    def run_finished(self, ctx: RunFinishedContext) -> RunFinishedDecision:
+        follow_up_requests: list[FollowUpRunRequest] = []
+        notes: list[str] = []
+
+        for hook in self.hooks:
+            handler = getattr(hook, "run_finished", None)
+            if handler is None:
+                continue
+
+            decision = handler(ctx)
+            if decision is None:
+                continue
+
+            follow_up_requests.extend(decision.follow_up_requests)
+            notes.extend(decision.notes)
+
+        return RunFinishedDecision(
+            follow_up_requests=tuple(follow_up_requests),
+            notes=tuple(notes),
+        )
 
 
 def _prompt_context_blocks(value: object) -> tuple[PromptContextBlock, ...]:
