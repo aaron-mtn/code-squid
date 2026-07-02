@@ -333,6 +333,21 @@ def test_run_finished_complete_receives_context_after_final_is_stored() -> None:
     assert hook.contexts[0].final_message == "TASK COMPLETE"
 
 
+def test_run_finished_notes_are_carried_on_run_result() -> None:
+    class FinishedHook:
+        def run_finished(self, ctx: RunFinishedContext) -> RunFinishedDecision:
+            return RunFinishedDecision(notes=("first note", "", "  ", "second note"))
+
+    loop, _, _, _, _ = build_loop(hook_runner=HookRunner([FinishedHook()]))
+
+    result = loop.run()
+
+    assert result == RunResult(
+        status="complete",
+        hook_notes=("first note", "second note"),
+    )
+
+
 def test_run_finished_before_run_failure_receives_reason_and_returns_follow_up() -> None:
     request = FollowUpRunRequest(task="Ask user whether to continue.")
 

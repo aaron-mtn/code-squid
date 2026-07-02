@@ -34,6 +34,7 @@ class RunResult:
     status: Literal["complete", "failed", "interrupted"]
     reason: str = ""
     follow_up_requests: tuple[FollowUpRunRequest, ...] = ()
+    hook_notes: tuple[str, ...] = ()
 
 
 class AgentLoop:
@@ -153,6 +154,16 @@ class AgentLoop:
                 ),
                 tool_steps_used=tool_steps_used,
             )
+        )
+
+    def _hook_notes_from_decision(
+        self,
+        decision: RunFinishedDecision,
+    ) -> tuple[str, ...]:
+        return tuple(
+            note
+            for note in decision.notes
+            if isinstance(note, str) and note.strip()
         )
 
     def _emit_event(self, event: dict[str, Any]) -> None:
@@ -318,6 +329,7 @@ class AgentLoop:
                     status="failed",
                     reason=reason,
                     follow_up_requests=run_finished.follow_up_requests,
+                    hook_notes=self._hook_notes_from_decision(run_finished),
                 )
             self._run_context_blocks = list(before_run.context_blocks)
 
@@ -616,6 +628,7 @@ class AgentLoop:
                     status="failed",
                     reason=failure_reason,
                     follow_up_requests=run_finished.follow_up_requests,
+                    hook_notes=self._hook_notes_from_decision(run_finished),
                 )
 
             self._check_cancelled()
@@ -629,6 +642,7 @@ class AgentLoop:
             return RunResult(
                 status="complete",
                 follow_up_requests=run_finished.follow_up_requests,
+                hook_notes=self._hook_notes_from_decision(run_finished),
             )
         except _CancellationRequested:
             self._update_status("interrupted")
@@ -648,6 +662,7 @@ class AgentLoop:
                 status="interrupted",
                 reason="cancelled",
                 follow_up_requests=run_finished.follow_up_requests,
+                hook_notes=self._hook_notes_from_decision(run_finished),
             )
 
     def _workspace_boundary_reason(self, action: dict) -> str | None:
