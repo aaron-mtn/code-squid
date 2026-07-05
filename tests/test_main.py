@@ -412,9 +412,9 @@ def test_new_session_prints_banner_before_task_prompt(monkeypatch, tmp_path, cap
         displays.append(display)
         return display
 
-    monkeypatch.setattr("main.TerminalDisplay", fake_display)
+    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task("Do the thing"))
-    monkeypatch.setattr("main._run_loop", lambda *args: 0)
+    monkeypatch.setattr("cli.run._run_loop", lambda *args: 0)
 
     assert _run_new_session(tmp_path) == 0
 
@@ -436,7 +436,7 @@ def test_new_session_empty_task_exits_without_run(monkeypatch, tmp_path, capsys)
         displays.append(display)
         return display
 
-    monkeypatch.setattr("main.TerminalDisplay", fake_display)
+    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task("  \n\t"))
 
     assert _run_new_session(tmp_path) == 0
@@ -456,7 +456,7 @@ def test_new_session_help_exits_without_session_or_run(monkeypatch, tmp_path, ca
         displays.append(display)
         return display
 
-    monkeypatch.setattr("main.TerminalDisplay", fake_display)
+    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task(" /help \n"))
 
     assert _run_new_session(tmp_path) == 0
@@ -476,7 +476,7 @@ def test_new_session_cancelled_task_exits_without_run(monkeypatch, tmp_path, cap
         displays.append(display)
         return display
 
-    monkeypatch.setattr("main.TerminalDisplay", fake_display)
+    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
     monkeypatch.setattr("main._prompt_task", _cancel_prompt_task)
 
     assert _run_new_session(tmp_path) == 0
@@ -505,14 +505,14 @@ def test_resume_session_prints_banner_before_follow_up_prompt(
         assert kwargs["display"] is displays[0]
         return NoopLoop()
 
-    monkeypatch.setattr("main.TerminalDisplay", fake_display)
+    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
     monkeypatch.setattr(
-        "main._session_dir_for_resume",
+        "cli.run._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task("Continue the thing"))
-    monkeypatch.setattr("main.build_agent_loop", fake_build_agent_loop)
-    monkeypatch.setattr("main._run_loop", lambda *args: 0)
+    monkeypatch.setattr("cli.run.build_agent_loop", fake_build_agent_loop)
+    monkeypatch.setattr("cli.run._run_loop", lambda *args: 0)
 
     assert _resume_session(tmp_path, session_store.session_id) == 0
 
@@ -538,11 +538,11 @@ def test_follow_up_records_current_skill_run_context(
     )
 
     monkeypatch.setattr(
-        "main._session_dir_for_resume",
+        "cli.run._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
-    monkeypatch.setattr("main.build_agent_loop", lambda **kwargs: NoopLoop())
-    monkeypatch.setattr("main._run_loop", lambda *args: 0)
+    monkeypatch.setattr("cli.run.build_agent_loop", lambda **kwargs: NoopLoop())
+    monkeypatch.setattr("cli.run._run_loop", lambda *args: 0)
 
     status, session_id = _run_follow_up_task(
         tmp_path,
@@ -582,9 +582,9 @@ def test_resume_session_empty_task_exits_without_run(monkeypatch, tmp_path, caps
         displays.append(display)
         return display
 
-    monkeypatch.setattr("main.TerminalDisplay", fake_display)
+    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
     monkeypatch.setattr(
-        "main._session_dir_for_resume",
+        "cli.run._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task(""))
@@ -607,9 +607,9 @@ def test_resume_session_help_exits_without_follow_up_or_run(monkeypatch, tmp_pat
         displays.append(display)
         return display
 
-    monkeypatch.setattr("main.TerminalDisplay", fake_display)
+    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
     monkeypatch.setattr(
-        "main._session_dir_for_resume",
+        "cli.run._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task("/help"))
@@ -633,9 +633,9 @@ def test_resume_session_cancelled_task_exits_without_run(monkeypatch, tmp_path, 
         displays.append(display)
         return display
 
-    monkeypatch.setattr("main.TerminalDisplay", fake_display)
+    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
     monkeypatch.setattr(
-        "main._session_dir_for_resume",
+        "cli.run._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr("main._prompt_task", _cancel_prompt_task)
@@ -661,9 +661,9 @@ def test_new_session_passes_trace_and_friendly_mode_to_terminal_display(
         return BannerDisplay(**kwargs)
 
     monkeypatch.setenv("CODE_SQUID_TRACE", "1")
-    monkeypatch.setattr("main.TerminalDisplay", fake_display)
+    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task("Do the thing"))
-    monkeypatch.setattr("main._run_loop", lambda *args: 0)
+    monkeypatch.setattr("cli.run._run_loop", lambda *args: 0)
 
     assert _run_new_session(tmp_path) == 0
 
@@ -695,10 +695,10 @@ def test_new_session_trace_threads_effective_debug_to_provider(
             provider_kwargs.append(kwargs)
 
     monkeypatch.setenv("CODE_SQUID_TRACE", "1")
-    monkeypatch.setattr("main.TerminalDisplay", CapturingDisplay)
+    monkeypatch.setattr("cli.run.TerminalDisplay", CapturingDisplay)
     monkeypatch.setattr("providers.factory.OpenAICompatibleProvider", CapturingProvider)
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task("Do the thing"))
-    monkeypatch.setattr("main._run_loop", lambda *args: 0)
+    monkeypatch.setattr("cli.run._run_loop", lambda *args: 0)
 
     assert _run_new_session(tmp_path) == 0
 
@@ -709,7 +709,7 @@ def test_interactive_exit_command_exits_without_run(monkeypatch, tmp_path) -> No
     def fail_run(*args):
         raise AssertionError("interactive exit should not start a run")
 
-    monkeypatch.setattr("main.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr("cli.run.TerminalDisplay", BannerDisplay)
     monkeypatch.setattr("main._prompt_task", _fake_prompt_tasks(["/exit"]))
     monkeypatch.setattr("main._run_new_session_task", fail_run)
     monkeypatch.setattr("main._run_follow_up_task", fail_run)
@@ -729,7 +729,7 @@ def test_interactive_new_command_clears_active_session(monkeypatch, tmp_path) ->
         follow_up_tasks.append((session_id, task))
         return 0, session_id
 
-    monkeypatch.setattr("main.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr("cli.run.TerminalDisplay", BannerDisplay)
     monkeypatch.setattr(
         "main._prompt_task",
         _fake_prompt_tasks(["first task", "/new", "second task", "/exit"]),
@@ -755,7 +755,7 @@ def test_interactive_second_input_uses_follow_up_path(monkeypatch, tmp_path) -> 
         follow_up_tasks.append((session_id, task))
         return 0, session_id
 
-    monkeypatch.setattr("main.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr("cli.run.TerminalDisplay", BannerDisplay)
     monkeypatch.setattr(
         "main._prompt_task",
         _fake_prompt_tasks(["first task", "follow up", "/exit"]),
@@ -777,7 +777,7 @@ def test_interactive_skill_command_lists_current_and_available_skills(
     def fail_run(*args):
         raise AssertionError("interactive /skill should not start a run")
 
-    monkeypatch.setattr("main.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr("cli.run.TerminalDisplay", BannerDisplay)
     monkeypatch.setattr("main._prompt_task", _fake_prompt_tasks(["/skill", "/exit"]))
     monkeypatch.setattr("main._run_new_session_task", fail_run)
     monkeypatch.setattr("main._run_follow_up_task", fail_run)
@@ -806,7 +806,7 @@ def test_interactive_skill_command_sets_active_skill_for_new_and_follow_up(
         follow_up_runs.append((session_id, task, skill_name))
         return 0, session_id
 
-    monkeypatch.setattr("main.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr("cli.run.TerminalDisplay", BannerDisplay)
     monkeypatch.setattr(
         "main._prompt_task",
         _fake_prompt_tasks(
@@ -837,7 +837,7 @@ def test_interactive_skill_none_clears_active_skill(monkeypatch, tmp_path, capsy
         follow_up_runs.append((session_id, task, skill_name))
         return 0, session_id
 
-    monkeypatch.setattr("main.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr("cli.run.TerminalDisplay", BannerDisplay)
     monkeypatch.setattr(
         "main._prompt_task",
         _fake_prompt_tasks(["first task", "/skill none", "follow up", "/exit"]),
@@ -863,7 +863,7 @@ def test_interactive_unknown_skill_does_not_change_active_skill(
         new_runs.append((task, skill_name))
         return 0, "active-session"
 
-    monkeypatch.setattr("main.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr("cli.run.TerminalDisplay", BannerDisplay)
     monkeypatch.setattr(
         "main._prompt_task",
         _fake_prompt_tasks(["/skill some-skill", "first task", "/exit"]),
@@ -889,9 +889,9 @@ def test_new_session_passes_debug_without_trace_to_terminal_display(
         return BannerDisplay(**kwargs)
 
     monkeypatch.setenv("CODE_SQUID_DEBUG", "1")
-    monkeypatch.setattr("main.TerminalDisplay", fake_display)
+    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task("Do the thing"))
-    monkeypatch.setattr("main._run_loop", lambda *args: 0)
+    monkeypatch.setattr("cli.run._run_loop", lambda *args: 0)
 
     assert _run_new_session(tmp_path) == 0
 
@@ -921,14 +921,14 @@ def test_resume_session_passes_trace_to_terminal_display(
         return BannerDisplay(**kwargs)
 
     monkeypatch.setenv("CODE_SQUID_TRACE", "1")
-    monkeypatch.setattr("main.TerminalDisplay", fake_display)
+    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
     monkeypatch.setattr(
-        "main._session_dir_for_resume",
+        "cli.run._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr("main._prompt_task", _fake_prompt_task("Continue the thing"))
-    monkeypatch.setattr("main.build_agent_loop", lambda **kwargs: NoopLoop())
-    monkeypatch.setattr("main._run_loop", lambda *args: 0)
+    monkeypatch.setattr("cli.run.build_agent_loop", lambda **kwargs: NoopLoop())
+    monkeypatch.setattr("cli.run._run_loop", lambda *args: 0)
 
     assert _resume_session(tmp_path, session_store.session_id) == 0
 
