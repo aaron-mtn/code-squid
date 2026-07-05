@@ -9,6 +9,21 @@ from pathlib import Path
 from prompt_toolkit.formatted_text import FormattedText
 
 from agent.coding import CodingAgent
+from cli.args import (
+    _extract_cwd_arg,
+    _extract_skill_arg,
+    _resolve_workspace_root,
+    parse_cli_args,
+)
+from cli.skills import (
+    _format_available_skills,
+    _format_skill_details,
+    _format_skill_status,
+    _handle_skill_input,
+    _is_skill_input,
+    _print_skill_status,
+    _skills,
+)
 from config.settings import Settings, load_settings, write_approval_mode
 from core.agent_loop import AgentLoop, RunResult
 from core.model_adapter import ModelRequestError
@@ -21,7 +36,6 @@ from core.runner import (
     startup_info,
 )
 from core.session import Session
-from core.skills import discover_skills
 from storage.error_log import write_error_log
 from storage.session_index import latest_session_id, session_dir_for
 from storage.session_store import SessionStore
@@ -84,124 +98,12 @@ def _is_new_input(task: str) -> bool:
     return task.strip() == NEW_COMMAND
 
 
-def _is_skill_input(task: str) -> bool:
-    stripped = task.strip()
-    return stripped == SKILL_COMMAND or stripped.startswith(f"{SKILL_COMMAND} ")
-
-
 def _is_exit_input(task: str) -> bool:
     return task.strip() in EXIT_COMMANDS
 
 
 def _print_help() -> None:
     print(HELP_TEXT)
-
-
-def _format_skill_details(skill_name: str | None) -> list[str]:
-    if skill_name is None:
-        return ["Current skill: none"]
-
-    skill = discover_skills().get(skill_name)
-    lines = [f"Current skill: {skill_name}"]
-    if skill is None:
-        return lines
-
-    if skill.allowed_tools:
-        lines.append(f"Tools: {', '.join(skill.allowed_tools)}")
-    if skill.prompt_sections:
-        lines.append(f"Prompt overrides: {', '.join(skill.prompt_sections)}")
-    return lines
-
-
-def _format_available_skills() -> list[str]:
-    skills = discover_skills()
-    if not skills:
-        return ["Available skills:", "none"]
-
-    lines = ["Available skills:"]
-    for skill in skills.values():
-        lines.append(f"- {skill.name}: {skill.description}")
-    return lines
-
-
-def _format_skill_status(skill_name: str | None) -> str:
-    return "\n".join(
-        [
-            *_format_skill_details(skill_name),
-            "",
-            *_format_available_skills(),
-        ]
-    )
-
-
-def _print_skill_status(skill_name: str | None) -> None:
-    print(_format_skill_status(skill_name))
-
-
-def _handle_skill_input(task: str, skill_name: str | None) -> str | None:
-    parts = task.strip().split()
-    if len(parts) == 1:
-        _print_skill_status(skill_name)
-        return skill_name
-
-    if len(parts) != 2:
-        print("Usage: /skill [name|none]")
-        return skill_name
-
-    requested_skill = parts[1]
-    if requested_skill in {"none", "default"}:
-        print("Active skill cleared.")
-        return None
-
-    skills = discover_skills()
-    skill = skills.get(requested_skill)
-    if skill is None:
-        print(f"Unknown skill: {requested_skill}")
-        print("Run /skill to see available skills.")
-        return skill_name
-
-    print(f"Active skill set to: {skill.name}")
-    if skill.allowed_tools:
-        print(f"Tools: {', '.join(skill.allowed_tools)}")
-    return skill.name
-
-
-def _extract_cwd_arg(args: list[str]) -> tuple[str | None, list[str]]:
-    if "--cwd" not in args:
-        return None, args
-
-    cwd_index = args.index("--cwd")
-    if cwd_index + 1 >= len(args):
-        raise ValueError("--cwd requires a path")
-
-    cwd_arg = args[cwd_index + 1]
-    remaining_args = args[:cwd_index] + args[cwd_index + 2 :]
-    return cwd_arg, remaining_args
-
-
-def _extract_skill_arg(args: list[str]) -> tuple[str | None, list[str]]:
-    if "--skill" not in args:
-        return None, args
-
-    skill_index = args.index("--skill")
-    if skill_index + 1 >= len(args):
-        raise ValueError("--skill requires a skill name")
-
-    skill_name = args[skill_index + 1]
-    remaining_args = args[:skill_index] + args[skill_index + 2 :]
-    return skill_name, remaining_args
-
-
-def _resolve_workspace_root(cwd_arg: str | None) -> Path:
-    workspace_root = Path.cwd() if cwd_arg is None else Path(cwd_arg).expanduser()
-    resolved_root = workspace_root.resolve()
-
-    if not resolved_root.exists():
-        raise ValueError(f"--cwd path does not exist: {workspace_root}")
-    if not resolved_root.is_dir():
-        raise ValueError(f"--cwd path is not a directory: {workspace_root}")
-
-    return resolved_root
 
 
 def _prompt_task(label: str) -> str:
@@ -473,18 +375,14 @@ def _mode(repo_root: Path, args: list[str]) -> int:
     return 0
 
 
-def _skills() -> int:
-    print("\n".join(_format_available_skills()))
-    return 0
-
-
 # Parse CLI commands and run the selected standalone Code Squid flow.
 def main() -> int:
     args = sys.argv[1:]
     try:
-        cwd_arg, args = _extract_cwd_arg(args)
-        skill_name, args = _extract_skill_arg(args)
-        repo_root = _resolve_workspace_root(cwd_arg)
+        parsed_args = parse_cli_args(args)
+        repo_root = parsed_args.repo_root
+        skill_name = parsed_args.skill_name
+        args = parsed_args.remaining_args
     except ValueError as error:
         print(error)
         return 1
