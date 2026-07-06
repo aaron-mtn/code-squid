@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from cli.args import parse_cli_args
+from cli.extensions import _extensions
 from cli.interactive import _resume_session, _run_interactive
 from cli.skills import _skills
 from config.settings import load_settings, write_approval_mode
@@ -77,6 +78,9 @@ def run_cli(args: list[str]) -> int:
 
     if args == ["skills"]:
         return _skills()
+
+    if args and args[0] == "extensions":
+        return _extensions(args[1:])
 
     if args == ["undo"]:
         _undo(repo_root)

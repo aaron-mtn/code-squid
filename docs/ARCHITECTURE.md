@@ -524,10 +524,17 @@ extension paths are:
 - `hooks/` stores user hook packages loaded by `core.hook_loader` when callers
   opt into user hooks.
 - `tools/` is reserved for future user tool storage.
-- `packs/` is reserved for future pack storage.
+- `extensions/` stores user extension bundles with `extension.yaml` metadata.
+- `extension-state.json` stores the single active extension name.
 
 These directories are separate from the repo-local `skills/builtin/` bundled
 skill directory and the legacy `skills/user/` compatibility/dev fallback.
+
+The CLI exposes extension management through `extensions list`,
+`extensions active`, `extensions activate <name>`, `extensions deactivate`, and
+`extensions validate <name>`. These commands only inspect or update extension
+metadata/state; extension creation, install, export, and import flows are not
+implemented.
 
 ## Settings
 
