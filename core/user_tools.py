@@ -89,6 +89,10 @@ def load_user_tool(tool_dir: Path | str) -> UserTool | None:
     ).strip()
     if not function:
         raise UserToolError(f"{metadata_path}: function must not be empty")
+    if not function.isidentifier():
+        raise UserToolError(
+            f"{metadata_path}: function must be a valid Python identifier"
+        )
 
     return UserTool(
         name=name,

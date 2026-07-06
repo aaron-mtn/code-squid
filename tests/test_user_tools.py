@@ -94,6 +94,49 @@ def test_handles_missing_optional_fields_with_defaults(tmp_path: Path) -> None:
     )
 
 
+def test_accepts_python_identifier_function_name(tmp_path: Path) -> None:
+    tool_dir = _write_tool(
+        tmp_path,
+        "valid_function",
+        "name: valid_function\nfunction: run_tool\n",
+    )
+
+    assert load_user_tool(tool_dir) == UserTool(
+        name="valid_function",
+        function="run_tool",
+    )
+
+
+@pytest.mark.parametrize("function", ["bad-name", "bad name", "123run"])
+def test_discovery_skips_invalid_function_names(
+    monkeypatch,
+    tmp_path: Path,
+    function: str,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
+    _write_tool(
+        home,
+        "invalid_function",
+        f"name: invalid_function\nfunction: {function}\n",
+    )
+    _write_tool(home, "valid", "name: valid\n")
+
+    assert discover_user_tools() == {"valid": UserTool(name="valid")}
+
+
+@pytest.mark.parametrize("function", ["bad-name", "bad name", "123run"])
+def test_rejects_invalid_function_names(tmp_path: Path, function: str) -> None:
+    tool_dir = _write_tool(
+        tmp_path,
+        "invalid_function",
+        f"name: invalid_function\nfunction: {function}\n",
+    )
+
+    with pytest.raises(UserToolError, match="function must be a valid Python identifier"):
+        load_user_tool(tool_dir)
+
+
 @pytest.mark.parametrize(
     "metadata",
     [
