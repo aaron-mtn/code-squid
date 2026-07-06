@@ -92,7 +92,7 @@ def _extensions_validate(name: str) -> int:
     return 1
 
 
-def _extensions(args: list[str]) -> int:
+def handle_extensions(args: list[str]) -> int:
     if args == ["list"]:
         return _extensions_list()
     if args == ["active"]:

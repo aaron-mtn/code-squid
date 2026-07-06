@@ -82,6 +82,6 @@ def _handle_skill_input(task: str, skill_name: str | None) -> str | None:
     return skill.name
 
 
-def _skills() -> int:
+def handle_skills() -> int:
     print("\n".join(_format_available_skills()))
     return 0
