@@ -28,18 +28,22 @@ machine-readable runtime facts.
 ## Component Layout
 
 - `main.py`
-  - Standalone CLI entry point, interactive prompt loop, command dispatch, and
-    user-facing error handling.
-  - Uses the selected workspace directory as `repo_root`; by default this is
-    the current directory.
-  - New coding task construction delegates to `core.runner`.
-  - Dispatches interactive runs, saved-session listing/showing, resume, undo,
-    and approval-mode commands.
-  - Resume/follow-up wiring may still live here unless it is moved later.
-  - Catches `KeyboardInterrupt`, marks the session interrupted, and prints the
-    final session display.
-  - Catches `ModelRequestError`, marks the session failed, writes a diagnostic
-    error log, and prints a short CLI failure.
+  - Thin standalone process entry point.
+  - Calls `cli.commands.run_cli(sys.argv[1:])` and exits with its status code.
+
+- `cli/`
+  - Terminal CLI behavior split out from the process entry point.
+  - `args.py` owns CLI argument parsing, `--cwd`, `--skill`, and workspace
+    resolution.
+  - `commands.py` owns top-level command dispatch, including `mode`, `undo`,
+    saved-session viewer routing, resume routing, and interactive startup.
+  - `interactive.py` owns the interactive prompt loop, `/help`, `/new`,
+    `/exit`, prompt input, and new-session/resume prompt flows.
+  - `run.py` owns CLI run/session orchestration, display setup, new-session
+    task runs, follow-up task runs, interruption handling, and model request
+    failure handling.
+  - `skills.py` owns CLI skill command/status helpers, `python main.py skills`,
+    and interactive `/skill` handling.
 
 - `agent/`
   - Coding-agent policy and prompt text.
@@ -64,9 +68,13 @@ machine-readable runtime facts.
     runtime events through an optional `on_event` callback.
   - `events.py` owns the tiny best-effort observer callback helper.
   - `hooks.py` owns hook context/decision dataclasses and `HookRunner`.
-  - `runner.py` owns reusable coding-task run wiring for Python callers and the
-    CLI new-task flow. It wires optional hooks or a `HookRunner`, and wires the
-    selected provider into the model adapter but does not own provider-specific
+  - `extension_paths.py` owns Code Squid home path resolution and user extension
+    storage directories.
+  - `hook_loader.py` owns loading enabled user hooks from disk when callers opt
+    into user hooks.
+  - `runner.py` owns reusable coding-task run wiring for Python callers and CLI
+    helpers. It wires optional hooks or a `HookRunner`, and wires the selected
+    provider into the model adapter but does not own provider-specific
     construction details.
   - `session.py` owns in-memory transcript state and lightweight read/write
     side-effect tracking.
@@ -195,7 +203,8 @@ Hooks:
 - return structured decisions/context
 - can influence the current run within narrow limits
 - failures are not swallowed
-- no disk loading or plugin registry yet
+- optional disk loading exists only when callers opt into user hooks
+- no plugin registry yet
 
 ### before_run
 
@@ -264,17 +273,18 @@ model request
 
 `core/hooks.py` owns the hook context and decision dataclasses plus
 `HookRunner`. `core/agent_loop.py` owns where hook calls happen in the loop.
-`core/runner.py` wires optional `hooks` or an explicit `hook_runner`.
-`core/events.py` remains observer-only.
+`core/runner.py` wires optional `hooks`, optionally loads user hooks from
+`CODE_SQUID_HOME/hooks`, or accepts an explicit `hook_runner`. `core/events.py`
+remains observer-only.
 
 Known limitations:
 
-- no hook file loading yet
 - no hook builder yet
 - no pack import/export yet
 - no settings-driven hook activation yet
-- hooks are in-process developer/host-provided objects
-- future user-loaded hooks will need review/enable/disable/safety boundaries
+- hooks are still in-process Python objects
+- broader user-loaded hook workflows will need review/enable/disable/safety
+  boundaries
 - `run_finished` follow-up requests are returned to the host; core does not
   orchestrate them
 
@@ -308,17 +318,46 @@ wiring.
 
 This runner layer is not a plugin system, orchestration layer, daemon, or
 server mode. It gives external Python code a clean way to call Code Squid
-without copying `main.py` wiring. `main.py` remains the standalone CLI.
+without copying CLI wiring. Terminal CLI wrapper behavior lives under `cli/`;
+`main.py` only delegates to `cli.commands.run_cli()`.
 
 ## Skill System
 
-Skills are file-backed prompt/tool profiles. Built-in and user skills live
-under:
+Skills are file-backed prompt/tool profiles. Discovery order is:
+
+1. Built-in skills bundled with the repo.
+2. User skills in the Code Squid home directory.
+3. Legacy repo-local user skills, only for names not already discovered.
+
+Built-ins win over user duplicates, and home user skills win over legacy
+repo-local duplicates.
+
+Built-in skills are bundled with the repo under:
 
 ```text
 skills/builtin/<skill-name>/SKILL.md
+```
+
+Primary user skills are stored in the Code Squid home directory:
+
+```text
+~/.code-squid/skills/<skill-name>/SKILL.md
+```
+
+If `CODE_SQUID_HOME` is set, user skills are stored under:
+
+```text
+<CODE_SQUID_HOME>/skills/<skill-name>/SKILL.md
+```
+
+Legacy repo-local user skills may still be discovered from:
+
+```text
 skills/user/<skill-name>/SKILL.md
 ```
+
+This legacy path is a compatibility/dev fallback, not the place new user skills
+should be created.
 
 Each skill is a `SKILL.md` file with simple frontmatter followed by Markdown
 instructions. The supported frontmatter fields are:
@@ -447,7 +486,8 @@ model, and `SessionStore.load_messages()` ignores non-message events.
 tool exposure and prompt overrides can be inspected after a run.
 
 Discovered skills include source metadata: built-in skills have
-`source="builtin"` and `editable=false`; user skills have `source="user"` and
+`source="builtin"` and `editable=false`; user skills discovered from the Code
+Squid home directory or the legacy repo-local fallback have `source="user"` and
 `editable=true`. Both sources use the same parsing, prompt override, selection,
 and tool filtering path once discovered.
 
@@ -455,8 +495,29 @@ The current built-in example is `architecture-review`, an inspection-only review
 skill. It allows only `read_file` and `run_command`, replaces `TASK_PROMPT`,
 replaces `FINAL_SUMMARY_REQUIREMENTS`, and appends `TOOL_USAGE_GUIDANCE`.
 
-Desktop skill picker/API integration, skill creation/editing, and new discovery
-tools such as repo tree/search helpers are not implemented yet.
+Core CLI skill creation/editing commands and new discovery tools such as repo
+tree/search helpers are not implemented yet.
+
+## Extension Storage
+
+User-level extension storage is rooted at the Code Squid home directory:
+
+```text
+~/.code-squid/
+```
+
+Setting `CODE_SQUID_HOME` redirects this home directory. Current and planned
+extension paths are:
+
+- `skills/` stores user skills such as
+  `~/.code-squid/skills/<skill-name>/SKILL.md`.
+- `hooks/` stores user hook packages loaded by `core.hook_loader` when callers
+  opt into user hooks.
+- `tools/` is reserved for future user tool storage.
+- `packs/` is reserved for future pack storage.
+
+These directories are separate from the repo-local `skills/builtin/` bundled
+skill directory and the legacy `skills/user/` compatibility/dev fallback.
 
 ## Settings
 
@@ -599,8 +660,9 @@ shape, omits `parallel_tool_calls`, and adapts the response back to the
 OpenAI-like shape consumed by `ModelAdapter`.
 
 Provider request failures are wrapped at the model-adapter boundary as
-`ModelRequestError`. `main.py` catches that error, marks the session failed, and
-writes diagnostic traceback details to `.code-squid/logs/latest.log`.
+`ModelRequestError`. The CLI run orchestration in `cli/run.py` catches that
+error, marks the session failed, and writes diagnostic traceback details to
+`.code-squid/logs/latest.log`.
 
 ## Runtime Contracts
 
@@ -876,11 +938,14 @@ behavior go through `run_command`.
 
 ## Ownership Boundaries
 
-`main.py` owns CLI parsing, interactive prompt behavior, command dispatch,
-resume/show/undo/mode flows, and user-facing errors. It should stay thin and
-should not grow agent policy, tool behavior, provider-specific response
-parsing, session storage internals, approval logic, undo mechanics, compaction
-strategy, or terminal formatting.
+`main.py` owns only process entrypoint behavior: passing command-line arguments
+to `cli.commands.run_cli()` and returning its exit status.
+
+`cli/` owns terminal CLI parsing, dispatch, interactive prompt flow, CLI
+run/resume wiring, mode/undo commands, saved-session command routing, and CLI
+skill commands. It should not grow agent policy, tool behavior,
+provider-specific response parsing, session storage internals, approval logic,
+undo mechanics, compaction strategy, or terminal formatting.
 
 `agent/` owns coding-agent behavior and prompt text. It decides which tools are
 exposed, which replies are valid, when the loop should stop, and what
@@ -893,8 +958,8 @@ does not decide how settings are enforced.
 place for provider transport, terminal rendering, tool implementation, or
 coding-task prompt text.
 
-`core/runner.py` owns reusable new-task wiring for Python callers and CLI
-new-task runs. It is not a plugin system, event bus, daemon, server, or future
+`core/runner.py` owns reusable Python run wiring and shared helpers used by the
+CLI. It is not a plugin system, event bus, daemon, server, or future
 orchestration layer.
 
 `core/model_adapter.py` owns provider response normalization and replay message
@@ -938,12 +1003,13 @@ layer for what happened, while model-native narration is encouraged by prompts.
   may need explicit wrapper handling depending on the caller path.
 - The default runner uses `TerminalDisplay`, so external wrappers may see
   terminal output unless they pass a different display later.
-- Resume support is still primarily CLI/`main.py`-owned unless it is moved
-  later.
+- Resume support is CLI-owned under `cli/`.
 - JSONL/file event output is intentionally not implemented yet.
-- User skill discovery is implemented for `skills/user/*/SKILL.md`; skill
-  creation/editing is not implemented yet.
-- Desktop skill picker/API integration is not implemented yet.
+- User skill discovery checks `<CODE_SQUID_HOME>/skills/*/SKILL.md`, defaulting
+  to `~/.code-squid/skills/*/SKILL.md`; legacy repo-local
+  `skills/user/*/SKILL.md` discovery remains as a compatibility/dev fallback
+  for missing names.
+- Core CLI skill creation/editing commands are not implemented yet.
 - `allowed-tools: none` is not a supported special case.
 - New discovery tools such as repo tree/search helpers are not part of
   Skills v1.

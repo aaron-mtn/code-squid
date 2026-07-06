@@ -5,10 +5,32 @@ files.
 
 ## Location
 
+Built-in skills remain bundled/repo-local under:
+
 ```text
 skills/builtin/<skill-name>/SKILL.md
+```
+
+User skills are stored at:
+
+```text
+~/.code-squid/skills/<skill-name>/SKILL.md
+```
+
+If `CODE_SQUID_HOME` is set:
+
+```text
+<CODE_SQUID_HOME>/skills/<skill-name>/SKILL.md
+```
+
+Legacy repo-local user skills may still be discovered from:
+
+```text
 skills/user/<skill-name>/SKILL.md
 ```
+
+This is a compatibility/dev fallback, not the place new user skills should be
+created.
 
 ## Frontmatter
 
@@ -109,6 +131,5 @@ Default/no skill = normal Code Squid coding behavior.
 
 ## Not implemented yet
 
-- Desktop skill picker/API support
-- Skill builder
+- Core CLI skill creation/editing commands
 - New skill-specific tools

@@ -20,7 +20,7 @@ Do not create or modify skill files until the user clearly approves creation.
 
 By default, do not use tools.
 
-Use tools only when needed to inspect the repository, verify the backend skill location, read an existing skill before editing, or create/update a skill after approval.
+Use tools only when needed to inspect Code Squid skill APIs, verify the user skill location, read an existing skill before editing, or create/update a skill after approval.
 
 Default behavior:
 - Answer questions about Code Squid skills.
@@ -33,41 +33,43 @@ Default behavior:
 
 Only create a skill file after the user clearly says to create it, save it, write it, add it, install it, or approves the final draft.
 
-## Skill location
+## User skill location
 
-Code Squid skills live in the Code Squid backend/core repo, not necessarily in the current Desktop repo.
+Code Squid user skills live in the user's Code Squid home directory, not inside the Desktop repo or the backend repo.
 
 The normal user skill path is:
 
-<code-squid-backend-repo>/skills/user/<skill-name>/SKILL.md
+~/.code-squid/skills/<skill-name>/SKILL.md
+
+If CODE_SQUID_HOME is set, use that as the Code Squid home instead of ~/.code-squid.
+
+With CODE_SQUID_HOME set, the user skill path is:
+
+<CODE_SQUID_HOME>/skills/<skill-name>/SKILL.md
 
 Built-in skills live under:
 
-<code-squid-backend-repo>/skills/builtin/<skill-name>/SKILL.md
+skills/builtin/<skill-name>/SKILL.md
 
-User-created skills should normally go under skills/user/, not skills/builtin/.
+Built-in skills are bundled/repo-local and should not be modified unless the user explicitly asks.
 
-In Code Squid Desktop setups, the Desktop repo may be separate from the Code Squid backend/core repo.
-
-Before creating a skill file:
-- Determine whether the current workspace is the Code Squid backend repo or the Desktop repo.
-- A Code Squid backend repo should contain main.py, core/runner.py, and skills/.
-- A Code Squid Desktop repo may contain desktop_app.py, desktop_backend/, electron/, and web/.
-
-If the current workspace is the Code Squid backend repo, create user skills under:
+Legacy repo-local user skills may still be discovered from:
 
 skills/user/<skill-name>/SKILL.md
 
-If the current workspace is the Desktop repo, do not create skills/user/ inside the Desktop repo by default.
+This legacy path is a compatibility/dev fallback, not the place new user skills should be created.
 
-Instead:
-- Ask the user for the Code Squid backend/core repo path, or
-- Use an explicitly provided backend path, or
-- Use a known relative backend path only if the user confirms it.
+Before creating a skill file:
+- Determine whether CODE_SQUID_HOME is set.
+- If CODE_SQUID_HOME is set, create the skill under <CODE_SQUID_HOME>/skills/.
+- If CODE_SQUID_HOME is not set, create the skill under ~/.code-squid/skills/.
+- If a skill with the same name exists in the target user skill directory, read it first and ask before overwriting.
 
-If CODE_SQUID_REPO is available or mentioned by the user, that likely points to the backend/core repo.
+Do not create new user skills under repo-local skills/user unless the user explicitly asks for legacy/dev behavior.
 
-Never create user skills inside the Desktop repo unless the user explicitly says that Desktop is the intended backend skill location.
+Do not create user skills inside the Desktop repo.
+
+Do not create user skills inside the Code Squid backend repo unless the user explicitly asks for legacy/dev behavior or a built-in skill change.
 
 ## Skill file format
 
@@ -172,28 +174,31 @@ When the user asks for a new skill, first produce a draft with:
 4. Complete SKILL.md content
 5. Intended save path
 
-Use this save path format when the backend path is known:
+Use this save path format when CODE_SQUID_HOME is not set:
 
-<code-squid-backend-repo>/skills/user/<skill-name>/SKILL.md
+~/.code-squid/skills/<skill-name>/SKILL.md
+
+If CODE_SQUID_HOME is set, use:
+
+<CODE_SQUID_HOME>/skills/<skill-name>/SKILL.md
 
 Do not write files during the draft step.
 
 After presenting the draft, ask the user to approve or request changes.
 
 When the user approves creation:
-- Confirm or infer the Code Squid backend/core repo path.
-- Check that the target repo looks like the backend repo.
-- The backend repo should contain main.py, core/runner.py, and skills/.
-- If the current workspace is the Desktop repo, do not write inside it unless the user explicitly asks.
-- Create the folder skills/user/<skill-name>/.
-- Write the skill file at skills/user/<skill-name>/SKILL.md.
+- Confirm or infer the Code Squid home directory.
+- Use CODE_SQUID_HOME if it is set; otherwise use ~/.code-squid.
+- Create the folder <Code Squid home>/skills/<skill-name>/.
+- Write the skill file at <Code Squid home>/skills/<skill-name>/SKILL.md.
 - Use write_file only for the new skill file, unless the user explicitly asks to edit an existing skill.
 - Do not modify built-in skills unless the user explicitly asks.
+- Do not create new skills under repo-local skills/user unless the user explicitly asks for legacy/dev behavior.
 - Do not modify unrelated files.
 - Do not run commands unless needed to inspect or verify the skill location.
 - If a skill with the same name already exists, read it first and ask before overwriting.
 
-If the backend path is unclear, ask for it before writing files.
+If the Code Squid home path is unclear, ask for it before writing files.
 
 ## Editing existing skills
 
@@ -269,7 +274,9 @@ SKILL.md:
 Provide the complete SKILL.md content.
 
 Where it belongs:
-<code-squid-backend-repo>/skills/user/<skill-name>/SKILL.md
+~/.code-squid/skills/<skill-name>/SKILL.md
+
+If CODE_SQUID_HOME is set, use <CODE_SQUID_HOME>/skills/<skill-name>/SKILL.md.
 
 Notes:
 Mention important choices, tradeoffs, or approval requirements.
@@ -326,7 +333,8 @@ Never:
 - create a skill before approval
 - overwrite an existing skill without confirmation
 - edit built-in skills unless explicitly asked
-- create user skills in the Desktop repo unless explicitly told to
+- create user skills in the Desktop repo
+- create new user skills under repo-local skills/user unless explicitly asked for legacy/dev behavior
 - modify unrelated files
 - run broad test suites just to create a skill
 - invent unsupported skill fields
@@ -339,7 +347,7 @@ If the user asks for ideas, provide ideas.
 
 If the user asks for a draft, draft the skill.
 
-If the user approves creation, create only the approved skill file in the correct backend repo location.
+If the user approves creation, create only the approved skill file in the correct Code Squid home user skill location.
 
 ## FINAL_SUMMARY_REQUIREMENTS replace
 
