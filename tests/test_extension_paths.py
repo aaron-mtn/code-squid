@@ -4,6 +4,8 @@ from core.extension_paths import (
     CODE_SQUID_HOME_ENV,
     code_squid_home,
     ensure_user_extension_dirs,
+    extension_state_path,
+    user_extensions_dir,
     user_hooks_dir,
     user_skills_dir,
     user_tools_dir,
@@ -24,6 +26,8 @@ def test_env_override_places_extension_dirs_under_temp_path(monkeypatch, tmp_pat
     assert user_skills_dir() == tmp_path / "custom-home" / "skills"
     assert user_hooks_dir() == tmp_path / "custom-home" / "hooks"
     assert user_tools_dir() == tmp_path / "custom-home" / "tools"
+    assert user_extensions_dir() == tmp_path / "custom-home" / "extensions"
+    assert extension_state_path() == tmp_path / "custom-home" / "extension-state.json"
 
 
 def test_getters_do_not_create_directories(monkeypatch, tmp_path: Path) -> None:
@@ -33,6 +37,8 @@ def test_getters_do_not_create_directories(monkeypatch, tmp_path: Path) -> None:
     assert user_skills_dir() == home / "skills"
     assert user_hooks_dir() == home / "hooks"
     assert user_tools_dir() == home / "tools"
+    assert user_extensions_dir() == home / "extensions"
+    assert extension_state_path() == home / "extension-state.json"
     assert not home.exists()
 
 
@@ -45,6 +51,7 @@ def test_ensure_user_extension_dirs_creates_standard_dirs(monkeypatch, tmp_path:
     assert (home / "skills").is_dir()
     assert (home / "hooks").is_dir()
     assert (home / "tools").is_dir()
+    assert (home / "extensions").is_dir()
 
 
 def test_env_path_expands_user_home(monkeypatch, tmp_path: Path) -> None:

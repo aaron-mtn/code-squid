@@ -70,6 +70,9 @@ machine-readable runtime facts.
   - `hooks.py` owns hook context/decision dataclasses and `HookRunner`.
   - `extension_paths.py` owns Code Squid home path resolution and user extension
     storage directories.
+  - `extensions.py` owns extension bundle metadata discovery, active-extension
+    state, and validation. It must not own runtime tool execution, skill prompt
+    parsing beyond metadata validation, hook execution, or Desktop UI.
   - `hook_loader.py` owns loading enabled user hooks from disk when callers opt
     into user hooks.
   - `runner.py` owns reusable coding-task run wiring for Python callers and CLI

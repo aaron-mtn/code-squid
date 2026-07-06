@@ -34,7 +34,22 @@ def user_tools_dir() -> Path:
     return code_squid_home() / "tools"
 
 
+def user_extensions_dir() -> Path:
+    """Return the user-level extensions directory without creating it."""
+    return code_squid_home() / "extensions"
+
+
+def extension_state_path() -> Path:
+    """Return the user-level active extension state file path."""
+    return code_squid_home() / "extension-state.json"
+
+
 def ensure_user_extension_dirs() -> None:
     """Create the standard user extension directories."""
-    for directory in (user_skills_dir(), user_hooks_dir(), user_tools_dir()):
+    for directory in (
+        user_skills_dir(),
+        user_hooks_dir(),
+        user_tools_dir(),
+        user_extensions_dir(),
+    ):
         directory.mkdir(parents=True, exist_ok=True)
