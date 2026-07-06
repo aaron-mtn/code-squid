@@ -28,6 +28,7 @@ from core.session import Session
 from core.skills import Skill, discover_skills
 from core.tool_executor import ToolExecutor
 from core.tool_results import ToolResults
+from core.user_tools import build_user_tool_registry
 from providers.factory import build_provider, tool_call_content_mode
 from storage.session_store import SessionStore
 from storage.undo_store import UndoStore
@@ -109,7 +110,11 @@ def build_coding_task_run(
     session = Session(repo_root=repo_root)
     session_store = SessionStore.create(repo_root=repo_root, task=task)
     undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
-    skill, active_tools = resolve_skill_tools(skill_name)
+    skill, active_tools = resolve_skill_tools(
+        skill_name,
+        repo_root=repo_root,
+        session_id=session_store.session_id,
+    )
     append_run_context(session_store, skill, active_tools)
     agent = CodingAgent(task=task, skill=skill, tools=active_tools)
     hook_runner = build_hook_runner(
@@ -217,7 +222,12 @@ def build_hook_runner(
     return HookRunner(combined_hooks)
 
 
-def resolve_skill_tools(skill_name: str | None) -> tuple[Skill | None, dict]:
+def resolve_skill_tools(
+    skill_name: str | None,
+    *,
+    repo_root: Path | str | None = None,
+    session_id: str | None = None,
+) -> tuple[Skill | None, dict]:
     if skill_name is None:
         return None, TOOLS
 
@@ -233,12 +243,18 @@ def resolve_skill_tools(skill_name: str | None) -> tuple[Skill | None, dict]:
     if not skill.allowed_tools:
         return skill, TOOLS
 
-    unknown_tools = [tool_name for tool_name in skill.allowed_tools if tool_name not in TOOLS]
+    user_tools = build_user_tool_registry(repo_root=repo_root, session_id=session_id)
+    available_tools = {**user_tools, **TOOLS}
+    unknown_tools = [
+        tool_name
+        for tool_name in skill.allowed_tools
+        if tool_name not in available_tools
+    ]
     if unknown_tools:
         unknown = ", ".join(unknown_tools)
         raise ValueError(f"Skill {skill.name} lists unknown tool(s): {unknown}")
 
-    return skill, {tool_name: TOOLS[tool_name] for tool_name in skill.allowed_tools}
+    return skill, {tool_name: available_tools[tool_name] for tool_name in skill.allowed_tools}
 
 
 def append_run_context(

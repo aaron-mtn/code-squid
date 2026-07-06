@@ -2,8 +2,10 @@ import json
 from pathlib import Path
 
 from agent.coding import CodingAgent
+from core.extension_paths import CODE_SQUID_HOME_ENV
 from core.runner import build_coding_task_run, resolve_skill_tools
 from core.skills import Skill
+from tools import TOOLS
 
 
 def read_entries(path: Path) -> list[dict]:
@@ -12,6 +14,16 @@ def read_entries(path: Path) -> list[dict]:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+
+
+def write_user_tool(home: Path, name: str, metadata: str | None = None) -> None:
+    tool_dir = home / "tools" / name
+    tool_dir.mkdir(parents=True)
+    (tool_dir / "tool.yaml").write_text(metadata or f"name: {name}\n", encoding="utf-8")
+    (tool_dir / "tool.py").write_text(
+        "def run(args, context=None):\n    return {'ok': True}\n",
+        encoding="utf-8",
+    )
 
 
 def test_selecting_skill_filters_tool_definitions(monkeypatch, tmp_path: Path) -> None:
@@ -92,7 +104,11 @@ def test_skill_with_omitted_tools_keeps_full_tool_default(monkeypatch, tmp_path:
     assert list(tools) == ["read_file", "write_file", "apply_patch", "run_command"]
 
 
-def test_no_selected_skill_preserves_full_tool_behavior() -> None:
+def test_no_selected_skill_preserves_full_tool_behavior(monkeypatch, tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
+    write_user_tool(home, "custom_tool")
+
     skill, tools = resolve_skill_tools(None)
     agent = CodingAgent("do this", skill=skill, tools=tools)
     names = [definition["function"]["name"] for definition in agent.tool_definitions()]
@@ -101,7 +117,62 @@ def test_no_selected_skill_preserves_full_tool_behavior() -> None:
     assert names == ["read_file", "write_file", "apply_patch", "run_command"]
 
 
+def test_skill_listing_user_tool_activates_it(monkeypatch, tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
+    write_user_tool(
+        home,
+        "custom_tool",
+        "name: custom_tool\ndescription: Custom user tool.\n",
+    )
+    skill = Skill(
+        name="custom",
+        description="Custom.",
+        instructions="Use custom tools.",
+        allowed_tools=("custom_tool",),
+        path=tmp_path / "SKILL.md",
+    )
+
+    monkeypatch.setattr("core.runner.discover_skills", lambda: {"custom": skill})
+
+    selected_skill, tools = resolve_skill_tools("custom")
+    agent = CodingAgent("use it", skill=selected_skill, tools=tools)
+    names = [definition["function"]["name"] for definition in agent.tool_definitions()]
+
+    assert selected_skill is skill
+    assert list(tools) == ["custom_tool"]
+    assert names == ["custom_tool"]
+    assert tools["custom_tool"]["definition"]()["function"]["description"] == "Custom user tool."
+
+
+def test_builtin_tool_name_wins_over_user_tool_collision(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
+    write_user_tool(
+        home,
+        "read_file",
+        "name: read_file\ndescription: Colliding user tool.\n",
+    )
+    skill = Skill(
+        name="read",
+        description="Read.",
+        instructions="Use read.",
+        allowed_tools=("read_file",),
+        path=tmp_path / "SKILL.md",
+    )
+
+    monkeypatch.setattr("core.runner.discover_skills", lambda: {"read": skill})
+
+    _selected_skill, tools = resolve_skill_tools("read")
+
+    assert tools["read_file"] is TOOLS["read_file"]
+
+
 def test_unknown_tool_in_allowed_tools_fails_clearly(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(tmp_path / "home"))
     skill = Skill(
         name="bad",
         description="Bad tool list.",

@@ -5,12 +5,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import importlib.util
 import json
 from pathlib import Path
 import re
+import uuid
 from typing import Any
 
 from core.extension_paths import user_tools_dir
+from tools._truncation import truncate_head_tail
 
 
 SAFE_TOOL_NAME_RE = re.compile(r"^[a-z0-9_-]+$")
@@ -53,6 +56,19 @@ def discover_user_tools() -> dict[str, UserTool]:
         if tool is not None:
             tools[tool.name] = tool
     return tools
+
+
+def build_user_tool_registry(
+    *,
+    repo_root: Path | str | None = None,
+    session_id: str | None = None,
+) -> dict[str, dict]:
+    """Return executable registry entries for discovered user tools."""
+    repo_root = None if repo_root is None else Path(repo_root)
+    return {
+        name: _registry_entry(tool, repo_root=repo_root, session_id=session_id)
+        for name, tool in discover_user_tools().items()
+    }
 
 
 def load_user_tool(tool_dir: Path | str) -> UserTool | None:
@@ -125,6 +141,171 @@ def _parse_metadata_file(path: Path) -> dict[str, Any]:
         return data
 
     return _parse_simple_yaml_mapping(text, path)
+
+
+def _registry_entry(
+    tool: UserTool,
+    *,
+    repo_root: Path | None,
+    session_id: str | None,
+) -> dict:
+    return {
+        "execute": lambda current_repo_root, **args: execute_user_tool(
+            tool,
+            current_repo_root if repo_root is None else repo_root,
+            args,
+            session_id=session_id,
+        ),
+        "definition": lambda: user_tool_definition(tool),
+        "source": "user",
+    }
+
+
+def user_tool_definition(tool: UserTool) -> dict:
+    """Convert saved user-tool metadata to a model tool definition."""
+    return {
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description or f"Run the {tool.name} user tool.",
+            "parameters": _user_tool_parameters(tool.args),
+        },
+    }
+
+
+def execute_user_tool(
+    tool: UserTool,
+    repo_root: Path | str,
+    args: dict[str, Any],
+    *,
+    session_id: str | None = None,
+) -> dict:
+    """Import and execute a discovered user tool with normalized results."""
+    tool_dir = user_tools_dir() / tool.name
+    try:
+        entrypoint = _resolve_entrypoint(tool_dir, tool.entrypoint)
+        module = _load_user_tool_module(tool.name, entrypoint)
+        function = getattr(module, tool.function, None)
+        if function is None or not callable(function):
+            return _error_result(tool.name, f"Function not found: {tool.function}")
+
+        context = {
+            "repo_root": str(Path(repo_root)),
+            "tool_name": tool.name,
+        }
+        if session_id:
+            context["session_id"] = session_id
+
+        result = function(args, context=context)
+        return _normalize_user_tool_result(tool.name, result)
+    except Exception as error:
+        return _error_result(tool.name, str(error))
+
+
+def _resolve_entrypoint(tool_dir: Path, entrypoint: str) -> Path:
+    base_dir = tool_dir.resolve()
+    entrypoint_path = (tool_dir / entrypoint).resolve()
+    if entrypoint_path != base_dir and base_dir not in entrypoint_path.parents:
+        raise UserToolError(
+            f"{tool_dir / entrypoint}: entrypoint must stay inside the tool directory"
+        )
+    if not entrypoint_path.is_file():
+        raise UserToolError(f"{entrypoint_path}: entrypoint file does not exist")
+    return entrypoint_path
+
+
+def _load_user_tool_module(tool_name: str, entrypoint: Path):
+    module_name = f"_code_squid_user_tool_{tool_name}_{uuid.uuid4().hex}"
+    spec = importlib.util.spec_from_file_location(module_name, entrypoint)
+    if spec is None or spec.loader is None:
+        raise UserToolError(f"{entrypoint}: could not load user tool module")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _normalize_user_tool_result(tool_name: str, result: Any) -> dict:
+    if isinstance(result, dict):
+        normalized = dict(result)
+        normalized.setdefault("tool", tool_name)
+    elif isinstance(result, str):
+        normalized = {
+            "ok": True,
+            "tool": tool_name,
+            "message": result,
+            "data": {},
+        }
+    elif result is None:
+        normalized = {
+            "ok": True,
+            "tool": tool_name,
+            "message": "",
+            "data": {},
+        }
+    else:
+        normalized = {
+            "ok": True,
+            "tool": tool_name,
+            "message": str(result),
+            "data": {},
+        }
+
+    if "ok" not in normalized:
+        normalized["ok"] = True
+    return _truncate_user_tool_result(normalized)
+
+
+def _error_result(tool_name: str, error: str) -> dict:
+    return {
+        "ok": False,
+        "tool": tool_name,
+        "error": error,
+    }
+
+
+def _truncate_user_tool_result(result: dict) -> dict:
+    truncated = dict(result)
+    for key, value in list(truncated.items()):
+        if not isinstance(value, str):
+            continue
+        value, metadata = truncate_head_tail(value)
+        truncated[key] = value
+        if metadata["truncated"]:
+            truncated[f"{key}_truncated"] = True
+            truncated[f"{key}_original_chars"] = metadata["original_chars"]
+            truncated[f"{key}_returned_chars"] = metadata["returned_chars"]
+    return truncated
+
+
+def _user_tool_parameters(args: dict[str, Any]) -> dict:
+    if not args:
+        return {
+            "type": "object",
+            "properties": {},
+        }
+
+    properties = {}
+    required = []
+    for name, spec in args.items():
+        if not isinstance(name, str):
+            continue
+        if isinstance(spec, dict):
+            property_spec = dict(spec)
+        else:
+            property_spec = {"description": str(spec)}
+        required_flag = bool(property_spec.pop("required", False))
+        properties[name] = property_spec
+        if required_flag:
+            required.append(name)
+
+    parameters = {
+        "type": "object",
+        "properties": properties,
+    }
+    if required:
+        parameters["required"] = required
+    return parameters
 
 
 def _parse_simple_yaml_mapping(text: str, path: Path) -> dict[str, Any]:
