@@ -13,6 +13,7 @@ import uuid
 from typing import Any
 
 from core.extension_paths import user_tools_dir
+from core.extensions import get_active_extension
 from tools._truncation import truncate_head_tail
 
 
@@ -30,6 +31,7 @@ class UserTool:
     safety: dict[str, Any] = field(default_factory=dict)
     source: str = "user"
     editable: bool = True
+    path: Path | None = field(default=None, compare=False)
 
 
 class UserToolError(RuntimeError):
@@ -39,22 +41,34 @@ class UserToolError(RuntimeError):
 def discover_user_tools() -> dict[str, UserTool]:
     """Return valid user tool metadata in deterministic directory order."""
     root = user_tools_dir()
-    if not root.exists():
-        return {}
-    if not root.is_dir():
-        raise UserToolError(f"{root}: tools path is not a directory")
-
     tools: dict[str, UserTool] = {}
-    for tool_dir in sorted(
-        (path for path in root.iterdir() if path.is_dir()),
-        key=_path_sort_key,
-    ):
-        try:
-            tool = load_user_tool(tool_dir)
-        except UserToolError:
-            continue
-        if tool is not None:
-            tools[tool.name] = tool
+
+    if not root.exists():
+        pass
+    elif not root.is_dir():
+        raise UserToolError(f"{root}: tools path is not a directory")
+    else:
+        for tool_dir in sorted(
+            (path for path in root.iterdir() if path.is_dir()),
+            key=_path_sort_key,
+        ):
+            try:
+                tool = load_user_tool(tool_dir)
+            except UserToolError:
+                continue
+            if tool is not None:
+                tools[tool.name] = tool
+
+    active_extension = get_active_extension()
+    if active_extension is not None and active_extension.valid:
+        extension_tools = _discover_user_tools_in(
+            active_extension.path / "tools",
+            active_extension.tools,
+            source="extension",
+            editable=False,
+        )
+        for name, tool in extension_tools.items():
+            tools.setdefault(name, tool)
     return tools
 
 
@@ -71,7 +85,12 @@ def build_user_tool_registry(
     }
 
 
-def load_user_tool(tool_dir: Path | str) -> UserTool | None:
+def load_user_tool(
+    tool_dir: Path | str,
+    *,
+    source: str = "user",
+    editable: bool = True,
+) -> UserTool | None:
     """Load one user tool manifest as metadata only."""
     tool_dir = Path(tool_dir)
     metadata_path = tool_dir / "tool.yaml"
@@ -118,7 +137,36 @@ def load_user_tool(tool_dir: Path | str) -> UserTool | None:
         function=function,
         args=_metadata_object(metadata, "args", metadata_path),
         safety=_metadata_object(metadata, "safety", metadata_path),
+        source=source,
+        editable=editable,
+        path=tool_dir,
     )
+
+
+def _discover_user_tools_in(
+    directory: Path,
+    names: tuple[str, ...],
+    *,
+    source: str,
+    editable: bool,
+) -> dict[str, UserTool]:
+    if not directory.exists():
+        return {}
+    if not directory.is_dir():
+        return {}
+
+    tools: dict[str, UserTool] = {}
+    for name in names:
+        tool_dir = directory / name
+        if not tool_dir.is_dir():
+            continue
+        try:
+            tool = load_user_tool(tool_dir, source=source, editable=editable)
+        except UserToolError:
+            continue
+        if tool is not None:
+            tools[tool.name] = tool
+    return tools
 
 
 def _parse_metadata_file(path: Path) -> dict[str, Any]:
@@ -157,7 +205,7 @@ def _registry_entry(
             session_id=session_id,
         ),
         "definition": lambda: user_tool_definition(tool),
-        "source": "user",
+        "source": tool.source,
     }
 
 
@@ -181,7 +229,7 @@ def execute_user_tool(
     session_id: str | None = None,
 ) -> dict:
     """Import and execute a discovered user tool with normalized results."""
-    tool_dir = user_tools_dir() / tool.name
+    tool_dir = tool.path if tool.path is not None else user_tools_dir() / tool.name
     try:
         entrypoint = _resolve_entrypoint(tool_dir, tool.entrypoint)
         module = _load_user_tool_module(tool.name, entrypoint)

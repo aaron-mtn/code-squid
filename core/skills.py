@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from core.extension_paths import user_skills_dir
+from core.extensions import get_active_extension
 
 
 SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
@@ -93,6 +94,17 @@ def discover_skills(skills_dir: Path = SKILLS_DIR) -> dict[str, Skill]:
         skills,
         _discover_skills_in(legacy_user_skills_dir, source="user", editable=True),
     )
+    active_extension = get_active_extension()
+    if active_extension is not None and active_extension.valid:
+        _merge_missing(
+            skills,
+            _discover_extension_skills(
+                active_extension.path / "skills",
+                active_extension.skills,
+                source="extension",
+                editable=False,
+            ),
+        )
     return skills
 
 
@@ -106,6 +118,26 @@ def _discover_skills_in(directory: Path, *, source: str, editable: bool) -> dict
 
     skills = {}
     for skill_file in sorted(directory.glob("*/SKILL.md")):
+        skill = parse_skill_file(skill_file, source=source, editable=editable)
+        skills[skill.name] = skill
+    return skills
+
+
+def _discover_extension_skills(
+    directory: Path,
+    names: tuple[str, ...],
+    *,
+    source: str,
+    editable: bool,
+) -> dict[str, Skill]:
+    if not directory.exists():
+        return {}
+
+    skills = {}
+    for name in names:
+        skill_file = directory / name / "SKILL.md"
+        if not skill_file.is_file():
+            continue
         skill = parse_skill_file(skill_file, source=source, editable=editable)
         skills[skill.name] = skill
     return skills

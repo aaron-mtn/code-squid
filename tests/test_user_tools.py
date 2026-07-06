@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from core.extension_paths import CODE_SQUID_HOME_ENV
+from core.extensions import set_active_extension
 from core.session import Session
 from core.tool_executor import ToolExecutor
 from core.user_tools import (
@@ -19,6 +20,33 @@ def _write_tool(home: Path, directory_name: str, metadata: str, source: str = ""
     tool_dir = home / "tools" / directory_name
     tool_dir.mkdir(parents=True)
     (tool_dir / "tool.yaml").write_text(metadata, encoding="utf-8")
+    if source:
+        (tool_dir / "tool.py").write_text(source, encoding="utf-8")
+    return tool_dir
+
+
+def _write_extension_tool(
+    home: Path,
+    extension_name: str,
+    tool_name: str,
+    metadata: str | None = None,
+    source: str = "",
+    *,
+    extension_metadata: str | None = None,
+) -> Path:
+    extension_dir = home / "extensions" / extension_name
+    extension_dir.mkdir(parents=True, exist_ok=True)
+    (extension_dir / "extension.yaml").write_text(
+        extension_metadata
+        or f"""name: {extension_name}
+tools:
+  - {tool_name}
+""",
+        encoding="utf-8",
+    )
+    tool_dir = extension_dir / "tools" / tool_name
+    tool_dir.mkdir(parents=True)
+    (tool_dir / "tool.yaml").write_text(metadata or f"name: {tool_name}\n", encoding="utf-8")
     if source:
         (tool_dir / "tool.py").write_text(source, encoding="utf-8")
     return tool_dir
@@ -216,6 +244,123 @@ def run(args, context=None):
     assert not marker.exists()
     assert registry["lazy"]["execute"](tmp_path)["message"] == "done"
     assert marker.read_text(encoding="utf-8") == "imported"
+
+
+def test_no_active_extension_leaves_user_tool_discovery_unchanged(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
+    _write_tool(home, "loose", "name: loose\n")
+    _write_extension_tool(home, "bundle", "extension_tool")
+
+    assert set(discover_user_tools()) == {"loose"}
+
+
+def test_active_extension_tool_appears_in_discovery(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
+    tool_dir = _write_extension_tool(
+        home,
+        "repo-inspector",
+        "line_count",
+        "name: line_count\ndescription: Count lines.\n",
+    )
+    set_active_extension("repo-inspector")
+
+    tools = discover_user_tools()
+
+    assert "line_count" in tools
+    assert tools["line_count"].source == "extension"
+    assert tools["line_count"].editable is False
+    assert tools["line_count"].path == tool_dir
+
+
+def test_inactive_extension_tool_does_not_appear(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
+    _write_extension_tool(home, "repo-inspector", "line_count")
+
+    assert "line_count" not in discover_user_tools()
+
+
+def test_invalid_active_extension_tool_does_not_appear(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
+    _write_extension_tool(
+        home,
+        "repo-inspector",
+        "line_count",
+        extension_metadata="""name: repo-inspector
+default_skill: missing
+tools:
+  - line_count
+""",
+    )
+    set_active_extension("repo-inspector")
+
+    assert "line_count" not in discover_user_tools()
+
+
+def test_loose_user_tool_wins_over_active_extension_duplicate(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
+    _write_tool(home, "line_count", "name: line_count\ndescription: Loose tool.\n")
+    _write_extension_tool(
+        home,
+        "repo-inspector",
+        "line_count",
+        "name: line_count\ndescription: Extension tool.\n",
+    )
+    set_active_extension("repo-inspector")
+
+    tools = discover_user_tools()
+
+    assert tools["line_count"].description == "Loose tool."
+    assert tools["line_count"].source == "user"
+
+
+def test_extension_tool_registry_executes_from_extension_folder(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
+    tool_dir = _write_extension_tool(
+        home,
+        "repo-inspector",
+        "line_count",
+        "name: line_count\n",
+        """
+from pathlib import Path
+
+def run(args, context=None):
+    marker = Path(__file__).with_name("marker.txt")
+    marker.write_text(context["tool_name"], encoding="utf-8")
+    return {"ok": True, "marker": str(marker)}
+""",
+    )
+    set_active_extension("repo-inspector")
+
+    registry = build_user_tool_registry()
+    result = registry["line_count"]["execute"](tmp_path)
+
+    assert result["ok"] is True
+    assert result["marker"] == str(tool_dir / "marker.txt")
+    assert (tool_dir / "marker.txt").read_text(encoding="utf-8") == "line_count"
 
 
 def test_empty_tools_dir_returns_empty_dict(monkeypatch, tmp_path: Path) -> None:

@@ -73,12 +73,18 @@ machine-readable runtime facts.
   - `extensions.py` owns extension bundle metadata discovery, active-extension
     state, and validation. It must not own runtime tool execution, skill prompt
     parsing beyond metadata validation, hook execution, or Desktop UI.
+  - `skills.py` owns skill prompt parsing and discovery. It includes built-in
+    skills, loose user skills, the legacy repo user-skill fallback, and skills
+    from the active valid extension.
+  - `user_tools.py` owns loose user-tool discovery/execution metadata and can
+    include tools from the active valid extension without importing tool code
+    during discovery.
   - `hook_loader.py` owns loading enabled user hooks from disk when callers opt
     into user hooks.
   - `runner.py` owns reusable coding-task run wiring for Python callers and CLI
-    helpers. It wires optional hooks or a `HookRunner`, and wires the selected
-    provider into the model adapter but does not own provider-specific
-    construction details.
+    helpers. It wires optional hooks or a `HookRunner`, wires the selected
+    provider into the model adapter, and owns runtime tool selection for
+    selected skills. It does not own provider-specific construction details.
   - `session.py` owns in-memory transcript state and lightweight read/write
     side-effect tracking.
   - `model_adapter.py` owns provider response normalization, tool-call parsing,
