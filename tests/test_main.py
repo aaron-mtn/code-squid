@@ -1,25 +1,24 @@
 import json
 from pathlib import Path
 
-from config.settings import load_settings
-from core.agent_loop import RunResult
-from core.model_adapter import ModelRequestError
-from main import (
+from cli.args import _resolve_workspace_root
+from cli.commands import _mode, run_cli
+from cli.interactive import (
     HELP_TEXT,
     INPUT_IDENTITY_LINE,
-    PROMPT_STYLE,
     PROMPT_PREFIX,
-    _format_skill_status,
-    _resolve_workspace_root,
-    _mode,
+    PROMPT_STYLE,
     _prompt_task,
     _resume_session,
     _run_interactive,
-    _run_loop,
-    _run_follow_up_task,
     _run_new_session,
-    main,
 )
+from cli.run import _run_follow_up_task, _run_loop
+from cli.skills import _format_skill_status
+from config.settings import load_settings
+from core.agent_loop import RunResult
+from core.model_adapter import ModelRequestError
+from main import main
 from storage.session_store import SessionStore
 from ui.terminal import (
     CODE_SQUID_BANNER,
@@ -133,10 +132,9 @@ def test_main_passes_selected_cwd_to_existing_commands(
         calls.append((repo_root, args))
         return 0
 
-    monkeypatch.setattr("sys.argv", ["main.py", "--cwd", str(tmp_path), "mode"])
-    monkeypatch.setattr("main._mode", fake_mode)
+    monkeypatch.setattr("cli.commands._mode", fake_mode)
 
-    assert main() == 0
+    assert run_cli(["--cwd", str(tmp_path), "mode"]) == 0
     assert calls == [(tmp_path.resolve(), [])]
 
 
@@ -150,13 +148,9 @@ def test_main_passes_selected_skill_to_interactive(
         calls.append((repo_root, skill_name))
         return 0
 
-    monkeypatch.setattr(
-        "sys.argv",
-        ["main.py", "--cwd", str(tmp_path), "--skill", "architecture-review"],
-    )
-    monkeypatch.setattr("main._run_interactive", fake_interactive)
+    monkeypatch.setattr("cli.commands._run_interactive", fake_interactive)
 
-    assert main() == 0
+    assert run_cli(["--cwd", str(tmp_path), "--skill", "architecture-review"]) == 0
     assert calls == [(tmp_path.resolve(), "architecture-review")]
 
 
