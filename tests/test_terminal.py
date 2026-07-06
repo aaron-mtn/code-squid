@@ -853,6 +853,29 @@ def test_run_command_result_prints_one_success_line(
     assert capsys.readouterr().out == f"{RUN_DETAIL_INDENT}💿 Ran: node --check app.js\n"
 
 
+def test_successful_unknown_tool_result_prints_compact_message(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay().tool_result(
+        {"tool": "ls", "args": {"path": "/tmp/project"}},
+        {
+            "ok": True,
+            "tool": "ls",
+            "message": (
+                "Listed 4 entries from "
+                "/home/aaron/Desktop/coding_agent_eval_repos/02_two_file_dependency"
+            ),
+            "data": {"entries": [{"name": "README.md", "type": "file"}]},
+        },
+    )
+
+    assert capsys.readouterr().out == (
+        f"{RUN_DETAIL_INDENT}"
+        "✅ ls completed: Listed 4 entries from "
+        "/home/aaron/Desktop/coding_agent_eval_repos/02_two_file_dependency\n"
+    )
+
+
 def test_tool_result_followed_by_assistant_message_has_one_blank_line(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

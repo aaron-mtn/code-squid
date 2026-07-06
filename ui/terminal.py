@@ -422,6 +422,11 @@ class TerminalDisplay:
         if result.get("ok", False):
             if tool_name in {"read_file", "write_file", "apply_patch"}:
                 self._print_visible_line(self._action_label(action, "success"), dim=True)
+            elif tool_name:
+                self._print_visible_line(
+                    self._generic_tool_success_label(str(tool_name), result),
+                    dim=True,
+                )
             self._print_debug_tool_result(action, result)
             return
 
@@ -436,6 +441,14 @@ class TerminalDisplay:
 
         self._print_visible_line(f"❌ {tool_name} failed: {error}", style=SOFT_RED_STYLE)
         self._print_debug_tool_result(action, result)
+
+    def _generic_tool_success_label(self, tool_name: str, result: dict) -> str:
+        label = f"✅ {tool_name} completed"
+        message = self._single_line(result.get("message", "")).strip()
+        if not message:
+            return label
+
+        return f"{label}: {self._truncate_middle(message, APPROVAL_COMMAND_LABEL_MAX)}"
 
     def reply_rejected(self, reason: str) -> None:
         self._stop_spinner()
