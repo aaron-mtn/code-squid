@@ -38,6 +38,10 @@ def _write_valid_files(extension_dir: Path) -> None:
         "name: squid-bell\n",
         encoding="utf-8",
     )
+    (extension_dir / "hooks" / "squid-bell" / "hook.py").write_text(
+        "def create_hook(config=None):\n    return None\n",
+        encoding="utf-8",
+    )
 
 
 def test_missing_extensions_dir_returns_empty_dict(tmp_path: Path) -> None:
@@ -235,6 +239,23 @@ def test_listed_hook_must_have_hook_yaml(tmp_path: Path) -> None:
     assert extension is not None
     assert extension.valid is False
     assert any("hook.yaml" in error for error in extension.errors)
+
+
+def test_listed_hook_must_have_hook_py(tmp_path: Path) -> None:
+    extension_dir = _write_extension(
+        tmp_path,
+        "example",
+        "name: example\nhooks:\n  - missing\n",
+    )
+    hook_dir = extension_dir / "hooks" / "missing"
+    hook_dir.mkdir(parents=True)
+    (hook_dir / "hook.yaml").write_text("name: missing\n", encoding="utf-8")
+
+    extension = load_extension(extension_dir)
+
+    assert extension is not None
+    assert extension.valid is False
+    assert any("hook.py" in error for error in extension.errors)
 
 
 def test_active_state_missing_file_returns_none(tmp_path: Path) -> None:

@@ -145,9 +145,14 @@ def validate_extension(extension: Extension) -> tuple[str, ...]:
                 f"{extension.path}: listed tool {tool!r} must have tools/{tool}/tool.yaml"
             )
     for hook in extension.hooks:
-        if not (extension.path / "hooks" / hook / "hook.yaml").is_file():
+        hook_dir = extension.path / "hooks" / hook
+        if not (hook_dir / "hook.yaml").is_file():
             errors.append(
                 f"{extension.path}: listed hook {hook!r} must have hooks/{hook}/hook.yaml"
+            )
+        if not (hook_dir / "hook.py").is_file():
+            errors.append(
+                f"{extension.path}: listed hook {hook!r} must have hooks/{hook}/hook.py"
             )
 
     return tuple(errors)

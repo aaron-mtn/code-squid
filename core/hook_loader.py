@@ -14,6 +14,7 @@ from types import ModuleType
 from typing import Any
 
 from core.extension_paths import user_hooks_dir
+from core.extensions import get_active_extension
 
 
 @dataclass(frozen=True)
@@ -49,10 +50,23 @@ def list_user_hooks(hooks_dir: Path | None = None) -> list[HookInfo]:
 
 
 def load_user_hooks(hooks_dir: Path | None = None) -> list[object]:
-    """Import enabled saved user hooks and return hook instances."""
+    """Import enabled saved user hooks and active extension hooks."""
+    hook_infos = list_user_hooks(hooks_dir)
+    if hooks_dir is None:
+        hook_infos.extend(_active_extension_hook_infos(hook_infos))
+    return _load_hook_infos(hook_infos)
+
+
+def load_active_extension_hooks() -> list[object]:
+    """Import hooks listed by the active valid extension."""
+    return _load_hook_infos(_active_extension_hook_infos([]))
+
+
+def _load_hook_infos(hook_infos: list[HookInfo]) -> list[object]:
+    """Import enabled hook infos and return hook instances."""
     loaded_hooks = []
 
-    for info in list_user_hooks(hooks_dir):
+    for info in hook_infos:
         if not info.enabled:
             continue
         if info.path is None:
@@ -78,7 +92,34 @@ def load_user_hooks(hooks_dir: Path | None = None) -> list[object]:
     return loaded_hooks
 
 
-def _read_hook_info(hook_dir: Path) -> HookInfo:
+def _active_extension_hook_infos(user_hook_infos: list[HookInfo]) -> list[HookInfo]:
+    active_extension = get_active_extension()
+    if active_extension is None or not active_extension.valid:
+        return []
+
+    user_hook_names = {info.name for info in user_hook_infos}
+    hook_infos: list[HookInfo] = []
+    for hook_name in active_extension.hooks:
+        hook_dir = active_extension.path / "hooks" / hook_name
+        if not hook_dir.is_dir():
+            continue
+        info = _read_hook_info(
+            hook_dir,
+            source="extension",
+            enabled_override=True,
+        )
+        if info.name in user_hook_names:
+            continue
+        hook_infos.append(info)
+    return hook_infos
+
+
+def _read_hook_info(
+    hook_dir: Path,
+    *,
+    source: str = "user",
+    enabled_override: bool | None = None,
+) -> HookInfo:
     metadata_path = hook_dir / "hook.yaml"
     source_path = hook_dir / "hook.py"
 
@@ -92,7 +133,11 @@ def _read_hook_info(hook_dir: Path) -> HookInfo:
     if not name:
         raise HookLoadError(f"{metadata_path}: missing required metadata field: name")
     description = _metadata_string(metadata, "description", metadata_path)
-    enabled = _metadata_bool(metadata, "enabled", metadata_path, default=False)
+    enabled = (
+        enabled_override
+        if enabled_override is not None
+        else _metadata_bool(metadata, "enabled", metadata_path, default=False)
+    )
     version = _metadata_int(metadata, "version", metadata_path, default=1)
 
     return HookInfo(
@@ -101,6 +146,7 @@ def _read_hook_info(hook_dir: Path) -> HookInfo:
         enabled=enabled,
         version=version,
         path=hook_dir,
+        source=source,
     )
 
 

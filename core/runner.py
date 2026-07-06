@@ -21,7 +21,7 @@ from core.agent_loop import AgentLoop, RunResult
 from core.approval import ApprovalPolicy
 from core.compaction import Compactor
 from core.events import EventCallback
-from core.hook_loader import load_user_hooks
+from core.hook_loader import load_active_extension_hooks, load_user_hooks
 from core.hooks import HookRunner
 from core.model_adapter import ModelAdapter
 from core.session import Session
@@ -218,6 +218,8 @@ def build_hook_runner(
     combined_hooks = list(hooks or [])
     if include_user_hooks:
         combined_hooks.extend(load_user_hooks())
+    else:
+        combined_hooks.extend(load_active_extension_hooks())
 
     return HookRunner(combined_hooks)
 
