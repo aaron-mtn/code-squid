@@ -1558,6 +1558,42 @@ def test_final_message_renders_unordered_bullet_markers_as_terminal_bullets(
     assert f"{FINAL_SUMMARY_INDENT}+ plus item" not in output
 
 
+def test_final_summary_short_unordered_bullet_renders_on_one_line() -> None:
+    formatted = TerminalDisplay()._format_final_summary("- item")
+
+    assert formatted == f"{FINAL_SUMMARY_INDENT}• item"
+
+
+def test_final_summary_long_unordered_bullet_does_not_orphan_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "ui.terminal.shutil.get_terminal_size",
+        lambda fallback: os.terminal_size((20, 24)),
+    )
+
+    formatted = TerminalDisplay()._format_final_summary("- `/long/path/file.py`")
+
+    assert f"{FINAL_SUMMARY_INDENT}•" not in formatted.splitlines()
+    assert formatted == f"{FINAL_SUMMARY_INDENT}• `/long/path/file.py`"
+
+
+def test_final_summary_unordered_bullet_continuation_aligns_under_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "ui.terminal.shutil.get_terminal_size",
+        lambda fallback: os.terminal_size((18, 24)),
+    )
+
+    formatted = TerminalDisplay()._format_final_summary("- short words continue here")
+
+    assert formatted.splitlines() == [
+        f"{FINAL_SUMMARY_INDENT}• short words",
+        f"{FINAL_SUMMARY_INDENT}  continue here",
+    ]
+
+
 def test_final_summary_separates_consecutive_top_level_bullets() -> None:
     formatted = TerminalDisplay()._format_final_summary(
         "## Files changed\n"

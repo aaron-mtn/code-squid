@@ -810,10 +810,9 @@ class TerminalDisplay:
         stripped = rendered.lstrip()
         unordered_bullet_match = re.match(r"^([-*+])\s+(.+)$", stripped)
         if unordered_bullet_match:
-            rendered = f"• {unordered_bullet_match.group(2)}"
             return self._wrapped_display_lines(
-                rendered,
-                initial_indent=FINAL_SUMMARY_INDENT,
+                unordered_bullet_match.group(2),
+                initial_indent=f"{FINAL_SUMMARY_INDENT}• ",
                 subsequent_indent=f"{FINAL_SUMMARY_INDENT}  ",
             )
 
