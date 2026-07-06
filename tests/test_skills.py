@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from core.extension_paths import CODE_SQUID_HOME_ENV
 from core.skills import discover_builtin_skills, discover_skills, parse_skill_file
 
 
@@ -253,7 +254,12 @@ def test_builtin_skills_are_still_discovered() -> None:
     assert skills["architecture-review"].editable is False
 
 
-def test_discover_skills_includes_builtin_and_user_skills(tmp_path: Path) -> None:
+def test_discover_skills_includes_builtin_and_home_user_skills(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
     _write_skill(
         tmp_path / "skills" / "builtin" / "architecture-review" / "SKILL.md",
         """---
@@ -266,7 +272,7 @@ Review architecture.
 """,
     )
     _write_skill(
-        tmp_path / "skills" / "user" / "my-skill" / "SKILL.md",
+        home / "skills" / "my-skill" / "SKILL.md",
         """---
 name: my-skill
 description: User skill.
@@ -284,9 +290,98 @@ Use my workflow.
     assert skills["architecture-review"].editable is False
     assert skills["my-skill"].source == "user"
     assert skills["my-skill"].editable is True
+    assert skills["my-skill"].path == home / "skills" / "my-skill" / "SKILL.md"
 
 
-def test_discover_skills_preserves_builtin_on_duplicate_names(tmp_path: Path) -> None:
+def test_discover_skills_honors_code_squid_home_env_override(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "custom-code-squid-home"
+    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
+    _write_skill(
+        home / "skills" / "home-only" / "SKILL.md",
+        """---
+name: home-only
+description: Home skill.
+---
+
+Home instructions.
+""",
+    )
+
+    skills = discover_skills(tmp_path / "skills")
+
+    assert "home-only" in skills
+    assert skills["home-only"].path == home / "skills" / "home-only" / "SKILL.md"
+
+
+def test_discover_skills_includes_legacy_repo_user_fallback(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(tmp_path / "home"))
+    _write_skill(
+        tmp_path / "skills" / "user" / "legacy-skill" / "SKILL.md",
+        """---
+name: legacy-skill
+description: Legacy user skill.
+---
+
+Legacy instructions.
+""",
+    )
+
+    skills = discover_skills(tmp_path / "skills")
+
+    assert "legacy-skill" in skills
+    assert skills["legacy-skill"].source == "user"
+    assert skills["legacy-skill"].editable is True
+    assert (
+        skills["legacy-skill"].path
+        == tmp_path / "skills" / "user" / "legacy-skill" / "SKILL.md"
+    )
+
+
+def test_home_user_skill_wins_over_legacy_repo_user_duplicate(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
+    _write_skill(
+        home / "skills" / "review" / "SKILL.md",
+        """---
+name: review
+description: Home review.
+---
+
+Home instructions.
+""",
+    )
+    _write_skill(
+        tmp_path / "skills" / "user" / "review" / "SKILL.md",
+        """---
+name: review
+description: Legacy review.
+---
+
+Legacy instructions.
+""",
+    )
+
+    skills = discover_skills(tmp_path / "skills")
+
+    assert skills["review"].description == "Home review."
+    assert skills["review"].path == home / "skills" / "review" / "SKILL.md"
+
+
+def test_discover_skills_preserves_builtin_on_duplicate_names(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
     _write_skill(
         tmp_path / "skills" / "builtin" / "architecture-review" / "SKILL.md",
         """---
@@ -298,13 +393,23 @@ Built-in instructions.
 """,
     )
     _write_skill(
-        tmp_path / "skills" / "user" / "architecture-review" / "SKILL.md",
+        home / "skills" / "architecture-review" / "SKILL.md",
         """---
 name: architecture-review
 description: User review.
 ---
 
 User instructions.
+""",
+    )
+    _write_skill(
+        tmp_path / "skills" / "user" / "architecture-review" / "SKILL.md",
+        """---
+name: architecture-review
+description: Legacy review.
+---
+
+Legacy instructions.
 """,
     )
 

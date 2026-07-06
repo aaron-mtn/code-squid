@@ -7,10 +7,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from core.extension_paths import user_skills_dir
+
 
 SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 BUILTIN_SKILLS_DIR = SKILLS_DIR / "builtin"
-USER_SKILLS_DIR = SKILLS_DIR / "user"
+LEGACY_USER_SKILLS_DIR = SKILLS_DIR / "user"
 PROMPT_SECTION_MODES = {"replace", "append"}
 SUPPORTED_PROMPT_SECTIONS = {
     "SYSTEM_PROMPT_INTRO",
@@ -78,10 +80,19 @@ def parse_skill_file(path: Path, *, source: str = "builtin", editable: bool = Fa
 
 
 def discover_skills(skills_dir: Path = SKILLS_DIR) -> dict[str, Skill]:
+    legacy_user_skills_dir = (
+        LEGACY_USER_SKILLS_DIR if skills_dir == SKILLS_DIR else skills_dir / "user"
+    )
     skills = {}
     skills.update(_discover_skills_in(skills_dir / "builtin", source="builtin", editable=False))
-    for name, skill in _discover_skills_in(skills_dir / "user", source="user", editable=True).items():
-        skills.setdefault(name, skill)
+    _merge_missing(
+        skills,
+        _discover_skills_in(user_skills_dir(), source="user", editable=True),
+    )
+    _merge_missing(
+        skills,
+        _discover_skills_in(legacy_user_skills_dir, source="user", editable=True),
+    )
     return skills
 
 
@@ -98,6 +109,11 @@ def _discover_skills_in(directory: Path, *, source: str, editable: bool) -> dict
         skill = parse_skill_file(skill_file, source=source, editable=editable)
         skills[skill.name] = skill
     return skills
+
+
+def _merge_missing(skills: dict[str, Skill], discovered: dict[str, Skill]) -> None:
+    for name, skill in discovered.items():
+        skills.setdefault(name, skill)
 
 
 def _split_frontmatter(text: str, path: Path) -> tuple[str, str]:
