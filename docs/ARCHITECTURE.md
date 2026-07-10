@@ -73,8 +73,8 @@ machine-readable runtime facts.
   - `extensions.py` owns extension bundle metadata discovery, active-extension
     state, and validation. It must not own runtime tool execution, skill prompt
     parsing beyond metadata validation, hook loading/execution, or Desktop UI.
-  - `skills.py` owns skill prompt parsing and discovery. It includes built-in
-    skills, loose user skills, the legacy repo user-skill fallback, and skills
+  - `skills.py` owns skill prompt parsing and discovery. It includes bundled
+    built-in skills, user skills from the Code Squid home directory, and skills
     from the active valid extension.
   - `user_tools.py` owns loose user-tool discovery/execution metadata and can
     include tools from the active valid extension without importing tool code
@@ -337,10 +337,8 @@ Skills are file-backed prompt/tool profiles. Discovery order is:
 
 1. Built-in skills bundled with the repo.
 2. User skills in the Code Squid home directory.
-3. Legacy repo-local user skills, only for names not already discovered.
 
-Built-ins win over user duplicates, and home user skills win over legacy
-repo-local duplicates.
+Built-ins win over user duplicates.
 
 Built-in skills are bundled with the repo under:
 
@@ -359,15 +357,6 @@ If `CODE_SQUID_HOME` is set, user skills are stored under:
 ```text
 <CODE_SQUID_HOME>/skills/<skill-name>/SKILL.md
 ```
-
-Legacy repo-local user skills may still be discovered from:
-
-```text
-skills/user/<skill-name>/SKILL.md
-```
-
-This legacy path is a compatibility/dev fallback, not the place new user skills
-should be created.
 
 Each skill is a `SKILL.md` file with simple frontmatter followed by Markdown
 instructions. The supported frontmatter fields are:
@@ -497,7 +486,7 @@ tool exposure and prompt overrides can be inspected after a run.
 
 Discovered skills include source metadata: built-in skills have
 `source="builtin"` and `editable=false`; user skills discovered from the Code
-Squid home directory or the legacy repo-local fallback have `source="user"` and
+Squid home directory have `source="user"` and
 `editable=true`. Both sources use the same parsing, prompt override, selection,
 and tool filtering path once discovered.
 
@@ -528,7 +517,7 @@ extension paths are:
 - `extension-state.json` stores the single active extension name.
 
 These directories are separate from the repo-local `skills/builtin/` bundled
-skill directory and the legacy `skills/user/` compatibility/dev fallback.
+skill directory.
 
 The CLI exposes extension management through `extensions list`,
 `extensions active`, `extensions activate <name>`, `extensions deactivate`, and
@@ -1023,9 +1012,7 @@ layer for what happened, while model-native narration is encouraged by prompts.
 - Resume support is CLI-owned under `cli/`.
 - JSONL/file event output is intentionally not implemented yet.
 - User skill discovery checks `<CODE_SQUID_HOME>/skills/*/SKILL.md`, defaulting
-  to `~/.code-squid/skills/*/SKILL.md`; legacy repo-local
-  `skills/user/*/SKILL.md` discovery remains as a compatibility/dev fallback
-  for missing names.
+  to `~/.code-squid/skills/*/SKILL.md`.
 - Core CLI skill creation/editing commands are not implemented yet.
 - `allowed-tools: none` is not a supported special case.
 - New discovery tools such as repo tree/search helpers are not part of

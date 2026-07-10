@@ -341,64 +341,47 @@ Home instructions.
     assert skills["home-only"].path == home / "skills" / "home-only" / "SKILL.md"
 
 
-def test_discover_skills_includes_legacy_repo_user_fallback(
+def test_discover_skills_ignores_repo_local_user_skills(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(tmp_path / "home"))
     _write_skill(
-        tmp_path / "skills" / "user" / "legacy-skill" / "SKILL.md",
+        tmp_path / "skills" / "user" / "repo-local-skill" / "SKILL.md",
         """---
-name: legacy-skill
-description: Legacy user skill.
+name: repo-local-skill
+description: Repo-local user skill.
 ---
 
-Legacy instructions.
+Repo-local instructions.
 """,
     )
 
     skills = discover_skills(tmp_path / "skills")
 
-    assert "legacy-skill" in skills
-    assert skills["legacy-skill"].source == "user"
-    assert skills["legacy-skill"].editable is True
-    assert (
-        skills["legacy-skill"].path
-        == tmp_path / "skills" / "user" / "legacy-skill" / "SKILL.md"
-    )
+    assert "repo-local-skill" not in skills
 
 
-def test_home_user_skill_wins_over_legacy_repo_user_duplicate(
+def test_missing_home_user_skills_directory_is_harmless(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
+    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(tmp_path / "missing-home"))
     _write_skill(
-        home / "skills" / "review" / "SKILL.md",
+        tmp_path / "skills" / "builtin" / "review" / "SKILL.md",
         """---
 name: review
-description: Home review.
+description: Built-in review.
 ---
 
-Home instructions.
-""",
-    )
-    _write_skill(
-        tmp_path / "skills" / "user" / "review" / "SKILL.md",
-        """---
-name: review
-description: Legacy review.
----
-
-Legacy instructions.
+Built-in instructions.
 """,
     )
 
     skills = discover_skills(tmp_path / "skills")
 
-    assert skills["review"].description == "Home review."
-    assert skills["review"].path == home / "skills" / "review" / "SKILL.md"
+    assert set(skills) == {"review"}
+    assert skills["review"].source == "builtin"
 
 
 def test_discover_skills_preserves_builtin_on_duplicate_names(
@@ -427,17 +410,6 @@ description: User review.
 User instructions.
 """,
     )
-    _write_skill(
-        tmp_path / "skills" / "user" / "architecture-review" / "SKILL.md",
-        """---
-name: architecture-review
-description: Legacy review.
----
-
-Legacy instructions.
-""",
-    )
-
     skills = discover_skills(tmp_path / "skills")
 
     assert skills["architecture-review"].description == "Built-in review."

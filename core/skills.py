@@ -13,7 +13,6 @@ from core.extensions import get_active_extension
 
 SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 BUILTIN_SKILLS_DIR = SKILLS_DIR / "builtin"
-LEGACY_USER_SKILLS_DIR = SKILLS_DIR / "user"
 PROMPT_SECTION_MODES = {"replace", "append"}
 SUPPORTED_PROMPT_SECTIONS = {
     "SYSTEM_PROMPT_INTRO",
@@ -81,18 +80,11 @@ def parse_skill_file(path: Path, *, source: str = "builtin", editable: bool = Fa
 
 
 def discover_skills(skills_dir: Path = SKILLS_DIR) -> dict[str, Skill]:
-    legacy_user_skills_dir = (
-        LEGACY_USER_SKILLS_DIR if skills_dir == SKILLS_DIR else skills_dir / "user"
-    )
     skills = {}
     skills.update(_discover_skills_in(skills_dir / "builtin", source="builtin", editable=False))
     _merge_missing(
         skills,
         _discover_skills_in(user_skills_dir(), source="user", editable=True),
-    )
-    _merge_missing(
-        skills,
-        _discover_skills_in(legacy_user_skills_dir, source="user", editable=True),
     )
     active_extension = get_active_extension()
     if active_extension is not None and active_extension.valid:

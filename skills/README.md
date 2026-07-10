@@ -23,15 +23,6 @@ If `CODE_SQUID_HOME` is set:
 <CODE_SQUID_HOME>/skills/<skill-name>/SKILL.md
 ```
 
-Legacy repo-local user skills may still be discovered from:
-
-```text
-skills/user/<skill-name>/SKILL.md
-```
-
-This is a compatibility/dev fallback, not the place new user skills should be
-created.
-
 ## Frontmatter
 
 Supported fields:
