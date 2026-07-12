@@ -3,7 +3,7 @@
 """Small terminal display layer for Code Squid."""
 
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shlex
 import shutil
@@ -484,7 +484,7 @@ class TerminalDisplay:
         print(_styled_text("🚫 Model request failed", SOFT_RED_STYLE))
         print()
         print("Code Squid could not get a response from the configured model provider.")
-        print(f"Details saved to: {log_path}")
+        print(f"Details saved to: {log_path.as_posix()}")
 
     def loop_finished(self, session, run_result=None) -> None:
         self._stop_spinner()
@@ -907,28 +907,30 @@ class TerminalDisplay:
             if path_obj.is_absolute():
                 resolved_path = path_obj.resolve()
                 try:
-                    display_path = str(resolved_path.relative_to(self._display_root()))
+                    display_path = resolved_path.relative_to(self._display_root()).as_posix()
                 except ValueError:
                     display_path = self._parent_file_label(resolved_path)
+            elif PurePosixPath(raw_path).is_absolute():
+                display_path = self._parent_file_label(PurePosixPath(raw_path))
             else:
-                display_path = raw_path
+                display_path = path_obj.as_posix()
         except (OSError, ValueError):
             display_path = raw_path
 
         if len(display_path) <= PATH_LABEL_MAX:
             return display_path
 
-        parts = Path(display_path).parts
-        if Path(display_path).is_absolute() and len(parts) >= 3:
+        parts = PurePosixPath(display_path).parts
+        if PurePosixPath(display_path).is_absolute() and len(parts) >= 3:
             return self._truncate_middle("/".join(("…", *parts[-2:])), PATH_LABEL_MAX)
 
         return self._truncate_middle(display_path, PATH_LABEL_MAX)
 
-    def _parent_file_label(self, path: Path) -> str:
+    def _parent_file_label(self, path: Path | PurePosixPath) -> str:
         parent = path.parent.name
         if not parent:
             return path.name
-        return str(Path(parent) / path.name)
+        return PurePosixPath(parent, path.name).as_posix()
 
     def _display_root(self) -> Path:
         if self.startup_info is not None:

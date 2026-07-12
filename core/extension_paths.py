@@ -15,6 +15,10 @@ def code_squid_home() -> Path:
     """Return the user-level Code Squid home directory."""
     configured_home = os.environ.get(CODE_SQUID_HOME_ENV)
     if configured_home:
+        configured_home = os.path.expandvars(configured_home)
+        if configured_home == "~" or configured_home.startswith(("~/", "~\\")):
+            home = Path(os.environ.get("HOME", Path.home()))
+            return home / configured_home[2:] if len(configured_home) > 1 else home
         return Path(configured_home).expanduser()
     return Path.home() / ".code-squid"
 

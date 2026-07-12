@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import os
 import shlex
 from pathlib import Path
 
@@ -40,7 +41,12 @@ def guarded_run_command_reason(command: str, workspace_root: Path) -> str | None
         return SHELL_SYNTAX_REASON
 
     try:
-        tokens = shlex.split(command)
+        lexer = shlex.shlex(command, posix=True)
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        if os.name == "nt":
+            lexer.escape = ""
+        tokens = list(lexer)
     except ValueError:
         return SHELL_SYNTAX_REASON
 
