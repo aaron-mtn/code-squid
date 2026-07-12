@@ -1,8 +1,10 @@
 from pathlib import Path
+import sys
 
 from core.session import Session
 import core.tool_executor as tool_executor_module
 from core.tool_executor import ToolExecutor
+from core.platform_context import PlatformContext
 
 
 class FakeUndoStore:
@@ -82,7 +84,7 @@ def test_read_file_and_run_command_do_not_snapshot(tmp_path: Path) -> None:
     command_result = executor.execute(
         {
             "tool": "run_command",
-            "args": {"command": "true"},
+            "args": {"command": "$true" if sys.platform == "win32" else "true"},
         }
     )
 
@@ -225,6 +227,38 @@ def test_run_command_is_not_restricted_by_workspace_boundary(
 
     assert result["ok"] is True
     assert calls == [(tmp_path, {"command": "cat /etc/hosts"})]
+
+
+def test_only_builtin_run_command_receives_platform_context(monkeypatch, tmp_path: Path) -> None:
+    context = PlatformContext("Windows", "PowerShell", "pwsh", "\\", True)
+    calls = []
+
+    def builtin_command(repo_root: Path, **args) -> dict:
+        calls.append(("command", args))
+        return {"ok": True, "tool": "run_command"}
+
+    def other_tool(repo_root: Path, **args) -> dict:
+        calls.append(("other", args))
+        return {"ok": True, "tool": "other"}
+
+    monkeypatch.setattr(tool_executor_module, "BUILTIN_RUN_COMMAND", builtin_command)
+    executor = ToolExecutor(
+        repo_root=tmp_path,
+        session=Session(repo_root=tmp_path),
+        tools={
+            "run_command": {"execute": builtin_command},
+            "other": {"execute": other_tool},
+        },
+        platform_context=context,
+    )
+
+    executor.execute({"tool": "run_command", "args": {"command": "Get-ChildItem"}})
+    executor.execute({"tool": "other", "args": {"value": 1}})
+
+    assert calls == [
+        ("command", {"command": "Get-ChildItem", "platform_context": context}),
+        ("other", {"value": 1}),
+    ]
 
 
 def test_allow_outside_workspace_allows_outside_file_paths_through(

@@ -48,10 +48,15 @@ def test_read_file_rejects_relative_path_and_succeeds_with_absolute_path(tmp_pat
 def test_run_command_uses_selected_repo_root_as_cwd(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    executable = (
+        f"& '{sys.executable}'"
+        if sys.platform == "win32"
+        else shlex.quote(sys.executable)
+    )
 
     result = run_command(
         workspace,
-        f'{shlex.quote(sys.executable)} -c "from pathlib import Path; print(Path.cwd())"',
+        f'{executable} -c "from pathlib import Path; print(Path.cwd())"',
     )
 
     assert result["ok"] is True
@@ -283,3 +288,67 @@ def test_run_command_timeout_returns_normal_failure_result(monkeypatch: pytest.M
     assert result["timed_out"] is True
     assert result["tool"] == "run_command"
     assert result["command"] == "sleep 1"
+
+
+def test_run_command_uses_selected_powershell_on_windows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from core.platform_context import PlatformContext
+
+    calls = []
+
+    class Completed:
+        returncode = 0
+        stdout = "ok\n"
+
+    monkeypatch.setattr(
+        run_command_module,
+        "detect_platform_context",
+        lambda: PlatformContext("Windows", "PowerShell", r"C:\Program Files\PowerShell\pwsh.exe", "\\", True),
+    )
+    monkeypatch.setattr(
+        run_command_module.subprocess,
+        "run",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or Completed(),
+    )
+
+    result = run_command(tmp_path, "Get-ChildItem")
+
+    args, kwargs = calls[0]
+    assert args[0] == [
+        r"C:\Program Files\PowerShell\pwsh.exe",
+        "-NoProfile",
+        "-Command",
+        "Get-ChildItem",
+    ]
+    assert kwargs["shell"] is False
+    assert kwargs["cwd"] == tmp_path
+    assert kwargs["timeout"] == 15
+    assert result["ok"] is True
+
+
+def test_run_command_uses_supplied_context_without_redetecting(monkeypatch, tmp_path: Path) -> None:
+    from core.platform_context import PlatformContext
+
+    calls = []
+
+    class Completed:
+        returncode = 0
+        stdout = "ok\n"
+
+    def fail_detection():
+        raise AssertionError("platform should not be redetected")
+
+    context = PlatformContext("Linux", "bash", "/bin/bash", "/", False)
+    monkeypatch.setattr(run_command_module, "detect_platform_context", fail_detection)
+    monkeypatch.setattr(
+        run_command_module.subprocess,
+        "run",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or Completed(),
+    )
+
+    result = run_command(tmp_path, "printf ok", platform_context=context)
+
+    assert calls[0][0][0] == "printf ok"
+    assert calls[0][1]["shell"] is True
+    assert result["ok"] is True

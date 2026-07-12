@@ -2,6 +2,7 @@ from pathlib import Path
 
 from core.agent_loop import RunResult
 from core.runner import run_coding_task
+from core.platform_context import PlatformContext
 
 
 class FakeDisplay:
@@ -73,3 +74,32 @@ def test_run_coding_task_returns_loop_run_result(monkeypatch, tmp_path: Path) ->
 
     assert result is expected
     assert display.run_starts == 1
+
+
+def test_run_construction_supplies_detected_platform_and_resolved_workspace(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from core.runner import build_coding_task_run
+
+    context = PlatformContext("Linux", "bash", "/bin/bash", "/", False)
+    captured_agent = {}
+    captured_executor = {}
+
+    class FakeCodingAgent:
+        def __init__(self, **kwargs) -> None:
+            captured_agent.update(kwargs)
+
+    class FakeToolExecutor:
+        def __init__(self, **kwargs) -> None:
+            captured_executor.update(kwargs)
+
+    monkeypatch.setattr("core.runner.detect_platform_context", lambda: context)
+    monkeypatch.setattr("core.runner.CodingAgent", FakeCodingAgent)
+    monkeypatch.setattr("core.runner.ToolExecutor", FakeToolExecutor)
+    monkeypatch.setattr("core.runner.build_provider", lambda *args, **kwargs: object())
+
+    build_coding_task_run(tmp_path / ".", "Do the thing", display=FakeDisplay())
+
+    assert captured_agent["platform_context"] is context
+    assert captured_agent["workspace"] == str(tmp_path.resolve())
+    assert captured_executor["platform_context"] is context

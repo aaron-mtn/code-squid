@@ -2,6 +2,7 @@
 
 from agent.prompts import correction_message, follow_up_prompt, system_prompt, task_prompt
 from core.skills import Skill
+from core.platform_context import PlatformContext
 from tools import TOOLS
 
 INVALID_REPLY_EXPLANATIONS = {
@@ -15,15 +16,27 @@ class CodingAgent:
     """Owns coding-agent behavior, allowed tools, and completion rules; must not own low-level loop machinery, provider transport, or tool implementation."""
 
     # Store the task this coding agent is trying to solve.
-    def __init__(self, task: str, skill: Skill | None = None, tools: dict | None = None) -> None:
+    def __init__(
+        self,
+        task: str,
+        skill: Skill | None = None,
+        tools: dict | None = None,
+        platform_context: PlatformContext | None = None,
+        workspace: str | None = None,
+    ) -> None:
         self.task = task
         self.skill = skill
         self.tools = TOOLS if tools is None else tools
+        self.platform_context = platform_context
+        self.workspace = workspace
 
     # Return the initial system and user messages for a new session.
     def initial_messages(self) -> list[dict]:
         return [
-            {"role": "system", "content": system_prompt(self.skill)},
+            {
+                "role": "system",
+                "content": system_prompt(self.skill, self.platform_context, self.workspace),
+            },
             {"role": "user", "content": task_prompt(self.task, self.skill)},
         ]
 

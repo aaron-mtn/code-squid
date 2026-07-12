@@ -2,8 +2,12 @@
 
 from pathlib import Path
 
+from core.platform_context import PlatformContext
 from core.workspace_boundary import workspace_boundary_reason
 from tools import TOOLS
+
+
+BUILTIN_RUN_COMMAND = TOOLS["run_command"]["execute"]
 
 
 class ToolExecutor:
@@ -19,12 +23,14 @@ class ToolExecutor:
         undo_store=None,
         allow_outside_workspace: bool = False,
         tools: dict | None = None,
+        platform_context: PlatformContext | None = None,
     ) -> None:
         self.repo_root = repo_root
         self.session = session
         self.undo_store = undo_store
         self.allow_outside_workspace = allow_outside_workspace
         self.tools = TOOLS if tools is None else tools
+        self.platform_context = platform_context
 
     # Execute one tool action by looking up the tool and calling its execute function.
     # If the tool runs successfully, record any simple side effects in the session.
@@ -56,7 +62,11 @@ class ToolExecutor:
                 if isinstance(path, str):
                     self.undo_store.snapshot_file(path)
 
-            result = tool["execute"](self.repo_root, **args)
+            execute_args = args
+            if tool["execute"] is BUILTIN_RUN_COMMAND:
+                execute_args = {**args, "platform_context": self.platform_context}
+
+            result = tool["execute"](self.repo_root, **execute_args)
             self._record_tool_effects(tool_name, result)
             return result
         except Exception as e:

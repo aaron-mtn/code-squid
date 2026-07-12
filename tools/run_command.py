@@ -5,6 +5,8 @@
 import subprocess
 from pathlib import Path
 
+from core.platform_context import PlatformContext, detect_platform_context
+
 from ._truncation import truncate_head_tail
 
 
@@ -38,11 +40,27 @@ def tool_definition() -> dict:
 
 
 # Run a command from the repo root and return the result in a consistent shape.
-def execute(repo_root: Path, command: str) -> dict:
+def execute(
+    repo_root: Path,
+    command: str,
+    platform_context: PlatformContext | None = None,
+) -> dict:
+    platform_context = platform_context or detect_platform_context()
+    subprocess_command: str | list[str] = command
+    use_shell = True
+    if platform_context.is_windows:
+        subprocess_command = [
+            platform_context.shell_executable,
+            "-NoProfile",
+            "-Command",
+            command,
+        ]
+        use_shell = False
+
     try:
         result = subprocess.run(
-            command,
-            shell=True,
+            subprocess_command,
+            shell=use_shell,
             cwd=repo_root,
             text=True,
             stdout=subprocess.PIPE,

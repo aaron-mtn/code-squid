@@ -1,6 +1,7 @@
 """Owns coding-agent prompt text and tool-usage guidance; must not own loop mechanics, provider logic, or tool implementation."""
 
 from core.skills import Skill
+from core.platform_context import PlatformContext
 
 SYSTEM_PROMPT_INTRO = """
 You are Code Squid, a coding agent working inside a repository.
@@ -33,7 +34,7 @@ TOOL_USAGE_GUIDANCE = """
 - Early in a task, check for repo guidance when it may affect how to work or verify.
 - Look for obvious guidance with bounded discovery, such as AGENTS.md, README.md, CONTRIBUTING.md, pyproject.toml, pytest.ini, Makefile, or scripts/.
 - If repo guidance provides a canonical verification command, use that command for final verification.
-- When using run_command for discovery, prefer focused commands with bounded output, such as `find ... | head -20`.
+- When using run_command for discovery, prefer focused commands with bounded output appropriate for the current shell.
 - Avoid broad commands that dump unnecessary output when a narrower command will do.
 - Do not over-explore guidance files when the task is already clear and no repo-specific guidance appears relevant.
 - Once the fix is verified and the task is complete, do not keep exploring or re-running unnecessary commands.
@@ -231,9 +232,49 @@ Skill instructions:
 """.strip()
 
 
-def system_prompt(skill: Skill | None = None) -> str:
+def execution_environment_prompt(
+    platform_context: PlatformContext,
+    workspace: str,
+) -> str:
+    lines = [
+        "## Execution Environment",
+        "",
+        f"Operating system: {platform_context.os_name}",
+        f"Preferred shell: {platform_context.shell_name}",
+        f"Path separator: {platform_context.path_separator}",
+        f"Workspace: {workspace}",
+        "",
+        "Use commands, quoting, and path syntax valid for this environment.",
+    ]
+    if platform_context.is_windows:
+        lines.extend(
+            [
+                "Use PowerShell syntax for run_command.",
+                "Do not assume Unix commands such as ls, cat, grep, find, cp, mv, or rm are available.",
+                "Prefer Get-ChildItem for listing files and directories.",
+                "Prefer Get-Content for reading text files.",
+                "Prefer Select-String for searching text.",
+                "Prefer Copy-Item, Move-Item, and Remove-Item for file operations.",
+                "Quote Windows paths when they contain spaces.",
+            ]
+        )
+    else:
+        lines.append(f"Use commands compatible with {platform_context.shell_name}.")
+    return "\n".join(lines)
+
+
+def system_prompt(
+    skill: Skill | None = None,
+    platform_context: PlatformContext | None = None,
+    workspace: str | None = None,
+) -> str:
     skill_block = skill_prompt_block(skill)
     intro = prompt_section("SYSTEM_PROMPT_INTRO", SYSTEM_PROMPT_INTRO, skill)
+    environment_block = (
+        execution_environment_prompt(platform_context, workspace)
+        if platform_context is not None and workspace is not None
+        else ""
+    )
     tool_guidance = tool_usage_guidance(skill)
     final_summary_requirements = prompt_section(
         "FINAL_SUMMARY_REQUIREMENTS",
@@ -243,6 +284,8 @@ def system_prompt(skill: Skill | None = None) -> str:
 
     return f"""
 {intro}
+
+{environment_block}
 
 {skill_block}
 

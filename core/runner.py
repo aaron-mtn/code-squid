@@ -24,6 +24,7 @@ from core.events import EventCallback
 from core.hook_loader import load_active_extension_hooks, load_user_hooks
 from core.hooks import HookRunner
 from core.model_adapter import ModelAdapter
+from core.platform_context import PlatformContext, detect_platform_context
 from core.session import Session
 from core.skills import Skill, discover_skills
 from core.tool_executor import ToolExecutor
@@ -116,7 +117,14 @@ def build_coding_task_run(
         session_id=session_store.session_id,
     )
     append_run_context(session_store, skill, active_tools)
-    agent = CodingAgent(task=task, skill=skill, tools=active_tools)
+    platform_context = detect_platform_context()
+    agent = CodingAgent(
+        task=task,
+        skill=skill,
+        tools=active_tools,
+        platform_context=platform_context,
+        workspace=str(repo_root),
+    )
     hook_runner = build_hook_runner(
         hooks=hooks,
         hook_runner=hook_runner,
@@ -134,6 +142,7 @@ def build_coding_task_run(
         on_event=on_event,
         should_cancel=should_cancel,
         hook_runner=hook_runner,
+        platform_context=platform_context,
     )
 
     return CodingTaskRun(
@@ -158,6 +167,7 @@ def build_agent_loop(
     hooks: list[object] | None = None,
     hook_runner: HookRunner | None = None,
     include_user_hooks: bool = False,
+    platform_context: PlatformContext | None = None,
 ) -> AgentLoop:
     """Build the shared provider/model/tool/approval/compaction/loop wiring."""
 
@@ -176,6 +186,7 @@ def build_agent_loop(
         undo_store=undo_store,
         allow_outside_workspace=settings.runtime.approval_mode == "never",
         tools=tools,
+        platform_context=platform_context,
     )
     tool_results = ToolResults()
     approval_policy = ApprovalPolicy(

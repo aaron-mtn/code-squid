@@ -1,7 +1,8 @@
 from pathlib import Path
 
 from agent.coding import CodingAgent
-from agent.prompts import TOOL_USAGE_GUIDANCE, follow_up_prompt, system_prompt, task_prompt
+from core.platform_context import PlatformContext
+from agent.prompts import SYSTEM_PROMPT, TOOL_USAGE_GUIDANCE, follow_up_prompt, system_prompt, task_prompt
 from core.session import Session
 from core.skills import PromptSectionOverride, Skill, parse_skill_file
 
@@ -313,6 +314,60 @@ def test_initial_prompt_includes_selected_skill_instructions() -> None:
 def test_default_tool_usage_guidance_is_used_without_skill() -> None:
     assert TOOL_USAGE_GUIDANCE in system_prompt()
     assert TOOL_USAGE_GUIDANCE in task_prompt("fix bug")
+
+
+def test_system_prompt_without_platform_context_preserves_compatibility() -> None:
+    assert system_prompt() == SYSTEM_PROMPT
+    assert "## Execution Environment" not in system_prompt()
+
+
+def test_windows_environment_prompt_includes_workspace_and_powershell_guidance() -> None:
+    context = PlatformContext("Windows", "PowerShell", "pwsh", "\\", True)
+    workspace = r"C:\Users\Example User\Desktop\project"
+
+    prompt = system_prompt(platform_context=context, workspace=workspace)
+
+    assert "Operating system: Windows" in prompt
+    assert "Preferred shell: PowerShell" in prompt
+    assert "Path separator: \\" in prompt
+    assert f"Workspace: {workspace}" in prompt
+    assert "Use PowerShell syntax for run_command." in prompt
+    assert "Prefer Get-ChildItem" in prompt
+
+
+def test_non_windows_environment_prompt_omits_powershell_guidance() -> None:
+    context = PlatformContext("Linux", "bash", "/bin/bash", "/", False)
+
+    prompt = system_prompt(platform_context=context, workspace="/home/user/project")
+
+    assert "Use commands compatible with bash." in prompt
+    assert "PowerShell" not in prompt
+    assert "Get-ChildItem" not in prompt
+
+
+def test_skill_override_does_not_remove_environment_block() -> None:
+    skill = Skill(
+        name="custom",
+        description="Custom behavior.",
+        instructions="Follow custom instructions.",
+        allowed_tools=("read_file",),
+        path=Path("SKILL.md"),
+        prompt_sections={
+            "SYSTEM_PROMPT_INTRO": PromptSectionOverride(
+                section="SYSTEM_PROMPT_INTRO",
+                mode="replace",
+                content="Custom intro.",
+            ),
+        },
+    )
+    context = PlatformContext("macOS", "zsh", "/bin/zsh", "/", False)
+
+    prompt = system_prompt(skill, context, "/Users/example/My Project")
+
+    assert prompt.startswith("Custom intro.")
+    assert "## Execution Environment" in prompt
+    assert "Workspace: /Users/example/My Project" in prompt
+    assert "## Active Skill: custom" in prompt
 
 
 def test_active_skill_without_tool_usage_guidance_omits_default_guidance_from_system_prompt() -> None:
