@@ -37,6 +37,10 @@ from tools import TOOLS
 from ui.terminal import StartupInfo, TerminalDisplay
 
 
+SessionStoreFactory = Callable[[Path, str], SessionStore]
+UndoStoreFactory = Callable[[Path, str], UndoStore]
+
+
 FRIENDLY_MODES = {
     "always": "strict",
     "guarded": "balanced",
@@ -65,6 +69,8 @@ def run_coding_task(
     hooks: list[object] | None = None,
     hook_runner: HookRunner | None = None,
     include_user_hooks: bool = False,
+    session_store_factory: SessionStoreFactory | None = None,
+    undo_store_factory: UndoStoreFactory | None = None,
 ) -> RunResult:
     """Simple call-and-run entry point for a new coding task.
 
@@ -84,6 +90,8 @@ def run_coding_task(
         hooks=hooks,
         hook_runner=hook_runner,
         include_user_hooks=include_user_hooks,
+        session_store_factory=session_store_factory,
+        undo_store_factory=undo_store_factory,
     )
     run.loop.display.run_started()
     return run.loop.run()
@@ -103,6 +111,8 @@ def build_coding_task_run(
     hooks: list[object] | None = None,
     hook_runner: HookRunner | None = None,
     include_user_hooks: bool = False,
+    session_store_factory: SessionStoreFactory | None = None,
+    undo_store_factory: UndoStoreFactory | None = None,
 ) -> CodingTaskRun:
     """Construct a new coding-task run without starting it.
 
@@ -123,8 +133,16 @@ def build_coding_task_run(
     )
 
     session = Session(repo_root=repo_root)
-    session_store = SessionStore.create(repo_root=repo_root, task=task)
-    undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
+    session_store = (
+        SessionStore.create(repo_root=repo_root, task=task)
+        if session_store_factory is None
+        else session_store_factory(repo_root, task)
+    )
+    undo_store = (
+        UndoStore.create(repo_root, session_id=session_store.session_id)
+        if undo_store_factory is None
+        else undo_store_factory(repo_root, session_store.session_id)
+    )
     if resolved_skill is not None and resolved_tools is not None:
         skill, active_tools = resolved_skill, resolved_tools
     else:

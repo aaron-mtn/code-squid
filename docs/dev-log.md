@@ -3,6 +3,11 @@
   registry can pass `resolved_skill` and `resolved_tools` together, bypassing
   discovery while Core continues to own run construction and execution. The
   seam is package-agnostic and adds no Core knowledge of Mods.
+- 2026-08-04: Added optional `session_store_factory` and
+  `undo_store_factory` inputs to fresh run construction and the convenience
+  runner. Core still creates repository-local stores by default, while hosts
+  can independently provide alternate persistence without replacing imported
+  globals or exposing host storage layouts to Core.
 - 2026-08-04: Added public metadata-to-runtime seams for package-aware hosts.
   `build_user_tool_registry_from_metadata(...)` builds Core's standard lazy
   executable entries from an explicit `UserTool` mapping, while

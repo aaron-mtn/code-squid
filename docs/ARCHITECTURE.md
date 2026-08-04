@@ -315,6 +315,20 @@ undo store, coding agent, and loop without starting the loop. The CLI uses this
 shape when it needs access to the session and session store for interactive
 follow-ups.
 
+By default, new runs create persistence with `SessionStore.create(repo_root,
+task)` followed by `UndoStore.create(repo_root, session_id)`. Embedding hosts
+may instead pass `session_store_factory` and/or `undo_store_factory` to
+`build_coding_task_run(...)` or `run_coding_task(...)`. Core preserves the
+construction order and supplies the created session id to the undo factory,
+while the returned stores become the run transcript store and `ToolExecutor`
+undo store. Either concern can be overridden independently.
+
+This seam lets a host persist outside the workspace without teaching Core its
+storage layout, indexes, or adapter types. Normal Core and CLI callers omit the
+factories and retain repository-local storage. Desktop is one possible host,
+not a special Core concern; the host remains responsible for any alternate
+persistence location while `repo_root` continues to define tool execution.
+
 Hosts that already resolved a Skill and its executable tool registry may pass
 them together as `resolved_skill` and `resolved_tools`. Core then skips Skill
 discovery while retaining ownership of run construction, metadata, and
