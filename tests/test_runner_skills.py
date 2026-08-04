@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from agent.coding import CodingAgent
 from core.extension_paths import CODE_SQUID_HOME_ENV
 from core.extensions import set_active_extension
@@ -367,6 +369,71 @@ def test_build_coding_task_run_passes_filtered_tools_to_executor(
     assert captured["agent"].skill is skill
     assert list(captured["agent"].tools) == ["read_file"]
     assert list(captured["tool_executor"].tools) == ["read_file"]
+
+
+def test_build_coding_task_run_uses_explicit_resolved_components(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    skill = Skill(
+        name="packaged-review",
+        description="Packaged review.",
+        instructions="Inspect the package.",
+        allowed_tools=("packaged_tool",),
+        path=tmp_path / "SKILL.md",
+    )
+    tool_entry = {"marker": object()}
+    tools = {"packaged_tool": tool_entry}
+    captured = {}
+
+    class FakeAgentLoop:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+            self.display = kwargs["display"]
+
+    def fail_resolution(*args, **kwargs):
+        raise AssertionError("explicit components must bypass skill discovery")
+
+    monkeypatch.setattr("core.runner.resolve_skill_tools", fail_resolution)
+    monkeypatch.setattr("core.runner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("core.runner.AgentLoop", FakeAgentLoop)
+
+    run = build_coding_task_run(
+        repo_root=tmp_path,
+        task="review this",
+        display=type("FakeDisplay", (), {"debug": False})(),
+        resolved_skill=skill,
+        resolved_tools=tools,
+    )
+
+    assert captured["agent"].skill is skill
+    assert captured["agent"].tools is tools
+    assert captured["tool_executor"].tools is tools
+    assert tools == {"packaged_tool": tool_entry}
+    entries = read_entries(run.session_store.jsonl_path)
+    assert entries[0]["skill_name"] == "packaged-review"
+    assert entries[0]["allowed_tools"] == ["packaged_tool"]
+
+
+@pytest.mark.parametrize("supplied", ["skill", "tools"])
+def test_build_coding_task_run_rejects_partial_explicit_components(
+    tmp_path: Path,
+    supplied: str,
+) -> None:
+    skill = Skill(
+        name="only-skill",
+        description="Only skill.",
+        instructions="",
+        allowed_tools=(),
+        path=tmp_path / "SKILL.md",
+    )
+    kwargs = {"resolved_skill": skill} if supplied == "skill" else {"resolved_tools": {}}
+
+    with pytest.raises(
+        ValueError,
+        match="resolved_skill and resolved_tools must be supplied together",
+    ):
+        build_coding_task_run(repo_root=tmp_path, task="review this", **kwargs)
 
 
 def test_build_coding_task_run_records_architecture_review_run_context(

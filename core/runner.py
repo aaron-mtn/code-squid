@@ -60,6 +60,8 @@ def run_coding_task(
     settings: Settings | None = None,
     display: TerminalDisplay | None = None,
     skill_name: str | None = None,
+    resolved_skill: Skill | None = None,
+    resolved_tools: dict | None = None,
     hooks: list[object] | None = None,
     hook_runner: HookRunner | None = None,
     include_user_hooks: bool = False,
@@ -77,6 +79,8 @@ def run_coding_task(
         settings=settings,
         display=display,
         skill_name=skill_name,
+        resolved_skill=resolved_skill,
+        resolved_tools=resolved_tools,
         hooks=hooks,
         hook_runner=hook_runner,
         include_user_hooks=include_user_hooks,
@@ -94,6 +98,8 @@ def build_coding_task_run(
     settings: Settings | None = None,
     display: TerminalDisplay | None = None,
     skill_name: str | None = None,
+    resolved_skill: Skill | None = None,
+    resolved_tools: dict | None = None,
     hooks: list[object] | None = None,
     hook_runner: HookRunner | None = None,
     include_user_hooks: bool = False,
@@ -104,18 +110,29 @@ def build_coding_task_run(
     ``SessionStore`` for interactive follow-ups after the first run.
     """
 
+    if (resolved_skill is None) != (resolved_tools is None):
+        raise ValueError("resolved_skill and resolved_tools must be supplied together")
+
     repo_root = Path(repo_root).resolve()
     settings = load_settings(repo_root) if settings is None else settings
-    display = build_run_display(repo_root, settings, skill_name) if display is None else display
+    display_skill_name = resolved_skill.name if resolved_skill is not None else skill_name
+    display = (
+        build_run_display(repo_root, settings, display_skill_name)
+        if display is None
+        else display
+    )
 
     session = Session(repo_root=repo_root)
     session_store = SessionStore.create(repo_root=repo_root, task=task)
     undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
-    skill, active_tools = resolve_skill_tools(
-        skill_name,
-        repo_root=repo_root,
-        session_id=session_store.session_id,
-    )
+    if resolved_skill is not None and resolved_tools is not None:
+        skill, active_tools = resolved_skill, resolved_tools
+    else:
+        skill, active_tools = resolve_skill_tools(
+            skill_name,
+            repo_root=repo_root,
+            session_id=session_store.session_id,
+        )
     append_run_context(session_store, skill, active_tools)
     platform_context = detect_platform_context()
     agent = CodingAgent(

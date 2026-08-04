@@ -1,3 +1,8 @@
+- 2026-08-04: Added an explicit resolved-component seam to fresh run
+  construction. Hosts that already resolved a Skill and executable tool
+  registry can pass `resolved_skill` and `resolved_tools` together, bypassing
+  discovery while Core continues to own run construction and execution. The
+  seam is package-agnostic and adds no Core knowledge of Mods.
 - 2026-08-04: Added public metadata-to-runtime seams for package-aware hosts.
   `build_user_tool_registry_from_metadata(...)` builds Core's standard lazy
   executable entries from an explicit `UserTool` mapping, while

@@ -315,6 +315,13 @@ undo store, coding agent, and loop without starting the loop. The CLI uses this
 shape when it needs access to the session and session store for interactive
 follow-ups.
 
+Hosts that already resolved a Skill and its executable tool registry may pass
+them together as `resolved_skill` and `resolved_tools`. Core then skips Skill
+discovery while retaining ownership of run construction, metadata, and
+execution. This is a package-agnostic handoff: frontends may resolve packaged
+resources, but Core has no knowledge of package or Mod paths. Passing neither
+argument preserves `skill_name` discovery; passing only one raises `ValueError`.
+
 `core.runner.build_agent_loop(...)` owns the shared runtime wiring for provider,
 model adapter, tool executor, tool-result formatter, approval, compaction, and
 `AgentLoop`. Provider-specific construction and replay-mode decisions are
