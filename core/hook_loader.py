@@ -54,16 +54,16 @@ def load_user_hooks(hooks_dir: Path | None = None) -> list[object]:
     hook_infos = list_user_hooks(hooks_dir)
     if hooks_dir is None:
         hook_infos.extend(_active_extension_hook_infos(hook_infos))
-    return _load_hook_infos(hook_infos)
+    return load_hook_infos(hook_infos)
 
 
 def load_active_extension_hooks() -> list[object]:
     """Import hooks listed by the active valid extension."""
-    return _load_hook_infos(_active_extension_hook_infos([]))
+    return load_hook_infos(_active_extension_hook_infos([]))
 
 
-def _load_hook_infos(hook_infos: list[HookInfo]) -> list[object]:
-    """Import enabled hook infos and return hook instances."""
+def load_hook_infos(hook_infos: list[HookInfo]) -> list[object]:
+    """Import enabled, explicitly selected hook metadata and return instances."""
     loaded_hooks = []
 
     for info in hook_infos:

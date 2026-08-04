@@ -4,7 +4,13 @@ import pytest
 
 from core.extension_paths import CODE_SQUID_HOME_ENV
 from core.extensions import set_active_extension
-from core.hook_loader import HookInfo, HookLoadError, list_user_hooks, load_user_hooks
+from core.hook_loader import (
+    HookInfo,
+    HookLoadError,
+    list_user_hooks,
+    load_hook_infos,
+    load_user_hooks,
+)
 
 
 def _write_hook(
@@ -117,6 +123,38 @@ def create_hook(config=None):
 
     assert len(hooks) == 1
     assert hooks[0].marker == "loaded"
+
+
+def test_selected_hook_info_loads_through_public_api(tmp_path: Path) -> None:
+    hooks_dir = tmp_path / "hooks"
+    _write_hook(
+        hooks_dir,
+        "selected",
+        "name: selected\nenabled: true\n",
+        "def create_hook(config=None):\n    return 'selected:' + config['source']\n",
+    )
+    info = list_user_hooks(hooks_dir)[0]
+
+    assert load_hook_infos([info]) == ["selected:user"]
+
+
+def test_hook_metadata_listing_does_not_import_source(tmp_path: Path) -> None:
+    hooks_dir = tmp_path / "hooks"
+    marker = tmp_path / "imported"
+    _write_hook(
+        hooks_dir,
+        "passive",
+        "name: passive\nenabled: true\n",
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('yes')\n"
+        "def create_hook(config=None):\n    return object()\n",
+    )
+
+    infos = list_user_hooks(hooks_dir)
+
+    assert [info.name for info in infos] == ["passive"]
+    assert not marker.exists()
+    assert len(load_hook_infos(infos)) == 1
+    assert marker.exists()
 
 
 def test_factory_receives_config(tmp_path: Path) -> None:

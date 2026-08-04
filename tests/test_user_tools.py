@@ -10,6 +10,7 @@ from core.user_tools import (
     UserTool,
     UserToolError,
     build_user_tool_registry,
+    build_user_tool_registry_from_metadata,
     discover_user_tools,
     execute_user_tool,
     load_user_tool,
@@ -244,6 +245,53 @@ def run(args, context=None):
     assert not marker.exists()
     assert registry["lazy"]["execute"](tmp_path)["message"] == "done"
     assert marker.read_text(encoding="utf-8") == "imported"
+
+
+def test_explicit_user_tool_metadata_builds_executable_registry_without_discovery(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    tool_dir = _write_tool(
+        tmp_path / "package",
+        "package_echo",
+        "name: package_echo\n",
+        "def run(args, context=None):\n    return args['message']\n",
+    )
+    tool = load_user_tool(tool_dir, source="mod", editable=False)
+    assert tool is not None
+    monkeypatch.setattr(
+        "core.user_tools.discover_user_tools",
+        lambda: pytest.fail("explicit registry must not rediscover tools"),
+    )
+
+    registry = build_user_tool_registry_from_metadata(
+        {tool.name: tool},
+        session_id="mod-session",
+    )
+
+    assert registry["package_echo"]["source"] == "mod"
+    assert registry["package_echo"]["execute"](tmp_path, message="hello")["message"] == "hello"
+
+
+def test_explicit_user_tool_registry_does_not_import_source_until_execution(
+    tmp_path: Path,
+) -> None:
+    marker = tmp_path / "imported"
+    tool_dir = _write_tool(
+        tmp_path / "package",
+        "lazy_package_tool",
+        "name: lazy_package_tool\n",
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('yes')\n"
+        "def run(args, context=None):\n    return 'done'\n",
+    )
+    tool = load_user_tool(tool_dir)
+    assert tool is not None
+
+    registry = build_user_tool_registry_from_metadata({tool.name: tool})
+
+    assert not marker.exists()
+    assert registry[tool.name]["execute"](tmp_path)["message"] == "done"
+    assert marker.exists()
 
 
 def test_no_active_extension_leaves_user_tool_discovery_unchanged(

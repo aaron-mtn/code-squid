@@ -78,10 +78,29 @@ def build_user_tool_registry(
     session_id: str | None = None,
 ) -> dict[str, dict]:
     """Return executable registry entries for discovered user tools."""
+    return build_user_tool_registry_from_metadata(
+        discover_user_tools(),
+        repo_root=repo_root,
+        session_id=session_id,
+    )
+
+
+def build_user_tool_registry_from_metadata(
+    user_tools: dict[str, UserTool],
+    *,
+    repo_root: Path | str | None = None,
+    session_id: str | None = None,
+) -> dict[str, dict]:
+    """Build executable registry entries from explicitly selected metadata.
+
+    This is the host-facing seam for package resolvers that have already
+    selected exact tool components. Constructing the registry stays lazy and
+    does not import tool source; source is imported by ``execute_user_tool``.
+    """
     repo_root = None if repo_root is None else Path(repo_root)
     return {
         name: _registry_entry(tool, repo_root=repo_root, session_id=session_id)
-        for name, tool in discover_user_tools().items()
+        for name, tool in user_tools.items()
     }
 
 

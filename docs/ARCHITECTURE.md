@@ -331,6 +331,39 @@ server mode. It gives external Python code a clean way to call Code Squid
 without copying CLI wiring. Terminal CLI wrapper behavior lives under `cli/`;
 `main.py` only delegates to `cli.commands.run_cli()`.
 
+### Explicit component loading for package hosts
+
+Core separates metadata discovery from runtime source loading. A host such as
+Code Squid Desktop owns package-aware resolution: it knows which Mod and Skill
+were selected, whether a component is Mod-local or shared, and which precedence
+rule applies. Core does not contain Mod resolution policy.
+
+After resolving exact components from metadata, a host uses two public seams:
+
+- `build_user_tool_registry_from_metadata(...)` converts an explicitly selected
+  `dict[str, UserTool]` into the same lazy executable registry entries used by
+  normal Core discovery. It does not rediscover global tools or import source.
+- `load_hook_infos(...)` instantiates an explicitly selected list of
+  `HookInfo` objects through Core's normal hook loader.
+
+This boundary keeps package selection in Desktop while Core remains responsible
+for execution wrappers, normalized tool results, entrypoint safety, source
+imports, hook factories, and hook configuration. Metadata operations
+(`load_user_tool`, `discover_user_tools`, and `list_user_hooks`) never execute
+`tool.py` or `hook.py`. A selected tool imports only when it executes; a
+selected hook imports only when `load_hook_infos` intentionally instantiates
+it.
+
+The existing discovery APIs remain unchanged: standalone Skills, loose Tools,
+loose Hooks, CLI runs, and active extensions continue using their established
+paths under `CODE_SQUID_HOME`. The explicit seams supplement rather than replace
+those workflows.
+
+Current Desktop Mods select a default Skill, but these Core APIs accept already
+selected metadata and do not encode a one-Skill assumption. This leaves a clean
+boundary for a future host to select another Skill while continuing to enforce
+that Skill's permissions. Multi-Skill Mod selection is not implemented here.
+
 ## Skill System
 
 Skills are file-backed prompt/tool profiles. Discovery order is:
