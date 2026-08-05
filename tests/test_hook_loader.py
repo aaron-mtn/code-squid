@@ -220,6 +220,21 @@ def test_malformed_metadata_raises(tmp_path: Path) -> None:
         list_user_hooks(hooks_dir)
 
 
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        "---\nname: bad\n---\n",
+        "name: bad\nevents:\n  - run_finished\n",
+    ],
+)
+def test_rejects_delimiters_and_list_syntax(tmp_path: Path, metadata: str) -> None:
+    hooks_dir = tmp_path / "hooks"
+    _write_hook(hooks_dir, "bad", metadata)
+
+    with pytest.raises(HookLoadError, match="invalid metadata line"):
+        list_user_hooks(hooks_dir)
+
+
 def test_deterministic_load_order(tmp_path: Path) -> None:
     hooks_dir = tmp_path / "hooks"
     _write_hook(

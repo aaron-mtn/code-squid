@@ -148,13 +148,20 @@ def load_user_tool(
             f"{metadata_path}: function must be a valid Python identifier"
         )
 
+    args = _metadata_object(metadata, "args", metadata_path)
+    if "properties" in args or args.get("type") == "object" or "required" in args:
+        raise UserToolError(
+            f"{metadata_path}: args must map argument names directly to property mappings; "
+            "top-level JSON Schema type/properties/required structure is not supported"
+        )
+
     return UserTool(
         name=name,
         description=_metadata_string(metadata, "description", metadata_path),
         version=_metadata_string(metadata, "version", metadata_path),
         entrypoint=entrypoint,
         function=function,
-        args=_metadata_object(metadata, "args", metadata_path),
+        args=args,
         safety=_metadata_object(metadata, "safety", metadata_path),
         source=source,
         editable=editable,

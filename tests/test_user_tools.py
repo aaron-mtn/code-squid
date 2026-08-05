@@ -190,6 +190,28 @@ def test_handles_malformed_yaml_json_safely(tmp_path: Path, metadata: str) -> No
         load_user_tool(tool_dir)
 
 
+@pytest.mark.parametrize(
+    ("metadata", "error"),
+    [
+        ("---\nname: broken\n---\n", "invalid metadata line"),
+        ("name: broken\nargs:\n  values:\n    - one\n", "invalid metadata line"),
+        (
+            "name: broken\nargs:\n  type: object\n  properties:\n    value:\n      type: string\n",
+            "top-level JSON Schema",
+        ),
+    ],
+)
+def test_rejects_unsupported_tool_metadata_shapes(
+    tmp_path: Path,
+    metadata: str,
+    error: str,
+) -> None:
+    tool_dir = _write_tool(tmp_path, "broken", metadata)
+
+    with pytest.raises(UserToolError, match=error):
+        load_user_tool(tool_dir)
+
+
 def test_discovery_skips_malformed_tools_independently(
     monkeypatch,
     tmp_path: Path,
