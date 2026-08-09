@@ -119,6 +119,25 @@ def test_native_response_with_content_adapts_to_openai_like_shape() -> None:
     assert response.choices[0].message.tool_calls == []
 
 
+def test_native_response_preserves_available_thinking_finish_reason_and_id() -> None:
+    response = adapt_response(
+        {
+            "id": "ollama_response_1",
+            "message": {
+                "role": "assistant",
+                "content": "Done.",
+                "thinking": "provider-exposed thinking",
+            },
+            "done_reason": "stop",
+        }
+    )
+
+    assert response.id == "ollama_response_1"
+    assert response.choices[0].finish_reason == "stop"
+    assert response.choices[0].message.thinking == "provider-exposed thinking"
+    assert not hasattr(response.choices[0].message, "reasoning")
+
+
 def test_native_tool_calls_get_generated_ids_and_json_string_arguments() -> None:
     response = adapt_response(
         {

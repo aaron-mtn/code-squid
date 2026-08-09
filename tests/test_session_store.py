@@ -158,6 +158,43 @@ def test_load_messages_ignores_run_context_entries(tmp_path: Path) -> None:
     assert store.load_messages() == messages
 
 
+def test_diagnostic_entries_are_linked_and_ignored_by_load_messages(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path, "diagnostics")
+    user = store.append_message({"role": "user", "content": "one"})
+    raw = store.append_model_reply(
+        {
+            "provider": "openrouter",
+            "model": "example/model",
+            "assistant": {
+                "content": "",
+                "raw_tool_calls": [
+                    {
+                        "id": "call_bad",
+                        "function": {"name": "read_file", "arguments": '{"path":'},
+                    }
+                ],
+            },
+        }
+    )
+    rejection = store.append_reply_rejection(
+        {
+            "format_error": "Tool arguments were not valid JSON",
+            "recoverable_tool_name": "read_file",
+            "recoverable_raw_arguments": '{"path":',
+        },
+        reason="malformed_tool_call",
+        consecutive_invalid_attempt=1,
+        raw_reply_id=raw["id"],
+    )
+
+    assert raw["type"] == "model_reply"
+    assert raw["parent_id"] == user["id"]
+    assert rejection["type"] == "reply_rejection"
+    assert rejection["parent_id"] == raw["id"]
+    assert rejection["raw_reply_id"] == raw["id"]
+    assert store.load_messages() == [{"role": "user", "content": "one"}]
+
+
 def test_compaction_parent_id_links_to_previous_active_leaf(tmp_path: Path) -> None:
     store = SessionStore.create(tmp_path, "compact")
 

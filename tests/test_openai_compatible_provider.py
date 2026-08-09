@@ -125,11 +125,16 @@ def test_debug_on_prints_parallel_tool_calls_false_without_message_contents(caps
     assert "secret task" not in output
 
 
-def chunk(content=None, tool_calls=None):
+def chunk(content=None, tool_calls=None, *, reasoning_content=None, finish_reason=None, id=None):
     delta = SimpleNamespace(content=content)
     if tool_calls is not None:
         delta.tool_calls = tool_calls
-    return SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+    if reasoning_content is not None:
+        delta.reasoning_content = reasoning_content
+    return SimpleNamespace(
+        id=id,
+        choices=[SimpleNamespace(delta=delta, finish_reason=finish_reason)],
+    )
 
 
 def tool_call_delta(index, id=None, name=None, arguments=None):
@@ -160,6 +165,26 @@ def test_stream_chat_requests_stream_true_and_assembles_text() -> None:
     assert deltas == ["hello ", "world"]
     assert response.choices[0].message.content == "hello world"
     assert response.choices[0].message.tool_calls == []
+
+
+def test_stream_chat_preserves_exposed_reasoning_finish_reason_and_response_id() -> None:
+    provider, client = provider_with_fake_client()
+    client.chat.completions.response = [
+        chunk(reasoning_content="first ", id="chatcmpl_123"),
+        chunk(reasoning_content="second", finish_reason="stop"),
+    ]
+
+    response = provider.stream_chat(
+        model="test-model",
+        messages=[],
+        tools=[],
+        on_text_delta=lambda _delta: None,
+    )
+
+    assert response.id == "chatcmpl_123"
+    assert response.choices[0].finish_reason == "stop"
+    assert response.choices[0].message.reasoning_content == "first second"
+    assert not hasattr(response.choices[0].message, "reasoning")
 
 
 def test_stream_chat_assembles_tool_call_fragments() -> None:

@@ -90,7 +90,8 @@ machine-readable runtime facts.
     side-effect tracking.
   - `model_adapter.py` owns provider response normalization, tool-call parsing,
     shallow tool-call validation, provider replay message shaping, usage
-    normalization, and `ModelRequestError`.
+    normalization, and provider-derived raw reply diagnostics captured before
+    tool arguments are parsed. It does not synthesize hidden reasoning.
   - `approval.py` owns UI-agnostic approval decisions and denied tool results.
   - `command_safety.py` owns conservative guarded-mode checks for
     `run_command`.
@@ -120,8 +121,8 @@ machine-readable runtime facts.
 - `storage/`
   - Local runtime persistence.
   - `session_store.py` owns one session folder, `metadata.json`, append-only
-    `session.jsonl` entries, message loading, status updates, and compaction
-    event logging.
+    `session.jsonl` entries, message loading, status updates, compaction event
+    logging, and non-replayable model-reply/rejection diagnostics.
   - `session_index.py` owns saved-session discovery, newest-session lookup,
     exact session directory lookup, and raw JSONL entry loading.
   - `undo_store.py` owns the latest-only undo buffer.
@@ -893,8 +894,56 @@ Each session folder contains:
 
 `metadata.json` stores run-level metadata: session id, timestamps, repo root,
 task, status, and active leaf id. `session.jsonl` stores append-only entries for
-messages, compaction events, and run-context debug events. Message entries
-include `id`, `parent_id`, `type`, `timestamp`, `message`, and optional `usage`.
+messages, compaction events, run-context events, and model reply diagnostics.
+Message entries include `id`, `parent_id`, `type`, `timestamp`, `message`, and
+optional `usage`.
+
+Every provider reply is captured before agent validation as a diagnostic-only
+`model_reply` entry:
+
+```json
+{
+  "id": "e_000003",
+  "parent_id": "e_000002",
+  "type": "model_reply",
+  "timestamp": "...",
+  "reply": {
+    "provider": "openrouter",
+    "model": "example/model",
+    "assistant": {"content": "...", "raw_tool_calls": []},
+    "finish_reason": "stop",
+    "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+    "response_id": "..."
+  }
+}
+```
+
+`assistant.reasoning`, `assistant.reasoning_content`, and
+`assistant.thinking` appear only when the provider returned those fields. The
+same applies to finish reason, usage, and response ID. Raw tool-call objects
+retain the tool name and argument string seen before JSON parsing.
+
+A rejected reply adds a linked diagnostic-only `reply_rejection` entry:
+
+```json
+{
+  "id": "e_000004",
+  "parent_id": "e_000003",
+  "type": "reply_rejection",
+  "timestamp": "...",
+  "reason": "malformed_tool_call",
+  "error": "Tool arguments were not valid JSON: ...",
+  "consecutive_invalid_attempt": 1,
+  "recoverable_tool_name": "read_file",
+  "recoverable_raw_arguments": "{...",
+  "raw_reply_id": "e_000003"
+}
+```
+
+Recoverable tool fields are omitted when unavailable. Rejection diagnostics
+cover normal agent reply validation failures; hook-blocked finals are outside
+this path. `SessionStore.load_messages()` reads only `type: "message"`, so
+neither diagnostic type enters canonical history or is replayed to the model.
 
 Current session statuses are:
 

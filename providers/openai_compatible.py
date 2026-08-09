@@ -69,16 +69,23 @@ class OpenAICompatibleProvider(BaseProvider):
             self._print_request_summary(payload)
 
         content_parts = []
+        reasoning_parts = {"reasoning": [], "reasoning_content": [], "thinking": []}
         tool_call_parts = {}
         prepared_tool_call_indexes = set()
         usage = None
+        finish_reason = None
+        response_id = None
 
         for chunk in self.client.chat.completions.create(**payload):
+            response_id = response_id or getattr(chunk, "id", None)
             chunk_usage = getattr(chunk, "usage", None)
             if chunk_usage is not None:
                 usage = chunk_usage
 
             for choice in getattr(chunk, "choices", []) or []:
+                choice_finish_reason = getattr(choice, "finish_reason", None)
+                if choice_finish_reason is not None:
+                    finish_reason = choice_finish_reason
                 delta = getattr(choice, "delta", None)
                 if delta is None:
                     continue
@@ -87,6 +94,11 @@ class OpenAICompatibleProvider(BaseProvider):
                 if content_delta:
                     content_parts.append(content_delta)
                     on_text_delta(content_delta)
+
+                for name, parts in reasoning_parts.items():
+                    value = getattr(delta, name, None)
+                    if value:
+                        parts.append(value)
 
                 for tool_call_delta in getattr(delta, "tool_calls", None) or []:
                     self._accumulate_tool_call_delta(tool_call_parts, tool_call_delta)
@@ -101,6 +113,9 @@ class OpenAICompatibleProvider(BaseProvider):
             content="".join(content_parts),
             tool_call_parts=tool_call_parts,
             usage=usage,
+            finish_reason=finish_reason,
+            response_id=response_id,
+            reasoning_parts=reasoning_parts,
         )
 
     def _payload(
@@ -192,6 +207,9 @@ class OpenAICompatibleProvider(BaseProvider):
         content: str,
         tool_call_parts: dict,
         usage,
+        finish_reason=None,
+        response_id=None,
+        reasoning_parts=None,
     ) -> object:
         tool_calls = [
             SimpleNamespace(
@@ -205,12 +223,14 @@ class OpenAICompatibleProvider(BaseProvider):
             for index, part in sorted(tool_call_parts.items())
         ]
 
-        message = SimpleNamespace(
-            content=content,
-            tool_calls=tool_calls,
-        )
+        message_fields = {"content": content, "tool_calls": tool_calls}
+        for name, parts in (reasoning_parts or {}).items():
+            if parts:
+                message_fields[name] = "".join(parts)
+        message = SimpleNamespace(**message_fields)
         return SimpleNamespace(
-            choices=[SimpleNamespace(message=message)],
+            id=response_id,
+            choices=[SimpleNamespace(message=message, finish_reason=finish_reason)],
             usage=usage,
         )
 

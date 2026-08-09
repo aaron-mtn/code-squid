@@ -122,6 +122,31 @@ class SessionStore:
 
         return entry
 
+    # Append a provider-derived assistant reply snapshot. This is diagnostic
+    # only: load_messages() deliberately ignores it, so it is never replayed.
+    def append_model_reply(self, reply: dict) -> dict:
+        return self._append_diagnostic_entry("model_reply", {"reply": reply})
+
+    # Append validation/rejection details linked to the model_reply snapshot.
+    def append_reply_rejection(
+        self,
+        reply: dict,
+        *,
+        reason: str,
+        consecutive_invalid_attempt: int,
+        raw_reply_id: str,
+    ) -> dict:
+        fields = {
+            "reason": reason,
+            "error": reply.get("format_error") or reason,
+            "consecutive_invalid_attempt": consecutive_invalid_attempt,
+            "raw_reply_id": raw_reply_id,
+        }
+        for name in ("recoverable_tool_name", "recoverable_raw_arguments"):
+            if name in reply:
+                fields[name] = reply[name]
+        return self._append_diagnostic_entry("reply_rejection", fields)
+
     # Append one compaction event as a JSONL entry.
     def append_compaction(self, metadata: dict) -> dict:
         session_metadata = self._read_metadata()
@@ -225,6 +250,25 @@ class SessionStore:
                     count += 1
 
         return count + 1
+
+    def _append_diagnostic_entry(self, entry_type: str, fields: dict) -> dict:
+        metadata = self._read_metadata()
+        entry_id = f"e_{self._next_entry_number():06d}"
+        entry = {
+            "id": entry_id,
+            "parent_id": metadata["active_leaf_id"],
+            "type": entry_type,
+            "timestamp": _utc_now(),
+            **fields,
+        }
+
+        with self.jsonl_path.open("a", encoding="utf-8") as file:
+            file.write(json.dumps(entry) + "\n")
+
+        metadata["active_leaf_id"] = entry_id
+        metadata["updated_at"] = _utc_now()
+        self._write_metadata(metadata)
+        return entry
 
     # Read metadata.json as a dictionary.
     def _read_metadata(self) -> dict[str, Any]:

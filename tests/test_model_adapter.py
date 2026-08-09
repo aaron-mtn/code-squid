@@ -188,6 +188,67 @@ def test_missing_required_args_are_rejected_from_passed_definitions() -> None:
     assert reply["format_error"] == "Missing required arguments for local_tool: content"
 
 
+def test_malformed_tool_arguments_preserve_raw_reply_and_available_metadata() -> None:
+    message = FakeMessage(
+        content="Trying the tool.",
+        tool_calls=[FakeToolCall("call_bad", "local_tool", '{"path":')],
+    )
+    message.reasoning_content = "provider-exposed reasoning"
+    response = FakeResponse(message, usage={"prompt_tokens": 7, "completion_tokens": 3})
+    response.id = "response_123"
+    response.choices[0].finish_reason = "tool_calls"
+    adapter = ModelAdapter(
+        provider=FakeProvider(response),
+        model_name="test-model",
+        provider_name="test-provider",
+    )
+
+    reply = adapter.respond(
+        messages=[{"role": "user", "content": "hi"}],
+        tool_definitions=[tool_definition("local_tool", ["path"])],
+    )
+
+    assert reply["format_error"].startswith("Tool arguments were not valid JSON:")
+    assert reply["recoverable_tool_name"] == "local_tool"
+    assert reply["recoverable_raw_arguments"] == '{"path":'
+    assert reply["raw_reply"] == {
+        "provider": "test-provider",
+        "model": "test-model",
+        "assistant": {
+            "content": "Trying the tool.",
+            "raw_tool_calls": [
+                {
+                    "id": "call_bad",
+                    "function": {
+                        "name": "local_tool",
+                        "arguments": '{"path":',
+                    },
+                }
+            ],
+            "reasoning_content": "provider-exposed reasoning",
+        },
+        "usage": {"input_tokens": 7, "output_tokens": 3, "total_tokens": None},
+        "finish_reason": "tool_calls",
+        "response_id": "response_123",
+    }
+
+
+def test_raw_reply_does_not_invent_unavailable_reasoning_or_metadata() -> None:
+    provider = FakeProvider(FakeResponse(FakeMessage(content="done", tool_calls=[])))
+    reply = ModelAdapter(provider=provider, model_name="test-model").respond(
+        messages=[],
+        tool_definitions=[],
+    )
+
+    assert reply["raw_reply"]["assistant"] == {
+        "content": "done",
+        "raw_tool_calls": [],
+    }
+    assert "finish_reason" not in reply["raw_reply"]
+    assert "response_id" not in reply["raw_reply"]
+    assert "usage" not in reply["raw_reply"]
+
+
 def test_assistant_tool_calls_metadata_is_preserved_on_normalized_message() -> None:
     reply = adapter_response(
         FakeToolCall("call_1", "local_tool", '{"path": "/tmp/input.txt"}'),

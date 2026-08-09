@@ -1,3 +1,9 @@
+- 2026-08-09: Added append-only `model_reply` and linked `reply_rejection`
+  diagnostics to each session JSONL. Core now preserves provider-exposed raw
+  tool arguments, content, reasoning/thinking, finish reason, usage, provider,
+  model, and response IDs before validation, while diagnostic entries remain
+  excluded from canonical conversation replay. Streaming provider adapters
+  retain exposed finish/reasoning metadata as well.
 - 2026-08-04: Added an explicit resolved-component seam to fresh run
   construction. Hosts that already resolved a Skill and executable tool
   registry can pass `resolved_skill` and `resolved_tools` together, bypassing

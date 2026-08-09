@@ -53,8 +53,19 @@ class FakeModelAdapter:
             }
         )
         if len(self.calls) <= len(self.replies):
-            return self.replies[len(self.calls) - 1]
-        return self.replies[-1]
+            reply = self.replies[len(self.calls) - 1]
+        else:
+            reply = self.replies[-1]
+        reply.setdefault(
+            "raw_reply",
+            {
+                "assistant": {
+                    "content": reply["message"].get("content"),
+                    "raw_tool_calls": reply["message"].get("tool_calls", []),
+                }
+            },
+        )
+        return reply
 
 
 class SequenceModelAdapter(FakeModelAdapter):
@@ -86,6 +97,12 @@ class FakeSessionStore:
 
     def append_message(self, message: dict, usage: dict | None = None) -> None:
         self.messages.append(message)
+
+    def append_model_reply(self, raw_reply: dict) -> dict:
+        return {"id": "raw_reply"}
+
+    def append_reply_rejection(self, reply: dict, **kwargs) -> dict:
+        return kwargs
 
     def update_status(self, status: str) -> None:
         self.statuses.append(status)

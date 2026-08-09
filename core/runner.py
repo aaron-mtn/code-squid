@@ -212,6 +212,7 @@ def build_agent_loop(
         provider=provider,
         model_name=settings.model.name,
         tool_call_content_mode=tool_call_content_mode(settings),
+        provider_name=settings.model.provider,
     )
     compactor = Compactor(settings.compaction, model_adapter)
 

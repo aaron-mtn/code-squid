@@ -61,6 +61,9 @@ class FakeModelAdapter:
             "actions": [],
             "format_error": "",
             "usage": None,
+            "raw_reply": {
+                "assistant": {"content": "TASK COMPLETE", "raw_tool_calls": []},
+            },
         }
 
     def supports_streaming(self) -> bool:

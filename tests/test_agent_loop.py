@@ -119,6 +119,8 @@ class FakeSessionStore:
     def __init__(self, events: list[str] | None = None) -> None:
         self.messages = []
         self.compactions = []
+        self.model_replies = []
+        self.reply_rejections = []
         self.statuses = []
         self.events = events
 
@@ -129,6 +131,31 @@ class FakeSessionStore:
 
     def append_compaction(self, metadata: dict) -> None:
         self.compactions.append(metadata)
+
+    def append_model_reply(self, raw_reply: dict) -> dict:
+        entry = {"id": f"raw_{len(self.model_replies) + 1}", "reply": raw_reply}
+        self.model_replies.append(entry)
+        return entry
+
+    def append_reply_rejection(
+        self,
+        reply: dict,
+        *,
+        reason: str,
+        consecutive_invalid_attempt: int,
+        raw_reply_id: str,
+    ) -> dict:
+        entry = {
+            "reason": reason,
+            "error": reply.get("format_error") or reason,
+            "consecutive_invalid_attempt": consecutive_invalid_attempt,
+            "raw_reply_id": raw_reply_id,
+        }
+        for name in ("recoverable_tool_name", "recoverable_raw_arguments"):
+            if name in reply:
+                entry[name] = reply[name]
+        self.reply_rejections.append(entry)
+        return entry
 
     def update_status(self, status: str) -> None:
         self.statuses.append(status)
@@ -178,6 +205,9 @@ def reply(content: str, actions: list[dict] | None = None, reason: str = "") -> 
         "message": {"role": "assistant", "content": content},
         "actions": actions or [],
         "reason": reason,
+        "raw_reply": {
+            "assistant": {"content": content, "raw_tool_calls": []},
+        },
     }
 
 
@@ -541,6 +571,124 @@ def test_correction_messages_are_persisted_and_rejected_invalid_replies_are_not(
 
     assert {"role": "user", "content": "correction:empty_final_reply"} in persisted_messages
     assert {"role": "assistant", "content": "bad 1"} not in persisted_messages
+
+
+def test_malformed_reply_persists_raw_reply_and_exact_rejection_error_only_as_diagnostics() -> None:
+    malformed = {
+        "message": {"role": "assistant", "content": "Trying."},
+        "actions": [],
+        "reason": "malformed_tool_call",
+        "format_error": "Tool arguments were not valid JSON: expected value",
+        "recoverable_tool_name": "read_file",
+        "recoverable_raw_arguments": '{"path":',
+        "raw_reply": {
+            "provider": "openrouter",
+            "model": "example/model",
+            "assistant": {
+                "content": "Trying.",
+                "raw_tool_calls": [
+                    {
+                        "id": "call_bad",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": '{"path":',
+                        },
+                    }
+                ],
+            },
+        },
+    }
+    session, _, session_store, _, _ = run_loop_with_store(
+        [malformed, reply("TASK COMPLETE")]
+    )
+
+    assert session_store.model_replies[0]["reply"] == malformed["raw_reply"]
+    assert session_store.reply_rejections == [
+        {
+            "reason": "malformed_tool_call",
+            "error": "Tool arguments were not valid JSON: expected value",
+            "consecutive_invalid_attempt": 1,
+            "raw_reply_id": "raw_1",
+            "recoverable_tool_name": "read_file",
+            "recoverable_raw_arguments": '{"path":',
+        }
+    ]
+    assert {"role": "assistant", "content": "Trying."} not in session.messages
+
+
+def test_all_three_repeated_invalid_replies_are_preserved_individually() -> None:
+    invalid_replies = [
+        {
+            **reply(f"bad {attempt}", reason="malformed_tool_call"),
+            "format_error": f"parse error {attempt}",
+            "raw_reply": {
+                "assistant": {
+                    "content": f"bad {attempt}",
+                    "raw_tool_calls": [],
+                }
+            },
+        }
+        for attempt in range(1, 4)
+    ]
+
+    session, _, session_store, model_adapter, _ = run_loop_with_store(invalid_replies)
+
+    assert len(session_store.model_replies) == 3
+    assert [item["consecutive_invalid_attempt"] for item in session_store.reply_rejections] == [
+        1,
+        2,
+        3,
+    ]
+    assert [item["error"] for item in session_store.reply_rejections] == [
+        "parse error 1",
+        "parse error 2",
+        "parse error 3",
+    ]
+    assert model_adapter.index == 3
+    assert session.messages[-1]["content"].startswith(
+        "Code Squid stopped after 3 consecutive invalid replies."
+    )
+
+
+def test_valid_tool_call_reply_remains_canonical_and_keeps_tool_call_id() -> None:
+    tool_message = {
+        "role": "assistant",
+        "content": "Reading.",
+        "tool_calls": [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "read_file", "arguments": '{"path":"README.md"}'},
+            }
+        ],
+    }
+    session, tool_executor, session_store, _, _ = run_loop_with_store(
+        [
+                {
+                    "message": tool_message,
+                    "actions": [
+                    {
+                        "tool": "read_file",
+                        "args": {"path": "README.md"},
+                        "tool_call_id": "call_1",
+                            "raw_arguments": '{"path":"README.md"}',
+                        }
+                    ],
+                    "raw_reply": {
+                        "assistant": {
+                            "content": "Reading.",
+                            "raw_tool_calls": tool_message["tool_calls"],
+                        }
+                    },
+                },
+            reply("TASK COMPLETE"),
+        ]
+    )
+
+    assert tool_message in session.messages
+    assert tool_message in [entry["message"] for entry in session_store.messages]
+    assert tool_executor.actions[0]["tool_call_id"] == "call_1"
+    assert session_store.reply_rejections == []
 
 
 def test_invalid_assistant_reply_is_not_displayed_in_normal_mode() -> None:

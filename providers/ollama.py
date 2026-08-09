@@ -213,12 +213,22 @@ def adapt_response(raw_response: dict) -> object:
         for index, tool_call in enumerate(message.get("tool_calls") or [])
     ]
 
-    adapted_message = SimpleNamespace(
-        content=message.get("content") or "",
-        tool_calls=tool_calls,
-    )
+    message_fields = {
+        "content": message.get("content") or "",
+        "tool_calls": tool_calls,
+    }
+    for name in ("reasoning", "reasoning_content", "thinking"):
+        if message.get(name) is not None:
+            message_fields[name] = message[name]
+    adapted_message = SimpleNamespace(**message_fields)
     return SimpleNamespace(
-        choices=[SimpleNamespace(message=adapted_message)],
+        id=raw_response.get("id"),
+        choices=[
+            SimpleNamespace(
+                message=adapted_message,
+                finish_reason=raw_response.get("done_reason"),
+            )
+        ],
         usage=_adapt_usage(raw_response),
     )
 
@@ -262,6 +272,11 @@ def _accumulate_stream_chunk(
     if content_delta:
         assembled_message["content"] += content_delta
         on_text_delta(content_delta)
+
+    for name in ("reasoning", "reasoning_content", "thinking"):
+        value = message.get(name)
+        if value:
+            assembled_message[name] = f"{assembled_message.get(name, '')}{value}"
 
     for index, tool_call in enumerate(message.get("tool_calls") or []):
         _accumulate_tool_call(assembled_message["tool_calls"], index, tool_call)

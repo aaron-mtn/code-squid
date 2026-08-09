@@ -382,6 +382,10 @@ class AgentLoop:
                 reply = self._respond(tool_definitions, extra_messages=extra_messages)
                 self._check_cancelled()
 
+                raw_reply_entry = None
+                if self.session_store is not None:
+                    raw_reply_entry = self.session_store.append_model_reply(reply["raw_reply"])
+
                 self.display.debug_reply(reply)
 
                 # Ask the coding agent whether this reply counts as a valid turn.
@@ -393,6 +397,13 @@ class AgentLoop:
                 # the transcript. Instead inject a reason-specific correction and retry.
                 if not validation["ok"]:
                     consecutive_invalid_replies += 1
+                    if self.session_store is not None:
+                        self.session_store.append_reply_rejection(
+                            reply,
+                            reason=validation["reason"],
+                            consecutive_invalid_attempt=consecutive_invalid_replies,
+                            raw_reply_id=raw_reply_entry["id"],
+                        )
                     if getattr(self.display, "debug", False):
                         self.display.assistant_message(reply["message"]["content"])
                     self.display.reply_rejected(validation["reason"])

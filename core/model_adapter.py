@@ -15,7 +15,13 @@ class ModelAdapter:
     # Store the provider and model name used for requests.
     # The provider handles the raw API call, while this adapter normalizes
     # provider output into the small internal reply shape used by the loop.
-    def __init__(self, provider, model_name: str, tool_call_content_mode: str = "empty") -> None:
+    def __init__(
+        self,
+        provider,
+        model_name: str,
+        tool_call_content_mode: str = "empty",
+        provider_name: str | None = None,
+    ) -> None:
         if tool_call_content_mode not in TOOL_CALL_CONTENT_MODES:
             valid_modes = ", ".join(sorted(TOOL_CALL_CONTENT_MODES))
             raise ValueError(f"tool_call_content_mode must be one of {valid_modes}")
@@ -23,6 +29,7 @@ class ModelAdapter:
         self.provider = provider
         self.model_name = model_name
         self.tool_call_content_mode = tool_call_content_mode
+        self.provider_name = provider_name or type(provider).__name__
 
     # Send transcript messages and tool definitions to the provider,
     # then normalize the raw provider response into the internal reply shape.
@@ -43,17 +50,7 @@ class ModelAdapter:
             # from normalization, validation, or the rest of the app.
             raise ModelRequestError("Model request failed") from exc
 
-        try:
-            return self._normalize_response(raw_response, tool_metadata)
-        except ValueError as e:
-            return {
-                "message": {
-                    "role": "assistant",
-                    "content": "",
-                },
-                "actions": [],
-                "format_error": str(e),
-            }
+        return self._reply_from_response(raw_response, tool_metadata)
 
     def supports_streaming(self) -> bool:
         return bool(getattr(self.provider, "supports_streaming", lambda: False)())
@@ -77,17 +74,7 @@ class ModelAdapter:
         except Exception as exc:
             raise ModelRequestError("Model request failed") from exc
 
-        try:
-            return self._normalize_response(raw_response, tool_metadata)
-        except ValueError as e:
-            return {
-                "message": {
-                    "role": "assistant",
-                    "content": "",
-                },
-                "actions": [],
-                "format_error": str(e),
-            }
+        return self._reply_from_response(raw_response, tool_metadata)
 
     def complete_text(self, messages: list[dict]) -> dict:
         try:
@@ -166,8 +153,13 @@ class ModelAdapter:
         for tool_call in raw_tool_calls:
             tool_name = tool_call.function.name
             raw_arguments = tool_call.function.arguments
-            args = self._parse_args(raw_arguments)
-            self._validate_tool_action(tool_name, args, tool_metadata)
+            try:
+                args = self._parse_args(raw_arguments)
+                self._validate_tool_action(tool_name, args, tool_metadata)
+            except ValueError as error:
+                error.recoverable_tool_name = tool_name
+                error.recoverable_raw_arguments = raw_arguments
+                raise
 
             actions.append(
                 {
@@ -225,6 +217,103 @@ class ModelAdapter:
                 return value
 
         return None
+
+    def _raw_reply_from_response(self, raw_response) -> dict:
+        """Extract only data the provider actually exposed, before parsing tool arguments."""
+        choices = self._value(raw_response, "choices") or []
+        choice = choices[0] if choices else None
+        assistant_message = self._value(choice, "message") or {}
+        raw_tool_calls = self._value(assistant_message, "tool_calls") or []
+
+        assistant = {
+            "content": self._json_value(self._value(assistant_message, "content")),
+            "raw_tool_calls": [self._json_value(tool_call) for tool_call in raw_tool_calls],
+        }
+        for name in ("reasoning", "reasoning_content", "thinking"):
+            value = self._value(assistant_message, name)
+            if value is not None:
+                assistant[name] = self._json_value(value)
+
+        raw_reply = {
+            "provider": self.provider_name,
+            "model": self.model_name,
+            "assistant": assistant,
+        }
+        usage = self._usage_from_response(raw_response)
+        if usage is not None:
+            raw_reply["usage"] = usage
+
+        finish_reason = self._value(choice, "finish_reason")
+        if finish_reason is not None:
+            raw_reply["finish_reason"] = self._json_value(finish_reason)
+
+        for name in ("id", "response_id", "request_id", "_request_id"):
+            value = self._value(raw_response, name)
+            if value is not None:
+                raw_reply["response_id"] = self._json_value(value)
+                break
+
+        return raw_reply
+
+    def _reply_from_response(self, raw_response, tool_metadata: dict) -> dict:
+        raw_reply = self._raw_reply_from_response(raw_response)
+        try:
+            reply = self._normalize_response(raw_response, tool_metadata)
+        except ValueError as error:
+            reply = {
+                "message": {
+                    "role": "assistant",
+                    "content": raw_reply["assistant"].get("content") or "",
+                },
+                "actions": [],
+                "format_error": str(error),
+                "usage": raw_reply.get("usage"),
+                **self._recoverable_tool_fields(error),
+            }
+
+        reply["raw_reply"] = raw_reply
+        return reply
+
+    def _value(self, value, name: str):
+        if isinstance(value, dict):
+            return value.get(name)
+        return getattr(value, name, None)
+
+    def _json_value(self, value):
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, dict):
+            return {str(key): self._json_value(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [self._json_value(item) for item in value]
+
+        model_dump = getattr(value, "model_dump", None)
+        if callable(model_dump):
+            try:
+                return self._json_value(model_dump(mode="json"))
+            except TypeError:
+                return self._json_value(model_dump())
+
+        try:
+            fields = vars(value).items()
+        except TypeError:
+            return str(value)
+        public_fields = {
+            name: self._json_value(field_value)
+            for name, field_value in fields
+            if not name.startswith("_")
+        }
+        return public_fields or str(value)
+
+    def _recoverable_tool_fields(self, error: ValueError) -> dict:
+        fields = {}
+        tool_name = getattr(error, "recoverable_tool_name", None)
+        raw_arguments = getattr(error, "recoverable_raw_arguments", None)
+        if tool_name is not None:
+            fields["recoverable_tool_name"] = tool_name
+        if raw_arguments is not None:
+            fields["recoverable_raw_arguments"] = raw_arguments
+        return fields
 
     # Parse the provider's tool-call arguments into a normal dictionary.
     # OpenAI-compatible APIs usually return tool arguments as a JSON string.
