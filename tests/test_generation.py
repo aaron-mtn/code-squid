@@ -33,6 +33,21 @@ class FakeProvider:
         return FakeResponse(self.content)
 
 
+class StreamingProvider(FakeProvider):
+    def __init__(self, content: str, deltas: list[str]) -> None:
+        super().__init__(content)
+        self.deltas = deltas
+
+    def supports_streaming(self) -> bool:
+        return True
+
+    def stream_chat(self, model: str, messages: list[dict], tools: list[dict], on_text_delta):
+        self.requests.append({"model": model, "messages": messages, "tools": tools})
+        for delta in self.deltas:
+            on_text_delta(delta)
+        return FakeResponse(self.content)
+
+
 class FailingProvider:
     def __init__(self, error: Exception) -> None:
         self.error = error
@@ -150,6 +165,88 @@ def test_model_request_failure_preserves_model_request_error(monkeypatch) -> Non
 
     with pytest.raises(ModelRequestError) as exc_info:
         generation.generate_text("Hello", settings=settings())
+
+    assert str(exc_info.value) == "Model request failed"
+    assert exc_info.value.__cause__ is provider_error
+
+
+def test_stream_text_converts_string_input_forwards_deltas_and_returns_content(monkeypatch) -> None:
+    provider = StreamingProvider("a short title", ["a short ", "title"])
+    monkeypatch.setattr(generation, "build_provider", lambda supplied_settings: provider)
+    deltas = []
+
+    text = generation.stream_text(
+        "Give me a title.",
+        deltas.append,
+        settings=settings(),
+    )
+
+    assert text == "a short title"
+    assert deltas == ["a short ", "title"]
+    assert provider.requests == [
+        {
+            "model": "generation-model",
+            "messages": [{"role": "user", "content": "Give me a title."}],
+            "tools": [],
+        }
+    ]
+
+
+def test_stream_text_passes_message_list_through_unchanged(monkeypatch) -> None:
+    messages = [
+        {"role": "system", "content": "Be helpful."},
+        {"role": "user", "content": "Hello"},
+    ]
+    calls = []
+
+    class CapturingAdapter:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def complete_text_streaming(self, supplied_messages, on_text_delta) -> str:
+            calls.append(supplied_messages)
+            on_text_delta("Hello!")
+            return "Hello!"
+
+    monkeypatch.setattr(generation, "build_provider", lambda supplied_settings: object())
+    monkeypatch.setattr(generation, "ModelAdapter", CapturingAdapter)
+    deltas = []
+
+    assert generation.stream_text(messages, deltas.append, settings=settings()) == "Hello!"
+    assert deltas == ["Hello!"]
+    assert calls == [messages]
+    assert calls[0] is messages
+
+
+def test_stream_text_falls_back_when_provider_does_not_support_streaming(monkeypatch) -> None:
+    provider = FakeProvider("completed response")
+    monkeypatch.setattr(generation, "build_provider", lambda supplied_settings: provider)
+    deltas = []
+
+    text = generation.stream_text("Hello", deltas.append, settings=settings())
+
+    assert text == "completed response"
+    assert deltas == ["completed response"]
+
+
+def test_stream_text_preserves_model_request_error_chaining(monkeypatch) -> None:
+    provider_error = RuntimeError("provider unavailable")
+
+    class FailingStreamingProvider:
+        def supports_streaming(self) -> bool:
+            return True
+
+        def stream_chat(self, **kwargs):
+            raise provider_error
+
+    monkeypatch.setattr(
+        generation,
+        "build_provider",
+        lambda supplied_settings: FailingStreamingProvider(),
+    )
+
+    with pytest.raises(ModelRequestError) as exc_info:
+        generation.stream_text("Hello", lambda _delta: None, settings=settings())
 
     assert str(exc_info.value) == "Model request failed"
     assert exc_info.value.__cause__ is provider_error

@@ -416,6 +416,61 @@ def test_complete_text_includes_normalized_usage_when_provider_usage_exists() ->
     }
 
 
+def test_complete_text_streaming_forwards_deltas_returns_content_and_disables_tools() -> None:
+    provider = StreamingProvider(
+        FakeResponse(FakeMessage(content="hello world", tool_calls=[])),
+        deltas=["hello ", "world"],
+    )
+    adapter = ModelAdapter(provider=provider, model_name="test-model")
+    deltas = []
+
+    content = adapter.complete_text_streaming(
+        messages=[{"role": "user", "content": "hi"}],
+        on_text_delta=deltas.append,
+    )
+
+    assert deltas == ["hello ", "world"]
+    assert content == "hello world"
+    assert provider.requests[0]["tools"] == []
+
+
+def test_complete_text_streaming_falls_back_to_completed_text() -> None:
+    provider = FakeProvider(FakeResponse(FakeMessage(content="fallback", tool_calls=[])))
+    adapter = ModelAdapter(provider=provider, model_name="test-model")
+    deltas = []
+
+    content = adapter.complete_text_streaming(
+        messages=[{"role": "user", "content": "hi"}],
+        on_text_delta=deltas.append,
+    )
+
+    assert content == "fallback"
+    assert deltas == ["fallback"]
+    assert provider.requests[0]["tools"] == []
+
+
+def test_complete_text_streaming_wraps_provider_error() -> None:
+    provider_error = RuntimeError("provider unavailable")
+
+    class FailingStreamingProvider:
+        def supports_streaming(self) -> bool:
+            return True
+
+        def stream_chat(self, **kwargs):
+            raise provider_error
+
+    adapter = ModelAdapter(provider=FailingStreamingProvider(), model_name="test-model")
+
+    with pytest.raises(ModelRequestError) as exc_info:
+        adapter.complete_text_streaming(
+            messages=[{"role": "user", "content": "hi"}],
+            on_text_delta=lambda _delta: None,
+        )
+
+    assert str(exc_info.value) == "Model request failed"
+    assert exc_info.value.__cause__ is provider_error
+
+
 def test_supports_streaming_delegates_to_provider() -> None:
     provider = StreamingProvider(
         FakeResponse(FakeMessage(content="done", tool_calls=[])),

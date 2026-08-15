@@ -92,6 +92,26 @@ class ModelAdapter:
             "usage": self._usage_from_response(raw_response),
         }
 
+    def complete_text_streaming(self, messages: list[dict], on_text_delta) -> str:
+        if not self.supports_streaming():
+            content = self.complete_text(messages)["content"]
+            if content:
+                on_text_delta(content)
+            return content
+
+        try:
+            raw_response = self.provider.stream_chat(
+                model=self.model_name,
+                messages=self._messages_for_provider(messages),
+                tools=[],
+                on_text_delta=on_text_delta,
+            )
+        except Exception as exc:
+            raise ModelRequestError("Model request failed") from exc
+
+        assistant_message = raw_response.choices[0].message
+        return assistant_message.content or ""
+
     # Build the tiny metadata map the adapter needs for validation from the
     # active tool definitions passed into this request.
     def _tool_metadata_from_definitions(self, tool_definitions: list[dict]) -> dict:
