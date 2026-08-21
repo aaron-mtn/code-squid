@@ -2,6 +2,8 @@ from pathlib import Path
 
 from core.extension_paths import CODE_SQUID_HOME_ENV
 from core.extensions import (
+    ALLOWED_EXTENSION_ACCENTS,
+    DEFAULT_EXTENSION_ACCENT,
     Extension,
     discover_extensions,
     get_active_extension,
@@ -74,6 +76,7 @@ hooks:
         title="Repo Inspector",
         description="Inspect repositories with repo-aware tools.",
         version="0.1.0",
+        accent=DEFAULT_EXTENSION_ACCENT,
         default_skill="repo-inspector",
         skills=("repo-inspector",),
         tools=("line_count",),
@@ -101,12 +104,71 @@ def test_optional_fields_default_correctly(tmp_path: Path) -> None:
         title="minimal",
         description="",
         version="",
+        accent=DEFAULT_EXTENSION_ACCENT,
         default_skill=None,
         skills=(),
         tools=(),
         hooks=(),
         path=extension_dir,
     )
+
+
+def test_manifest_without_accent_uses_default(tmp_path: Path) -> None:
+    extension_dir = _write_extension(tmp_path, "minimal", "name: minimal\n")
+
+    extension = load_extension(extension_dir)
+
+    assert extension is not None
+    assert extension.valid is True
+    assert extension.accent == "cyan"
+
+
+def test_every_allowed_accent_loads_and_is_preserved(tmp_path: Path) -> None:
+    for accent in ALLOWED_EXTENSION_ACCENTS:
+        extension_dir = _write_extension(
+            tmp_path,
+            accent,
+            f"name: {accent}\naccent: {accent}\n",
+        )
+
+        extension = load_extension(extension_dir)
+
+        assert extension is not None
+        assert extension.valid is True
+        assert extension.accent == accent
+
+
+def test_unsupported_accent_is_invalid(tmp_path: Path) -> None:
+    extension_dir = _write_extension(
+        tmp_path,
+        "unsupported-accent",
+        "name: unsupported-accent\naccent: ultraviolet\n",
+    )
+
+    extension = load_extension(extension_dir)
+
+    assert extension is not None
+    assert extension.valid is False
+    assert any(
+        "accent 'ultraviolet' must be one of: " in error
+        and ", ".join(ALLOWED_EXTENSION_ACCENTS) in error
+        for error in extension.errors
+    )
+
+
+def test_non_string_json_accent_is_invalid_without_crashing(tmp_path: Path) -> None:
+    extension_dir = _write_extension(
+        tmp_path,
+        "json-accent",
+        '{"name": "json-accent", "accent": 123}\n',
+    )
+
+    extension = load_extension(extension_dir)
+
+    assert extension is not None
+    assert extension.valid is False
+    assert extension.accent == DEFAULT_EXTENSION_ACCENT
+    assert any("accent must be a string" in error for error in extension.errors)
 
 
 def test_invalid_name_is_invalid_with_errors(tmp_path: Path) -> None:

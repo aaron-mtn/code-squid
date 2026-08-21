@@ -574,6 +574,11 @@ extension paths are:
 These directories are separate from the repo-local `skills/builtin/` bundled
 skill directory.
 
+Extension metadata supports an optional top-level semantic accent, for example
+`accent: purple`. The effective default is `cyan`; allowed names are `cyan`,
+`blue`, `green`, `yellow`, `orange`, `red`, `pink`, `purple`, `white`, and
+`gray`.
+
 The CLI exposes extension management through `extensions list`,
 `extensions active`, `extensions activate <name>`, `extensions deactivate`, and
 `extensions validate <name>`. These commands only inspect or update extension

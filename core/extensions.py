@@ -14,6 +14,19 @@ from core.extension_paths import extension_state_path, user_extensions_dir
 
 
 SAFE_EXTENSION_NAME_RE = re.compile(r"^[a-z0-9_-]+$")
+ALLOWED_EXTENSION_ACCENTS = (
+    "cyan",
+    "blue",
+    "green",
+    "yellow",
+    "orange",
+    "red",
+    "pink",
+    "purple",
+    "white",
+    "gray",
+)
+DEFAULT_EXTENSION_ACCENT = "cyan"
 
 
 @dataclass(frozen=True)
@@ -22,6 +35,7 @@ class Extension:
     title: str
     description: str
     version: str
+    accent: str
     default_skill: str | None
     skills: tuple[str, ...]
     tools: tuple[str, ...]
@@ -81,6 +95,12 @@ def load_extension(
             title=title or name,
             description=_metadata_string(metadata, "description", metadata_path),
             version=_metadata_string(metadata, "version", metadata_path),
+            accent=_metadata_string(
+                metadata,
+                "accent",
+                metadata_path,
+                default=DEFAULT_EXTENSION_ACCENT,
+            ),
             default_skill=_metadata_optional_string(
                 metadata,
                 "default_skill",
@@ -99,6 +119,7 @@ def load_extension(
             title=folder_name,
             description="",
             version="",
+            accent=DEFAULT_EXTENSION_ACCENT,
             default_skill=None,
             skills=(),
             tools=(),
@@ -128,6 +149,12 @@ def validate_extension(extension: Extension) -> tuple[str, ...]:
         errors.append(
             f"{metadata_path}: extension name {extension.name!r} must match "
             f"folder name {extension.path.name!r}"
+        )
+    if extension.accent not in ALLOWED_EXTENSION_ACCENTS:
+        allowed_accents = ", ".join(ALLOWED_EXTENSION_ACCENTS)
+        errors.append(
+            f"{metadata_path}: accent {extension.accent!r} must be one of: "
+            f"{allowed_accents}"
         )
     if extension.default_skill is not None and extension.default_skill not in extension.skills:
         errors.append(
