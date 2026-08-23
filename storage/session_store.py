@@ -177,6 +177,7 @@ class SessionStore:
         skill_name: str | None,
         allowed_tools: list[str],
         prompt_overrides: list[str],
+        mod_id: str | None = None,
     ) -> dict:
         session_metadata = self._read_metadata()
         previous_leaf_id = session_metadata["active_leaf_id"]
@@ -191,6 +192,11 @@ class SessionStore:
             "allowed_tools": sorted(allowed_tools),
             "prompt_overrides": sorted(prompt_overrides),
         }
+
+        # Mod identity is optional wrapper metadata. Core persists only the
+        # stable identifier and remains unaware of presentation concerns.
+        if mod_id is not None:
+            entry["mod_id"] = mod_id
 
         with self.jsonl_path.open("a", encoding="utf-8") as file:
             file.write(json.dumps(entry) + "\n")

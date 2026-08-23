@@ -64,6 +64,7 @@ def run_coding_task(
     settings: Settings | None = None,
     display: TerminalDisplay | None = None,
     skill_name: str | None = None,
+    mod_id: str | None = None,
     resolved_skill: Skill | None = None,
     resolved_tools: dict | None = None,
     hooks: list[object] | None = None,
@@ -85,6 +86,7 @@ def run_coding_task(
         settings=settings,
         display=display,
         skill_name=skill_name,
+        mod_id=mod_id,
         resolved_skill=resolved_skill,
         resolved_tools=resolved_tools,
         hooks=hooks,
@@ -106,6 +108,7 @@ def build_coding_task_run(
     settings: Settings | None = None,
     display: TerminalDisplay | None = None,
     skill_name: str | None = None,
+    mod_id: str | None = None,
     resolved_skill: Skill | None = None,
     resolved_tools: dict | None = None,
     hooks: list[object] | None = None,
@@ -151,7 +154,7 @@ def build_coding_task_run(
             repo_root=repo_root,
             session_id=session_store.session_id,
         )
-    append_run_context(session_store, skill, active_tools)
+    append_run_context(session_store, skill, active_tools, mod_id=mod_id)
     platform_context = detect_platform_context()
     agent = CodingAgent(
         task=task,
@@ -310,11 +313,13 @@ def append_run_context(
     session_store: SessionStore,
     skill: Skill | None,
     active_tools: dict,
+    mod_id: str | None = None,
 ) -> dict:
     return session_store.append_run_context(
         skill_name=skill.name if skill is not None else None,
         allowed_tools=sorted(active_tools),
         prompt_overrides=sorted(skill.prompt_sections) if skill is not None else [],
+        mod_id=mod_id,
     )
 
 

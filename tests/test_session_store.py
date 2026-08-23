@@ -158,6 +158,44 @@ def test_load_messages_ignores_run_context_entries(tmp_path: Path) -> None:
     assert store.load_messages() == messages
 
 
+def test_append_run_context_persists_optional_mod_id(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path, "mod context")
+
+    with_mod = store.append_run_context(
+        skill_name="story-maker",
+        allowed_tools=[],
+        prompt_overrides=[],
+        mod_id="story-maker",
+    )
+    without_mod = store.append_run_context(
+        skill_name=None,
+        allowed_tools=[],
+        prompt_overrides=[],
+    )
+
+    assert with_mod["mod_id"] == "story-maker"
+    assert "mod_id" not in without_mod
+
+
+def test_run_contexts_can_persist_different_mod_ids_in_one_session(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path, "mod sequence")
+
+    for mod_id in ("story-maker", "reviewer", "story-maker"):
+        store.append_run_context(
+            skill_name="shared-skill",
+            allowed_tools=[],
+            prompt_overrides=[],
+            mod_id=mod_id,
+        )
+
+    contexts = [entry for entry in read_entries(store) if entry["type"] == "run_context"]
+    assert [entry["mod_id"] for entry in contexts] == [
+        "story-maker",
+        "reviewer",
+        "story-maker",
+    ]
+
+
 def test_diagnostic_entries_are_linked_and_ignored_by_load_messages(tmp_path: Path) -> None:
     store = SessionStore.create(tmp_path, "diagnostics")
     user = store.append_message({"role": "user", "content": "one"})

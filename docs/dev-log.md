@@ -1,3 +1,8 @@
+- 2026-08-22: Made session transcripts canonical for user-authored tasks.
+  Initial and follow-up text now persist as raw `role=user` messages, while
+  task/follow-up prompt guidance and invalid-reply corrections are assembled
+  only for model requests. Resumed runs retain prior canonical context and the
+  existing continuation guidance without saving control prompts as user turns.
 - 2026-08-09: Added append-only `model_reply` and linked `reply_rejection`
   diagnostics to each session JSONL. Core now preserves provider-exposed raw
   tool arguments, content, reasoning/thinking, finish reason, usage, provider,

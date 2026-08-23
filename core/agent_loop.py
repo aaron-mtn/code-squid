@@ -208,7 +208,15 @@ class AgentLoop:
         return callable(supports_streaming) and bool(supports_streaming())
 
     def _respond(self, tool_definitions: list[dict], extra_messages=None) -> dict:
-        messages = self.session.messages
+        messages = list(self.session.messages)
+        runtime_control_message = getattr(
+            self.agent,
+            "runtime_control_message",
+            lambda: None,
+        )()
+        if runtime_control_message is not None:
+            insert_at = 1 if messages and messages[0].get("role") == "system" else 0
+            messages.insert(insert_at, runtime_control_message)
         if extra_messages:
             messages = [*messages, *extra_messages]
 
@@ -339,6 +347,7 @@ class AgentLoop:
             failure_reason = ""
             final_message = ""
             tool_steps_used = 0
+            pending_runtime_messages = []
 
             # Keep going until the agent says the task is complete.
             while not self.agent.should_stop(self.session):
@@ -378,8 +387,12 @@ class AgentLoop:
                         *turn_context_blocks,
                     ]
                 )
-                extra_messages = [context_message] if context_message is not None else None
+                extra_messages = [
+                    *([context_message] if context_message is not None else []),
+                    *pending_runtime_messages,
+                ]
                 reply = self._respond(tool_definitions, extra_messages=extra_messages)
+                pending_runtime_messages = []
                 self._check_cancelled()
 
                 raw_reply_entry = None
@@ -434,7 +447,7 @@ class AgentLoop:
                         failure_reason = validation["reason"]
                         break
 
-                    self._add_message(
+                    pending_runtime_messages.append(
                         self.agent.correction_message_for(validation["reason"])
                     )
                     continue
@@ -478,7 +491,9 @@ class AgentLoop:
                                 ),
                             }
                         )
-                        self._add_message(self._user_instruction_message(guidance))
+                        pending_runtime_messages.append(
+                            self._user_instruction_message(guidance)
+                        )
                         continue
                     if final_decision.report_note:
                         assistant_content = (

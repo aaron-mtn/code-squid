@@ -23,12 +23,14 @@ class CodingAgent:
         tools: dict | None = None,
         platform_context: PlatformContext | None = None,
         workspace: str | None = None,
+        continuation: bool = False,
     ) -> None:
         self.task = task
         self.skill = skill
         self.tools = TOOLS if tools is None else tools
         self.platform_context = platform_context
         self.workspace = workspace
+        self.continuation = continuation
 
     # Return the initial system and user messages for a new session.
     def initial_messages(self) -> list[dict]:
@@ -37,12 +39,22 @@ class CodingAgent:
                 "role": "system",
                 "content": system_prompt(self.skill, self.platform_context, self.workspace),
             },
-            {"role": "user", "content": task_prompt(self.task, self.skill)},
+            {"role": "user", "content": self.task},
         ]
 
-    # Return the user message that continues an existing saved session.
+    # Return the canonical authored turn that continues a saved session.
     def follow_up_message(self, task: str) -> dict:
-        return {"role": "user", "content": follow_up_prompt(task, self.skill)}
+        return {"role": "user", "content": task}
+
+    # Return model-control guidance for this run. AgentLoop injects this into
+    # provider requests without adding it to the canonical session transcript.
+    def runtime_control_message(self) -> dict:
+        content = (
+            follow_up_prompt(self.task, self.skill)
+            if self.continuation
+            else task_prompt(self.task, self.skill)
+        )
+        return {"role": "system", "content": content}
 
     # Return the tool definitions available to this agent.
     def tool_definitions(self) -> list[dict]:

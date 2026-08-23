@@ -452,11 +452,13 @@ def test_build_coding_task_run_records_architecture_review_run_context(
         task="review this",
         display=type("FakeDisplay", (), {"debug": False})(),
         skill_name="architecture-review",
+        mod_id="architecture-mod",
     )
 
     entries = read_entries(run.session_store.jsonl_path)
     assert entries[0]["type"] == "run_context"
     assert entries[0]["skill_name"] == "architecture-review"
+    assert entries[0]["mod_id"] == "architecture-mod"
     assert entries[0]["allowed_tools"] == ["read_file", "run_command"]
     assert entries[0]["prompt_overrides"] == [
         "FINAL_SUMMARY_REQUIREMENTS",

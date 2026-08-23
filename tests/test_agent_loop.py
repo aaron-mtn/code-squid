@@ -1,5 +1,6 @@
 import json
 
+from agent.coding import CodingAgent
 from core.agent_loop import AgentLoop, RunResult
 from core.approval import ApprovalDecision, ApprovalPolicy
 from core.session import Session
@@ -53,8 +54,10 @@ class FakeModelAdapter:
         self.streaming = streaming
         self.deltas = deltas or []
         self.tool_preparing_events = tool_preparing_events or []
+        self.message_requests = []
 
     def respond(self, messages: list[dict], tool_definitions: list[dict]) -> dict:
+        self.message_requests.append([dict(message) for message in messages])
         if self.events is not None:
             self.events.append("respond")
         reply = self.replies[self.index]
@@ -71,6 +74,7 @@ class FakeModelAdapter:
         on_text_delta,
         on_tool_preparing=None,
     ) -> dict:
+        self.message_requests.append([dict(message) for message in messages])
         if self.events is not None:
             self.events.append("respond_streaming:start")
         for delta in self.deltas:
@@ -298,9 +302,9 @@ def test_valid_reply_resets_consecutive_invalid_reply_counter() -> None:
         ]
     )
 
-    assert [message["content"] for message in session.messages].count(
-        "correction:empty_final_reply"
-    ) == 4
+    assert "correction:empty_final_reply" not in [
+        message["content"] for message in session.messages
+    ]
     assert session.messages[-1]["content"] == "TASK COMPLETE"
     assert tool_executor.actions == [{"tool": "read_file"}]
 
@@ -314,8 +318,10 @@ def test_invalid_replies_get_normal_correction_before_limit() -> None:
         ]
     )
 
-    assert {"role": "user", "content": "correction:empty_final_reply"} in session.messages
-    assert {"role": "user", "content": "correction:non_final_too_many_tool_calls"} in session.messages
+    assert not any(
+        message.get("content", "").startswith("correction:")
+        for message in session.messages
+    )
 
 
 def test_loop_stops_after_three_consecutive_invalid_replies() -> None:
@@ -460,6 +466,80 @@ def test_initial_and_valid_assistant_messages_are_persisted() -> None:
     ]
 
 
+def test_coding_agent_persists_initial_task_canonically_and_injects_control_at_runtime() -> None:
+    session = Session(repo_root=None)
+    session_store = FakeSessionStore()
+    model_adapter = FakeModelAdapter([reply("TASK COMPLETE")])
+    agent = CodingAgent(task="build a notes app", tools={})
+    loop = AgentLoop(
+        session=session,
+        model_adapter=model_adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=agent,
+        display=NullDisplay(),
+        session_store=session_store,
+    )
+
+    loop.run()
+
+    assert session.messages[1] == {"role": "user", "content": "build a notes app"}
+    assert [entry["message"] for entry in session_store.messages][1] == {
+        "role": "user",
+        "content": "build a notes app",
+    }
+    request = model_adapter.message_requests[0]
+    assert request[1]["role"] == "system"
+    assert request[1]["content"].startswith("Solve this coding task: build a notes app")
+    assert request[2] == {"role": "user", "content": "build a notes app"}
+    assert request[1] not in session.messages
+
+
+def test_resumed_coding_agent_keeps_prior_context_and_runtime_follow_up_guidance() -> None:
+    session = Session(repo_root=None)
+    session.add_messages(
+        {"role": "system", "content": "saved system"},
+        {"role": "user", "content": "build a notes app"},
+        {"role": "assistant", "content": "Initial report"},
+        {"role": "user", "content": "add search"},
+    )
+    session_store = FakeSessionStore()
+    session_store.append_message(session.messages[-1])
+    model_adapter = FakeModelAdapter([reply("Updated report")])
+    agent = CodingAgent(task="add search", tools={}, continuation=True)
+    loop = AgentLoop(
+        session=session,
+        model_adapter=model_adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=agent,
+        display=NullDisplay(),
+        session_store=session_store,
+    )
+
+    loop.run()
+
+    request = model_adapter.message_requests[0]
+    assert request[0] == {"role": "system", "content": "saved system"}
+    assert request[1]["role"] == "system"
+    assert request[1]["content"].startswith(
+        "Continue this saved Code Squid session with this follow-up request:\n\nadd search"
+    )
+    assert request[2:5] == [
+        {"role": "user", "content": "build a notes app"},
+        {"role": "assistant", "content": "Initial report"},
+        {"role": "user", "content": "add search"},
+    ]
+    assert all(
+        not message.get("content", "").startswith("Continue this saved Code Squid")
+        for message in session.messages
+    )
+    assert session_store.messages[0]["message"] == {
+        "role": "user",
+        "content": "add search",
+    }
+
+
 def test_preloaded_session_does_not_get_duplicate_initial_messages() -> None:
     session = Session(repo_root=None)
     session.add_messages(
@@ -559,8 +639,8 @@ def test_compactor_is_not_called_after_step_limit_stops_loop() -> None:
     assert len(compactor.sessions) == 1
 
 
-def test_correction_messages_are_persisted_and_rejected_invalid_replies_are_not() -> None:
-    _, _, session_store, _, _ = run_loop_with_store(
+def test_correction_messages_are_runtime_only_and_rejected_replies_are_not_persisted() -> None:
+    _, _, session_store, model_adapter, _ = run_loop_with_store(
         [
             reply("bad 1", reason="empty_final_reply"),
             reply("TASK COMPLETE"),
@@ -569,8 +649,12 @@ def test_correction_messages_are_persisted_and_rejected_invalid_replies_are_not(
 
     persisted_messages = [entry["message"] for entry in session_store.messages]
 
-    assert {"role": "user", "content": "correction:empty_final_reply"} in persisted_messages
+    assert {"role": "user", "content": "correction:empty_final_reply"} not in persisted_messages
     assert {"role": "assistant", "content": "bad 1"} not in persisted_messages
+    assert model_adapter.message_requests[1][-1] == {
+        "role": "user",
+        "content": "correction:empty_final_reply",
+    }
 
 
 def test_malformed_reply_persists_raw_reply_and_exact_rejection_error_only_as_diagnostics() -> None:
@@ -1527,7 +1611,7 @@ def test_invalid_rejected_replies_do_not_count_toward_tool_step_limit() -> None:
         max_tool_steps=1,
     )
 
-    assert {"role": "user", "content": "correction:empty_final_reply"} in session.messages
+    assert {"role": "user", "content": "correction:empty_final_reply"} not in session.messages
     assert tool_executor.actions == [{"tool": "read_file"}]
     assert model_adapter.index == 2
     assert display.step_limits_reached == [1]

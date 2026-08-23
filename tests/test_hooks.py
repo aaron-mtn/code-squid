@@ -461,10 +461,13 @@ def test_agent_loop_final_hook_blocks_and_retries_without_storing_final() -> Non
     assert loop.display.final_messages == ["TASK COMPLETE"]
     assert session.messages == [
         {"role": "system", "content": "system"},
-        {"role": "user", "content": "Run the verification before finalizing."},
         {"role": "assistant", "content": "TASK COMPLETE"},
     ]
     assert session_store.messages == session.messages
+    assert model_adapter.calls[1]["messages"][-1] == {
+        "role": "user",
+        "content": "Run the verification before finalizing.",
+    }
     assert [event["type"] for event in events] == [
         "run_started",
         "reply_rejected",
@@ -549,9 +552,12 @@ def test_before_accept_final_does_not_run_for_invalid_no_tool_reply() -> None:
     assert loop.display.rejected_replies == ["invalid narration"]
     assert session.messages == [
         {"role": "system", "content": "system"},
-        {"role": "user", "content": "Correction: invalid narration"},
         {"role": "assistant", "content": "TASK COMPLETE"},
     ]
+    assert model_adapter.calls[1]["messages"][-1] == {
+        "role": "user",
+        "content": "Correction: invalid narration",
+    }
 
 
 def test_before_accept_final_report_note_is_appended_once() -> None:

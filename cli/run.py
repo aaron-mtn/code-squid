@@ -119,7 +119,12 @@ def _run_follow_up_task(
     display.run_started()
     skill, active_tools = resolve_skill_tools(skill_name)
     append_run_context(session_store, skill, active_tools)
-    agent = CodingAgent(task=follow_up_task, skill=skill, tools=active_tools)
+    agent = CodingAgent(
+        task=follow_up_task,
+        skill=skill,
+        tools=active_tools,
+        continuation=True,
+    )
     follow_up_message = agent.follow_up_message(follow_up_task)
     session.add_message(follow_up_message)
     session_store.append_message(follow_up_message)
