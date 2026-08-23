@@ -251,16 +251,11 @@ def test_empty_final_correction_mentions_final_content() -> None:
 
 
 def test_follow_up_message_returns_user_message() -> None:
-    agent = CodingAgent("show me what changed", continuation=True)
+    agent = CodingAgent("show me what changed")
 
     message = agent.follow_up_message("show me what changed")
-    control = agent.runtime_control_message()
 
     assert message == {"role": "user", "content": "show me what changed"}
-    assert control["role"] == "system"
-    assert "existing transcript" in control["content"]
-    assert "without using another tool" in control["content"]
-    assert "If fresh repo state is needed, use exactly one available tool" in control["content"]
 
 
 def test_initial_prompts_encourage_compact_markdown_narration() -> None:
@@ -430,9 +425,7 @@ def test_selected_skill_can_override_prompt_sections() -> None:
     messages = CodingAgent(task="agent/", skill=skill).initial_messages()
 
     assert messages[1]["content"] == "agent/"
-    assert CodingAgent(task="agent/", skill=skill).runtime_control_message()[
-        "content"
-    ] == "Review this code area: agent/"
+    assert task_prompt("agent/", skill) == "Review this code area: agent/"
     assert "Use inspection tools only." in messages[0]["content"]
     assert TOOL_USAGE_GUIDANCE not in messages[0]["content"]
     assert "Write an architecture review." in messages[0]["content"]
@@ -551,11 +544,11 @@ def test_selected_skill_can_override_follow_up_prompt() -> None:
         },
     )
 
-    agent = CodingAgent(task="focus prompts", skill=skill, continuation=True)
+    agent = CodingAgent(task="focus prompts", skill=skill)
     message = agent.follow_up_message("focus prompts")
 
     assert message["content"] == "focus prompts"
-    assert agent.runtime_control_message()["content"] == "Continue review: focus prompts"
+    assert follow_up_prompt("focus prompts", skill) == "Continue review: focus prompts"
 
 
 def test_prompt_rendering_strips_replaced_task_text() -> None:
@@ -584,19 +577,17 @@ def test_prompt_rendering_strips_replaced_task_text() -> None:
 
 
 def test_default_follow_up_prompt_uses_generic_session_continuation_wording() -> None:
-    message = CodingAgent(task="x", continuation=True).runtime_control_message()
+    message = follow_up_prompt("x")
 
-    assert message["content"].startswith(
+    assert message.startswith(
         "Continue this saved Code Squid session with this follow-up request:\n\nx"
     )
-    assert "Preserve the current task mode, active skill, workspace, constraints, and available tools." in message[
-        "content"
-    ]
-    assert "Keep the response aligned with the active skill." in message["content"]
-    assert "{task}" not in message["content"]
+    assert "Preserve the current task mode, active skill, workspace, constraints, and available tools." in message
+    assert "Keep the response aligned with the active skill." in message
+    assert "{task}" not in message
 
 
 def test_default_follow_up_prompt_output_is_stripped() -> None:
-    message = CodingAgent(task="x", continuation=True).runtime_control_message()
+    message = follow_up_prompt("x")
 
-    assert message["content"] == message["content"].strip()
+    assert message == message.strip()

@@ -466,11 +466,12 @@ def test_initial_and_valid_assistant_messages_are_persisted() -> None:
     ]
 
 
-def test_coding_agent_persists_initial_task_canonically_and_injects_control_at_runtime() -> None:
+def test_new_coding_session_sends_system_prompt_and_raw_task_without_runtime_wrapper() -> None:
     session = Session(repo_root=None)
     session_store = FakeSessionStore()
     model_adapter = FakeModelAdapter([reply("TASK COMPLETE")])
     agent = CodingAgent(task="build a notes app", tools={})
+    expected_messages = agent.initial_messages()
     loop = AgentLoop(
         session=session,
         model_adapter=model_adapter,
@@ -483,57 +484,57 @@ def test_coding_agent_persists_initial_task_canonically_and_injects_control_at_r
 
     loop.run()
 
-    assert session.messages[1] == {"role": "user", "content": "build a notes app"}
-    assert [entry["message"] for entry in session_store.messages][1] == {
-        "role": "user",
-        "content": "build a notes app",
-    }
-    request = model_adapter.message_requests[0]
-    assert request[1]["role"] == "system"
-    assert request[1]["content"].startswith("Solve this coding task: build a notes app")
-    assert request[2] == {"role": "user", "content": "build a notes app"}
-    assert request[1] not in session.messages
+    assert model_adapter.message_requests[0] == expected_messages
+    assert session.messages[:2] == expected_messages
+    assert [entry["message"] for entry in session_store.messages[:2]] == expected_messages
 
 
-def test_resumed_coding_agent_keeps_prior_context_and_runtime_follow_up_guidance() -> None:
+def test_resumed_coding_session_sends_prior_context_and_raw_follow_up_without_wrapper() -> None:
     session = Session(repo_root=None)
-    session.add_messages(
+    canonical_messages = [
         {"role": "system", "content": "saved system"},
         {"role": "user", "content": "build a notes app"},
-        {"role": "assistant", "content": "Initial report"},
-        {"role": "user", "content": "add search"},
-    )
-    session_store = FakeSessionStore()
-    session_store.append_message(session.messages[-1])
-    model_adapter = FakeModelAdapter([reply("Updated report")])
-    agent = CodingAgent(task="add search", tools={}, continuation=True)
-    loop = AgentLoop(
-        session=session,
-        model_adapter=model_adapter,
-        tool_executor=FakeToolExecutor(),
-        tool_results=FakeToolResults(),
-        agent=agent,
-        display=NullDisplay(),
-        session_store=session_store,
-    )
-
-    loop.run()
-
-    request = model_adapter.message_requests[0]
-    assert request[0] == {"role": "system", "content": "saved system"}
-    assert request[1]["role"] == "system"
-    assert request[1]["content"].startswith(
-        "Continue this saved Code Squid session with this follow-up request:\n\nadd search"
-    )
-    assert request[2:5] == [
-        {"role": "user", "content": "build a notes app"},
+        {
+            "role": "assistant",
+            "content": "Reading the current implementation.",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": '{"path":"notes.py"}',
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": "def list_notes(): ...",
+        },
         {"role": "assistant", "content": "Initial report"},
         {"role": "user", "content": "add search"},
     ]
-    assert all(
-        not message.get("content", "").startswith("Continue this saved Code Squid")
-        for message in session.messages
+    session.add_messages(*canonical_messages)
+    session_store = FakeSessionStore()
+    session_store.append_message(session.messages[-1])
+    model_adapter = FakeModelAdapter([reply("Updated report")])
+    agent = CodingAgent(task="add search", tools={})
+    loop = AgentLoop(
+        session=session,
+        model_adapter=model_adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=agent,
+        display=NullDisplay(),
+        session_store=session_store,
     )
+
+    loop.run()
+
+    assert model_adapter.message_requests[0] == canonical_messages
+    assert session.messages[: len(canonical_messages)] == canonical_messages
     assert session_store.messages[0]["message"] == {
         "role": "user",
         "content": "add search",
@@ -651,10 +652,13 @@ def test_correction_messages_are_runtime_only_and_rejected_replies_are_not_persi
 
     assert {"role": "user", "content": "correction:empty_final_reply"} not in persisted_messages
     assert {"role": "assistant", "content": "bad 1"} not in persisted_messages
-    assert model_adapter.message_requests[1][-1] == {
-        "role": "user",
-        "content": "correction:empty_final_reply",
-    }
+    assert model_adapter.message_requests == [
+        [{"role": "system", "content": "system"}],
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "correction:empty_final_reply"},
+        ],
+    ]
 
 
 def test_malformed_reply_persists_raw_reply_and_exact_rejection_error_only_as_diagnostics() -> None:

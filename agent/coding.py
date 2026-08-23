@@ -1,6 +1,6 @@
 # agent/coding.py
 
-from agent.prompts import correction_message, follow_up_prompt, system_prompt, task_prompt
+from agent.prompts import correction_message, system_prompt
 from core.skills import Skill
 from core.platform_context import PlatformContext
 from tools import TOOLS
@@ -23,14 +23,12 @@ class CodingAgent:
         tools: dict | None = None,
         platform_context: PlatformContext | None = None,
         workspace: str | None = None,
-        continuation: bool = False,
     ) -> None:
         self.task = task
         self.skill = skill
         self.tools = TOOLS if tools is None else tools
         self.platform_context = platform_context
         self.workspace = workspace
-        self.continuation = continuation
 
     # Return the initial system and user messages for a new session.
     def initial_messages(self) -> list[dict]:
@@ -45,16 +43,6 @@ class CodingAgent:
     # Return the canonical authored turn that continues a saved session.
     def follow_up_message(self, task: str) -> dict:
         return {"role": "user", "content": task}
-
-    # Return model-control guidance for this run. AgentLoop injects this into
-    # provider requests without adding it to the canonical session transcript.
-    def runtime_control_message(self) -> dict:
-        content = (
-            follow_up_prompt(self.task, self.skill)
-            if self.continuation
-            else task_prompt(self.task, self.skill)
-        )
-        return {"role": "system", "content": content}
 
     # Return the tool definitions available to this agent.
     def tool_definitions(self) -> list[dict]:

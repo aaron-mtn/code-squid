@@ -209,14 +209,6 @@ class AgentLoop:
 
     def _respond(self, tool_definitions: list[dict], extra_messages=None) -> dict:
         messages = list(self.session.messages)
-        runtime_control_message = getattr(
-            self.agent,
-            "runtime_control_message",
-            lambda: None,
-        )()
-        if runtime_control_message is not None:
-            insert_at = 1 if messages and messages[0].get("role") == "system" else 0
-            messages.insert(insert_at, runtime_control_message)
         if extra_messages:
             messages = [*messages, *extra_messages]
 

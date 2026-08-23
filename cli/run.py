@@ -123,7 +123,6 @@ def _run_follow_up_task(
         task=follow_up_task,
         skill=skill,
         tools=active_tools,
-        continuation=True,
     )
     follow_up_message = agent.follow_up_message(follow_up_task)
     session.add_message(follow_up_message)
