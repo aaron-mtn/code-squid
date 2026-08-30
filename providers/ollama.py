@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import time
 from types import SimpleNamespace
 from urllib import request
 from urllib.error import HTTPError, URLError
@@ -59,6 +60,7 @@ class OllamaProvider(BaseProvider):
         on_text_delta,
         on_tool_preparing=None,
         tool_choice=None,
+        trace_callback=None,
     ) -> object:
         payload = {
             "model": model,
@@ -74,19 +76,104 @@ class OllamaProvider(BaseProvider):
 
         assembled = _empty_stream_response()
         prepared_tool_call_indexes = set()
+        request_started_at = time.perf_counter()
+        raw_chunk_count = 0
+        total_content_characters = 0
+        total_reasoning_characters = 0
+        first_raw_chunk_elapsed = None
+        first_content_delta_elapsed = None
+        first_reasoning_delta_elapsed = None
+        response_id = None
+        self._trace(
+            trace_callback,
+            {
+                "type": "request_start",
+                "timestamp_unix": time.time(),
+                "monotonic": request_started_at,
+                "provider": "ollama",
+                "model": model,
+                "base_url": self.base_url,
+                "payload": payload,
+            },
+        )
 
-        for chunk in self._post_chat_stream(payload):
-            _accumulate_stream_chunk(
-                assembled,
-                chunk,
-                on_text_delta=on_text_delta,
-                on_tool_preparing=on_tool_preparing,
-                prepared_tool_call_indexes=prepared_tool_call_indexes,
+        try:
+            for chunk in self._post_chat_stream(payload):
+                chunk_elapsed = time.perf_counter() - request_started_at
+                raw_chunk_count += 1
+                if first_raw_chunk_elapsed is None:
+                    first_raw_chunk_elapsed = chunk_elapsed
+                response_id = response_id or chunk.get("id")
+                message = chunk.get("message") or {}
+                content_delta = message.get("content") or ""
+                reasoning_deltas = {
+                    name: message.get(name) or ""
+                    for name in ("reasoning", "reasoning_content", "thinking")
+                }
+                if content_delta:
+                    total_content_characters += len(content_delta)
+                    if first_content_delta_elapsed is None:
+                        first_content_delta_elapsed = chunk_elapsed
+                reasoning_character_count = sum(
+                    len(value) for value in reasoning_deltas.values()
+                )
+                if reasoning_character_count:
+                    total_reasoning_characters += reasoning_character_count
+                    if first_reasoning_delta_elapsed is None:
+                        first_reasoning_delta_elapsed = chunk_elapsed
+
+                self._trace(
+                    trace_callback,
+                    {
+                        "type": "raw_chunk",
+                        "elapsed": chunk_elapsed,
+                        "chunk_index": raw_chunk_count,
+                        "raw": chunk,
+                        "response_id": chunk.get("id"),
+                        "content_delta": content_delta,
+                        "reasoning_delta": reasoning_deltas["reasoning"],
+                        "reasoning_content_delta": reasoning_deltas["reasoning_content"],
+                        "thinking_delta": reasoning_deltas["thinking"],
+                        "finish_reason": chunk.get("done_reason"),
+                    },
+                )
+                _accumulate_stream_chunk(
+                    assembled,
+                    chunk,
+                    on_text_delta=on_text_delta,
+                    on_tool_preparing=on_tool_preparing,
+                    prepared_tool_call_indexes=prepared_tool_call_indexes,
+                )
+                if chunk.get("done") is True:
+                    break
+        finally:
+            self._trace(
+                trace_callback,
+                {
+                    "type": "request_complete",
+                    "timestamp_unix": time.time(),
+                    "elapsed": time.perf_counter() - request_started_at,
+                    "response_id": response_id,
+                    "finish_reason": assembled.get("done_reason"),
+                    "first_raw_chunk_elapsed": first_raw_chunk_elapsed,
+                    "first_reasoning_delta_elapsed": first_reasoning_delta_elapsed,
+                    "first_visible_content_delta_elapsed": first_content_delta_elapsed,
+                    "total_reasoning_characters": total_reasoning_characters,
+                    "total_visible_content_characters": total_content_characters,
+                    "total_raw_chunk_count": raw_chunk_count,
+                },
             )
-            if chunk.get("done") is True:
-                break
 
         return adapt_response(assembled)
+
+    def _trace(self, trace_callback, event: dict) -> None:
+        """Keep optional diagnostic output from changing provider behavior."""
+        if trace_callback is None:
+            return
+        try:
+            trace_callback(event)
+        except Exception:
+            pass
 
     def _post_chat(self, payload: dict) -> dict:
         body = json.dumps(payload).encode("utf-8")

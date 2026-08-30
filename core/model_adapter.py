@@ -92,19 +92,30 @@ class ModelAdapter:
             "usage": self._usage_from_response(raw_response),
         }
 
-    def complete_text_streaming(self, messages: list[dict], on_text_delta) -> str:
+    def complete_text_streaming(
+        self,
+        messages: list[dict],
+        on_text_delta,
+        trace_callback=None,
+    ) -> str:
         if not self.supports_streaming():
             content = self.complete_text(messages)["content"]
             if content:
                 on_text_delta(content)
             return content
 
+        request_options = {
+            "model": self.model_name,
+            "messages": self._messages_for_provider(messages),
+            "tools": [],
+            "on_text_delta": on_text_delta,
+        }
+        if trace_callback is not None:
+            request_options["trace_callback"] = trace_callback
+
         try:
             raw_response = self.provider.stream_chat(
-                model=self.model_name,
-                messages=self._messages_for_provider(messages),
-                tools=[],
-                on_text_delta=on_text_delta,
+                **request_options,
             )
         except Exception as exc:
             raise ModelRequestError("Model request failed") from exc

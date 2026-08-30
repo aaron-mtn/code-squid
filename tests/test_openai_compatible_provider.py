@@ -187,6 +187,41 @@ def test_stream_chat_preserves_exposed_reasoning_finish_reason_and_response_id()
     assert not hasattr(response.choices[0].message, "reasoning")
 
 
+def test_stream_trace_reports_raw_reasoning_before_visible_content() -> None:
+    provider, client = provider_with_fake_client()
+    client.chat.completions.response = [
+        chunk(reasoning_content="thinking", id="chatcmpl_trace"),
+        chunk(content="Ready.", finish_reason="stop"),
+    ]
+    events = []
+    deltas = []
+
+    provider.stream_chat(
+        model="test-model",
+        messages=[{"role": "user", "content": "prompt"}],
+        tools=[],
+        on_text_delta=deltas.append,
+        trace_callback=events.append,
+    )
+
+    assert [event["type"] for event in events] == [
+        "request_start", "raw_chunk", "raw_chunk", "request_complete",
+    ]
+    assert events[0]["payload"] == client.chat.completions.payloads[0]
+    assert events[1]["raw"] is client.chat.completions.response[0]
+    assert events[1]["reasoning_content_delta"] == "thinking"
+    assert events[1]["content_delta"] == ""
+    assert events[2]["content_delta"] == "Ready."
+    assert deltas == ["Ready."]
+    assert events[-1]["response_id"] == "chatcmpl_trace"
+    assert events[-1]["first_raw_chunk_elapsed"] is not None
+    assert events[-1]["first_reasoning_delta_elapsed"] is not None
+    assert events[-1]["first_visible_content_delta_elapsed"] is not None
+    assert events[-1]["total_reasoning_characters"] == len("thinking")
+    assert events[-1]["total_visible_content_characters"] == len("Ready.")
+    assert events[-1]["total_raw_chunk_count"] == 2
+
+
 def test_stream_chat_assembles_tool_call_fragments() -> None:
     provider, client = provider_with_fake_client()
     client.chat.completions.response = [

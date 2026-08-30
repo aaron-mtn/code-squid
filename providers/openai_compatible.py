@@ -2,6 +2,7 @@
 
 """OpenAI-compatible chat-completions provider transport."""
 
+import time
 from types import SimpleNamespace
 
 from openai import OpenAI
@@ -19,6 +20,7 @@ class OpenAICompatibleProvider(BaseProvider):
         temperature: float | int | None = None,
         debug: bool = False,
     ) -> None:
+        self.base_url = base_url
         self.temperature = temperature
         self.debug = debug
         self.client = OpenAI(
@@ -56,6 +58,7 @@ class OpenAICompatibleProvider(BaseProvider):
         on_text_delta,
         on_tool_preparing=None,
         tool_choice=None,
+        trace_callback=None,
     ) -> object:
         payload = self._payload(
             model=model,
@@ -75,39 +78,128 @@ class OpenAICompatibleProvider(BaseProvider):
         usage = None
         finish_reason = None
         response_id = None
+        request_started_at = time.perf_counter()
+        raw_chunk_count = 0
+        total_content_characters = 0
+        total_reasoning_characters = 0
+        first_raw_chunk_elapsed = None
+        first_content_delta_elapsed = None
+        first_reasoning_delta_elapsed = None
 
-        for chunk in self.client.chat.completions.create(**payload):
-            response_id = response_id or getattr(chunk, "id", None)
-            chunk_usage = getattr(chunk, "usage", None)
-            if chunk_usage is not None:
-                usage = chunk_usage
+        self._trace(
+            trace_callback,
+            {
+                "type": "request_start",
+                "timestamp_unix": time.time(),
+                "monotonic": request_started_at,
+                "provider": "openai_compatible",
+                "model": model,
+                "base_url": getattr(self, "base_url", None),
+                "payload": payload,
+            },
+        )
 
-            for choice in getattr(chunk, "choices", []) or []:
-                choice_finish_reason = getattr(choice, "finish_reason", None)
-                if choice_finish_reason is not None:
-                    finish_reason = choice_finish_reason
-                delta = getattr(choice, "delta", None)
-                if delta is None:
-                    continue
+        try:
+            for chunk in self.client.chat.completions.create(**payload):
+                chunk_elapsed = time.perf_counter() - request_started_at
+                if trace_callback is not None:
+                    raw_chunk_count += 1
+                    if first_raw_chunk_elapsed is None:
+                        first_raw_chunk_elapsed = chunk_elapsed
+                    chunk_content_deltas = []
+                    chunk_reasoning_deltas = {
+                        "reasoning": [],
+                        "reasoning_content": [],
+                        "thinking": [],
+                    }
+                    chunk_finish_reasons = []
+                    for choice in getattr(chunk, "choices", []) or []:
+                        choice_finish_reason = getattr(choice, "finish_reason", None)
+                        if choice_finish_reason is not None:
+                            chunk_finish_reasons.append(choice_finish_reason)
+                        delta = getattr(choice, "delta", None)
+                        if delta is None:
+                            continue
+                        content_delta = getattr(delta, "content", None)
+                        if content_delta:
+                            chunk_content_deltas.append(content_delta)
+                            total_content_characters += len(content_delta)
+                            if first_content_delta_elapsed is None:
+                                first_content_delta_elapsed = chunk_elapsed
+                        for name in chunk_reasoning_deltas:
+                            value = getattr(delta, name, None)
+                            if value:
+                                chunk_reasoning_deltas[name].append(value)
+                                total_reasoning_characters += len(value)
+                                if first_reasoning_delta_elapsed is None:
+                                    first_reasoning_delta_elapsed = chunk_elapsed
 
-                content_delta = getattr(delta, "content", None)
-                if content_delta:
-                    content_parts.append(content_delta)
-                    on_text_delta(content_delta)
-
-                for name, parts in reasoning_parts.items():
-                    value = getattr(delta, name, None)
-                    if value:
-                        parts.append(value)
-
-                for tool_call_delta in getattr(delta, "tool_calls", None) or []:
-                    self._accumulate_tool_call_delta(tool_call_parts, tool_call_delta)
-                    self._notify_tool_preparing(
-                        tool_call_parts=tool_call_parts,
-                        tool_call_delta=tool_call_delta,
-                        prepared_tool_call_indexes=prepared_tool_call_indexes,
-                        on_tool_preparing=on_tool_preparing,
+                    # Emit before the original normalization loop and visible
+                    # callback so tracing cannot confuse provider and Desktop time.
+                    self._trace(
+                        trace_callback,
+                        {
+                            "type": "raw_chunk",
+                            "elapsed": chunk_elapsed,
+                            "chunk_index": raw_chunk_count,
+                            "raw": chunk,
+                            "response_id": getattr(chunk, "id", None),
+                            "content_delta": "".join(chunk_content_deltas),
+                            "reasoning_delta": "".join(chunk_reasoning_deltas["reasoning"]),
+                            "reasoning_content_delta": "".join(
+                                chunk_reasoning_deltas["reasoning_content"]
+                            ),
+                            "thinking_delta": "".join(chunk_reasoning_deltas["thinking"]),
+                            "finish_reason": chunk_finish_reasons,
+                        },
                     )
+
+                # This is the pre-existing response assembly path. Trace mode
+                # only observes immediately before it; normal mode stays exact.
+                response_id = response_id or getattr(chunk, "id", None)
+                chunk_usage = getattr(chunk, "usage", None)
+                if chunk_usage is not None:
+                    usage = chunk_usage
+                for choice in getattr(chunk, "choices", []) or []:
+                    choice_finish_reason = getattr(choice, "finish_reason", None)
+                    if choice_finish_reason is not None:
+                        finish_reason = choice_finish_reason
+                    delta = getattr(choice, "delta", None)
+                    if delta is None:
+                        continue
+                    content_delta = getattr(delta, "content", None)
+                    if content_delta:
+                        content_parts.append(content_delta)
+                        on_text_delta(content_delta)
+                    for name, parts in reasoning_parts.items():
+                        value = getattr(delta, name, None)
+                        if value:
+                            parts.append(value)
+                    for tool_call_delta in getattr(delta, "tool_calls", None) or []:
+                        self._accumulate_tool_call_delta(tool_call_parts, tool_call_delta)
+                        self._notify_tool_preparing(
+                            tool_call_parts=tool_call_parts,
+                            tool_call_delta=tool_call_delta,
+                            prepared_tool_call_indexes=prepared_tool_call_indexes,
+                            on_tool_preparing=on_tool_preparing,
+                        )
+        finally:
+            self._trace(
+                trace_callback,
+                {
+                    "type": "request_complete",
+                    "timestamp_unix": time.time(),
+                    "elapsed": time.perf_counter() - request_started_at,
+                    "response_id": response_id,
+                    "finish_reason": finish_reason,
+                    "first_raw_chunk_elapsed": first_raw_chunk_elapsed,
+                    "first_reasoning_delta_elapsed": first_reasoning_delta_elapsed,
+                    "first_visible_content_delta_elapsed": first_content_delta_elapsed,
+                    "total_reasoning_characters": total_reasoning_characters,
+                    "total_visible_content_characters": total_content_characters,
+                    "total_raw_chunk_count": raw_chunk_count,
+                },
+            )
 
         return self._assembled_stream_response(
             content="".join(content_parts),
@@ -117,6 +209,15 @@ class OpenAICompatibleProvider(BaseProvider):
             response_id=response_id,
             reasoning_parts=reasoning_parts,
         )
+
+    def _trace(self, trace_callback, event: dict) -> None:
+        """Keep optional diagnostic output from changing provider behavior."""
+        if trace_callback is None:
+            return
+        try:
+            trace_callback(event)
+        except Exception:
+            pass
 
     def _payload(
         self,

@@ -1,3 +1,8 @@
+- 2026-08-30: Added an optional request-scoped streaming trace callback for
+  diagnostic callers. OpenAI-compatible and native Ollama providers report the
+  exact generation payload, raw chunks, exposed reasoning/thinking fields,
+  response/finish metadata, and first/total timing before normal response
+  assembly. Callers that omit the callback retain the existing generation path.
 - 2026-08-22: Made session transcripts canonical for user-authored tasks.
   Initial and follow-up text now persist as raw `role=user` messages, while
   task/follow-up prompt guidance and invalid-reply corrections are assembled

@@ -35,8 +35,14 @@ def stream_text(
     on_text_delta: Callable[[str], None],
     *,
     settings: Settings | None = None,
+    trace_callback: Callable[[dict], None] | None = None,
 ) -> str:
-    """Stream one plain-text response and return its assembled content."""
+    """Stream one plain-text response and return its assembled content.
+
+    ``trace_callback`` is an opt-in diagnostic seam for callers that need the
+    provider's raw streaming boundary. Normal generation leaves it unset, so
+    provider behavior and ordinary debug output remain unchanged.
+    """
 
     settings = load_settings(Path.cwd()) if settings is None else settings
     provider = build_provider(settings)
@@ -48,4 +54,10 @@ def stream_text(
     )
     messages = [{"role": "user", "content": input}] if isinstance(input, str) else input
 
-    return model_adapter.complete_text_streaming(messages, on_text_delta)
+    if trace_callback is None:
+        return model_adapter.complete_text_streaming(messages, on_text_delta)
+    return model_adapter.complete_text_streaming(
+        messages,
+        on_text_delta,
+        trace_callback=trace_callback,
+    )

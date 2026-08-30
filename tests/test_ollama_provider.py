@@ -30,6 +30,42 @@ class StreamingOllamaProvider(OllamaProvider):
         yield from self.chunks
 
 
+def test_stream_trace_reports_native_raw_thinking_and_summary() -> None:
+    chunks = [
+        {"id": "ollama_trace", "message": {"thinking": "thinking"}},
+        {
+            "message": {"content": "Ready."},
+            "done": True,
+            "done_reason": "stop",
+        },
+    ]
+    provider = StreamingOllamaProvider(chunks)
+    events = []
+
+    provider.stream_chat(
+        model="test-model",
+        messages=[{"role": "user", "content": "prompt"}],
+        tools=[],
+        on_text_delta=lambda _delta: None,
+        trace_callback=events.append,
+    )
+
+    assert [event["type"] for event in events] == [
+        "request_start", "raw_chunk", "raw_chunk", "request_complete",
+    ]
+    assert events[1]["raw"] is chunks[0]
+    assert events[1]["thinking_delta"] == "thinking"
+    assert events[2]["content_delta"] == "Ready."
+    assert events[-1]["response_id"] == "ollama_trace"
+    assert events[-1]["finish_reason"] == "stop"
+    assert events[-1]["first_raw_chunk_elapsed"] is not None
+    assert events[-1]["first_reasoning_delta_elapsed"] is not None
+    assert events[-1]["first_visible_content_delta_elapsed"] is not None
+    assert events[-1]["total_reasoning_characters"] == len("thinking")
+    assert events[-1]["total_visible_content_characters"] == len("Ready.")
+    assert events[-1]["total_raw_chunk_count"] == 2
+
+
 def test_assistant_tool_call_arguments_are_converted_to_dict() -> None:
     converted = convert_messages(
         [

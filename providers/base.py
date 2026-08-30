@@ -23,5 +23,6 @@ class BaseProvider:
         on_text_delta,
         on_tool_preparing=None,
         tool_choice=None,
+        trace_callback=None,
     ) -> object:
         raise NotImplementedError
