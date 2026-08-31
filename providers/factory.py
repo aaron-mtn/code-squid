@@ -25,6 +25,7 @@ def build_provider(settings: Settings, debug: bool | None = None):
         api_key=settings.model.api_key,
         temperature=settings.model.temperature,
         debug=provider_debug,
+        provider_name=settings.model.provider,
     )
 
 

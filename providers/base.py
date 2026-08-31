@@ -12,6 +12,7 @@ class BaseProvider:
         messages: list[dict],
         tools: list[dict],
         tool_choice=None,
+        please_stop_contemplating_the_void: bool = False,
     ) -> object:
         raise NotImplementedError
 
@@ -24,5 +25,6 @@ class BaseProvider:
         on_tool_preparing=None,
         tool_choice=None,
         trace_callback=None,
+        please_stop_contemplating_the_void: bool = False,
     ) -> object:
         raise NotImplementedError

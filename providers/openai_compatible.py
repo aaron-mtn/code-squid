@@ -19,10 +19,12 @@ class OpenAICompatibleProvider(BaseProvider):
         api_key: str | None = None,
         temperature: float | int | None = None,
         debug: bool = False,
+        provider_name: str = "openai_compatible",
     ) -> None:
         self.base_url = base_url
         self.temperature = temperature
         self.debug = debug
+        self.provider_name = provider_name
         self.client = OpenAI(
             base_url=base_url,
             api_key=api_key or "lm-studio",
@@ -37,12 +39,14 @@ class OpenAICompatibleProvider(BaseProvider):
         messages: list[dict],
         tools: list[dict],
         tool_choice=None,
+        please_stop_contemplating_the_void: bool = False,
     ) -> object:
         payload = self._payload(
             model=model,
             messages=messages,
             tools=tools,
             tool_choice=tool_choice,
+            please_stop_contemplating_the_void=please_stop_contemplating_the_void,
         )
 
         if self.debug:
@@ -59,12 +63,14 @@ class OpenAICompatibleProvider(BaseProvider):
         on_tool_preparing=None,
         tool_choice=None,
         trace_callback=None,
+        please_stop_contemplating_the_void: bool = False,
     ) -> object:
         payload = self._payload(
             model=model,
             messages=messages,
             tools=tools,
             tool_choice=tool_choice,
+            please_stop_contemplating_the_void=please_stop_contemplating_the_void,
         )
         payload["stream"] = True
 
@@ -225,6 +231,7 @@ class OpenAICompatibleProvider(BaseProvider):
         messages: list[dict],
         tools: list[dict],
         tool_choice=None,
+        please_stop_contemplating_the_void: bool = False,
     ) -> dict:
         payload = {
             "model": model,
@@ -237,6 +244,14 @@ class OpenAICompatibleProvider(BaseProvider):
             payload["parallel_tool_calls"] = False
         if tool_choice is not None:
             payload["tool_choice"] = tool_choice
+        if please_stop_contemplating_the_void:
+            provider_name = getattr(self, "provider_name", "openai_compatible")
+            if provider_name == "squid_models":
+                payload["extra_body"] = {
+                    "chat_template_kwargs": {"enable_thinking": False},
+                }
+            elif provider_name == "openrouter":
+                payload["extra_body"] = {"reasoning": {"effort": "none"}}
         return payload
 
     def _accumulate_tool_call_delta(self, tool_call_parts: dict, tool_call_delta) -> None:

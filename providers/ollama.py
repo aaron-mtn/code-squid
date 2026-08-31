@@ -36,14 +36,16 @@ class OllamaProvider(BaseProvider):
         messages: list[dict],
         tools: list[dict],
         tool_choice=None,
+        please_stop_contemplating_the_void: bool = False,
     ) -> object:
         payload = {
             "model": model,
             "messages": convert_messages(messages),
             "tools": tools,
             "stream": False,
-            "think": False,
         }
+        if please_stop_contemplating_the_void:
+            payload["think"] = False
         if self.temperature is not None:
             payload["options"] = {"temperature": self.temperature}
         if tool_choice is not None:
@@ -61,14 +63,16 @@ class OllamaProvider(BaseProvider):
         on_tool_preparing=None,
         tool_choice=None,
         trace_callback=None,
+        please_stop_contemplating_the_void: bool = False,
     ) -> object:
         payload = {
             "model": model,
             "messages": convert_messages(messages),
             "tools": tools,
             "stream": True,
-            "think": False,
         }
+        if please_stop_contemplating_the_void:
+            payload["think"] = False
         if self.temperature is not None:
             payload["options"] = {"temperature": self.temperature}
         if tool_choice is not None:

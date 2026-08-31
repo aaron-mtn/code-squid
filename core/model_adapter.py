@@ -76,13 +76,20 @@ class ModelAdapter:
 
         return self._reply_from_response(raw_response, tool_metadata)
 
-    def complete_text(self, messages: list[dict]) -> dict:
+    def complete_text(
+        self,
+        messages: list[dict],
+        please_stop_contemplating_the_void: bool = False,
+    ) -> dict:
+        request_options = {
+            "model": self.model_name,
+            "messages": self._messages_for_provider(messages),
+            "tools": [],
+        }
+        if please_stop_contemplating_the_void:
+            request_options["please_stop_contemplating_the_void"] = True
         try:
-            raw_response = self.provider.create_response(
-                model=self.model_name,
-                messages=self._messages_for_provider(messages),
-                tools=[],
-            )
+            raw_response = self.provider.create_response(**request_options)
         except Exception as exc:
             raise ModelRequestError("Model request failed") from exc
 
@@ -97,9 +104,13 @@ class ModelAdapter:
         messages: list[dict],
         on_text_delta,
         trace_callback=None,
+        please_stop_contemplating_the_void: bool = False,
     ) -> str:
         if not self.supports_streaming():
-            content = self.complete_text(messages)["content"]
+            content = self.complete_text(
+                messages,
+                please_stop_contemplating_the_void=please_stop_contemplating_the_void,
+            )["content"]
             if content:
                 on_text_delta(content)
             return content
@@ -112,6 +123,8 @@ class ModelAdapter:
         }
         if trace_callback is not None:
             request_options["trace_callback"] = trace_callback
+        if please_stop_contemplating_the_void:
+            request_options["please_stop_contemplating_the_void"] = True
 
         try:
             raw_response = self.provider.stream_chat(

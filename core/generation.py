@@ -14,6 +14,7 @@ def generate_text(
     input: str | list[dict],
     *,
     settings: Settings | None = None,
+    please_stop_contemplating_the_void: bool = False,
 ) -> str:
     """Generate one text response from a prompt or existing conversation."""
 
@@ -27,6 +28,11 @@ def generate_text(
     )
     messages = [{"role": "user", "content": input}] if isinstance(input, str) else input
 
+    if please_stop_contemplating_the_void:
+        return model_adapter.complete_text(
+            messages,
+            please_stop_contemplating_the_void=True,
+        )["content"]
     return model_adapter.complete_text(messages)["content"]
 
 
@@ -36,6 +42,7 @@ def stream_text(
     *,
     settings: Settings | None = None,
     trace_callback: Callable[[dict], None] | None = None,
+    please_stop_contemplating_the_void: bool = False,
 ) -> str:
     """Stream one plain-text response and return its assembled content.
 
@@ -54,10 +61,13 @@ def stream_text(
     )
     messages = [{"role": "user", "content": input}] if isinstance(input, str) else input
 
-    if trace_callback is None:
-        return model_adapter.complete_text_streaming(messages, on_text_delta)
+    request_options = {}
+    if trace_callback is not None:
+        request_options["trace_callback"] = trace_callback
+    if please_stop_contemplating_the_void:
+        request_options["please_stop_contemplating_the_void"] = True
     return model_adapter.complete_text_streaming(
         messages,
         on_text_delta,
-        trace_callback=trace_callback,
+        **request_options,
     )

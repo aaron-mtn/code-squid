@@ -26,10 +26,12 @@ class FakeClient:
 def provider_with_fake_client(
     temperature=None,
     debug: bool = False,
+    provider_name: str = "openai_compatible",
 ) -> tuple[OpenAICompatibleProvider, FakeClient]:
     provider = OpenAICompatibleProvider.__new__(OpenAICompatibleProvider)
     provider.temperature = temperature
     provider.debug = debug
+    provider.provider_name = provider_name
     provider.client = FakeClient()
     return provider, provider.client
 
@@ -84,6 +86,59 @@ def test_tool_choice_is_forwarded_when_supplied() -> None:
         "type": "function",
         "function": {"name": "read_file"},
     }
+
+
+def test_generic_openai_compatible_omits_speculative_reasoning_fields() -> None:
+    provider, client = provider_with_fake_client(provider_name="openai_compatible")
+
+    provider.create_response(
+        model="test-model",
+        messages=[],
+        tools=[],
+        please_stop_contemplating_the_void=True,
+    )
+
+    payload = client.chat.completions.payloads[0]
+    assert "extra_body" not in payload
+    assert "reasoning" not in payload
+    assert "chat_template_kwargs" not in payload
+
+
+def test_managed_llama_cpp_disables_thinking_when_requested() -> None:
+    provider, client = provider_with_fake_client(provider_name="squid_models")
+
+    provider.create_response(
+        model="test-model",
+        messages=[],
+        tools=[],
+        please_stop_contemplating_the_void=True,
+    )
+
+    assert client.chat.completions.payloads[0]["extra_body"] == {
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+
+
+def test_openrouter_disables_optional_reasoning_when_requested() -> None:
+    provider, client = provider_with_fake_client(provider_name="openrouter")
+
+    provider.create_response(
+        model="test-model",
+        messages=[],
+        tools=[],
+        please_stop_contemplating_the_void=True,
+    )
+
+    assert client.chat.completions.payloads[0]["extra_body"] == {
+        "reasoning": {"effort": "none"},
+    }
+
+
+def test_reasoning_controls_are_omitted_by_default() -> None:
+    for provider_name in ("squid_models", "openrouter"):
+        provider, client = provider_with_fake_client(provider_name=provider_name)
+        provider.create_response(model="test-model", messages=[], tools=[])
+        assert "extra_body" not in client.chat.completions.payloads[0]
 
 
 def test_debug_off_does_not_print_request_summary(capsys) -> None:

@@ -208,6 +208,37 @@ def test_temperature_none_omits_options_temperature_from_payload() -> None:
     assert "options" not in payload
 
 
+def test_native_ollama_thinking_control_is_request_scoped() -> None:
+    provider = CapturingOllamaProvider()
+
+    provider.create_response(model="test-model", messages=[], tools=[])
+    provider.create_response(
+        model="test-model",
+        messages=[],
+        tools=[],
+        please_stop_contemplating_the_void=True,
+    )
+
+    assert "think" not in provider.payloads[0]
+    assert provider.payloads[1]["think"] is False
+
+
+def test_native_ollama_streaming_thinking_control_is_request_scoped() -> None:
+    provider = StreamingOllamaProvider([
+        {"message": {"content": "Done."}, "done": True},
+    ])
+
+    provider.stream_chat(
+        model="test-model",
+        messages=[],
+        tools=[],
+        on_text_delta=lambda _delta: None,
+        please_stop_contemplating_the_void=True,
+    )
+
+    assert provider.payloads[0]["think"] is False
+
+
 def test_zero_temperature_is_included_in_options_payload() -> None:
     provider = CapturingOllamaProvider(temperature=0)
 
@@ -367,6 +398,20 @@ def test_provider_selection_uses_openai_compatible_for_openrouter() -> None:
     assert isinstance(provider, OpenAICompatibleProvider)
     assert provider.temperature == 0
     assert provider.debug is True
+    assert provider.provider_name == "openrouter"
+
+
+def test_provider_selection_preserves_managed_llama_cpp_identity() -> None:
+    settings = Settings(
+        model=ModelSettings(provider="squid_models"),
+        display=DisplaySettings(),
+        runtime=RuntimeSettings(),
+    )
+
+    provider = build_provider(settings)
+
+    assert isinstance(provider, OpenAICompatibleProvider)
+    assert provider.provider_name == "squid_models"
 
 
 def test_openrouter_uses_null_tool_call_content_mode() -> None:

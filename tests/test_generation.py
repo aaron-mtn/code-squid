@@ -1,3 +1,4 @@
+import inspect
 from pathlib import Path
 
 import pytest
@@ -78,6 +79,38 @@ def test_string_input_becomes_user_message_and_request_uses_no_tools(monkeypatch
             "tools": [],
         }
     ]
+
+
+def test_reasoning_control_defaults_to_false() -> None:
+    assert inspect.signature(generation.generate_text).parameters[
+        "please_stop_contemplating_the_void"
+    ].default is False
+    assert inspect.signature(generation.stream_text).parameters[
+        "please_stop_contemplating_the_void"
+    ].default is False
+
+
+def test_generate_text_forwards_requested_reasoning_control(monkeypatch) -> None:
+    calls = []
+
+    class CapturingAdapter:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def complete_text(self, messages, **options):
+            calls.append((messages, options))
+            return {"content": "done", "usage": None}
+
+    monkeypatch.setattr(generation, "build_provider", lambda _settings: object())
+    monkeypatch.setattr(generation, "ModelAdapter", CapturingAdapter)
+
+    generation.generate_text(
+        "Hello",
+        settings=settings(),
+        please_stop_contemplating_the_void=True,
+    )
+
+    assert calls[0][1] == {"please_stop_contemplating_the_void": True}
 
 
 def test_message_list_is_passed_through_to_model_adapter(monkeypatch) -> None:
@@ -190,6 +223,31 @@ def test_stream_text_converts_string_input_forwards_deltas_and_returns_content(m
             "tools": [],
         }
     ]
+
+
+def test_stream_text_forwards_requested_reasoning_control(monkeypatch) -> None:
+    calls = []
+
+    class CapturingAdapter:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def complete_text_streaming(self, messages, callback, **options):
+            calls.append((messages, options))
+            callback("done")
+            return "done"
+
+    monkeypatch.setattr(generation, "build_provider", lambda _settings: object())
+    monkeypatch.setattr(generation, "ModelAdapter", CapturingAdapter)
+
+    generation.stream_text(
+        "Hello",
+        lambda _delta: None,
+        settings=settings(),
+        please_stop_contemplating_the_void=True,
+    )
+
+    assert calls[0][1] == {"please_stop_contemplating_the_void": True}
 
 
 def test_stream_text_passes_message_list_through_unchanged(monkeypatch) -> None:
