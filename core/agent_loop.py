@@ -283,6 +283,31 @@ class AgentLoop:
     # 8. converts tool results into transcript messages
     # 9. stores those result messages in the session
     def run(self) -> RunResult:
+        # Once an assistant tool call is committed, keep enough information to
+        # close that transcript pair if cancellation wins before normal result
+        # persistence. A completed/denied/blocked result always takes priority
+        # over the synthetic interrupted result.
+        pending_tool_action = None
+        pending_tool_result = None
+
+        def persist_pending_tool_result() -> None:
+            if pending_tool_action is None:
+                return
+
+            result = pending_tool_result if pending_tool_result is not None else {
+                "ok": False,
+                "tool": pending_tool_action.get("tool", ""),
+                "error": "tool action interrupted",
+                "reason": "interrupted before a tool result was available",
+                "interrupted": True,
+            }
+            self._add_messages(
+                *self.tool_results.messages_from_action_results(
+                    [pending_tool_action],
+                    [result],
+                )
+            )
+
         try:
             self._check_cancelled()
             # New sessions start with the agent's initial system/user messages.
@@ -520,6 +545,9 @@ class AgentLoop:
                     final_message = assistant_content
                 self._check_cancelled()
                 self._add_message(reply["message"], usage=reply.get("usage"))
+                if reply["actions"]:
+                    pending_tool_action = reply["actions"][0]
+                    pending_tool_result = None
 
                 # Execute each requested tool action and collect the raw results.
                 executed_actions = []
@@ -537,6 +565,7 @@ class AgentLoop:
                     )
                     if tool_decision.block:
                         action = tool_decision.action or action
+                        pending_tool_action = action
                         reason = (
                             tool_decision.reason
                             or tool_decision.guidance
@@ -548,9 +577,11 @@ class AgentLoop:
                             "reason": reason,
                             "guidance": tool_decision.guidance,
                         }
+                        pending_tool_result = result
                         approval_action = action
                     else:
                         action = tool_decision.action or action
+                        pending_tool_action = action
                         workspace_boundary_reason_value = self._workspace_boundary_reason(
                             action
                         )
@@ -586,9 +617,11 @@ class AgentLoop:
                             )
                             self._check_cancelled()
                             result = self.tool_executor.execute(execute_action)
+                            pending_tool_result = result
                             self._check_cancelled()
                         else:
                             result = denied_result(action, decision.reason)
+                            pending_tool_result = result
                             if decision.instruction.strip():
                                 approval_instructions.append(decision.instruction)
                     result = self.hook_runner.tool_result(
@@ -599,6 +632,7 @@ class AgentLoop:
                             result=result,
                         )
                     )
+                    pending_tool_result = result
                     self.display.tool_result(approval_action, result)
                     self._check_cancelled()
                     self._emit_event(
@@ -618,6 +652,8 @@ class AgentLoop:
                 )
                 self._check_cancelled()
                 self._add_messages(*result_messages)
+                pending_tool_action = None
+                pending_tool_result = None
                 self._add_messages(
                     *[
                         self._user_instruction_message(instruction)
@@ -663,6 +699,7 @@ class AgentLoop:
                 hook_notes=self._hook_notes_from_decision(run_finished),
             )
         except _CancellationRequested:
+            persist_pending_tool_result()
             self._update_status("interrupted")
             self._emit_event(
                 {
@@ -682,6 +719,11 @@ class AgentLoop:
                 follow_up_requests=run_finished.follow_up_requests,
                 hook_notes=self._hook_notes_from_decision(run_finished),
             )
+        except KeyboardInterrupt:
+            # The CLI owns KeyboardInterrupt presentation and status handling.
+            # Repair any committed tool-call pair before preserving that flow.
+            persist_pending_tool_result()
+            raise
 
     def _workspace_boundary_reason(self, action: dict) -> str | None:
         repo_root = getattr(self.tool_executor, "repo_root", None)

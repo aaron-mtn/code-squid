@@ -5,6 +5,7 @@ from core.agent_loop import AgentLoop, RunResult
 from core.approval import ApprovalDecision, ApprovalPolicy
 from core.session import Session
 from core.tool_results import ToolResults
+from storage.session_store import SessionStore
 
 
 class FakeAgent:
@@ -215,6 +216,35 @@ def reply(content: str, actions: list[dict] | None = None, reason: str = "") -> 
     }
 
 
+def tool_call_reply(
+    call_id: str,
+    *,
+    content: str = "Using read_file.",
+    tool: str = "read_file",
+    args: dict | None = None,
+) -> dict:
+    args = args or {}
+    return {
+        "message": {
+            "role": "assistant",
+            "content": content,
+            "tool_calls": [
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": tool,
+                        "arguments": json.dumps(args),
+                    },
+                }
+            ],
+        },
+        "actions": [{"tool": tool, "args": args, "tool_call_id": call_id}],
+        "reason": "",
+        "raw_reply": {"assistant": {"content": content}},
+    }
+
+
 class FakeCompactor:
     def __init__(self, metadata: dict | None = None, events: list[str] | None = None) -> None:
         self.metadata = metadata
@@ -385,6 +415,165 @@ def test_cancellation_before_model_call_returns_interrupted() -> None:
     assert events[0]["status"] == "interrupted"
     assert events[0]["reason"] == "cancelled"
     assert events[1]["status"] == "interrupted"
+    assert not any(
+        entry["message"].get("role") == "tool" for entry in session_store.messages
+    )
+
+
+def test_cancellation_after_persisted_tool_call_appends_interrupted_result() -> None:
+    session = Session(repo_root=None)
+    session_store = FakeSessionStore()
+    tool_executor = FakeToolExecutor()
+    accepted_reply = tool_call_reply(
+        "call_cancelled", args={"path": "README.md"}
+    )
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter([accepted_reply]),
+        tool_executor=tool_executor,
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        session_store=session_store,
+        should_cancel=lambda: any(
+            message.get("role") == "assistant" and message.get("tool_calls")
+            for message in session.messages
+        ),
+    )
+
+    result = loop.run()
+
+    assert result == RunResult(status="interrupted", reason="cancelled")
+    assert tool_executor.actions == []
+    assert session.messages[-1]["role"] == "tool"
+    assert session.messages[-1]["tool_call_id"] == "call_cancelled"
+    assert json.loads(session.messages[-1]["content"]) == {
+        "ok": False,
+        "tool": "read_file",
+        "error": "tool action interrupted",
+        "reason": "interrupted before a tool result was available",
+        "interrupted": True,
+    }
+    assert session_store.messages[-1]["message"] == session.messages[-1]
+
+
+def test_interrupted_tool_pair_survives_saved_transcript_reload(tmp_path) -> None:
+    session = Session(repo_root=tmp_path)
+    session_store = SessionStore.create(tmp_path, "cancel tool")
+    accepted_reply = tool_call_reply("call_saved", args={"path": "README.md"})
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter([accepted_reply]),
+        tool_executor=FakeToolExecutor(),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        session_store=session_store,
+        should_cancel=lambda: any(
+            message.get("role") == "assistant" and message.get("tool_calls")
+            for message in session.messages
+        ),
+    )
+
+    loop.run()
+
+    loaded = SessionStore.open(session_store.session_dir).load_messages()
+    assistant_index = next(
+        index for index, message in enumerate(loaded) if message.get("tool_calls")
+    )
+    assert loaded[assistant_index]["tool_calls"][0]["id"] == "call_saved"
+    assert loaded[assistant_index + 1]["role"] == "tool"
+    assert loaded[assistant_index + 1]["tool_call_id"] == "call_saved"
+
+
+def test_cancellation_after_tool_returns_persists_real_result() -> None:
+    cancelled = False
+
+    class CancellingToolExecutor(FakeToolExecutor):
+        def execute(self, action: dict) -> dict:
+            nonlocal cancelled
+            result = super().execute(action)
+            cancelled = True
+            return {**result, "content": "actual file contents"}
+
+    session = Session(repo_root=None)
+    accepted_reply = tool_call_reply(
+        "call_completed", content="Reading.", args={"path": "README.md"}
+    )
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter([accepted_reply]),
+        tool_executor=CancellingToolExecutor(),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        should_cancel=lambda: cancelled,
+    )
+
+    result = loop.run()
+
+    assert result == RunResult(status="interrupted", reason="cancelled")
+    assert session.messages[-1]["tool_call_id"] == "call_completed"
+    assert json.loads(session.messages[-1]["content"]) == {
+        "ok": True,
+        "tool": "read_file",
+        "content": "actual file contents",
+    }
+
+
+def test_keyboard_interrupt_after_tool_call_persistence_repairs_pair_and_reraises() -> None:
+    class InterruptingApprovalPolicy:
+        mode = "never"
+
+        def check(self, action: dict):
+            raise KeyboardInterrupt
+
+    session = Session(repo_root=None)
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter([tool_call_reply("call_keyboard")]),
+        tool_executor=FakeToolExecutor(),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        approval_policy=InterruptingApprovalPolicy(),
+    )
+
+    try:
+        loop.run()
+    except KeyboardInterrupt:
+        pass
+    else:
+        raise AssertionError("KeyboardInterrupt was not re-raised")
+
+    assert session.messages[-1]["role"] == "tool"
+    assert session.messages[-1]["tool_call_id"] == "call_keyboard"
+    assert json.loads(session.messages[-1]["content"])["interrupted"] is True
+
+
+def test_normal_successful_tool_execution_still_persists_normal_result() -> None:
+    accepted_reply = tool_call_reply("call_success", content="Reading.")
+    action = accepted_reply["actions"][0]
+    session = Session(repo_root=None)
+    tool_executor = FakeToolExecutor()
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter([accepted_reply, reply("TASK COMPLETE")]),
+        tool_executor=tool_executor,
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+    )
+
+    result = loop.run()
+
+    assert result == RunResult(status="complete")
+    assert tool_executor.actions == [action]
+    tool_message = next(
+        message for message in session.messages if message["role"] == "tool"
+    )
+    assert tool_message["tool_call_id"] == "call_success"
+    assert json.loads(tool_message["content"]) == {"ok": True, "tool": "read_file"}
 
 
 def test_cancellation_after_validated_model_reply_prevents_tool_turn() -> None:
