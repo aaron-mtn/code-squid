@@ -37,6 +37,14 @@ class ModelFailingLoop:
             raise ModelRequestError("Model request failed") from error
 
 
+class ResultLoop:
+    def __init__(self, result: RunResult) -> None:
+        self.result = result
+
+    def run(self) -> RunResult:
+        return self.result
+
+
 class FakeDisplay:
     def __init__(self) -> None:
         self.starts = 0
@@ -307,6 +315,36 @@ def test_run_loop_handles_model_request_error_with_log_and_status(tmp_path) -> N
     assert session_store.statuses == ["failed"]
     assert "RuntimeError: provider unavailable" in log_text
     assert "core.model_adapter.ModelRequestError: Model request failed" in log_text
+
+
+def test_run_loop_returns_zero_for_complete_result(tmp_path) -> None:
+    display = FakeDisplay()
+
+    status = _run_loop(
+        tmp_path,
+        ResultLoop(RunResult(status="complete")),
+        display,
+        session=object(),
+        session_store=FakeSessionStore(),
+    )
+
+    assert status == 0
+    assert display.run_result == RunResult(status="complete")
+
+
+def test_run_loop_returns_nonzero_for_failed_result(tmp_path) -> None:
+    display = FakeDisplay()
+
+    status = _run_loop(
+        tmp_path,
+        ResultLoop(RunResult(status="failed", reason="task failed")),
+        display,
+        session=object(),
+        session_store=FakeSessionStore(),
+    )
+
+    assert status == 1
+    assert display.run_result == RunResult(status="failed", reason="task failed")
 
 
 def _expected_startup_output(repo_root: Path) -> str:

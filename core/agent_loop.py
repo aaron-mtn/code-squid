@@ -686,12 +686,26 @@ class AgentLoop:
                 )
 
             self._check_cancelled()
+            try:
+                run_finished = self._run_finished_decision(
+                    status="complete",
+                    final_message=final_message,
+                    tool_steps_used=tool_steps_used,
+                )
+            except Exception as error:
+                reason = f"run_finished hook failed: {error or type(error).__name__}"
+                self._update_status("failed")
+                self._emit_event(
+                    {
+                        "type": "run_failed",
+                        "status": "failed",
+                        "reason": reason,
+                    }
+                )
+                self._emit_event({"type": "run_finished", "status": "failed"})
+                return RunResult(status="failed", reason=reason)
+
             self._update_status("complete")
-            run_finished = self._run_finished_decision(
-                status="complete",
-                final_message=final_message,
-                tool_steps_used=tool_steps_used,
-            )
             self._emit_event({"type": "run_finished", "status": "complete"})
             return RunResult(
                 status="complete",

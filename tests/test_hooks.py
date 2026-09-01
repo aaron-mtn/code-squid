@@ -329,7 +329,7 @@ def test_run_finished_complete_receives_context_after_final_is_stored() -> None:
 
         def run_finished(self, ctx: RunFinishedContext) -> RunFinishedDecision:
             self.contexts.append(ctx)
-            assert self.session_store.statuses == ["complete"]
+            assert self.session_store.statuses == []
             assert self.session_store.messages[-1] == {
                 "role": "assistant",
                 "content": "TASK COMPLETE",
@@ -348,6 +348,45 @@ def test_run_finished_complete_receives_context_after_final_is_stored() -> None:
     )
     assert hook.contexts[0].status == "complete"
     assert hook.contexts[0].final_message == "TASK COMPLETE"
+    assert session_store.statuses == ["complete"]
+
+
+def test_run_finished_failure_marks_otherwise_successful_run_failed() -> None:
+    events = []
+
+    class FailingFinishedHook:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_finished(self, ctx: RunFinishedContext) -> RunFinishedDecision:
+            self.calls += 1
+            assert ctx.status == "complete"
+            raise RuntimeError("notification unavailable")
+
+    hook = FailingFinishedHook()
+    loop, _, _, session_store, _ = build_loop(
+        hook_runner=HookRunner([hook]),
+        on_event=events.append,
+    )
+
+    result = loop.run()
+
+    assert result == RunResult(
+        status="failed",
+        reason="run_finished hook failed: notification unavailable",
+    )
+    assert hook.calls == 1
+    assert session_store.statuses == ["failed"]
+    assert [event["type"] for event in events[-2:]] == [
+        "run_failed",
+        "run_finished",
+    ]
+    assert events[-2]["reason"] == result.reason
+    assert events[-1]["status"] == "failed"
+    assert not any(
+        event["type"] == "run_finished" and event["status"] == "complete"
+        for event in events
+    )
 
 
 def test_run_finished_notes_are_carried_on_run_result() -> None:

@@ -76,7 +76,7 @@ def _run_loop(
         return 1
 
     display.loop_finished(session, run_result)
-    return 0
+    return 1 if run_result.status == "failed" else 0
 
 
 def _run_new_session_task(
