@@ -56,20 +56,31 @@ class ToolExecutor:
                     "error": constraint_reason,
                 }
 
+        provisional_snapshot_path = None
         try:
             if self.undo_store is not None and tool_name in {"write_file", "apply_patch"}:
                 path = args.get("path")
                 if isinstance(path, str):
+                    snapshot_already_existed = self.undo_store.has_snapshot(path)
                     self.undo_store.snapshot_file(path)
+                    if not snapshot_already_existed:
+                        provisional_snapshot_path = path
 
             execute_args = args
             if tool["execute"] is BUILTIN_RUN_COMMAND:
                 execute_args = {**args, "platform_context": self.platform_context}
 
             result = tool["execute"](self.repo_root, **execute_args)
+            if not result.get("ok") and provisional_snapshot_path is not None:
+                self.undo_store.discard_snapshot_if_unchanged(provisional_snapshot_path)
             self._record_tool_effects(tool_name, result)
             return result
         except Exception as e:
+            if provisional_snapshot_path is not None:
+                try:
+                    self.undo_store.discard_snapshot_if_unchanged(provisional_snapshot_path)
+                except Exception:
+                    pass
             return {
                 "ok": False,
                 "tool": tool_name,

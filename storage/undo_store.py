@@ -103,6 +103,49 @@ class UndoStore:
         with self.index_path.open(encoding="utf-8") as file:
             return json.load(file)
 
+    def has_snapshot(self, path: str) -> bool:
+        return any(record.get("path") == path for record in self.load_index())
+
+    def discard_snapshot(self, path: str) -> bool:
+        index = self.load_index()
+
+        for position, record in enumerate(index):
+            if record.get("path") != path:
+                continue
+
+            snapshot_path = record.get("snapshot_path")
+            if snapshot_path is not None:
+                (self.undo_dir / snapshot_path).unlink(missing_ok=True)
+
+            index.pop(position)
+            self._write_index(index)
+            self._touch_metadata()
+            return True
+
+        return False
+
+    def discard_snapshot_if_unchanged(self, path: str) -> bool:
+        record = next(
+            (record for record in self.load_index() if record.get("path") == path),
+            None,
+        )
+        if record is None:
+            return False
+
+        original_path = Path(path)
+        if record["existed"]:
+            try:
+                snapshot_path = self.undo_dir / record["snapshot_path"]
+                unchanged = original_path.read_bytes() == snapshot_path.read_bytes()
+            except OSError:
+                return False
+        else:
+            unchanged = not original_path.exists()
+
+        if not unchanged:
+            return False
+        return self.discard_snapshot(path)
+
     def restore(self) -> list[dict]:
         results = []
 

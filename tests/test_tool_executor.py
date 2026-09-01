@@ -5,6 +5,7 @@ from core.session import Session
 import core.tool_executor as tool_executor_module
 from core.tool_executor import ToolExecutor
 from core.platform_context import PlatformContext
+from storage.undo_store import UndoStore
 
 
 class FakeUndoStore:
@@ -15,6 +16,25 @@ class FakeUndoStore:
     def snapshot_file(self, path: str) -> None:
         self.paths.append(path)
         self.contents.append(Path(path).read_text(encoding="utf-8"))
+
+    def has_snapshot(self, path: str) -> bool:
+        return path in self.paths
+
+    def discard_snapshot(self, path: str) -> bool:
+        if path not in self.paths:
+            return False
+        position = self.paths.index(path)
+        self.paths.pop(position)
+        self.contents.pop(position)
+        return True
+
+    def discard_snapshot_if_unchanged(self, path: str) -> bool:
+        if path not in self.paths:
+            return False
+        position = self.paths.index(path)
+        if Path(path).read_text(encoding="utf-8") != self.contents[position]:
+            return False
+        return self.discard_snapshot(path)
 
 
 def test_write_file_snapshots_target_before_write(tmp_path: Path) -> None:
@@ -63,6 +83,160 @@ def test_successful_apply_patch_snapshots_and_records_file_written(tmp_path: Pat
     assert session.files_written == {str(target)}
     assert undo_store.paths == [str(target)]
     assert undo_store.contents == ["before"]
+
+
+def test_successful_write_file_produces_usable_undo_state(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("before", encoding="utf-8")
+    undo_store = UndoStore.create(tmp_path)
+    executor = ToolExecutor(
+        repo_root=tmp_path,
+        session=Session(repo_root=tmp_path),
+        undo_store=undo_store,
+    )
+
+    result = executor.execute(
+        {
+            "tool": "write_file",
+            "args": {"path": str(target), "content": "after"},
+        }
+    )
+
+    assert result["ok"] is True
+    assert len(undo_store.load_index()) == 1
+    undo_store.restore()
+    assert target.read_text(encoding="utf-8") == "before"
+
+
+def test_failed_write_file_discards_new_undo_state(tmp_path: Path) -> None:
+    target = tmp_path / "missing-parent" / "target.txt"
+    undo_store = UndoStore.create(tmp_path)
+    executor = ToolExecutor(
+        repo_root=tmp_path,
+        session=Session(repo_root=tmp_path),
+        undo_store=undo_store,
+    )
+
+    result = executor.execute(
+        {
+            "tool": "write_file",
+            "args": {"path": str(target), "content": "after"},
+        }
+    )
+
+    assert result["ok"] is False
+    assert not target.exists()
+    assert undo_store.load_index() == []
+    assert list(undo_store.files_dir.iterdir()) == []
+
+
+def test_successful_apply_patch_produces_usable_undo_state(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("before", encoding="utf-8")
+    undo_store = UndoStore.create(tmp_path)
+    executor = ToolExecutor(
+        repo_root=tmp_path,
+        session=Session(repo_root=tmp_path),
+        undo_store=undo_store,
+    )
+
+    result = executor.execute(
+        {
+            "tool": "apply_patch",
+            "args": {"path": str(target), "old_text": "before", "new_text": "after"},
+        }
+    )
+
+    assert result["ok"] is True
+    assert len(undo_store.load_index()) == 1
+    undo_store.restore()
+    assert target.read_text(encoding="utf-8") == "before"
+
+
+def test_failed_apply_patch_discards_new_undo_state(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("before", encoding="utf-8")
+    undo_store = UndoStore.create(tmp_path)
+    executor = ToolExecutor(
+        repo_root=tmp_path,
+        session=Session(repo_root=tmp_path),
+        undo_store=undo_store,
+    )
+
+    result = executor.execute(
+        {
+            "tool": "apply_patch",
+            "args": {"path": str(target), "old_text": "missing", "new_text": "after"},
+        }
+    )
+
+    assert result["ok"] is False
+    assert target.read_text(encoding="utf-8") == "before"
+    assert undo_store.load_index() == []
+    assert list(undo_store.files_dir.iterdir()) == []
+
+
+def test_failed_mutation_preserves_previous_successful_undo_state(tmp_path: Path) -> None:
+    changed = tmp_path / "changed.txt"
+    unchanged = tmp_path / "unchanged.txt"
+    changed.write_text("original", encoding="utf-8")
+    unchanged.write_text("untouched", encoding="utf-8")
+    undo_store = UndoStore.create(tmp_path)
+    executor = ToolExecutor(
+        repo_root=tmp_path,
+        session=Session(repo_root=tmp_path),
+        undo_store=undo_store,
+    )
+
+    successful_result = executor.execute(
+        {
+            "tool": "write_file",
+            "args": {"path": str(changed), "content": "changed"},
+        }
+    )
+    failed_result = executor.execute(
+        {
+            "tool": "apply_patch",
+            "args": {"path": str(unchanged), "old_text": "missing", "new_text": "replacement"},
+        }
+    )
+
+    assert successful_result["ok"] is True
+    assert failed_result["ok"] is False
+    assert [record["path"] for record in undo_store.load_index()] == [str(changed)]
+    undo_store.restore()
+    assert changed.read_text(encoding="utf-8") == "original"
+    assert unchanged.read_text(encoding="utf-8") == "untouched"
+
+
+def test_mutation_exception_retains_snapshot_for_possible_partial_write(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("before", encoding="utf-8")
+    undo_store = UndoStore.create(tmp_path)
+
+    def partially_write_then_raise(_repo_root: Path, **args) -> dict:
+        Path(args["path"]).write_text("partial", encoding="utf-8")
+        raise OSError("write interrupted")
+
+    executor = ToolExecutor(
+        repo_root=tmp_path,
+        session=Session(repo_root=tmp_path),
+        undo_store=undo_store,
+        tools={"write_file": {"execute": partially_write_then_raise}},
+    )
+
+    result = executor.execute(
+        {
+            "tool": "write_file",
+            "args": {"path": str(target), "content": "after"},
+        }
+    )
+
+    assert result["ok"] is False
+    assert target.read_text(encoding="utf-8") == "partial"
+    assert len(undo_store.load_index()) == 1
+    undo_store.restore()
+    assert target.read_text(encoding="utf-8") == "before"
 
 
 def test_read_file_and_run_command_do_not_snapshot(tmp_path: Path) -> None:
