@@ -11,6 +11,8 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
 
+from storage.atomic_json import atomic_write_json
+
 
 # Defaults keep Code Squid usable with a local OpenAI-compatible server,
 # especially LM Studio, without requiring a settings file.
@@ -302,7 +304,4 @@ def write_approval_mode(repo_root: Path, approval_mode: str) -> None:
     raw_settings["runtime"] = runtime_settings
 
     settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(
-        json.dumps(raw_settings, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(settings_path, raw_settings)

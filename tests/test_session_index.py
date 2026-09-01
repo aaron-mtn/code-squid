@@ -207,6 +207,49 @@ def test_session_dir_for_raises_file_not_found_error_for_missing_id(tmp_path: Pa
         session_dir_for(tmp_path, "missing")
 
 
+@pytest.mark.parametrize(
+    "session_id",
+    ["../x", "..\\x", "/tmp/x", "nested/session", "nested\\session", ".."],
+)
+def test_session_dir_for_rejects_path_like_ids(
+    tmp_path: Path,
+    session_id: str,
+) -> None:
+    with pytest.raises(ValueError, match="Invalid session ID"):
+        session_dir_for(tmp_path, session_id)
+
+
+def test_session_dir_for_rejects_windows_absolute_path(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Invalid session ID"):
+        session_dir_for(tmp_path, r"C:\outside\session")
+
+
+def test_session_dir_for_rejects_symlink_that_resolves_outside_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = sessions_dir(tmp_path)
+    root.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = root / "linked-session"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        resolved_outside = outside.resolve()
+        original_resolve = Path.resolve
+
+        def resolve_link_outside(path: Path, *args, **kwargs) -> Path:
+            if path == link:
+                return resolved_outside
+            return original_resolve(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", resolve_link_outside)
+
+    with pytest.raises(ValueError, match="escapes sessions directory"):
+        session_dir_for(tmp_path, "linked-session")
+
+
 def test_load_session_entries_returns_entries_in_order_and_skips_blank_lines(
     tmp_path: Path,
 ) -> None:

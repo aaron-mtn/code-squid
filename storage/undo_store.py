@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from storage.atomic_json import atomic_write_json
+
 
 class UndoStore:
     """Persists one latest-only undo buffer."""
@@ -179,14 +181,10 @@ class UndoStore:
             return json.load(file)
 
     def _write_metadata(self, metadata: dict[str, Any]) -> None:
-        with self.metadata_path.open("w", encoding="utf-8") as file:
-            json.dump(metadata, file, indent=2)
-            file.write("\n")
+        atomic_write_json(self.metadata_path, metadata)
 
     def _write_index(self, index: list[dict]) -> None:
-        with self.index_path.open("w", encoding="utf-8") as file:
-            json.dump(index, file, indent=2)
-            file.write("\n")
+        atomic_write_json(self.index_path, index)
 
     def _touch_metadata(self) -> None:
         metadata = self._read_metadata()

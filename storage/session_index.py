@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -97,7 +98,19 @@ def latest_session_id(repo_root: Path) -> str | None:
 
 # Return the path for one exact session ID.
 def session_dir_for(repo_root: Path, session_id: str) -> Path:
-    path = sessions_dir(repo_root) / session_id
+    if not isinstance(session_id, str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9_-]*",
+        session_id,
+    ):
+        raise ValueError(f"Invalid session ID: {session_id!r}")
+
+    root = sessions_dir(repo_root)
+    resolved_root = root.resolve()
+    path = root / session_id
+    resolved_path = path.resolve()
+    if not resolved_path.is_relative_to(resolved_root):
+        raise ValueError(f"Session path escapes sessions directory: {session_id!r}")
+
     if not path.is_dir():
         raise FileNotFoundError(f"Session not found: {session_id}")
 

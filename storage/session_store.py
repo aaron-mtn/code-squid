@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from storage.atomic_json import atomic_write_json
 from storage.session_index import register_session_index
 
 
@@ -283,9 +284,7 @@ class SessionStore:
 
     # Write metadata.json in a stable, readable format.
     def _write_metadata(self, metadata: dict[str, Any]) -> None:
-        with self.metadata_path.open("w", encoding="utf-8") as file:
-            json.dump(metadata, file, indent=2)
-            file.write("\n")
+        atomic_write_json(self.metadata_path, metadata)
 
 
 # Build a unique, human-readable session ID.

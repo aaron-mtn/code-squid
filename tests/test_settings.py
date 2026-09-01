@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from config.settings import load_settings
+from config.settings import load_settings, write_approval_mode
 
 
 ENV_VARS = [
@@ -350,3 +350,16 @@ def test_invalid_json_produces_clear_failure(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Invalid settings JSON"):
         load_settings(tmp_path)
+
+
+def test_write_approval_mode_preserves_settings_and_json_format(tmp_path: Path) -> None:
+    write_settings(tmp_path, {"model": {"name": "local-model"}})
+
+    write_approval_mode(tmp_path, "guarded")
+
+    settings_path = tmp_path / ".code-squid" / "settings.json"
+    assert settings_path.read_text(encoding="utf-8") == (
+        '{\n  "model": {\n    "name": "local-model"\n  },\n'
+        '  "runtime": {\n    "approval_mode": "guarded"\n  }\n}\n'
+    )
+    assert load_settings(tmp_path).runtime.approval_mode == "guarded"

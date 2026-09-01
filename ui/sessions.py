@@ -90,7 +90,7 @@ def handle_session_viewer(repo_root: Path, args: list[str]) -> bool:
     if len(args) == 2 and args[0] == "show":
         try:
             print_session(repo_root, args[1])
-        except FileNotFoundError as error:
+        except (FileNotFoundError, ValueError) as error:
             print(error)
         return True
 
