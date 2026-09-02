@@ -356,8 +356,8 @@ def test_build_coding_task_run_passes_filtered_tools_to_executor(
             self.display = kwargs["display"]
 
     monkeypatch.setattr("core.runner.discover_skills", lambda: {"review": skill})
-    monkeypatch.setattr("core.runner.build_provider", lambda *args, **kwargs: object())
-    monkeypatch.setattr("core.runner.AgentLoop", FakeAgentLoop)
+    monkeypatch.setattr("squid_core.runner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("squid_core.runner.AgentLoop", FakeAgentLoop)
 
     build_coding_task_run(
         repo_root=tmp_path,
@@ -395,8 +395,8 @@ def test_build_coding_task_run_uses_explicit_resolved_components(
         raise AssertionError("explicit components must bypass skill discovery")
 
     monkeypatch.setattr("core.runner.resolve_skill_tools", fail_resolution)
-    monkeypatch.setattr("core.runner.build_provider", lambda *args, **kwargs: object())
-    monkeypatch.setattr("core.runner.AgentLoop", FakeAgentLoop)
+    monkeypatch.setattr("squid_core.runner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("squid_core.runner.AgentLoop", FakeAgentLoop)
 
     run = build_coding_task_run(
         repo_root=tmp_path,
@@ -444,8 +444,8 @@ def test_build_coding_task_run_records_architecture_review_run_context(
         def __init__(self, **kwargs) -> None:
             self.display = kwargs["display"]
 
-    monkeypatch.setattr("core.runner.build_provider", lambda *args, **kwargs: object())
-    monkeypatch.setattr("core.runner.AgentLoop", FakeAgentLoop)
+    monkeypatch.setattr("squid_core.runner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("squid_core.runner.AgentLoop", FakeAgentLoop)
 
     run = build_coding_task_run(
         repo_root=tmp_path,
@@ -475,8 +475,8 @@ def test_build_coding_task_run_records_default_run_context(
         def __init__(self, **kwargs) -> None:
             self.display = kwargs["display"]
 
-    monkeypatch.setattr("core.runner.build_provider", lambda *args, **kwargs: object())
-    monkeypatch.setattr("core.runner.AgentLoop", FakeAgentLoop)
+    monkeypatch.setattr("squid_core.runner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("squid_core.runner.AgentLoop", FakeAgentLoop)
 
     run = build_coding_task_run(
         repo_root=tmp_path,

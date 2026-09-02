@@ -14,10 +14,11 @@ multi-agent system, a hardened sandbox, or a polished TUI. The main value of the
 architecture is that the loop, contracts, storage, configuration, and tool
 boundaries are small enough to inspect directly.
 
-The runtime shape is:
+The construction and runtime shape is:
 
 ```text
-settings -> runner/wiring -> provider -> model adapter -> Core Agent -> agent loop -> action preflight -> approval -> tools -> transcript/session storage
+Code Squid application builder -> generic Squid Core builder -> AgentLoop
+settings -> provider -> model adapter -> Core Agent -> action preflight -> approval -> tools -> transcript/session storage
 ```
 
 `AgentLoop -> on_event callback` is an optional observer path for compact
@@ -69,6 +70,13 @@ its legacy location and injects the app-owned defaults into Core.
     action, result, verification, correction, next-step, and risk context
     without Code Squid identity or coding-only language.
 
+- `squid_core/runner.py`
+  - Generic, UI-neutral construction for `AgentRun` and `AgentLoop`.
+  - Creates ordinary runtime collaborators when omitted and accepts selected
+    collaborators directly when an embedding application replaces them.
+  - Does not import Code Squid prompts, CodingAgent compatibility, terminal
+    presentation, or Code Squid Skill/Extension discovery.
+
 - `agent/`
   - Code Squid application prompt defaults and migration compatibility.
   - `prompts.py` owns Code Squid identity, its non-replaceable baseline coding
@@ -109,10 +117,10 @@ its legacy location and injects the app-owned defaults into Core.
   - `hook_loader.py` owns loading enabled loose user hooks from disk when
     callers opt into user hooks. It also loads hooks listed by the active valid
     extension while preserving loose hook behavior.
-  - `runner.py` owns reusable coding-task run wiring for Python callers and CLI
-    helpers. It wires optional hooks or a `HookRunner`, wires the selected
-    provider into the model adapter, and owns runtime tool selection for
-    selected skills. It does not own provider-specific construction details.
+  - `runner.py` is the Code Squid application builder and compatibility layer.
+    It owns Code Squid prompt defaults, Skill/tool discovery, active-extension
+    hooks, run-context metadata, and terminal-display construction, then passes
+    selected components to `squid_core.runner`.
   - `session.py` owns in-memory transcript state and lightweight read/write
     side-effect tracking.
   - `model_adapter.py` owns provider response normalization, tool-call parsing,
@@ -328,10 +336,28 @@ Known limitations:
 
 ## Runner / Python Wrapping
 
-`core/runner.py` is the public Python wiring layer for apps and wrappers that
-embed Code Squid. Wrappers should use public helpers such as
-`build_coding_task_run(...)`, `build_agent_loop(...)`, and
-`build_run_display(...)` instead of underscore-prefixed internals.
+Runtime construction has three explicit levels:
+
+1. Easy/default: `core.runner.run_coding_task(...)` and
+   `build_coding_task_run(...)` provide the batteries-included Code Squid path.
+2. Custom: `squid_core.runner.build_agent_run(...)` or
+   `build_agent_loop(...)` create omitted collaborators while using supplied
+   Agent, provider, adapter, compactor, tools/executor/results, approval,
+   preflight, hooks, stores, and presentation objects directly.
+3. Low-level: callers may instantiate `core.agent_loop.AgentLoop(...)`
+   directly. The generic builder is convenience, not mandatory architecture.
+
+The customization rule is deliberately small: pass a replacement collaborator
+object to `squid_core.runner`; use only the session/undo factories when Core
+must create stores in lifecycle order; construct `AgentLoop` directly when
+complete control over construction is required. Generic constructor factories
+for providers, adapters, compactors, executors, policies, hooks, or the loop
+itself are not part of the API.
+
+The dependency direction is Code Squid application construction to generic
+Squid Core construction to Core collaborators to `AgentLoop`; generic
+construction never calls back into Code Squid prompt, terminal, or discovery
+policy.
 
 `core.runner.run_coding_task(...)` is the reusable Python entry point for
 starting a new coding task. It accepts `repo_root`, `task`, optional `settings`,
@@ -339,17 +365,38 @@ optional `display`, and optional `on_event`, and returns the existing
 `RunResult`.
 
 `core.runner.build_coding_task_run(...)` constructs the session, session store,
-undo store, generic Agent with Code Squid prompt defaults, and loop without starting the loop. The CLI uses this
-shape when it needs access to the session and session store for interactive
-follow-ups.
+undo store, generic Agent with `CODE_SQUID_PROMPT_DEFAULTS`, selected tools,
+application hooks, terminal display, and generic loop wiring without starting
+the loop. The CLI uses this shape when it needs access to the session and
+session store for interactive follow-ups. Its Skill/tool resolution and
+precedence rules remain application-owned; the generic builder accepts tools
+and Agent objects already selected by its caller.
+
+`squid_core.runner.build_agent_run(...)` constructs a generic `Agent` by
+default and uses a no-op `NullDisplay` when no presentation collaborator is
+provided. It creates a provider, `ModelAdapter`, `Compactor`, `ToolExecutor`,
+`ToolResults`, `ApprovalPolicy`, `ActionPreflight`, `HookRunner`, `Session`,
+`SessionStore`, and `UndoStore` when those concerns are omitted. It requires
+typed settings supplied by the application and does not load Code Squid
+settings or defaults itself.
+
+Callers may replace any of those major runtime collaborators selectively. A
+supplied `ModelAdapter` bypasses provider construction; a supplied provider is
+used to construct the default adapter; a supplied `ToolExecutor` bypasses its
+default construction and the otherwise implicit undo-store creation. A
+supplied approval policy or action preflight is used directly. Presentation
+and approval prompting are separate inputs, so a GUI need not imitate a
+terminal display. Provider transport and OpenAI-compatible/OpenRouter/Ollama
+selection remain in `providers/`, not in the runner.
 
 By default, new runs create persistence with `SessionStore.create(repo_root,
 task)` followed by `UndoStore.create(repo_root, session_id)`. Embedding hosts
-may instead pass `session_store_factory` and/or `undo_store_factory` to
-`build_coding_task_run(...)` or `run_coding_task(...)`. Core preserves the
-construction order and supplies the created session id to the undo factory,
-while the returned stores become the run transcript store and `ToolExecutor`
-undo store. Either concern can be overridden independently.
+may instead pass `session_store_factory` and/or `undo_store_factory` to either
+application or generic construction. Construction preserves session-store
+first ordering and supplies its session id to the undo factory. Either concern
+can be overridden independently. Generic and application builders also accept
+pre-created `Session`, `SessionStore`, and `UndoStore` objects without creating
+defaults for them.
 
 This seam lets a host persist outside the workspace without teaching Core its
 storage layout, indexes, or adapter types. Normal Core and CLI callers omit the
@@ -364,10 +411,10 @@ execution. This is a package-agnostic handoff: frontends may resolve packaged
 resources, but Core has no knowledge of package or Mod paths. Passing neither
 argument preserves `skill_name` discovery; passing only one raises `ValueError`.
 
-`core.runner.build_agent_loop(...)` owns the shared runtime wiring for provider,
-model adapter, tool executor, tool-result formatter, approval, compaction, and
-`AgentLoop`. Provider-specific construction and replay-mode decisions are
-delegated to `providers.factory`.
+`core.runner.build_agent_loop(...)` remains as a compatibility wrapper used by
+the CLI follow-up path. It delegates generic collaborator wiring to
+`squid_core.runner.build_agent_loop(...)`. Provider-specific construction and
+replay-mode decisions are delegated to `providers.factory`.
 
 `storage/session_index.py` owns read-only session discovery across registered
 workspaces. `SessionStore` owns persistence for one session. App-specific UIs
@@ -1115,9 +1162,9 @@ coding-task prompt text. Its tool path remains visibly hook, action preflight,
 approval, execution, and result handling; it does not own workspace or guarded
 shell policy.
 
-`core/runner.py` owns reusable Python run wiring and shared helpers used by the
-CLI. It is not a plugin system, event bus, daemon, server, or future
-orchestration layer.
+`core/runner.py` owns Code Squid application construction and shared CLI
+helpers. `squid_core/runner.py` owns generic selective construction. Neither is
+a plugin system, event bus, daemon, server, or future orchestration layer.
 
 `core/model_adapter.py` owns provider response normalization and replay message
 shaping. Provider-specific HTTP/API calls stay in `providers/`.
@@ -1165,8 +1212,8 @@ layer for what happened, while model-native narration is encouraged by prompts.
 - Event callback support currently covers normal loop-level events. Outer
   CLI-caught failures such as some model request errors or keyboard interrupts
   may need explicit wrapper handling depending on the caller path.
-- The default runner uses `TerminalDisplay`, so external wrappers may see
-  terminal output unless they pass a different display later.
+- The Code Squid application runner uses `TerminalDisplay`; generic Squid Core
+  construction uses `NullDisplay` unless the host supplies presentation.
 - Resume support is CLI-owned under `cli/`.
 - JSONL/file event output is intentionally not implemented yet.
 - User skill discovery checks `<CODE_SQUID_HOME>/skills/*/SKILL.md`, defaulting

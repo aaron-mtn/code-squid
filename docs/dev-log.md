@@ -1,3 +1,30 @@
+- 2026-09-01: Simplified the Patch 3 generic construction API before treating
+  it as permanent. Removed factory arguments for provider, ModelAdapter,
+  Compactor, ToolExecutor, ToolResults, ApprovalPolicy, ActionPreflight,
+  HookRunner, and AgentLoop construction. Callers now either pass replacement
+  collaborator objects or construct `AgentLoop` directly. Session and undo
+  store factories remain because Core must create the session store first and
+  pass its session ID into delayed undo-store construction. UI neutrality,
+  direct/pre-created stores, provider/adapter bypass behavior, and the normal
+  Code Squid application path are unchanged. Focused runner suite: 42 passed.
+  Full suite: 751 passed. `git diff --check` passed.
+- 2026-09-01: Completed Squid Core refactor Patch 3 by separating the
+  batteries-included Code Squid application builder in `core/runner.py` from
+  UI-neutral generic construction in `squid_core/runner.py`. The generic seam
+  defaults to `squid_core.agent.Agent` and can selectively accept an Agent,
+  provider, ModelAdapter, Compactor, ToolExecutor, ToolResults, ApprovalPolicy,
+  ActionPreflight, HookRunner, display, approval prompter, Session,
+  SessionStore, UndoStore, or storage factories. Supplied adapters bypass
+  provider construction, supplied executors bypass default executor/undo
+  construction, and store factories retain session-first/session-id ordering.
+  TerminalDisplay construction, Code Squid prompt defaults, Skill/tool
+  resolution, active-extension hooks, and run-context policy remain in the
+  application layer. Existing Code Squid helpers, prompt/runtime behavior,
+  provider selection, approvals, compaction, transcripts, hooks, storage, and
+  direct `AgentLoop(...)` construction are intentionally preserved. Focused
+  verification: 124 passed. Full suite: 751 passed. `git diff --check` passed.
+  Patch 4 still owns broader physical package migration,
+  Extension/Mod naming work, and Desktop import/packaging migration.
 - 2026-09-01: Completed Squid Core refactor Patch 2 after the Patch 1
   Agent/prompt split. `AgentLoop` now delegates workspace-boundary and guarded
   `run_command` decisions to a small action-preflight collaborator, while its

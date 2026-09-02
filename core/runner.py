@@ -1,11 +1,9 @@
 # core/runner.py
 
-"""Reusable wiring for starting a normal Code Squid coding task from Python.
+"""Code Squid application wiring for normal coding tasks.
 
-This module owns the shared provider/model/tool/approval/compaction/loop setup
-for new coding-task runs. ``main.py`` remains the standalone CLI entry point and
-keeps CLI parsing, command dispatch, resume/show/undo/mode behavior,
-interactive prompting, and user-facing error handling.
+This layer owns Code Squid prompts, Skill/tool discovery, hooks, and terminal
+presentation. Generic collaborator construction lives in ``squid_core.runner``.
 """
 
 from __future__ import annotations
@@ -17,26 +15,20 @@ from typing import Callable
 
 from agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
 from config.settings import Settings, load_settings
-from core.action_preflight import ActionPreflight
 from core.agent_loop import AgentLoop, RunResult
-from core.approval import ApprovalPolicy
-from core.compaction import Compactor
 from core.events import EventCallback
 from core.hook_loader import load_active_extension_hooks, load_user_hooks
 from core.hooks import HookRunner
-from core.model_adapter import ModelAdapter
 from core.platform_context import PlatformContext, detect_platform_context
 from core.session import Session
 from core.skills import Skill, discover_skills
-from core.tool_executor import ToolExecutor
-from core.tool_results import ToolResults
 from core.user_tools import build_user_tool_registry
-from providers.factory import build_provider, tool_call_content_mode
 from storage.session_store import SessionStore
 from storage.undo_store import UndoStore
 from tools import TOOLS
 from ui.terminal import StartupInfo, TerminalDisplay
 from squid_core.agent import Agent
+from squid_core.runner import build_agent_loop as build_core_agent_loop
 
 
 SessionStoreFactory = Callable[[Path, str], SessionStore]
@@ -72,6 +64,18 @@ def run_coding_task(
     hooks: list[object] | None = None,
     hook_runner: HookRunner | None = None,
     include_user_hooks: bool = False,
+    agent=None,
+    provider=None,
+    model_adapter=None,
+    compactor=None,
+    tool_executor=None,
+    tool_results=None,
+    approval_policy=None,
+    action_preflight=None,
+    approval_prompter=None,
+    session: Session | None = None,
+    session_store: SessionStore | None = None,
+    undo_store: UndoStore | None = None,
     session_store_factory: SessionStoreFactory | None = None,
     undo_store_factory: UndoStoreFactory | None = None,
 ) -> RunResult:
@@ -94,6 +98,18 @@ def run_coding_task(
         hooks=hooks,
         hook_runner=hook_runner,
         include_user_hooks=include_user_hooks,
+        agent=agent,
+        provider=provider,
+        model_adapter=model_adapter,
+        compactor=compactor,
+        tool_executor=tool_executor,
+        tool_results=tool_results,
+        approval_policy=approval_policy,
+        action_preflight=action_preflight,
+        approval_prompter=approval_prompter,
+        session=session,
+        session_store=session_store,
+        undo_store=undo_store,
         session_store_factory=session_store_factory,
         undo_store_factory=undo_store_factory,
     )
@@ -116,6 +132,18 @@ def build_coding_task_run(
     hooks: list[object] | None = None,
     hook_runner: HookRunner | None = None,
     include_user_hooks: bool = False,
+    agent=None,
+    provider=None,
+    model_adapter=None,
+    compactor=None,
+    tool_executor=None,
+    tool_results=None,
+    approval_policy=None,
+    action_preflight=None,
+    approval_prompter=None,
+    session: Session | None = None,
+    session_store: SessionStore | None = None,
+    undo_store: UndoStore | None = None,
     session_store_factory: SessionStoreFactory | None = None,
     undo_store_factory: UndoStoreFactory | None = None,
 ) -> CodingTaskRun:
@@ -137,17 +165,26 @@ def build_coding_task_run(
         else display
     )
 
-    session = Session(repo_root=repo_root)
-    session_store = (
-        SessionStore.create(repo_root=repo_root, task=task)
-        if session_store_factory is None
-        else session_store_factory(repo_root, task)
-    )
-    undo_store = (
-        UndoStore.create(repo_root, session_id=session_store.session_id)
-        if undo_store_factory is None
-        else undo_store_factory(repo_root, session_store.session_id)
-    )
+    if session_store is not None and session_store_factory is not None:
+        raise ValueError("session_store and session_store_factory are mutually exclusive")
+    if undo_store is not None and undo_store_factory is not None:
+        raise ValueError("undo_store and undo_store_factory are mutually exclusive")
+
+    session = session if session is not None else Session(repo_root=repo_root)
+    if session_store is None:
+        session_store = (
+            SessionStore.create(repo_root=repo_root, task=task)
+            if session_store_factory is None
+            else session_store_factory(repo_root, task)
+        )
+    if undo_store is None and tool_executor is None:
+        undo_store = (
+            UndoStore.create(repo_root, session_id=session_store.session_id)
+            if undo_store_factory is None
+            else undo_store_factory(repo_root, session_store.session_id)
+        )
+    elif undo_store is None and undo_store_factory is not None:
+        undo_store = undo_store_factory(repo_root, session_store.session_id)
     if resolved_skill is not None and resolved_tools is not None:
         skill, active_tools = resolved_skill, resolved_tools
     else:
@@ -157,15 +194,20 @@ def build_coding_task_run(
             session_id=session_store.session_id,
         )
     append_run_context(session_store, skill, active_tools, mod_id=mod_id)
-    platform_context = detect_platform_context()
-    agent = Agent(
-        task=task,
-        skill=skill,
-        tools=active_tools,
-        platform_context=platform_context,
-        workspace=str(repo_root),
-        prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS,
+    platform_context = (
+        detect_platform_context()
+        if agent is None or tool_executor is None
+        else None
     )
+    if agent is None:
+        agent = Agent(
+            task=task,
+            skill=skill,
+            tools=active_tools,
+            platform_context=platform_context,
+            workspace=str(repo_root),
+            prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS,
+        )
     hook_runner = build_hook_runner(
         hooks=hooks,
         hook_runner=hook_runner,
@@ -184,6 +226,14 @@ def build_coding_task_run(
         should_cancel=should_cancel,
         hook_runner=hook_runner,
         platform_context=platform_context,
+        provider=provider,
+        model_adapter=model_adapter,
+        compactor=compactor,
+        tool_executor=tool_executor,
+        tool_results=tool_results,
+        approval_policy=approval_policy,
+        action_preflight=action_preflight,
+        approval_prompter=display if approval_prompter is None else approval_prompter,
     )
 
     return CodingTaskRun(
@@ -200,7 +250,7 @@ def build_agent_loop(
     agent: Agent,
     undo_store: UndoStore,
     settings: Settings,
-    display: TerminalDisplay,
+    display=None,
     *,
     tools: dict | None = None,
     on_event: EventCallback | None = None,
@@ -209,58 +259,45 @@ def build_agent_loop(
     hook_runner: HookRunner | None = None,
     include_user_hooks: bool = False,
     platform_context: PlatformContext | None = None,
+    approval_prompter=None,
+    provider=None,
+    model_adapter=None,
+    compactor=None,
+    tool_executor=None,
+    tool_results=None,
+    approval_policy=None,
+    action_preflight=None,
 ) -> AgentLoop:
-    """Build the shared provider/model/tool/approval/compaction/loop wiring."""
+    """Compatibility wrapper around generic Squid Core construction."""
 
-    provider = build_provider(settings, debug=display.debug)
-
-    model_adapter = ModelAdapter(
-        provider=provider,
-        model_name=settings.model.name,
-        tool_call_content_mode=tool_call_content_mode(settings),
-        provider_name=settings.model.provider,
-    )
-    compactor = Compactor(settings.compaction, model_adapter)
-
-    tool_executor = ToolExecutor(
-        repo_root=repo_root,
-        session=session,
-        undo_store=undo_store,
-        allow_outside_workspace=settings.runtime.approval_mode == "never",
-        tools=tools,
-        platform_context=platform_context,
-    )
-    tool_results = ToolResults()
-    approval_policy = ApprovalPolicy(
-        mode=settings.runtime.approval_mode,
-        prompter=display,
-    )
-    action_preflight = ActionPreflight(
-        workspace_root=repo_root,
-        approval_mode=settings.runtime.approval_mode,
-    )
     hook_runner = build_hook_runner(
         hooks=hooks,
         hook_runner=hook_runner,
         include_user_hooks=include_user_hooks,
     )
 
-    return AgentLoop(
+    return build_core_agent_loop(
+        repo_root=repo_root,
         session=session,
+        session_store=session_store,
+        undo_store=undo_store,
+        settings=settings,
+        tools=tools,
+        display=display,
+        approval_prompter=approval_prompter,
+        provider=provider,
         model_adapter=model_adapter,
+        compactor=compactor,
         tool_executor=tool_executor,
         tool_results=tool_results,
         agent=agent,
-        display=display,
-        session_store=session_store,
-        compactor=compactor,
-        max_tool_steps=settings.runtime.max_tool_steps,
         approval_policy=approval_policy,
         action_preflight=action_preflight,
-        stream_assistant_text=settings.runtime.stream_assistant_text,
         on_event=on_event,
         should_cancel=should_cancel,
         hook_runner=hook_runner,
+        platform_context=platform_context,
+        provider_debug=getattr(display, "debug", settings.display.debug),
     )
 
 

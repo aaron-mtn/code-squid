@@ -38,8 +38,8 @@ def test_run_coding_task_passes_callbacks_to_agent_loop(monkeypatch, tmp_path) -
     def should_cancel() -> bool:
         return False
 
-    monkeypatch.setattr("core.runner.build_provider", lambda *args, **kwargs: object())
-    monkeypatch.setattr("core.runner.AgentLoop", FakeAgentLoop)
+    monkeypatch.setattr("squid_core.runner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("squid_core.runner.AgentLoop", FakeAgentLoop)
 
     run_coding_task(
         repo_root=tmp_path,
@@ -63,8 +63,8 @@ def test_run_coding_task_returns_loop_run_result(monkeypatch, tmp_path: Path) ->
             return expected
 
     display = FakeDisplay()
-    monkeypatch.setattr("core.runner.build_provider", lambda *args, **kwargs: object())
-    monkeypatch.setattr("core.runner.AgentLoop", FakeAgentLoop)
+    monkeypatch.setattr("squid_core.runner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("squid_core.runner.AgentLoop", FakeAgentLoop)
 
     result = run_coding_task(
         repo_root=tmp_path,
@@ -95,8 +95,8 @@ def test_run_construction_supplies_detected_platform_and_resolved_workspace(
 
     monkeypatch.setattr("core.runner.detect_platform_context", lambda: context)
     monkeypatch.setattr("core.runner.Agent", FakeCodingAgent)
-    monkeypatch.setattr("core.runner.ToolExecutor", FakeToolExecutor)
-    monkeypatch.setattr("core.runner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("squid_core.runner.ToolExecutor", FakeToolExecutor)
+    monkeypatch.setattr("squid_core.runner.build_provider", lambda *args, **kwargs: object())
 
     build_coding_task_run(tmp_path / ".", "Do the thing", display=FakeDisplay())
 
@@ -125,7 +125,7 @@ def test_run_construction_uses_default_storage_factories(monkeypatch, tmp_path: 
 
     monkeypatch.setattr("core.runner.SessionStore.create", create_session)
     monkeypatch.setattr("core.runner.UndoStore.create", create_undo)
-    monkeypatch.setattr("core.runner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("squid_core.runner.build_provider", lambda *args, **kwargs: object())
 
     run = build_coding_task_run(tmp_path, "Store defaults", display=FakeDisplay())
 
@@ -162,8 +162,8 @@ def test_run_construction_uses_explicit_storage_factories(monkeypatch, tmp_path:
         calls.append(("undo", repo_root, session_id))
         return custom_undo
 
-    monkeypatch.setattr("core.runner.ToolExecutor", FakeToolExecutor)
-    monkeypatch.setattr("core.runner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("squid_core.runner.ToolExecutor", FakeToolExecutor)
+    monkeypatch.setattr("squid_core.runner.build_provider", lambda *args, **kwargs: object())
 
     run = build_coding_task_run(
         tmp_path / ".",
@@ -199,7 +199,7 @@ def test_storage_factories_can_be_overridden_independently(monkeypatch, tmp_path
         return original_undo_create(tmp_path / "default-undo", session_id)
 
     monkeypatch.setattr("core.runner.UndoStore.create", create_default_undo)
-    monkeypatch.setattr("core.runner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("squid_core.runner.build_provider", lambda *args, **kwargs: object())
 
     session_run = build_coding_task_run(
         tmp_path,
