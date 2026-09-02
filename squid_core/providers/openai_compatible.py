@@ -16,18 +16,16 @@ class OpenAICompatibleProvider(BaseProvider):
     def __init__(
         self,
         base_url: str,
-        api_key: str | None = None,
+        api_key: str,
         temperature: float | int | None = None,
-        debug: bool = False,
         provider_name: str = "openai_compatible",
     ) -> None:
         self.base_url = base_url
         self.temperature = temperature
-        self.debug = debug
         self.provider_name = provider_name
         self.client = OpenAI(
             base_url=base_url,
-            api_key=api_key or "lm-studio",
+            api_key=api_key,
         )
 
     def supports_streaming(self) -> bool:
@@ -48,9 +46,6 @@ class OpenAICompatibleProvider(BaseProvider):
             tool_choice=tool_choice,
             please_stop_contemplating_the_void=please_stop_contemplating_the_void,
         )
-
-        if self.debug:
-            self._print_request_summary(payload)
 
         return self.client.chat.completions.create(**payload)
 
@@ -73,9 +68,6 @@ class OpenAICompatibleProvider(BaseProvider):
             please_stop_contemplating_the_void=please_stop_contemplating_the_void,
         )
         payload["stream"] = True
-
-        if self.debug:
-            self._print_request_summary(payload)
 
         content_parts = []
         reasoning_parts = {"reasoning": [], "reasoning_content": [], "thinking": []}
@@ -350,26 +342,3 @@ class OpenAICompatibleProvider(BaseProvider):
             usage=usage,
         )
 
-    def _print_request_summary(self, payload: dict) -> None:
-        def field(name: str) -> object:
-            return payload[name] if name in payload else "<missing>"
-
-        lines = [
-            "provider: openai-compatible",
-            f"model: {field('model')}",
-            f"messages: {len(payload['messages'])}",
-            f"tools: {len(payload.get('tools') or [])}",
-            f"temperature: {field('temperature')}",
-            f"stream: {str(field('stream')).lower()}",
-            f"parallel_tool_calls: {str(field('parallel_tool_calls')).lower()}",
-            f"tool_choice: {field('tool_choice')}",
-        ]
-        self._debug_block("provider request", lines)
-
-    def _debug_block(self, title: str, lines: list[str]) -> None:
-        width = 47
-        top_label = f"─ {title} "
-        print(f"┌{top_label}{'─' * max(width - len(top_label), 0)}")
-        for line in lines:
-            print(f"│ {line}")
-        print(f"└{'─' * width}")

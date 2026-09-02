@@ -99,13 +99,27 @@ application-owned modules awaiting the later application-package cleanup.
   - Generic, UI-neutral construction for `AgentRun` and `AgentLoop`.
   - Creates ordinary runtime collaborators when omitted and accepts selected
     collaborators directly when an embedding application replaces them.
-  - Does not import Code Squid prompts, CodingAgent compatibility, terminal
-    presentation, or Code Squid resource/Mod discovery.
+  - Consumes only generic `squid_core.settings.RuntimeSettings`; it does not
+    import Code Squid configuration, prompts, terminal presentation, or
+    resource/Mod discovery.
+
+- `squid_core/providers/`
+  - Core-owned provider contract and first-party provider transports.
+  - `openai_compatible.py` owns OpenAI-compatible chat-completions transport,
+    including OpenRouter request quirks already supported by that path.
+  - `ollama.py` owns native Ollama `/api/chat` transport and response adaptation.
+  - `__init__.py` contains the small built-in construction helper and backend
+    replay choice. It consumes effective `ProviderSettings` and has no Code
+    Squid defaults, settings loading, environment, or presentation policy.
+  - These built-ins are first-party conveniences, not permanent dependencies:
+    callers can pass a custom provider or ready `ModelAdapter` through the
+    spawner, or construct `AgentLoop` directly.
 
 - Flat `squid_core/*.py` runtime concepts
   - `agent_loop.py` owns orchestration; `events.py` owns observation;
     `generation.py` owns one-shot generation; `model_adapter.py` owns provider
-    normalization; `platform_context.py` describes the environment;
+    normalization; `settings.py` owns generic provider/runtime/compaction
+    semantics; `platform_context.py` describes the environment;
     `spawner.py` owns generic construction; `session.py` owns in-memory
     transcript state; `skills.py` owns standalone Skills; and
     `token_estimate.py` owns token estimation.
@@ -123,10 +137,10 @@ application-owned modules awaiting the later application-package cleanup.
     `squid_core.agent.Agent`; it contains no agent implementation.
 
 - `config/`
-  - Runtime settings loading.
+  - Code Squid application settings loading and persistence.
   - `settings.py` reads `.code-squid/settings.json`, validates supported
-    settings, applies supported environment overrides, and returns typed
-    settings objects.
+    application input, applies product defaults and optional `CODE_SQUID_*`
+    environment overrides, and translates the result to generic Core settings.
 
 - `core/`
   - Temporary location for Code Squid application-owned wiring/policy only.
@@ -139,20 +153,6 @@ application-owned modules awaiting the later application-package cleanup.
     presentation, and passes selected resources to `squid_core.spawner`.
   - Final relocation of these two files into a Code Squid application package,
     followed by removal of `core/`, is deferred to the next cleanup patch.
-
-- `providers/`
-  - Provider construction and raw provider transport.
-  - `factory.py` owns provider selection/construction and provider-specific
-    replay-mode choices, including OpenRouter's assistant tool-call content
-    shape.
-  - `base.py` owns only the provider contract/interface.
-  - `openai_compatible.py` owns OpenAI-compatible chat-completions calls through
-    the OpenAI Python client.
-  - `ollama.py` owns native Ollama `/api/chat` calls and adapts native Ollama
-    responses to the OpenAI-like shape expected by `ModelAdapter`.
-  - Concrete provider files own transport behavior. Provider transport does not
-    own loop control, coding-agent policy, tool execution, or final reply
-    validation.
 
 - `storage/`
   - Local runtime persistence.
@@ -380,8 +380,13 @@ used to construct the default adapter; a supplied `ToolExecutor` bypasses its
 default construction and the otherwise implicit undo-store creation. A
 supplied approval policy or action preflight is used directly. Presentation
 and approval prompting are separate inputs, so a GUI need not imitate a
-terminal display. Provider transport and OpenAI-compatible/OpenRouter/Ollama
-selection remain in `providers/`, not in the runner.
+terminal display. Built-in OpenAI-compatible/OpenRouter/Ollama construction is
+owned by `squid_core.providers`, not by either runner.
+
+The generic generation API follows the same boundary: callers pass an explicit
+Core `RuntimeSettings` object or a ready `ModelAdapter`. It never reads the
+working directory or loads Code Squid configuration. A supplied adapter bypasses
+built-in provider construction.
 
 By default, new runs create persistence with `SessionStore.create(repo_root,
 task)` followed by `UndoStore.create(repo_root, session_id)`. Embedding hosts
@@ -410,7 +415,7 @@ Mod names, paths, discovery, or selection policy.
 `core.runner.build_agent_loop(...)` remains as a compatibility wrapper used by
 the CLI follow-up path. It delegates generic collaborator wiring to
 `squid_core.spawner.build_agent_loop(...)`. Provider-specific construction and
-replay-mode decisions are delegated to `providers.factory`.
+replay-mode decisions are delegated to `squid_core.providers`.
 
 `storage/session_index.py` owns read-only session discovery across registered
 workspaces. `SessionStore` owns persistence for one session. App-specific UIs
@@ -677,6 +682,13 @@ selection.
 
 ## Settings
 
+Settings have two explicit ownership layers. `config/settings.py` owns the
+human-facing Code Squid shape, `.code-squid/settings.json`, product defaults,
+saved selection, persistence, and optional environment overrides. It translates
+those values into `squid_core.settings.RuntimeSettings`. Core owns only the
+effective provider values and runtime validation semantics used by the spawner,
+loop, approval policy, and compactor.
+
 Code Squid reads settings from:
 
 ```text
@@ -725,8 +737,8 @@ validated. Streamed deltas are UI events only; tool execution still waits for
 the full validated assistant response.
 `model.temperature` is `null` or a number from 0 through 2.
 
-Environment overrides exist for current model/debug/temperature/provider-related
-settings:
+Environment overrides are optional development, headless, and automation
+inputs—not the normal user configuration UX. Current overrides are:
 
 - `CODE_SQUID_BASE_URL`
 - `CODE_SQUID_API_KEY`
@@ -790,12 +802,12 @@ map to settings values this way:
 ## Provider Model
 
 LM Studio or another generic OpenAI-compatible server is the recommended default
-path. `openai_compatible` uses `providers/openai_compatible.py` and sends
+path. `openai_compatible` uses `squid_core/providers/openai_compatible.py` and sends
 chat-completions requests through the OpenAI Python client.
 
 OpenRouter is supported through the OpenAI-compatible provider path by setting
 `model.provider` or `CODE_SQUID_PROVIDER` to `openrouter`. It still uses
-`OpenAICompatibleProvider`, but `providers.factory` configures assistant
+`OpenAICompatibleProvider`, while Core's small provider helper configures assistant
 tool-call replay with `content: null` for assistant messages that have
 `tool_calls` and no content. This provider-specific behavior is handled before
 messages are sent to the provider.
@@ -810,7 +822,7 @@ Streaming assembles text and tool-call fragments into the same raw response
 shape used by non-streaming responses before `ModelAdapter` normalizes and
 validates the reply.
 
-The native Ollama provider exists and is experimental. `providers/ollama.py`
+The native Ollama provider exists and is experimental. `squid_core/providers/ollama.py`
 uses Ollama `/api/chat`, converts replayed messages into Ollama's expected
 shape, omits `parallel_tool_calls`, and adapts the response back to the
 OpenAI-like shape consumed by `ModelAdapter`.
@@ -1162,8 +1174,10 @@ not own Code Squid identity or coding workflow policy.
 baseline coding discipline. `agent/coding.py` is compatibility-only and must
 not regain a duplicate or empty subclass implementation.
 
-`config/settings.py` owns local settings parsing and environment overrides. It
-does not decide how settings are enforced.
+`config/settings.py` owns local settings parsing, persistence, Code Squid
+defaults and selection, and optional environment overrides. It produces
+`squid_core.settings.RuntimeSettings`; Core owns validation of generic runtime
+semantics and enforcement.
 
 `squid_core/agent_loop.py` owns generic turn flow. It is the sequencing layer, not the
 place for provider transport, terminal rendering, tool implementation, or
@@ -1176,7 +1190,7 @@ helpers. `squid_core/spawner.py` owns generic selective construction. Neither is
 a plugin system, event bus, daemon, server, or future orchestration layer.
 
 `squid_core/model_adapter.py` owns provider response normalization and replay message
-shaping. Provider-specific HTTP/API calls stay in `providers/`.
+shaping. Provider-specific HTTP/API calls stay in `squid_core/providers/`.
 
 `squid_core/compaction/compactor.py` owns transcript compression mechanics, while
 `squid_core/compaction/prompts.py` owns the generic continuation-summary
@@ -1236,6 +1250,11 @@ layer for what happened, while model-native narration is encouraged by prompts.
   tools exist globally.
 - Do not turn Code Squid into a broad framework prematurely.
 - There are no live provider integration tests in the focused unit suite.
+- LM Studio still uses the OpenAI-compatible `/v1` path; native `/api/v1/*`
+  integration and explicit model load/unload/download support are deferred.
+- Future Squid Models provider/runtime integration is deferred; the existing
+  OpenAI-compatible request behavior is not a dedicated transport.
+- Durable storage ownership cleanup is deferred.
 
 ## Practical Principles
 

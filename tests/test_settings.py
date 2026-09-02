@@ -46,6 +46,20 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert settings.compaction.trigger_input_tokens == 48000
     assert settings.compaction.keep_recent_turns == 8
 
+    runtime_settings = settings.to_runtime_settings()
+    assert runtime_settings.provider.provider == "openai_compatible"
+    assert runtime_settings.provider.model_name == "qwen3.5-9b"
+    assert runtime_settings.provider.api_key == "lm-studio"
+    assert runtime_settings.approval_mode == "never"
+
+
+def test_ollama_product_default_translates_to_core_backend_default(tmp_path: Path) -> None:
+    write_settings(tmp_path, {"model": {"provider": "ollama"}})
+
+    runtime_settings = load_settings(tmp_path).to_runtime_settings()
+
+    assert runtime_settings.provider.base_url is None
+
 
 def test_settings_file_overrides_defaults(tmp_path: Path) -> None:
     write_settings(

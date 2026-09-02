@@ -2,25 +2,29 @@ from pathlib import Path
 
 import squid_core.spawner as core_spawner
 from agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
-from config.settings import (
-    CompactionSettings,
-    DisplaySettings,
-    ModelSettings,
-    RuntimeSettings,
-    Settings,
-)
+from squid_core.settings import CompactionSettings, ProviderSettings, RuntimeSettings
 from squid_core.session import Session
 from squid_core.agent import Agent
 from storage.session_store import SessionStore
 from storage.undo_store import UndoStore
 
 
-def _settings(*, provider: str = "openai_compatible") -> Settings:
-    return Settings(
-        model=ModelSettings(provider=provider),
-        display=DisplaySettings(debug=False),
-        runtime=RuntimeSettings(),
-        compaction=CompactionSettings(enabled=False),
+def _settings(*, provider: str = "openai_compatible") -> RuntimeSettings:
+    return RuntimeSettings(
+        provider=ProviderSettings(
+            provider=provider,
+            model_name="test-model",
+            base_url="http://127.0.0.1:1234/v1",
+            api_key="test-key",
+        ),
+        approval_mode="never",
+        max_tool_steps=None,
+        stream_assistant_text=False,
+        compaction=CompactionSettings(
+            enabled=False,
+            trigger_input_tokens=48_000,
+            keep_recent_turns=8,
+        ),
     )
 
 

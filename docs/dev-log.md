@@ -1,3 +1,23 @@
+- 2026-09-02: Moved the provider contract, OpenAI-compatible transport, native
+  Ollama transport, and their small settings-only construction helper into
+  `squid_core/providers/`; removed the old top-level provider source package
+  without compatibility shims. Added `squid_core/settings.py` for effective
+  provider, runtime, approval, streaming, tool-step, and compaction semantics.
+  Code Squid's `config/settings.py` continues to own
+  `.code-squid/settings.json`, product defaults, saved provider/model selection,
+  persistence, and optional `CODE_SQUID_*` overrides, and now explicitly
+  translates those application settings before `core.runner` calls the generic
+  spawner. Generic generation now requires explicit Core settings or a supplied
+  `ModelAdapter`; supplied adapters and providers retain their construction
+  bypasses. Removed terminal debug output and the implicit `lm-studio` API-key
+  fallback from reusable OpenAI-compatible transport. Focused
+  provider/settings/spawner/generation/application-runner/boundary suite: 194
+  passed. Full suite: 711 passed. Production compileall and a fresh 67-module
+  import walk passed; stale old-provider imports and forbidden Core imports are
+  absent, and both diff checks passed. No live inference was run. Deferred: LM
+  Studio native `/api/v1/*`, explicit LM Studio model
+  load/unload/download support, future Squid Models provider/runtime integration,
+  and storage ownership cleanup.
 - 2026-09-01: Completed Patch 5C by renaming `squid_core/runner.py` to
   `squid_core/spawner.py`, reflecting that the module spawns and constructs a
   fully wired generic runtime. The `AgentRun`, `AgentLoop`, `build_agent_run`,

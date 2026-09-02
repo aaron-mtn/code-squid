@@ -2,11 +2,11 @@ import json
 
 import pytest
 
-from config.settings import ModelSettings, RuntimeSettings, Settings, DisplaySettings
 from squid_core.model_adapter import ModelAdapter
-from providers.factory import build_provider, tool_call_content_mode
-from providers.ollama import OllamaProvider, adapt_response, convert_messages
-from providers.openai_compatible import OpenAICompatibleProvider
+from squid_core.providers import build_provider, tool_call_content_mode
+from squid_core.providers.ollama import OllamaProvider, adapt_response, convert_messages
+from squid_core.providers.openai_compatible import OpenAICompatibleProvider
+from squid_core.settings import ProviderSettings
 
 
 class CapturingOllamaProvider(OllamaProvider):
@@ -330,10 +330,11 @@ def test_native_ollama_streaming_accumulates_text_and_tool_calls_once() -> None:
 
 
 def test_provider_selection_defaults_to_openai_compatible() -> None:
-    settings = Settings(
-        model=ModelSettings(base_url="http://127.0.0.1:1234/v1", api_key="key"),
-        display=DisplaySettings(),
-        runtime=RuntimeSettings(),
+    settings = ProviderSettings(
+        provider="openai_compatible",
+        model_name="model",
+        base_url="http://127.0.0.1:1234/v1",
+        api_key="key",
     )
 
     provider = build_provider(settings)
@@ -342,15 +343,24 @@ def test_provider_selection_defaults_to_openai_compatible() -> None:
     assert provider.temperature is None
 
 
+def test_openai_compatible_construction_requires_effective_api_key() -> None:
+    settings = ProviderSettings(
+        provider="openai_compatible",
+        model_name="model",
+        base_url="http://127.0.0.1:1234/v1",
+        api_key=None,
+    )
+
+    with pytest.raises(ValueError, match="api_key"):
+        build_provider(settings)
+
+
 def test_provider_selection_uses_native_ollama_when_configured() -> None:
-    settings = Settings(
-        model=ModelSettings(
-            base_url="http://127.0.0.1:11434/v1",
-            api_key="key",
-            provider="ollama",
-        ),
-        display=DisplaySettings(),
-        runtime=RuntimeSettings(),
+    settings = ProviderSettings(
+        provider="ollama",
+        model_name="model",
+        base_url="http://127.0.0.1:11434/v1",
+        api_key=None,
     )
 
     provider = build_provider(settings)
@@ -361,10 +371,11 @@ def test_provider_selection_uses_native_ollama_when_configured() -> None:
 
 
 def test_provider_selection_uses_native_ollama_default_base_url() -> None:
-    settings = Settings(
-        model=ModelSettings(provider="ollama"),
-        display=DisplaySettings(),
-        runtime=RuntimeSettings(),
+    settings = ProviderSettings(
+        provider="ollama",
+        model_name="model",
+        base_url=None,
+        api_key=None,
     )
 
     provider = build_provider(settings)
@@ -374,10 +385,12 @@ def test_provider_selection_uses_native_ollama_default_base_url() -> None:
 
 
 def test_provider_selection_threads_temperature() -> None:
-    settings = Settings(
-        model=ModelSettings(temperature=0),
-        display=DisplaySettings(),
-        runtime=RuntimeSettings(),
+    settings = ProviderSettings(
+        provider="openai_compatible",
+        model_name="model",
+        base_url="http://127.0.0.1:1234/v1",
+        api_key="key",
+        temperature=0,
     )
 
     provider = build_provider(settings)
@@ -387,25 +400,27 @@ def test_provider_selection_threads_temperature() -> None:
 
 
 def test_provider_selection_uses_openai_compatible_for_openrouter() -> None:
-    settings = Settings(
-        model=ModelSettings(provider="openrouter", temperature=0),
-        display=DisplaySettings(debug=True),
-        runtime=RuntimeSettings(),
+    settings = ProviderSettings(
+        provider="openrouter",
+        model_name="model",
+        base_url="https://openrouter.ai/api/v1",
+        api_key="key",
+        temperature=0,
     )
 
     provider = build_provider(settings)
 
     assert isinstance(provider, OpenAICompatibleProvider)
     assert provider.temperature == 0
-    assert provider.debug is True
     assert provider.provider_name == "openrouter"
 
 
 def test_provider_selection_preserves_managed_llama_cpp_identity() -> None:
-    settings = Settings(
-        model=ModelSettings(provider="squid_models"),
-        display=DisplaySettings(),
-        runtime=RuntimeSettings(),
+    settings = ProviderSettings(
+        provider="squid_models",
+        model_name="model",
+        base_url="http://127.0.0.1:1234/v1",
+        api_key="key",
     )
 
     provider = build_provider(settings)
@@ -415,30 +430,34 @@ def test_provider_selection_preserves_managed_llama_cpp_identity() -> None:
 
 
 def test_openrouter_uses_null_tool_call_content_mode() -> None:
-    settings = Settings(
-        model=ModelSettings(provider="openrouter"),
-        display=DisplaySettings(),
-        runtime=RuntimeSettings(),
+    settings = ProviderSettings(
+        provider="openrouter",
+        model_name="model",
+        base_url="https://openrouter.ai/api/v1",
+        api_key="key",
     )
 
     assert tool_call_content_mode(settings) == "null"
 
 
 def test_openai_compatible_preserves_default_tool_call_content_mode() -> None:
-    settings = Settings(
-        model=ModelSettings(provider="openai_compatible"),
-        display=DisplaySettings(),
-        runtime=RuntimeSettings(),
+    settings = ProviderSettings(
+        provider="openai_compatible",
+        model_name="model",
+        base_url="http://127.0.0.1:1234/v1",
+        api_key="key",
     )
 
     assert tool_call_content_mode(settings) == "empty"
 
 
 def test_provider_selection_threads_temperature_to_ollama() -> None:
-    settings = Settings(
-        model=ModelSettings(provider="ollama", temperature=0),
-        display=DisplaySettings(),
-        runtime=RuntimeSettings(),
+    settings = ProviderSettings(
+        provider="ollama",
+        model_name="model",
+        base_url=None,
+        api_key=None,
+        temperature=0,
     )
 
     provider = build_provider(settings)

@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from providers.openai_compatible import OpenAICompatibleProvider
+from squid_core.providers.openai_compatible import OpenAICompatibleProvider
 
 
 class FakeCompletions:
@@ -25,12 +25,10 @@ class FakeClient:
 
 def provider_with_fake_client(
     temperature=None,
-    debug: bool = False,
     provider_name: str = "openai_compatible",
 ) -> tuple[OpenAICompatibleProvider, FakeClient]:
     provider = OpenAICompatibleProvider.__new__(OpenAICompatibleProvider)
     provider.temperature = temperature
-    provider.debug = debug
     provider.provider_name = provider_name
     provider.client = FakeClient()
     return provider, provider.client
@@ -141,8 +139,8 @@ def test_reasoning_controls_are_omitted_by_default() -> None:
         assert "extra_body" not in client.chat.completions.payloads[0]
 
 
-def test_debug_off_does_not_print_request_summary(capsys) -> None:
-    provider, _client = provider_with_fake_client(debug=False)
+def test_transport_does_not_print_request_summary(capsys) -> None:
+    provider, _client = provider_with_fake_client()
 
     provider.create_response(
         model="test-model",
@@ -151,33 +149,6 @@ def test_debug_off_does_not_print_request_summary(capsys) -> None:
     )
 
     assert capsys.readouterr().out == ""
-
-
-def test_debug_on_prints_parallel_tool_calls_false_without_message_contents(capsys) -> None:
-    provider, _client = provider_with_fake_client(debug=True)
-
-    provider.create_response(
-        model="test-model",
-        messages=[
-            {"role": "system"},
-            {"role": "user", "content": "secret task"},
-            {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1"}]},
-            {"role": "tool", "content": ""},
-        ],
-        tools=[{"type": "function", "function": {"name": "read_file"}}],
-    )
-
-    output = capsys.readouterr().out
-    assert "┌─ provider request " in output
-    assert "│ provider: openai-compatible" in output
-    assert "│ model: test-model" in output
-    assert "│ messages: 4" in output
-    assert "│ tools: 1" in output
-    assert "│ temperature: <missing>" in output
-    assert "│ stream: <missing>" in output
-    assert "│ parallel_tool_calls: false" in output
-    assert "│ tool_choice: <missing>" in output
-    assert "secret task" not in output
 
 
 def chunk(content=None, tool_calls=None, *, reasoning_content=None, finish_reason=None, id=None):

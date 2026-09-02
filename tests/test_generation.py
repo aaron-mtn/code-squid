@@ -1,11 +1,10 @@
 import inspect
-from pathlib import Path
 
 import pytest
 
 import squid_core.generation as generation
-from config.settings import DisplaySettings, ModelSettings, RuntimeSettings, Settings
 from squid_core.model_adapter import ModelRequestError
+from squid_core.settings import CompactionSettings, ProviderSettings, RuntimeSettings
 
 
 class FakeMessage:
@@ -57,11 +56,26 @@ class FailingProvider:
         raise self.error
 
 
-def settings(*, model_name: str = "generation-model", provider: str = "openai_compatible") -> Settings:
-    return Settings(
-        model=ModelSettings(name=model_name, provider=provider),
-        display=DisplaySettings(),
-        runtime=RuntimeSettings(),
+def settings(
+    *,
+    model_name: str = "generation-model",
+    provider: str = "openai_compatible",
+) -> RuntimeSettings:
+    return RuntimeSettings(
+        provider=ProviderSettings(
+            provider=provider,
+            model_name=model_name,
+            base_url="http://127.0.0.1:1234/v1",
+            api_key="test-key",
+        ),
+        approval_mode="never",
+        max_tool_steps=None,
+        stream_assistant_text=False,
+        compaction=CompactionSettings(
+            enabled=False,
+            trigger_input_tokens=48_000,
+            keep_recent_turns=8,
+        ),
     )
 
 
@@ -158,7 +172,7 @@ def test_supplied_settings_configure_provider_and_model_adapter(monkeypatch) -> 
 
     generation.generate_text("Hello", settings=supplied_settings)
 
-    assert provider_settings == [supplied_settings]
+    assert provider_settings == [supplied_settings.provider]
     assert adapter_kwargs == [
         {
             "provider": provider,
@@ -169,23 +183,23 @@ def test_supplied_settings_configure_provider_and_model_adapter(monkeypatch) -> 
     ]
 
 
-def test_normal_settings_are_loaded_from_working_directory_when_omitted(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    loaded_settings = settings()
-    load_roots = []
-    monkeypatch.chdir(tmp_path)
+def test_generation_requires_explicit_core_settings_or_adapter() -> None:
+    with pytest.raises(ValueError, match="settings or model_adapter"):
+        generation.generate_text("Hello")
+
+
+def test_supplied_adapter_bypasses_settings_and_provider_construction(monkeypatch) -> None:
+    class Adapter:
+        def complete_text(self, messages, **_options):
+            return {"content": messages[0]["content"], "usage": None}
+
     monkeypatch.setattr(
         generation,
-        "load_settings",
-        lambda root: load_roots.append(root) or loaded_settings,
+        "build_provider",
+        lambda _settings: (_ for _ in ()).throw(AssertionError("provider built")),
     )
-    monkeypatch.setattr(generation, "build_provider", lambda actual_settings: FakeProvider())
 
-    generation.generate_text("Hello")
-
-    assert load_roots == [tmp_path]
+    assert generation.generate_text("direct", model_adapter=Adapter()) == "direct"
 
 
 def test_model_request_failure_preserves_model_request_error(monkeypatch) -> None:

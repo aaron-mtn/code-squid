@@ -14,6 +14,8 @@ REUSABLE_MODULES = (
     "model_adapter",
     "mods",
     "platform_context",
+    "providers",
+    "settings",
     "spawner",
     "safety",
     "session",
@@ -71,6 +73,12 @@ def test_old_core_runner_module_is_removed() -> None:
     assert not (package_root / "runner.py").exists()
 
 
+def test_old_provider_source_package_is_removed() -> None:
+    provider_root = Path(__file__).resolve().parents[1] / "providers"
+
+    assert not list(provider_root.glob("*.py"))
+
+
 def test_old_subsystem_import_paths_are_absent() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     stale_patterns = tuple(
@@ -102,6 +110,7 @@ def test_old_subsystem_import_paths_are_absent() -> None:
 def test_squid_core_has_no_code_squid_application_imports() -> None:
     package_root = Path(__file__).resolve().parents[1] / "squid_core"
     forbidden = (
+        re.compile(r"^\s*(?:from|import)\s+config(?:\.|\s|$)", re.MULTILINE),
         re.compile(r"^\s*(?:from|import)\s+agent\.prompts\b", re.MULTILINE),
         re.compile(r"^\s*(?:from|import)\s+ui\.terminal\b", re.MULTILINE),
         re.compile(r"^\s*(?:from|import)\s+core\.(?:app_paths|runner)\b", re.MULTILINE),

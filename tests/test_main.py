@@ -713,7 +713,7 @@ def test_new_session_passes_trace_and_friendly_mode_to_terminal_display(
     ]
 
 
-def test_new_session_trace_threads_effective_debug_to_provider(
+def test_new_session_trace_does_not_push_presentation_into_provider(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -728,13 +728,13 @@ def test_new_session_trace_threads_effective_debug_to_provider(
 
     monkeypatch.setenv("CODE_SQUID_TRACE", "1")
     monkeypatch.setattr("cli.run.TerminalDisplay", CapturingDisplay)
-    monkeypatch.setattr("providers.factory.OpenAICompatibleProvider", CapturingProvider)
+    monkeypatch.setattr("squid_core.providers.OpenAICompatibleProvider", CapturingProvider)
     monkeypatch.setattr("cli.interactive._prompt_task", _fake_prompt_task("Do the thing"))
     monkeypatch.setattr("cli.run._run_loop", lambda *args: 0)
 
     assert _run_new_session(tmp_path) == 0
 
-    assert provider_kwargs[0]["debug"] is True
+    assert "debug" not in provider_kwargs[0]
 
 
 def test_interactive_exit_command_exits_without_run(monkeypatch, tmp_path) -> None:

@@ -11,6 +11,11 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
 
+from squid_core.settings import (
+    CompactionSettings as CoreCompactionSettings,
+    ProviderSettings,
+    RuntimeSettings as CoreRuntimeSettings,
+)
 from storage.atomic_json import atomic_write_json
 
 
@@ -70,10 +75,39 @@ class CompactionSettings:
 
 @dataclass(frozen=True)
 class Settings:
+    """Code Squid's persisted settings shape and presentation preferences."""
+
     model: ModelSettings
     display: DisplaySettings
     runtime: RuntimeSettings
     compaction: CompactionSettings = field(default_factory=CompactionSettings)
+
+    def to_runtime_settings(self) -> CoreRuntimeSettings:
+        """Translate application configuration into effective Core settings."""
+
+        # An omitted Ollama endpoint means its conventional local endpoint;
+        # Code Squid's LM Studio default must not leak into Core construction.
+        base_url = self.model.base_url
+        if self.model.provider == "ollama" and base_url == DEFAULT_BASE_URL:
+            base_url = None
+
+        return CoreRuntimeSettings(
+            provider=ProviderSettings(
+                provider=self.model.provider,
+                model_name=self.model.name,
+                base_url=base_url,
+                api_key=self.model.api_key,
+                temperature=self.model.temperature,
+            ),
+            approval_mode=self.runtime.approval_mode,
+            max_tool_steps=self.runtime.max_tool_steps,
+            stream_assistant_text=self.runtime.stream_assistant_text,
+            compaction=CoreCompactionSettings(
+                enabled=self.compaction.enabled,
+                trigger_input_tokens=self.compaction.trigger_input_tokens,
+                keep_recent_turns=self.compaction.keep_recent_turns,
+            ),
+        )
 
 
 def _read_settings_file(settings_path: Path) -> dict[str, Any]:

@@ -168,6 +168,7 @@ def build_coding_task_run(
     repo_root = Path(repo_root).resolve()
     app_home = code_squid_home(app_home)
     settings = load_settings(repo_root) if settings is None else settings
+    runtime_settings = settings.to_runtime_settings()
     selected_mod: ResolvedMod | None = None
 
     if session_store is not None and session_store_factory is not None:
@@ -238,13 +239,13 @@ def build_coding_task_run(
         include_user_hooks=include_user_hooks,
         app_home=app_home,
     )
-    loop = build_agent_loop(
+    loop = build_core_agent_loop(
         repo_root=repo_root,
         session=session,
         session_store=session_store,
         agent=agent,
         undo_store=undo_store,
-        settings=settings,
+        settings=runtime_settings,
         display=display,
         tools=active_tools,
         on_event=on_event,
@@ -308,7 +309,7 @@ def build_agent_loop(
         session=session,
         session_store=session_store,
         undo_store=undo_store,
-        settings=settings,
+        settings=settings.to_runtime_settings(),
         tools=tools,
         display=display,
         approval_prompter=approval_prompter,
@@ -324,7 +325,6 @@ def build_agent_loop(
         should_cancel=should_cancel,
         hook_runner=hook_runner,
         platform_context=platform_context,
-        provider_debug=getattr(display, "debug", settings.display.debug),
     )
 
 

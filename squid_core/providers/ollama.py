@@ -1,5 +1,3 @@
-# providers/ollama.py
-
 """Native Ollama chat provider transport and response adapter."""
 
 from __future__ import annotations

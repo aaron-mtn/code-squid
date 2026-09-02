@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from config.settings import Settings
 from squid_core.safety import ActionPreflight
 from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.safety import ApprovalPolicy
@@ -20,9 +19,10 @@ from squid_core.events import EventCallback
 from squid_core.hooks import HookRunner
 from squid_core.model_adapter import ModelAdapter
 from squid_core.platform_context import PlatformContext, detect_platform_context
+from squid_core.providers import build_provider, tool_call_content_mode
 from squid_core.session import Session
+from squid_core.settings import RuntimeSettings
 from squid_core.tools import ToolExecutor, ToolResults
-from providers.factory import build_provider, tool_call_content_mode
 from squid_core.agent import Agent
 from storage.session_store import SessionStore
 from storage.undo_store import UndoStore
@@ -75,7 +75,13 @@ class AgentRun:
     loop: AgentLoop
 
 
-def run_agent_task(repo_root: Path | str, task: str, *, settings: Settings, **kwargs) -> RunResult:
+def run_agent_task(
+    repo_root: Path | str,
+    task: str,
+    *,
+    settings: RuntimeSettings,
+    **kwargs,
+) -> RunResult:
     """Build and run a generic task with optional selective replacements."""
 
     run = build_agent_run(repo_root, task, settings=settings, **kwargs)
@@ -87,7 +93,7 @@ def build_agent_run(
     repo_root: Path | str,
     task: str,
     *,
-    settings: Settings,
+    settings: RuntimeSettings,
     prompt_defaults=None,
     skill=None,
     tools: dict | None = None,
@@ -110,7 +116,6 @@ def build_agent_run(
     on_event: EventCallback | None = None,
     should_cancel: Callable[[], bool] | None = None,
     platform_context: PlatformContext | None = None,
-    provider_debug: bool | None = None,
 ) -> AgentRun:
     """Construct a generic run without application discovery or terminal UI.
 
@@ -177,7 +182,6 @@ def build_agent_run(
         on_event=on_event,
         should_cancel=should_cancel,
         platform_context=platform_context,
-        provider_debug=provider_debug,
     )
     return AgentRun(session=session, session_store=session_store, loop=loop)
 
@@ -188,7 +192,7 @@ def build_agent_loop(
     session_store: SessionStore,
     agent,
     undo_store: UndoStore | None,
-    settings: Settings,
+    settings: RuntimeSettings,
     *,
     tools: dict | None = None,
     display=None,
@@ -204,21 +208,21 @@ def build_agent_loop(
     on_event: EventCallback | None = None,
     should_cancel: Callable[[], bool] | None = None,
     platform_context: PlatformContext | None = None,
-    provider_debug: bool | None = None,
 ) -> AgentLoop:
     """Wire default Core collaborators around an Agent, with explicit seams."""
 
     repo_root = Path(repo_root).resolve()
     display = NullDisplay() if display is None else display
     if model_adapter is None:
+        if settings.provider is None:
+            raise ValueError("provider settings are required unless model_adapter is supplied")
         if provider is None:
-            debug = settings.display.debug if provider_debug is None else provider_debug
-            provider = build_provider(settings, debug=debug)
+            provider = build_provider(settings.provider)
         model_adapter = ModelAdapter(
             provider=provider,
-            model_name=settings.model.name,
-            tool_call_content_mode=tool_call_content_mode(settings),
-            provider_name=settings.model.provider,
+            model_name=settings.provider.model_name,
+            tool_call_content_mode=tool_call_content_mode(settings.provider),
+            provider_name=settings.provider.provider,
         )
     if compactor is None:
         compactor = Compactor(settings.compaction, model_adapter)
@@ -227,7 +231,7 @@ def build_agent_loop(
             repo_root=repo_root,
             session=session,
             undo_store=undo_store,
-            allow_outside_workspace=settings.runtime.approval_mode == "never",
+            allow_outside_workspace=settings.approval_mode == "never",
             tools={} if tools is None else tools,
             platform_context=platform_context,
         )
@@ -235,13 +239,13 @@ def build_agent_loop(
         tool_results = ToolResults()
     if approval_policy is None:
         approval_policy = ApprovalPolicy(
-            mode=settings.runtime.approval_mode,
+            mode=settings.approval_mode,
             prompter=approval_prompter,
         )
     if action_preflight is None:
         action_preflight = ActionPreflight(
             workspace_root=repo_root,
-            approval_mode=settings.runtime.approval_mode,
+            approval_mode=settings.approval_mode,
         )
     if hook_runner is None:
         hook_runner = HookRunner()
@@ -255,10 +259,10 @@ def build_agent_loop(
         display=display,
         session_store=session_store,
         compactor=compactor,
-        max_tool_steps=settings.runtime.max_tool_steps,
+        max_tool_steps=settings.max_tool_steps,
         approval_policy=approval_policy,
         action_preflight=action_preflight,
-        stream_assistant_text=settings.runtime.stream_assistant_text,
+        stream_assistant_text=settings.stream_assistant_text,
         on_event=on_event,
         should_cancel=should_cancel,
         hook_runner=hook_runner,

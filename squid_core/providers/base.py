@@ -1,4 +1,4 @@
-# providers/base.py
+"""Provider contract for raw model request and response transports."""
 
 class BaseProvider:
     """Owns the raw request/response call to a model provider; must not own agent policy, loop control, or tool execution."""
