@@ -16,11 +16,11 @@ from core.runner import (
     resolve_skill_tools,
     startup_info,
 )
+from core.app_paths import workspace_undo_dir
 from squid_core.session import Session
 from storage.error_log import write_error_log
 from storage.session_index import latest_session_id, session_dir_for
-from storage.session_store import SessionStore
-from storage.undo_store import UndoStore
+from squid_core.storage import SessionStore, UndoStore
 from ui.terminal import TerminalDisplay
 from squid_core.agent import Agent
 
@@ -131,7 +131,11 @@ def _run_follow_up_task(
     session_store.append_message(follow_up_message)
     session_store.update_status("active")
 
-    undo_store = UndoStore.create(repo_root, session_id=session_store.session_id)
+    undo_store = UndoStore.create(
+        workspace_undo_dir(repo_root),
+        session_id=session_store.session_id,
+        workspace_root=repo_root,
+    )
     loop = build_agent_loop(
         repo_root=repo_root,
         session=session,

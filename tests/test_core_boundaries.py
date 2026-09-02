@@ -20,6 +20,7 @@ REUSABLE_MODULES = (
     "safety",
     "session",
     "skills",
+    "storage",
     "token_estimate",
     "tools",
 )
@@ -48,10 +49,12 @@ def test_subsystem_packages_expose_useful_public_seams() -> None:
     from squid_core.safety import ActionPreflight, ApprovalPolicy
     from squid_core.tools import TOOLS, ToolExecutor, ToolResults
     from squid_core.tools.builtins import TOOLS as BUILTIN_TOOLS
+    from squid_core.storage import SessionStore, UndoStore
 
     assert all((Mod, ResolvedMod, discover_mods, load_mod, resolve_mod, validate_mod))
     assert all((HookRunner, BeforeRunContext, ActionPreflight, ApprovalPolicy))
     assert all((ToolExecutor, ToolResults))
+    assert all((SessionStore, UndoStore))
     assert TOOLS is BUILTIN_TOOLS
 
 
@@ -77,6 +80,16 @@ def test_old_provider_source_package_is_removed() -> None:
     provider_root = Path(__file__).resolve().parents[1] / "providers"
 
     assert not list(provider_root.glob("*.py"))
+
+
+def test_top_level_storage_contains_only_application_policy() -> None:
+    storage_root = Path(__file__).resolve().parents[1] / "storage"
+
+    assert sorted(path.name for path in storage_root.glob("*.py")) == [
+        "__init__.py",
+        "error_log.py",
+        "session_index.py",
+    ]
 
 
 def test_old_subsystem_import_paths_are_absent() -> None:
@@ -122,6 +135,19 @@ def test_squid_core_has_no_code_squid_application_imports() -> None:
         source = source_path.read_text(encoding="utf-8")
         if any(pattern.search(source) for pattern in forbidden):
             violations.append(source_path.relative_to(package_root).as_posix())
+
+    assert violations == []
+
+
+def test_squid_core_storage_has_no_application_path_or_environment_policy() -> None:
+    storage_root = Path(__file__).resolve().parents[1] / "squid_core" / "storage"
+    forbidden = (".code-squid", "CODE_SQUID_", "core.app_paths", "cli.", "ui.")
+
+    violations = []
+    for source_path in storage_root.rglob("*.py"):
+        source = source_path.read_text(encoding="utf-8")
+        if any(pattern in source for pattern in forbidden):
+            violations.append(source_path.relative_to(storage_root).as_posix())
 
     assert violations == []
 

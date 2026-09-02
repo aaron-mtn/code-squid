@@ -9,7 +9,7 @@ from squid_core.safety import ApprovalDecision, ApprovalPolicy
 from squid_core.hooks import HookRunner
 from squid_core.session import Session
 from squid_core.tools import ToolResults
-from storage.session_store import SessionStore
+from squid_core.storage import SessionStore
 
 
 class FakeAgent:

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from storage.session_store import SessionStore
+from squid_core.storage import SessionStore
 
 
 def read_metadata(store: SessionStore) -> dict:
@@ -21,7 +21,11 @@ def read_entries(store: SessionStore) -> list[dict]:
 
 
 def test_create_writes_initial_metadata_and_empty_jsonl(tmp_path: Path) -> None:
-    store = SessionStore.create(tmp_path, "Fix Formatter Underscore Bug")
+    store = SessionStore.create(
+        tmp_path,
+        "Fix Formatter Underscore Bug",
+        workspace_root=tmp_path,
+    )
     metadata = read_metadata(store)
 
     assert store.metadata_path.exists()
@@ -177,6 +181,24 @@ def test_append_run_context_persists_optional_mod_id(tmp_path: Path) -> None:
     assert "mod_id" not in without_mod
 
 
+def test_create_without_workspace_omits_application_metadata(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path / "sessions", "Generic session")
+
+    assert "repo_root" not in read_metadata(store)
+
+
+def test_create_does_not_register_a_code_squid_global_index(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    index_path = tmp_path / "global" / "indexes.jsonl"
+    monkeypatch.setenv("CODE_SQUID_SESSION_INDEXES", str(index_path))
+
+    SessionStore.create(tmp_path / "sessions", "Unregistered session")
+
+    assert not index_path.exists()
+
+
 def test_run_contexts_can_persist_different_mod_ids_in_one_session(tmp_path: Path) -> None:
     store = SessionStore.create(tmp_path, "mod sequence")
 
@@ -291,7 +313,7 @@ def test_duplicate_session_id_gets_suffix_instead_of_overwriting(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    import storage.session_store as session_store
+    import squid_core.storage.session_store as session_store
 
     class FixedDatetime:
         @classmethod

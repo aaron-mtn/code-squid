@@ -1,3 +1,22 @@
+- 2026-09-02: Completed Squid Core refactor Patch 6B by moving atomic JSON
+  writes, per-session persistence, latest-only undo mechanics, and generic
+  session-directory inspection into `squid_core/storage/` with no compatibility
+  shims. `SessionStore.create(...)` and `UndoStore.create/open(...)` now accept
+  explicit storage directories; optional workspace metadata is supplied
+  explicitly. Session creation no longer writes Code Squid's global registry.
+  Code Squid's `core.app_paths` and application runner now own
+  `<repo>/.code-squid/sessions`, `<repo>/.code-squid/undo`, and explicit
+  best-effort registration, while top-level `storage/session_index.py` retains
+  `CODE_SQUID_SESSION_INDEXES` and cross-workspace policy. Existing session
+  metadata/JSONL semantics, IDs, diagnostics, replay, statuses, CLI discovery,
+  resume/show/latest behavior, and latest-only undo behavior were preserved.
+  Focused storage/session/undo/spawner/runner/CLI/boundary suite: 219 passed.
+  Full suite: 721 passed. Production compileall and a fresh 69-module import
+  walk passed; stale top-level generic storage imports and forbidden Core path,
+  environment, app-path, CLI, and UI dependencies are absent. Both diff checks
+  passed. No live model inference was run. Provider/config ownership, Skills/
+  Mods packaging, CLI architecture, and final application-package relocation
+  remain intentionally deferred.
 - 2026-09-02: Moved the provider contract, OpenAI-compatible transport, native
   Ollama transport, and their small settings-only construction helper into
   `squid_core/providers/`; removed the old top-level provider source package

@@ -1,18 +1,15 @@
-"""Reads Code Squid session folders without owning agent behavior."""
+"""Code Squid cross-workspace session registration and discovery policy."""
 
 import json
-import os
-import re
 from pathlib import Path
-from typing import Any
 
-
-# Return the small global registry that points at workspace-local session indexes.
-def session_indexes_path() -> Path:
-    configured_path = os.environ.get("CODE_SQUID_SESSION_INDEXES", "").strip()
-    if configured_path:
-        return Path(configured_path).expanduser()
-    return Path.home() / ".code-squid" / "session-indexes.jsonl"
+from core.app_paths import session_indexes_path, workspace_sessions_dir
+from squid_core.storage.session_index import (
+    latest_session_id as _latest_session_id,
+    list_sessions as _list_sessions,
+    load_session_entries as _load_session_entries,
+    session_dir_for as _session_dir_for,
+)
 
 
 # Remember a workspace index without moving session data out of the workspace.
@@ -31,7 +28,7 @@ def register_session_index(repo_root: Path) -> None:
 
 # Return the folder that contains all saved session directories.
 def sessions_dir(repo_root: Path) -> Path:
-    return repo_root / ".code-squid" / "sessions"
+    return workspace_sessions_dir(repo_root)
 
 
 # Load session metadata files, newest first.
@@ -39,28 +36,7 @@ def sessions_dir(repo_root: Path) -> Path:
 # Broken or hand-edited folders are skipped so one bad session does not make
 # the whole viewer unusable.
 def list_sessions(repo_root: Path) -> list[dict]:
-    root = sessions_dir(repo_root)
-    if not root.exists():
-        return []
-
-    sessions = []
-    for session_dir in root.iterdir():
-        if not session_dir.is_dir():
-            continue
-
-        metadata_path = session_dir / "metadata.json"
-        if not metadata_path.exists():
-            continue
-
-        try:
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
-
-        if isinstance(metadata, dict):
-            sessions.append(metadata)
-
-    return sorted(sessions, key=_updated_at, reverse=True)
+    return _list_sessions(sessions_dir(repo_root))
 
 
 # Load sessions across every workspace index registered by Code Squid.
@@ -84,60 +60,26 @@ def list_all_sessions() -> list[dict]:
         except OSError:
             continue
 
-    return sorted(sessions, key=_updated_at, reverse=True)
+    return sorted(
+        sessions,
+        key=lambda item: item.get("updated_at", ""),
+        reverse=True,
+    )
 
 
 # Return the newest session ID, or None when no sessions have metadata.
 def latest_session_id(repo_root: Path) -> str | None:
-    sessions = list_sessions(repo_root)
-    if not sessions:
-        return None
-
-    return sessions[0].get("session_id")
+    return _latest_session_id(sessions_dir(repo_root))
 
 
 # Return the path for one exact session ID.
 def session_dir_for(repo_root: Path, session_id: str) -> Path:
-    if not isinstance(session_id, str) or not re.fullmatch(
-        r"[A-Za-z0-9][A-Za-z0-9_-]*",
-        session_id,
-    ):
-        raise ValueError(f"Invalid session ID: {session_id!r}")
-
-    root = sessions_dir(repo_root)
-    resolved_root = root.resolve()
-    path = root / session_id
-    resolved_path = path.resolve()
-    if not resolved_path.is_relative_to(resolved_root):
-        raise ValueError(f"Session path escapes sessions directory: {session_id!r}")
-
-    if not path.is_dir():
-        raise FileNotFoundError(f"Session not found: {session_id}")
-
-    return path
+    return _session_dir_for(sessions_dir(repo_root), session_id)
 
 
 # Load raw transcript entries from a saved session.
 def load_session_entries(repo_root: Path, session_id: str) -> list[dict]:
-    jsonl_path = session_dir_for(repo_root, session_id) / "session.jsonl"
-    entries = []
-
-    with jsonl_path.open(encoding="utf-8") as file:
-        for line in file:
-            if not line.strip():
-                continue
-
-            entries.append(json.loads(line))
-
-    return entries
-
-
-def _updated_at(metadata: dict[str, Any]) -> str:
-    updated_at = metadata.get("updated_at")
-    if isinstance(updated_at, str):
-        return updated_at
-
-    return ""
+    return _load_session_entries(sessions_dir(repo_root), session_id)
 
 
 def _registered_repo_roots(index_path: Path) -> list[str]:

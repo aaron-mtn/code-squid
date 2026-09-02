@@ -16,7 +16,7 @@ from squid_core.settings import (
     ProviderSettings,
     RuntimeSettings as CoreRuntimeSettings,
 )
-from storage.atomic_json import atomic_write_json
+from squid_core.storage.atomic_json import atomic_write_json
 
 
 # Defaults keep Code Squid usable with a local OpenAI-compatible server,

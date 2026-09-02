@@ -84,6 +84,16 @@ application-owned modules awaiting the later application-package cleanup.
   - Exposes `ToolExecutor` and `ToolResults` from `squid_core.tools`; the static
     built-in registry is available as `squid_core.tools.builtins.TOOLS`.
 
+- `squid_core/storage/`
+  - Generic durable persistence mechanics with no Code Squid path or discovery
+    policy.
+  - `session_store.py` owns one explicitly located session directory,
+    `metadata.json`, append-only `session.jsonl`, replay loading, status updates,
+    compaction/run-context events, and model-reply/rejection diagnostics.
+  - `undo_store.py` owns the explicitly located latest-only undo buffer.
+  - `atomic_json.py` owns small same-directory atomic JSON replacement, and
+    `session_index.py` owns generic inspection of an explicit sessions directory.
+
 - `squid_core/hooks/`
   - Hook lifecycle contexts and decisions, `HookRunner`, and Hook metadata,
     discovery, and loading.
@@ -144,9 +154,10 @@ application-owned modules awaiting the later application-package cleanup.
 
 - `core/`
   - Temporary location for Code Squid application-owned wiring/policy only.
-  - `app_paths.py` owns Code Squid application-home policy and paths for loose
-    resources and Mods. Reusable Mod machinery receives the application home
-    explicitly; Squid Core does not define a global home.
+  - `app_paths.py` owns Code Squid application-home policy, repository-local
+    session/undo locations, the global session-index location, and paths for
+    loose resources and Mods. Reusable Core machinery receives those paths
+    explicitly; Squid Core does not define a global home or `.code-squid` layout.
   - `runner.py` is the Code Squid application builder and compatibility layer.
     It owns Code Squid prompt defaults, invokes Core Mod resolution for an
     explicitly selected `mod_name`, records run context, constructs terminal
@@ -155,13 +166,10 @@ application-owned modules awaiting the later application-package cleanup.
     followed by removal of `core/`, is deferred to the next cleanup patch.
 
 - `storage/`
-  - Local runtime persistence.
-  - `session_store.py` owns one session folder, `metadata.json`, append-only
-    `session.jsonl` entries, message loading, status updates, compaction event
-    logging, and non-replayable model-reply/rejection diagnostics.
-  - `session_index.py` owns saved-session discovery, newest-session lookup,
-    exact session directory lookup, and raw JSONL entry loading.
-  - `undo_store.py` owns the latest-only undo buffer.
+  - Code Squid application-owned persistence policy only.
+  - `session_index.py` owns `CODE_SQUID_SESSION_INDEXES`, cross-workspace
+    registration/discovery, and adapts the Core directory-inspection helpers to
+    Code Squid's repository-local session layout.
   - `error_log.py` owns narrow diagnostic traceback logging for model request
     failures.
 
@@ -388,20 +396,20 @@ Core `RuntimeSettings` object or a ready `ModelAdapter`. It never reads the
 working directory or loads Code Squid configuration. A supplied adapter bypasses
 built-in provider construction.
 
-By default, new runs create persistence with `SessionStore.create(repo_root,
-task)` followed by `UndoStore.create(repo_root, session_id)`. Embedding hosts
-may instead pass `session_store_factory` and/or `undo_store_factory` to either
-application or generic construction. Construction preserves session-store
-first ordering and supplies its session id to the undo factory. Either concern
-can be overridden independently. Generic and application builders also accept
-pre-created `Session`, `SessionStore`, and `UndoStore` objects without creating
-defaults for them.
+Generic new-run construction requires explicit `sessions_dir` and `undo_dir`
+inputs when it creates the stores itself. It calls
+`SessionStore.create(sessions_dir, task, workspace_root=...)` followed by
+`UndoStore.create(undo_dir, session_id, workspace_root=...)`. Embedding hosts
+may instead pass `session_store_factory` and/or `undo_store_factory`, or pass
+pre-created `SessionStore` and `UndoStore` objects. Construction preserves
+session-store-first ordering and supplies its session ID to delayed undo
+construction. Direct `AgentLoop(...)` construction remains unchanged.
 
 This seam lets a host persist outside the workspace without teaching Core its
-storage layout, indexes, or adapter types. Normal Core and CLI callers omit the
-factories and retain repository-local storage. Desktop is one possible host,
-not a special Core concern; the host remains responsible for any alternate
-persistence location while `repo_root` continues to define tool execution.
+storage layout, indexes, or adapter types. Code Squid's application runner uses
+`core.app_paths` to supply `<repo>/.code-squid/sessions` and
+`<repo>/.code-squid/undo`, while `repo_root` separately continues to define tool
+execution. Desktop is one possible host, not a special Core concern.
 
 Hosts that already resolved a Skill and its executable tool registry may pass
 them together as `resolved_skill` and `resolved_tools`. Core then skips Skill
@@ -417,11 +425,13 @@ the CLI follow-up path. It delegates generic collaborator wiring to
 `squid_core.spawner.build_agent_loop(...)`. Provider-specific construction and
 replay-mode decisions are delegated to `squid_core.providers`.
 
-`storage/session_index.py` owns read-only session discovery across registered
-workspaces. `SessionStore` owns persistence for one session. App-specific UIs
-own their presentation projection, such as turning persisted messages into
-feeds, cards, or views, while core owns reusable run, session, model, and tool
-wiring.
+`squid_core.storage.session_index` owns generic inspection of an explicit
+sessions directory. `storage/session_index.py` owns Code Squid's global
+cross-workspace registry and conventional workspace mapping. Session creation
+does not register itself globally; the Code Squid runner explicitly registers a
+workspace after it creates a session. Registry failure remains supplementary
+and does not invalidate usable local storage. App-specific UIs own their
+presentation projection while Core owns the persistence formats and mechanics.
 
 This runner layer is not a plugin system, orchestration layer, daemon, or
 server mode. It gives external Python code a clean way to call Code Squid
@@ -1072,7 +1082,7 @@ Compaction events are not printed as transcript messages by the viewer.
 Run-context events are shown as compact `[run context]` blocks with the skill,
 filtered tools, and prompt overrides used for that run.
 
-`UndoStore` stores the latest undo buffer under:
+Code Squid calculates the latest undo location as:
 
 ```text
 .code-squid/undo/
@@ -1215,8 +1225,11 @@ elsewhere.
 `squid_core/tools/executor.py` owns mechanical tool dispatch and side-effect tracking.
 Individual built-in tool behavior stays in `squid_core/tools/builtins/`.
 
-`storage/` owns durable local state. In-memory session behavior stays in
-`squid_core/session.py`; live display stays in `ui/`.
+`squid_core/storage/` owns generic durable session, undo, atomic-write, and
+session-directory inspection mechanics. `core/app_paths.py` and the top-level
+`storage/session_index.py` own Code Squid locations and global discovery policy.
+In-memory session behavior stays in `squid_core/session.py`; live display stays
+in `ui/`.
 
 `ui/` owns terminal presentation only. Tool-event display is the reliable UX
 layer for what happened, while model-native narration is encouraged by prompts.
@@ -1254,7 +1267,6 @@ layer for what happened, while model-native narration is encouraged by prompts.
   integration and explicit model load/unload/download support are deferred.
 - Future Squid Models provider/runtime integration is deferred; the existing
   OpenAI-compatible request behavior is not a dedicated transport.
-- Durable storage ownership cleanup is deferred.
 
 ## Practical Principles
 

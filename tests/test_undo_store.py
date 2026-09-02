@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from storage.undo_store import UndoStore
+from squid_core.storage import UndoStore
 
 
 def read_metadata(store: UndoStore) -> dict:
@@ -13,10 +13,15 @@ def read_metadata(store: UndoStore) -> dict:
 
 
 def test_create_creates_metadata_index_and_files_folder(tmp_path: Path) -> None:
-    store = UndoStore.create(tmp_path, session_id="session-1")
+    undo_dir = tmp_path / "undo"
+    store = UndoStore.create(
+        undo_dir,
+        session_id="session-1",
+        workspace_root=tmp_path,
+    )
     metadata = read_metadata(store)
 
-    assert store.undo_dir == tmp_path / ".code-squid" / "undo"
+    assert store.undo_dir == undo_dir
     assert store.metadata_path.is_file()
     assert store.index_path.is_file()
     assert store.files_dir.is_dir()
@@ -38,6 +43,12 @@ def test_create_replaces_previous_undo_folder(tmp_path: Path) -> None:
     assert second.undo_dir == first.undo_dir
     assert not leftover.exists()
     assert second.load_index() == []
+
+
+def test_create_without_workspace_omits_application_metadata(tmp_path: Path) -> None:
+    store = UndoStore.create(tmp_path / "undo")
+
+    assert "repo_root" not in read_metadata(store)
 
 
 def test_open_opens_existing_undo_folder(tmp_path: Path) -> None:

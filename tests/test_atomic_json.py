@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from storage.atomic_json import atomic_write_json
+from squid_core.storage.atomic_json import atomic_write_json
 
 
 def test_atomic_write_json_writes_existing_format(tmp_path: Path) -> None:
@@ -45,7 +45,7 @@ def test_replace_failure_does_not_install_partial_state(
     def fail_replace(source: Path, target: Path) -> None:
         raise OSError("replace failed")
 
-    monkeypatch.setattr("storage.atomic_json.os.replace", fail_replace)
+    monkeypatch.setattr("squid_core.storage.atomic_json.os.replace", fail_replace)
 
     with pytest.raises(OSError, match="replace failed"):
         atomic_write_json(destination, {"status": "new"})

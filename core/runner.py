@@ -17,15 +17,19 @@ from agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
 from config.settings import Settings, load_settings
 from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.events import EventCallback
-from core.app_paths import code_squid_home
+from core.app_paths import (
+    code_squid_home,
+    workspace_sessions_dir,
+    workspace_undo_dir,
+)
 from squid_core.hooks import HookRunner, load_user_hooks
 from squid_core.mods import ResolvedMod, resolve_mod
 from squid_core.platform_context import PlatformContext, detect_platform_context
 from squid_core.session import Session
 from squid_core.skills import Skill, discover_skills
 from squid_core.tools.user_tools import build_user_tool_registry
-from storage.session_store import SessionStore
-from storage.undo_store import UndoStore
+from squid_core.storage import SessionStore, UndoStore
+from storage.session_index import register_session_index
 from squid_core.tools.builtins import TOOLS
 from ui.terminal import StartupInfo, TerminalDisplay
 from squid_core.agent import Agent
@@ -177,15 +181,27 @@ def build_coding_task_run(
         raise ValueError("undo_store and undo_store_factory are mutually exclusive")
 
     session = session if session is not None else Session(repo_root=repo_root)
+    sessions_dir = workspace_sessions_dir(repo_root)
+    undo_dir = workspace_undo_dir(repo_root)
     if session_store is None:
         session_store = (
-            SessionStore.create(repo_root=repo_root, task=task)
+            SessionStore.create(sessions_dir, task, workspace_root=repo_root)
             if session_store_factory is None
             else session_store_factory(repo_root, task)
         )
+        try:
+            # Cross-workspace discovery is supplementary application policy;
+            # failure must not invalidate the newly created local session.
+            register_session_index(repo_root)
+        except Exception:
+            pass
     if undo_store is None and tool_executor is None:
         undo_store = (
-            UndoStore.create(repo_root, session_id=session_store.session_id)
+            UndoStore.create(
+                undo_dir,
+                session_store.session_id,
+                workspace_root=repo_root,
+            )
             if undo_store_factory is None
             else undo_store_factory(repo_root, session_store.session_id)
         )

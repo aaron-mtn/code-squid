@@ -1,12 +1,13 @@
 from pathlib import Path
 
+import pytest
+
 import squid_core.spawner as core_spawner
 from agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
 from squid_core.settings import CompactionSettings, ProviderSettings, RuntimeSettings
 from squid_core.session import Session
 from squid_core.agent import Agent
-from storage.session_store import SessionStore
-from storage.undo_store import UndoStore
+from squid_core.storage import SessionStore, UndoStore
 
 
 def _settings(*, provider: str = "openai_compatible") -> RuntimeSettings:
@@ -28,6 +29,13 @@ def _settings(*, provider: str = "openai_compatible") -> RuntimeSettings:
     )
 
 
+def _storage_paths(tmp_path: Path) -> dict:
+    return {
+        "sessions_dir": tmp_path / "sessions",
+        "undo_dir": tmp_path / "undo",
+    }
+
+
 def test_generic_module_has_no_coding_or_terminal_ui_dependency() -> None:
     source = Path(core_spawner.__file__).read_text(encoding="utf-8")
 
@@ -46,6 +54,7 @@ def test_generic_run_builds_default_agent_and_ui_neutral_display(tmp_path: Path)
         "Generic task",
         settings=_settings(),
         model_adapter=adapter,
+        **_storage_paths(tmp_path),
     )
 
     assert type(run.loop.agent) is Agent
@@ -53,6 +62,16 @@ def test_generic_run_builds_default_agent_and_ui_neutral_display(tmp_path: Path)
     assert run.loop.agent.tools == {}
     assert run.loop.model_adapter is adapter
     assert type(run.loop.display) is core_spawner.NullDisplay
+
+
+def test_generic_run_requires_explicit_storage_paths(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="sessions_dir is required"):
+        core_spawner.build_agent_run(
+            tmp_path,
+            "Generic task",
+            settings=_settings(),
+            model_adapter=object(),
+        )
 
 
 def test_code_squid_builder_supplies_application_prompt_defaults(
@@ -93,6 +112,7 @@ def test_supplied_provider_is_used_without_default_provider(
         "Provider task",
         settings=_settings(),
         provider=supplied_provider,
+        **_storage_paths(tmp_path),
     )
 
     assert run.loop.model_adapter.provider is supplied_provider
@@ -118,6 +138,7 @@ def test_supplied_model_adapter_bypasses_provider_and_adapter_construction(
         "Adapter task",
         settings=_settings(),
         model_adapter=adapter,
+        **_storage_paths(tmp_path),
     )
 
     assert run.loop.model_adapter is adapter
@@ -140,6 +161,7 @@ def test_supplied_runtime_collaborators_are_used_directly(tmp_path: Path) -> Non
         tmp_path,
         "Custom task",
         settings=_settings(),
+        **_storage_paths(tmp_path),
         **collaborators,
     )
 
@@ -168,6 +190,7 @@ def test_supplied_tool_executor_skips_default_undo_and_executor(
         settings=_settings(),
         model_adapter=object(),
         tool_executor=executor,
+        **_storage_paths(tmp_path),
     )
 
     assert run.loop.tool_executor is executor

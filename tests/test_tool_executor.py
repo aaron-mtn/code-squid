@@ -5,7 +5,7 @@ from squid_core.session import Session
 import squid_core.tools.executor as tool_executor_module
 from squid_core.tools import ToolExecutor
 from squid_core.platform_context import PlatformContext
-from storage.undo_store import UndoStore
+from squid_core.storage import UndoStore
 
 
 class FakeUndoStore:
@@ -88,7 +88,7 @@ def test_successful_apply_patch_snapshots_and_records_file_written(tmp_path: Pat
 def test_successful_write_file_produces_usable_undo_state(tmp_path: Path) -> None:
     target = tmp_path / "target.txt"
     target.write_text("before", encoding="utf-8")
-    undo_store = UndoStore.create(tmp_path)
+    undo_store = UndoStore.create(tmp_path / ".undo")
     executor = ToolExecutor(
         repo_root=tmp_path,
         session=Session(repo_root=tmp_path),
@@ -110,7 +110,7 @@ def test_successful_write_file_produces_usable_undo_state(tmp_path: Path) -> Non
 
 def test_failed_write_file_discards_new_undo_state(tmp_path: Path) -> None:
     target = tmp_path / "missing-parent" / "target.txt"
-    undo_store = UndoStore.create(tmp_path)
+    undo_store = UndoStore.create(tmp_path / ".undo")
     executor = ToolExecutor(
         repo_root=tmp_path,
         session=Session(repo_root=tmp_path),
@@ -133,7 +133,7 @@ def test_failed_write_file_discards_new_undo_state(tmp_path: Path) -> None:
 def test_successful_apply_patch_produces_usable_undo_state(tmp_path: Path) -> None:
     target = tmp_path / "target.txt"
     target.write_text("before", encoding="utf-8")
-    undo_store = UndoStore.create(tmp_path)
+    undo_store = UndoStore.create(tmp_path / ".undo")
     executor = ToolExecutor(
         repo_root=tmp_path,
         session=Session(repo_root=tmp_path),
@@ -156,7 +156,7 @@ def test_successful_apply_patch_produces_usable_undo_state(tmp_path: Path) -> No
 def test_failed_apply_patch_discards_new_undo_state(tmp_path: Path) -> None:
     target = tmp_path / "target.txt"
     target.write_text("before", encoding="utf-8")
-    undo_store = UndoStore.create(tmp_path)
+    undo_store = UndoStore.create(tmp_path / ".undo")
     executor = ToolExecutor(
         repo_root=tmp_path,
         session=Session(repo_root=tmp_path),
@@ -181,7 +181,7 @@ def test_failed_mutation_preserves_previous_successful_undo_state(tmp_path: Path
     unchanged = tmp_path / "unchanged.txt"
     changed.write_text("original", encoding="utf-8")
     unchanged.write_text("untouched", encoding="utf-8")
-    undo_store = UndoStore.create(tmp_path)
+    undo_store = UndoStore.create(tmp_path / ".undo")
     executor = ToolExecutor(
         repo_root=tmp_path,
         session=Session(repo_root=tmp_path),
@@ -212,7 +212,7 @@ def test_failed_mutation_preserves_previous_successful_undo_state(tmp_path: Path
 def test_mutation_exception_retains_snapshot_for_possible_partial_write(tmp_path: Path) -> None:
     target = tmp_path / "target.txt"
     target.write_text("before", encoding="utf-8")
-    undo_store = UndoStore.create(tmp_path)
+    undo_store = UndoStore.create(tmp_path / ".undo")
 
     def partially_write_then_raise(_repo_root: Path, **args) -> dict:
         Path(args["path"]).write_text("partial", encoding="utf-8")

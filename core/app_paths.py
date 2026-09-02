@@ -11,6 +11,7 @@ from pathlib import Path
 
 
 CODE_SQUID_HOME_ENV = "CODE_SQUID_HOME"
+CODE_SQUID_SESSION_INDEXES_ENV = "CODE_SQUID_SESSION_INDEXES"
 
 
 def code_squid_home(app_home: Path | str | None = None) -> Path:
@@ -42,6 +43,29 @@ def user_tools_dir(app_home: Path | str | None = None) -> Path:
 
 def user_mods_dir(app_home: Path | str | None = None) -> Path:
     return code_squid_home(app_home) / "mods"
+
+
+def workspace_state_dir(repo_root: Path | str) -> Path:
+    """Return Code Squid's repository-local state directory."""
+    return Path(repo_root).resolve() / ".code-squid"
+
+
+def workspace_sessions_dir(repo_root: Path | str) -> Path:
+    """Return the application-owned location for workspace sessions."""
+    return workspace_state_dir(repo_root) / "sessions"
+
+
+def workspace_undo_dir(repo_root: Path | str) -> Path:
+    """Return the application-owned location for the latest undo buffer."""
+    return workspace_state_dir(repo_root) / "undo"
+
+
+def session_indexes_path() -> Path:
+    """Return Code Squid's configured cross-workspace registry path."""
+    configured_path = os.environ.get(CODE_SQUID_SESSION_INDEXES_ENV, "").strip()
+    if configured_path:
+        return Path(configured_path).expanduser()
+    return code_squid_home() / "session-indexes.jsonl"
 
 
 def ensure_user_resource_dirs(app_home: Path | str | None = None) -> None:

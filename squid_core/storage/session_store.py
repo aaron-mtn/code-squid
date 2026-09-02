@@ -1,6 +1,4 @@
-# storage/session_store.py
-
-"""Owns disk persistence for one Code Squid session; must not own agent policy, loop control, or in-memory session behavior."""
+"""Own disk persistence mechanics for one Squid Core session."""
 
 import json
 import re
@@ -9,8 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from storage.atomic_json import atomic_write_json
-from storage.session_index import register_session_index
+from squid_core.storage.atomic_json import atomic_write_json
 
 
 # Status values allowed in metadata.json.
@@ -19,7 +16,7 @@ ALLOWED_STATUSES = {"active", "complete", "failed", "abandoned", "interrupted"}
 
 
 class SessionStore:
-    """Persists one Code Squid session to disk."""
+    """Persist one Squid Core session to an explicitly supplied directory."""
 
     # Store the paths for one session folder.
     #
@@ -31,19 +28,17 @@ class SessionStore:
         self.metadata_path = session_dir / "metadata.json"
         self.jsonl_path = session_dir / "session.jsonl"
 
-    # Create a brand-new session store under:
-    #
-    #   <repo_root>/.code-squid/sessions/<session_id>/
-    #
-    # This only creates storage files. It does not modify core/session.py,
-    # start the agent loop, or load prior messages.
     @classmethod
-    def create(cls, repo_root: Path, task: str) -> "SessionStore":
-        # Resolve the repo root once so metadata gets a stable absolute path.
-        repo_root = repo_root.resolve()
+    def create(
+        cls,
+        sessions_dir: Path,
+        task: str,
+        *,
+        workspace_root: Path | None = None,
+    ) -> "SessionStore":
+        """Create a session below ``sessions_dir`` without app path policy."""
 
-        # Keep Code Squid's local state inside the repo/workspace.
-        sessions_dir = repo_root / ".code-squid" / "sessions"
+        sessions_dir = Path(sessions_dir)
         sessions_dir.mkdir(parents=True, exist_ok=True)
 
         # Session IDs are human-readable so users can browse folders without
@@ -55,26 +50,23 @@ class SessionStore:
         # Store machine-friendly timestamp truth in metadata.
         # Later CLI rendering can decide whether to show 12-hour display time.
         now = _utc_now()
-        metadata = {
+        metadata: dict[str, Any] = {
             "session_id": session_id,
             "created_at": now,
             "updated_at": now,
-            "repo_root": str(repo_root),
             "task": task,
             "status": "active",
             "active_leaf_id": None,
         }
+        if workspace_root is not None:
+            # The host may retain workspace identity for viewers without Core
+            # needing to know where that host stores sessions.
+            metadata["repo_root"] = str(Path(workspace_root).resolve())
 
         # Write the initial metadata and create an empty JSONL transcript.
         store = cls(session_dir)
         store._write_metadata(metadata)
         store.jsonl_path.write_text("", encoding="utf-8")
-        try:
-            register_session_index(repo_root)
-        except Exception:
-            # Global discovery is supplementary. A local session must still be
-            # usable when the home-level registry cannot be written.
-            pass
         return store
 
     # Open an existing session folder without creating or modifying files.

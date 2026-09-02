@@ -2,12 +2,17 @@ from pathlib import Path
 
 from core.app_paths import (
     CODE_SQUID_HOME_ENV,
+    CODE_SQUID_SESSION_INDEXES_ENV,
     code_squid_home,
     ensure_user_resource_dirs,
+    session_indexes_path,
     user_hooks_dir,
     user_mods_dir,
     user_skills_dir,
     user_tools_dir,
+    workspace_sessions_dir,
+    workspace_state_dir,
+    workspace_undo_dir,
 )
 
 
@@ -44,3 +49,16 @@ def test_env_path_expands_user_home(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv(CODE_SQUID_HOME_ENV, "~/custom-code-squid")
     assert code_squid_home() == tmp_path / "custom-code-squid"
+
+
+def test_workspace_storage_paths_are_application_owned(tmp_path: Path) -> None:
+    root = tmp_path.resolve()
+    assert workspace_state_dir(tmp_path) == root / ".code-squid"
+    assert workspace_sessions_dir(tmp_path) == root / ".code-squid" / "sessions"
+    assert workspace_undo_dir(tmp_path) == root / ".code-squid" / "undo"
+
+
+def test_session_index_path_uses_override(monkeypatch, tmp_path: Path) -> None:
+    configured = tmp_path / "indexes.jsonl"
+    monkeypatch.setenv(CODE_SQUID_SESSION_INDEXES_ENV, str(configured))
+    assert session_indexes_path() == configured

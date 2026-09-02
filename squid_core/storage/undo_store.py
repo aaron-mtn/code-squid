@@ -1,6 +1,4 @@
-# storage/undo_store.py
-
-"""Stores the latest Code Squid undo buffer on disk."""
+"""Store the latest-only Squid Core undo buffer on disk."""
 
 import json
 import shutil
@@ -8,17 +6,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from storage.atomic_json import atomic_write_json
+from squid_core.storage.atomic_json import atomic_write_json
 
 
 class UndoStore:
-    """Persists one latest-only undo buffer."""
+    """Persist one latest-only undo buffer at an explicit path."""
 
-    # The undo folder is intentionally fixed:
-    #
-    #   <repo_root>/.code-squid/undo/
-    #
-    # Creating a new store replaces whatever was there before.
     def __init__(self, undo_dir: Path) -> None:
         self.undo_dir = undo_dir
         self.metadata_path = undo_dir / "metadata.json"
@@ -26,10 +19,16 @@ class UndoStore:
         self.files_dir = undo_dir / "files"
 
     @classmethod
-    def create(cls, repo_root: Path, session_id: str | None = None) -> "UndoStore":
-        repo_root = repo_root.resolve()
-        undo_dir = repo_root / ".code-squid" / "undo"
+    def create(
+        cls,
+        undo_dir: Path,
+        session_id: str | None = None,
+        *,
+        workspace_root: Path | None = None,
+    ) -> "UndoStore":
+        """Replace and initialize the latest-only buffer at ``undo_dir``."""
 
+        undo_dir = Path(undo_dir)
         if undo_dir.exists():
             shutil.rmtree(undo_dir)
 
@@ -38,21 +37,23 @@ class UndoStore:
 
         now = _utc_now()
         store = cls(undo_dir)
-        store._write_metadata(
-            {
-                "created_at": now,
-                "updated_at": now,
-                "repo_root": str(repo_root),
-                "session_id": session_id,
-                "status": "active",
-            }
-        )
+        metadata: dict[str, Any] = {
+            "created_at": now,
+            "updated_at": now,
+            "session_id": session_id,
+            "status": "active",
+        }
+        if workspace_root is not None:
+            metadata["repo_root"] = str(Path(workspace_root).resolve())
+        store._write_metadata(metadata)
         store._write_index([])
         return store
 
     @classmethod
-    def open(cls, repo_root: Path) -> "UndoStore":
-        undo_dir = repo_root.resolve() / ".code-squid" / "undo"
+    def open(cls, undo_dir: Path) -> "UndoStore":
+        """Open an existing undo buffer at ``undo_dir``."""
+
+        undo_dir = Path(undo_dir)
         store = cls(undo_dir)
 
         if not store.metadata_path.is_file():

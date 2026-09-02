@@ -38,7 +38,10 @@ def test_run_coding_task_passes_callbacks_to_agent_loop(monkeypatch, tmp_path) -
     def should_cancel() -> bool:
         return False
 
-    monkeypatch.setattr("squid_core.spawner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        "squid_core.spawner.build_provider",
+        lambda *args, **kwargs: object(),
+    )
     monkeypatch.setattr("squid_core.spawner.AgentLoop", FakeAgentLoop)
 
     run_coding_task(
@@ -109,19 +112,27 @@ def test_run_construction_uses_default_storage_factories(monkeypatch, tmp_path: 
     calls = []
 
     original_session_create = __import__(
-        "storage.session_store", fromlist=["SessionStore"]
+        "squid_core.storage.session_store", fromlist=["SessionStore"]
     ).SessionStore.create
     original_undo_create = __import__(
-        "storage.undo_store", fromlist=["UndoStore"]
+        "squid_core.storage.undo_store", fromlist=["UndoStore"]
     ).UndoStore.create
 
-    def create_session(*, repo_root, task):
-        calls.append(("session", repo_root, task))
-        return original_session_create(repo_root=repo_root, task=task)
+    def create_session(sessions_dir, task, *, workspace_root=None):
+        calls.append(("session", sessions_dir, task, workspace_root))
+        return original_session_create(
+            sessions_dir,
+            task,
+            workspace_root=workspace_root,
+        )
 
-    def create_undo(repo_root, session_id=None):
-        calls.append(("undo", repo_root, session_id))
-        return original_undo_create(repo_root, session_id=session_id)
+    def create_undo(undo_dir, session_id=None, *, workspace_root=None):
+        calls.append(("undo", undo_dir, session_id, workspace_root))
+        return original_undo_create(
+            undo_dir,
+            session_id=session_id,
+            workspace_root=workspace_root,
+        )
 
     monkeypatch.setattr("core.runner.SessionStore.create", create_session)
     monkeypatch.setattr("core.runner.UndoStore.create", create_undo)
@@ -130,17 +141,45 @@ def test_run_construction_uses_default_storage_factories(monkeypatch, tmp_path: 
     run = build_coding_task_run(tmp_path, "Store defaults", display=FakeDisplay())
 
     assert calls == [
-        ("session", tmp_path.resolve(), "Store defaults"),
-        ("undo", tmp_path.resolve(), run.session_store.session_id),
+        (
+            "session",
+            tmp_path.resolve() / ".code-squid" / "sessions",
+            "Store defaults",
+            tmp_path.resolve(),
+        ),
+        (
+            "undo",
+            tmp_path.resolve() / ".code-squid" / "undo",
+            run.session_store.session_id,
+            tmp_path.resolve(),
+        ),
     ]
 
 
+def test_run_construction_explicitly_registers_new_session(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    registrations = []
+    monkeypatch.setattr(
+        "core.runner.register_session_index",
+        lambda repo_root: registrations.append(repo_root),
+    )
+    monkeypatch.setattr(
+        "squid_core.spawner.build_provider",
+        lambda *args, **kwargs: object(),
+    )
+
+    build_coding_task_run(tmp_path, "Register session", display=FakeDisplay())
+
+    assert registrations == [tmp_path.resolve()]
+
+
 def test_run_construction_uses_explicit_storage_factories(monkeypatch, tmp_path: Path) -> None:
-    from storage.session_store import SessionStore
-    from storage.undo_store import UndoStore
+    from squid_core.storage import SessionStore, UndoStore
 
     custom_session = SessionStore.create(tmp_path / "persistence", "Custom session")
-    custom_undo = UndoStore.create(tmp_path / "persistence", custom_session.session_id)
+    custom_undo = UndoStore.create(tmp_path / "undo-persistence", custom_session.session_id)
     calls = []
     captured_executor = {}
     tools = {"custom_tool": {"marker": object()}}
@@ -186,16 +225,15 @@ def test_run_construction_uses_explicit_storage_factories(monkeypatch, tmp_path:
 
 
 def test_storage_factories_can_be_overridden_independently(monkeypatch, tmp_path: Path) -> None:
-    from storage.session_store import SessionStore
-    from storage.undo_store import UndoStore
+    from squid_core.storage import SessionStore, UndoStore
 
     custom_session = SessionStore.create(tmp_path / "session-data", "Session only")
     custom_undo = UndoStore.create(tmp_path / "undo-data", "undo-only")
     default_undo_calls = []
     original_undo_create = UndoStore.create
 
-    def create_default_undo(repo_root, session_id=None):
-        default_undo_calls.append((repo_root, session_id))
+    def create_default_undo(undo_dir, session_id=None, *, workspace_root=None):
+        default_undo_calls.append((undo_dir, session_id, workspace_root))
         return original_undo_create(tmp_path / "default-undo", session_id)
 
     monkeypatch.setattr("core.runner.UndoStore.create", create_default_undo)
@@ -215,7 +253,13 @@ def test_storage_factories_can_be_overridden_independently(monkeypatch, tmp_path
     )
 
     assert session_run.session_store is custom_session
-    assert default_undo_calls == [(tmp_path.resolve(), custom_session.session_id)]
+    assert default_undo_calls == [
+        (
+            tmp_path.resolve() / ".code-squid" / "undo",
+            custom_session.session_id,
+            tmp_path.resolve(),
+        )
+    ]
     assert undo_run.loop.tool_executor.undo_store is custom_undo
 
 

@@ -24,8 +24,7 @@ from squid_core.session import Session
 from squid_core.settings import RuntimeSettings
 from squid_core.tools import ToolExecutor, ToolResults
 from squid_core.agent import Agent
-from storage.session_store import SessionStore
-from storage.undo_store import UndoStore
+from squid_core.storage import SessionStore, UndoStore
 
 
 SessionStoreFactory = Callable[[Path, str], SessionStore]
@@ -109,6 +108,8 @@ def build_agent_run(
     display=None,
     approval_prompter=None,
     session: Session | None = None,
+    sessions_dir: Path | None = None,
+    undo_dir: Path | None = None,
     session_store: SessionStore | None = None,
     undo_store: UndoStore | None = None,
     session_store_factory: SessionStoreFactory | None = None,
@@ -121,7 +122,9 @@ def build_agent_run(
 
     Supplied high-level collaborators are used directly.  In particular, a
     supplied model adapter bypasses provider construction and a supplied tool
-    executor bypasses default undo-store and executor construction.
+    executor bypasses default undo-store and executor construction. Default
+    stores require explicit ``sessions_dir`` and ``undo_dir`` paths; store
+    factories continue to receive the workspace root and own their path policy.
     """
 
     if session_store is not None and session_store_factory is not None:
@@ -132,18 +135,33 @@ def build_agent_run(
     repo_root = Path(repo_root).resolve()
     session = session if session is not None else Session(repo_root=repo_root)
     if session_store is None:
-        session_store = (
-            SessionStore.create(repo_root=repo_root, task=task)
-            if session_store_factory is None
-            else session_store_factory(repo_root, task)
-        )
+        if session_store_factory is not None:
+            session_store = session_store_factory(repo_root, task)
+        else:
+            if sessions_dir is None:
+                raise ValueError(
+                    "sessions_dir is required unless a session store or factory "
+                    "is supplied"
+                )
+            session_store = SessionStore.create(
+                sessions_dir,
+                task,
+                workspace_root=repo_root,
+            )
 
     if undo_store is None and tool_executor is None:
-        undo_store = (
-            UndoStore.create(repo_root, session_id=session_store.session_id)
-            if undo_store_factory is None
-            else undo_store_factory(repo_root, session_store.session_id)
-        )
+        if undo_store_factory is not None:
+            undo_store = undo_store_factory(repo_root, session_store.session_id)
+        else:
+            if undo_dir is None:
+                raise ValueError(
+                    "undo_dir is required unless an undo store or factory is supplied"
+                )
+            undo_store = UndoStore.create(
+                undo_dir,
+                session_store.session_id,
+                workspace_root=repo_root,
+            )
     elif undo_store is None and undo_store_factory is not None:
         undo_store = undo_store_factory(repo_root, session_store.session_id)
 

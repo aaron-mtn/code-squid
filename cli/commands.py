@@ -6,8 +6,9 @@ from cli.args import parse_cli_args
 from cli.interactive import _resume_session, _run_interactive
 from cli.skills import handle_skills
 from config.settings import load_settings, write_approval_mode
+from core.app_paths import workspace_undo_dir
 from core.runner import FRIENDLY_MODES
-from storage.undo_store import UndoStore
+from squid_core.storage import UndoStore
 from ui.sessions import USAGE, handle_session_viewer
 
 
@@ -20,7 +21,7 @@ APPROVAL_MODES = {
 
 def _undo(repo_root: Path) -> None:
     try:
-        results = UndoStore.open(repo_root).restore()
+        results = UndoStore.open(workspace_undo_dir(repo_root)).restore()
     except FileNotFoundError as error:
         print(error)
         return

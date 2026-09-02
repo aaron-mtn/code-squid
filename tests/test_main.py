@@ -19,7 +19,7 @@ from config.settings import load_settings
 from squid_core.agent_loop import RunResult
 from squid_core.model_adapter import ModelRequestError
 from main import main
-from storage.session_store import SessionStore
+from squid_core.storage import SessionStore
 from ui.terminal import (
     CODE_SQUID_BANNER,
     RUN_STARTED_DIVIDER,

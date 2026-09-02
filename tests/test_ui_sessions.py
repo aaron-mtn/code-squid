@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from storage.session_store import SessionStore
+from core.app_paths import workspace_sessions_dir
+from squid_core.storage import SessionStore
 from ui.sessions import handle_session_viewer, print_session
 
 
@@ -8,7 +9,11 @@ def test_print_session_shows_run_context_events(
     tmp_path: Path,
     capsys,
 ) -> None:
-    store = SessionStore.create(tmp_path, "debug context")
+    store = SessionStore.create(
+        workspace_sessions_dir(tmp_path),
+        "debug context",
+        workspace_root=tmp_path,
+    )
     store.append_run_context(
         skill_name="architecture-review",
         allowed_tools=["run_command", "read_file"],
@@ -27,7 +32,11 @@ def test_print_session_shows_run_context_events(
 
 
 def test_session_viewer_latest_selects_newest_session(tmp_path: Path, capsys) -> None:
-    store = SessionStore.create(tmp_path, "latest session")
+    store = SessionStore.create(
+        workspace_sessions_dir(tmp_path),
+        "latest session",
+        workspace_root=tmp_path,
+    )
 
     assert handle_session_viewer(tmp_path, ["show", "latest"]) is True
 
