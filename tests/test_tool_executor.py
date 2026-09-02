@@ -2,8 +2,8 @@ from pathlib import Path
 import sys
 
 from squid_core.session import Session
-import squid_core.tool_executor as tool_executor_module
-from squid_core.tool_executor import ToolExecutor
+import squid_core.tools.executor as tool_executor_module
+from squid_core.tools import ToolExecutor
 from squid_core.platform_context import PlatformContext
 from storage.undo_store import UndoStore
 

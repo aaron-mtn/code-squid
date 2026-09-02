@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 
 from squid_core.session import Session
-from squid_core.tool_executor import ToolExecutor
-from squid_core.user_tools import (
+from squid_core.tools import ToolExecutor
+from squid_core.tools.user_tools import (
     UserTool,
     UserToolError,
     build_user_tool_registry,
@@ -241,7 +241,7 @@ def test_explicit_user_tool_metadata_builds_executable_registry_without_discover
     tool = load_user_tool(tool_dir, source="mod", editable=False)
     assert tool is not None
     monkeypatch.setattr(
-        "squid_core.user_tools.discover_user_tools",
+        "squid_core.tools.user_tools.discover_user_tools",
         lambda: pytest.fail("explicit registry must not rediscover tools"),
     )
 

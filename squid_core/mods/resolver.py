@@ -1,4 +1,4 @@
-"""Canonical Code Squid Mod metadata and runtime resolution.
+"""Canonical Mod metadata and runtime resolution.
 
 Discovery and validation read metadata only.  Tool and Hook Python source is
 imported only when an explicitly selected runtime executes a Tool or resolves
@@ -7,61 +7,32 @@ its selected Hooks, respectively.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 import json
 from pathlib import Path
-import re
 from typing import Any
 
-from squid_core.hook_loader import HookInfo, HookLoadError, load_hook_infos, read_hook_info
+from squid_core.hooks import HookInfo, HookLoadError, load_hook_infos, read_hook_info
 from squid_core.skills import Skill, discover_skills, parse_skill_file
-from squid_core.user_tools import (
+from squid_core.tools.builtins import TOOLS
+from squid_core.tools.user_tools import (
     UserTool,
     UserToolError,
     build_user_tool_registry_from_metadata,
     discover_user_tools,
     load_user_tool,
 )
-from tools import TOOLS
-
-
-SAFE_MOD_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-SAFE_COMPONENT_NAME_RE = re.compile(r"^[a-z0-9_-]+$")
-ALLOWED_MOD_ACCENTS = (
-    "cyan", "blue", "green", "yellow", "orange",
-    "red", "pink", "purple", "white", "gray",
+from .model import (
+    ALLOWED_MOD_ACCENTS,
+    DEFAULT_MOD_ACCENT,
+    MOD_FIELDS,
+    SAFE_COMPONENT_NAME_RE,
+    SAFE_MOD_NAME_RE,
+    Mod,
+    ModMetadataError,
+    ModResolutionError,
+    ResolvedMod,
 )
-DEFAULT_MOD_ACCENT = "cyan"
-MOD_FIELDS = {"name", "description", "default_skill", "accent", "tools", "hooks"}
-
-
-@dataclass(frozen=True)
-class Mod:
-    name: str
-    description: str
-    default_skill: str
-    accent: str
-    tools: tuple[str, ...]
-    hooks: tuple[str, ...]
-    path: Path
-    valid: bool = True
-    errors: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class ResolvedMod:
-    metadata: Mod
-    skill: Skill
-    tools: dict
-    hooks: tuple[object, ...]
-
-
-class ModMetadataError(RuntimeError):
-    pass
-
-
-class ModResolutionError(ValueError):
-    pass
 
 
 def discover_mods(app_home: Path | str) -> dict[str, Mod]:

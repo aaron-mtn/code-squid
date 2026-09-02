@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
-from squid_core.action_preflight import ActionPreflight
-from squid_core.approval import ApprovalPolicy, denied_result
+from squid_core.safety import ActionPreflight, ApprovalPolicy, denied_result
 from squid_core.events import EventCallback, emit_event
 from squid_core.hooks import (
     BeforeAcceptFinalContext,

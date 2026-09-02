@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import squid_core.runner as core_runner
+import squid_core.spawner as core_spawner
 from agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
 from config.settings import (
     CompactionSettings,
@@ -25,7 +25,7 @@ def _settings(*, provider: str = "openai_compatible") -> Settings:
 
 
 def test_generic_module_has_no_coding_or_terminal_ui_dependency() -> None:
-    source = Path(core_runner.__file__).read_text(encoding="utf-8")
+    source = Path(core_spawner.__file__).read_text(encoding="utf-8")
 
     assert "agent.coding" not in source
     assert "agent.prompts" not in source
@@ -37,7 +37,7 @@ def test_generic_module_has_no_coding_or_terminal_ui_dependency() -> None:
 def test_generic_run_builds_default_agent_and_ui_neutral_display(tmp_path: Path) -> None:
     adapter = object()
 
-    run = core_runner.build_agent_run(
+    run = core_spawner.build_agent_run(
         tmp_path,
         "Generic task",
         settings=_settings(),
@@ -48,7 +48,7 @@ def test_generic_run_builds_default_agent_and_ui_neutral_display(tmp_path: Path)
     assert run.loop.agent.task == "Generic task"
     assert run.loop.agent.tools == {}
     assert run.loop.model_adapter is adapter
-    assert type(run.loop.display) is core_runner.NullDisplay
+    assert type(run.loop.display) is core_spawner.NullDisplay
 
 
 def test_code_squid_builder_supplies_application_prompt_defaults(
@@ -79,12 +79,12 @@ def test_supplied_provider_is_used_without_default_provider(
 ) -> None:
     supplied_provider = object()
     monkeypatch.setattr(
-        core_runner,
+        core_spawner,
         "build_provider",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("default provider")),
     )
 
-    run = core_runner.build_agent_run(
+    run = core_spawner.build_agent_run(
         tmp_path,
         "Provider task",
         settings=_settings(),
@@ -99,17 +99,17 @@ def test_supplied_model_adapter_bypasses_provider_and_adapter_construction(
 ) -> None:
     adapter = object()
     monkeypatch.setattr(
-        core_runner,
+        core_spawner,
         "build_provider",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("provider built")),
     )
     monkeypatch.setattr(
-        core_runner,
+        core_spawner,
         "ModelAdapter",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("adapter built")),
     )
 
-    run = core_runner.build_agent_run(
+    run = core_spawner.build_agent_run(
         tmp_path,
         "Adapter task",
         settings=_settings(),
@@ -132,7 +132,7 @@ def test_supplied_runtime_collaborators_are_used_directly(tmp_path: Path) -> Non
         "display": object(),
     }
 
-    run = core_runner.build_agent_run(
+    run = core_spawner.build_agent_run(
         tmp_path,
         "Custom task",
         settings=_settings(),
@@ -148,17 +148,17 @@ def test_supplied_tool_executor_skips_default_undo_and_executor(
 ) -> None:
     executor = object()
     monkeypatch.setattr(
-        core_runner.UndoStore,
+        core_spawner.UndoStore,
         "create",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("undo built")),
     )
     monkeypatch.setattr(
-        core_runner,
+        core_spawner,
         "ToolExecutor",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("executor built")),
     )
 
-    run = core_runner.build_agent_run(
+    run = core_spawner.build_agent_run(
         tmp_path,
         "Executor task",
         settings=_settings(),
@@ -182,7 +182,7 @@ def test_store_factories_preserve_order_and_session_id(tmp_path: Path) -> None:
         calls.append(("undo", repo_root, session_id))
         return undo_store
 
-    run = core_runner.build_agent_run(
+    run = core_spawner.build_agent_run(
         tmp_path,
         "Stored task",
         settings=_settings(),
@@ -207,17 +207,17 @@ def test_precreated_session_and_stores_skip_default_construction(
     undo_store = UndoStore.create(tmp_path / "undo-host", session_store.session_id)
 
     monkeypatch.setattr(
-        core_runner.SessionStore,
+        core_spawner.SessionStore,
         "create",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("session store built")),
     )
     monkeypatch.setattr(
-        core_runner.UndoStore,
+        core_spawner.UndoStore,
         "create",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("undo store built")),
     )
 
-    run = core_runner.build_agent_run(
+    run = core_spawner.build_agent_run(
         tmp_path,
         "Existing",
         settings=_settings(),
@@ -242,7 +242,7 @@ def test_direct_agent_loop_construction_remains_available(tmp_path: Path) -> Non
         tool_executor=object(),
         tool_results=object(),
         agent=object(),
-        display=core_runner.NullDisplay(),
+        display=core_spawner.NullDisplay(),
     )
 
     assert isinstance(loop, AgentLoop)

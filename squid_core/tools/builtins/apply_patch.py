@@ -1,4 +1,4 @@
-# tools/apply_patch.py
+# squid_core/tools/builtins/apply_patch.py
 
 """Owns the apply_patch tool schema and exact-replacement behavior; must not own agent policy, loop control, or message formatting."""
 

@@ -3,12 +3,12 @@ import json
 
 import squid_core.agent_loop as agent_loop_module
 from agent.coding import CodingAgent
-from squid_core.action_preflight import ActionPreflightDecision
+from squid_core.safety import ActionPreflightDecision
 from squid_core.agent_loop import AgentLoop, RunResult
-from squid_core.approval import ApprovalDecision, ApprovalPolicy
+from squid_core.safety import ApprovalDecision, ApprovalPolicy
 from squid_core.hooks import HookRunner
 from squid_core.session import Session
-from squid_core.tool_results import ToolResults
+from squid_core.tools import ToolResults
 from storage.session_store import SessionStore
 
 

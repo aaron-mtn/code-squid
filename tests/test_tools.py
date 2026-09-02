@@ -6,15 +6,15 @@ import sys
 
 import pytest
 
-from tools.read_file import execute as read_file
-from tools.read_file import tool_definition as read_file_definition
-from tools._truncation import truncate_head_tail
-from tools.run_command import execute as run_command
-from tools.apply_patch import execute as apply_patch
-from tools.write_file import execute as write_file
+from squid_core.tools.builtins.read_file import execute as read_file
+from squid_core.tools.builtins.read_file import tool_definition as read_file_definition
+from squid_core.tools.builtins._truncation import truncate_head_tail
+from squid_core.tools.builtins.run_command import execute as run_command
+from squid_core.tools.builtins.apply_patch import execute as apply_patch
+from squid_core.tools.builtins.write_file import execute as write_file
 
 
-run_command_module = importlib.import_module("tools.run_command")
+run_command_module = importlib.import_module("squid_core.tools.builtins.run_command")
 
 
 def test_read_file_rejects_relative_path_and_succeeds_with_absolute_path(tmp_path: Path) -> None:

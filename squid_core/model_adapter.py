@@ -44,8 +44,8 @@ class ModelAdapter:
             )
         except Exception as exc:
             # Provider-specific failures are wrapped at this boundary so the
-            # CLI can handle request failures without hiding Code Squid bugs
-            # from normalization, validation, or the rest of the app.
+            # The host can handle request failures without hiding bugs in
+            # normalization, validation, or the rest of the application.
             raise ModelRequestError("Model request failed") from exc
 
         return self._reply_from_response(raw_response, tool_metadata)

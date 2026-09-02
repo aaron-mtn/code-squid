@@ -9,13 +9,13 @@ from config.settings import (
     RuntimeSettings,
     Settings,
 )
-from squid_core.hook_loader import list_user_hooks, load_user_hooks
+from squid_core.hooks import list_user_hooks, load_user_hooks
 from squid_core.mods import ModResolutionError, discover_mods, load_mod, resolve_mod, validate_mod
 from core.runner import build_coding_task_run
 from squid_core.skills import discover_skills
-from squid_core.user_tools import discover_user_tools
-from squid_core import runner as generic_runner
-from tools import TOOLS
+from squid_core.tools.user_tools import discover_user_tools
+from squid_core import spawner as generic_spawner
+from squid_core.tools.builtins import TOOLS
 
 
 def _write_skill(path: Path, name: str, tools: tuple[str, ...], description: str) -> None:
@@ -248,6 +248,6 @@ def test_code_squid_builder_resolves_selected_mod_into_agent_tools_hooks_and_con
     assert '"skill_name": "review-pack"' in context
 
 
-def test_generic_runner_remains_mod_agnostic() -> None:
-    assert "mod_name" not in generic_runner.build_agent_run.__annotations__
-    assert "mod_name" not in generic_runner.build_agent_run.__code__.co_varnames
+def test_generic_spawner_remains_mod_agnostic() -> None:
+    assert "mod_name" not in generic_spawner.build_agent_run.__annotations__
+    assert "mod_name" not in generic_spawner.build_agent_run.__code__.co_varnames

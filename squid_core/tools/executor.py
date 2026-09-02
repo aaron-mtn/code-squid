@@ -1,8 +1,8 @@
 from pathlib import Path
 
 from squid_core.platform_context import PlatformContext
-from squid_core.workspace_boundary import workspace_boundary_reason
-from tools import TOOLS
+from squid_core.safety.workspace_boundary import workspace_boundary_reason
+from .builtins import TOOLS
 
 
 BUILTIN_RUN_COMMAND = TOOLS["run_command"]["execute"]

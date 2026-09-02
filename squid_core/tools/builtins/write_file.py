@@ -1,4 +1,4 @@
-# tools/write_file.py
+# squid_core/tools/builtins/write_file.py
 
 """Owns the write_file tool schema and file-writing behavior; must not own agent policy, loop control, or message formatting."""
 

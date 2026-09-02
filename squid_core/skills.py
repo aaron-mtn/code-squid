@@ -1,4 +1,4 @@
-"""Minimal Code Squid skill loading."""
+"""Skill parsing and discovery."""
 
 from __future__ import annotations
 

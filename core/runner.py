@@ -3,7 +3,7 @@
 """Code Squid application wiring for normal coding tasks.
 
 This layer owns Code Squid prompts, Skill/tool discovery, hooks, and terminal
-presentation. Generic collaborator construction lives in ``squid_core.runner``.
+presentation. Generic collaborator construction lives in ``squid_core.spawner``.
 """
 
 from __future__ import annotations
@@ -18,19 +18,18 @@ from config.settings import Settings, load_settings
 from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.events import EventCallback
 from core.app_paths import code_squid_home
-from squid_core.hook_loader import load_user_hooks
-from squid_core.hooks import HookRunner
+from squid_core.hooks import HookRunner, load_user_hooks
 from squid_core.mods import ResolvedMod, resolve_mod
 from squid_core.platform_context import PlatformContext, detect_platform_context
 from squid_core.session import Session
 from squid_core.skills import Skill, discover_skills
-from squid_core.user_tools import build_user_tool_registry
+from squid_core.tools.user_tools import build_user_tool_registry
 from storage.session_store import SessionStore
 from storage.undo_store import UndoStore
-from tools import TOOLS
+from squid_core.tools.builtins import TOOLS
 from ui.terminal import StartupInfo, TerminalDisplay
 from squid_core.agent import Agent
-from squid_core.runner import build_agent_loop as build_core_agent_loop
+from squid_core.spawner import build_agent_loop as build_core_agent_loop
 
 
 SessionStoreFactory = Callable[[Path, str], SessionStore]

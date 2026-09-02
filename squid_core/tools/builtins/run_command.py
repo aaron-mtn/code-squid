@@ -1,4 +1,4 @@
-# tools/run_command.py
+# squid_core/tools/builtins/run_command.py
 
 """Owns the run_command tool schema and execution behavior; must not own agent policy, prompt guidance, or session updates."""
 

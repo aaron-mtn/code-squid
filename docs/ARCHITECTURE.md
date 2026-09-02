@@ -17,8 +17,8 @@ boundaries are small enough to inspect directly.
 The construction and runtime shape is:
 
 ```text
-Code Squid host selects Mod -> Core resolves Skill/Tools/Hooks
--> Code Squid application builder -> generic Squid Core builder -> AgentLoop
+Code Squid host/app -> Code Squid application runner -> Squid Core spawner
+-> AgentLoop
 settings -> provider -> model adapter -> Core Agent -> action preflight -> approval -> tools -> transcript/session storage
 ```
 
@@ -73,18 +73,44 @@ application-owned modules awaiting the later application-package cleanup.
     action, result, verification, correction, next-step, and risk context
     without Code Squid identity or coding-only language.
 
-- `squid_core/runner.py`
+- `squid_core/mods/`
+  - Mod metadata, validation, discovery, and runtime composition.
+  - Exposes `Mod`, `ResolvedMod`, `discover_mods`, `load_mod`, `validate_mod`,
+    and `resolve_mod` from `squid_core.mods`.
+
+- `squid_core/tools/`
+  - Complete Tool subsystem: execution, result formatting, saved Tool metadata,
+    and the built-in registry and implementations under `builtins/`.
+  - Exposes `ToolExecutor` and `ToolResults` from `squid_core.tools`; the static
+    built-in registry is available as `squid_core.tools.builtins.TOOLS`.
+
+- `squid_core/hooks/`
+  - Hook lifecycle contexts and decisions, `HookRunner`, and Hook metadata,
+    discovery, and loading.
+  - Hooks participate in runtime decisions; flat `squid_core/events.py` only
+    observes runtime facts.
+
+- `squid_core/safety/`
+  - Tool-action preflight, approval policy, guarded-command classification, and
+    structured file-tool workspace boundaries.
+  - This is an approval/preflight boundary, not a hardened sandbox.
+
+- `squid_core/spawner.py`
   - Generic, UI-neutral construction for `AgentRun` and `AgentLoop`.
   - Creates ordinary runtime collaborators when omitted and accepts selected
     collaborators directly when an embedding application replaces them.
   - Does not import Code Squid prompts, CodingAgent compatibility, terminal
     presentation, or Code Squid resource/Mod discovery.
 
-- `squid_core/*.py`
-  - Reusable runtime collaborators live directly in the package: AgentLoop,
-    action preflight, approvals, command/workspace safety, events, hooks and
-    hook loading, model adaptation, Mod/Skill/Tool discovery, platform context,
-    sessions, token/context status, tool execution/results, and text generation.
+- Flat `squid_core/*.py` runtime concepts
+  - `agent_loop.py` owns orchestration; `events.py` owns observation;
+    `generation.py` owns one-shot generation; `model_adapter.py` owns provider
+    normalization; `platform_context.py` describes the environment;
+    `spawner.py` owns generic construction; `session.py` owns in-memory
+    transcript state; `skills.py` owns standalone Skills; and
+    `token_estimate.py` owns token estimation.
+  - Existing `context_status.py` remains flat pending the remaining ownership
+    audit; Patch 5B does not create another subsystem for it.
   - Resource modules accept explicit application homes or resource roots. They
     do not import Code Squid's application-home policy.
 
@@ -110,7 +136,7 @@ application-owned modules awaiting the later application-package cleanup.
   - `runner.py` is the Code Squid application builder and compatibility layer.
     It owns Code Squid prompt defaults, invokes Core Mod resolution for an
     explicitly selected `mod_name`, records run context, constructs terminal
-    presentation, and passes selected resources to `squid_core.runner`.
+    presentation, and passes selected resources to `squid_core.spawner`.
   - Final relocation of these two files into a Code Squid application package,
     followed by removal of `core/`, is deferred to the next cleanup patch.
 
@@ -138,14 +164,6 @@ application-owned modules awaiting the later application-package cleanup.
   - `undo_store.py` owns the latest-only undo buffer.
   - `error_log.py` owns narrow diagnostic traceback logging for model request
     failures.
-
-- `tools/`
-  - Local tool schemas and implementations.
-  - Current active tools are `read_file`, `write_file`, `apply_patch`, and
-    `run_command`.
-  - `_truncation.py` owns shared head/tail truncation for large file and command
-    outputs.
-  - `tools/__init__.py` owns the static tool registry.
 
 - `ui/`
   - Small terminal display helpers.
@@ -291,8 +309,9 @@ model request
 -> run_finished handoff
 ```
 
-`squid_core/hooks.py` owns the hook context and decision dataclasses plus
-`HookRunner`. `squid_core/agent_loop.py` owns where hook calls happen in the loop.
+`squid_core/hooks/` owns the hook context and decision dataclasses, `HookRunner`,
+and Hook metadata/loading. `squid_core/agent_loop.py` owns where hook calls happen
+in the loop.
 `core/runner.py` wires optional `hooks`, optionally loads standalone hooks from
 the supplied application home's `hooks/`, or accepts an explicit `hook_runner`.
 Selected Mod Hooks arrive through `ResolvedMod`. `squid_core/events.py`
@@ -315,7 +334,7 @@ Runtime construction has three explicit levels:
 
 1. Easy/default: `core.runner.run_coding_task(...)` and
    `build_coding_task_run(...)` provide the batteries-included Code Squid path.
-2. Custom: `squid_core.runner.build_agent_run(...)` or
+2. Custom: `squid_core.spawner.build_agent_run(...)` or
    `build_agent_loop(...)` create omitted collaborators while using supplied
    Agent, provider, adapter, compactor, tools/executor/results, approval,
    preflight, hooks, stores, and presentation objects directly.
@@ -323,7 +342,7 @@ Runtime construction has three explicit levels:
    directly. The generic builder is convenience, not mandatory architecture.
 
 The customization rule is deliberately small: pass a replacement collaborator
-object to `squid_core.runner`; use only the session/undo factories when Core
+object to `squid_core.spawner`; use only the session/undo factories when Core
 must create stores in lifecycle order; construct `AgentLoop` directly when
 complete control over construction is required. Generic constructor factories
 for providers, adapters, compactors, executors, policies, hooks, or the loop
@@ -347,7 +366,7 @@ session store for interactive follow-ups. Its Skill/tool resolution and
 precedence rules remain application-owned; the generic builder accepts tools
 and Agent objects already selected by its caller.
 
-`squid_core.runner.build_agent_run(...)` constructs a generic `Agent` by
+`squid_core.spawner.build_agent_run(...)` constructs a generic `Agent` by
 default and uses a no-op `NullDisplay` when no presentation collaborator is
 provided. It creates a provider, `ModelAdapter`, `Compactor`, `ToolExecutor`,
 `ToolResults`, `ApprovalPolicy`, `ActionPreflight`, `HookRunner`, `Session`,
@@ -385,12 +404,12 @@ discovery while retaining ownership of run construction, metadata, and
 execution. The normal Code Squid builder also accepts `mod_name` and
 `app_home`; it asks `squid_core.mods.resolve_mod(...)` for the selected resources.
 Passing neither path preserves standalone `skill_name` discovery. Generic
-`squid_core.runner` receives only selected resources and remains unaware of
+`squid_core.spawner` receives only selected resources and remains unaware of
 Mod names, paths, discovery, or selection policy.
 
 `core.runner.build_agent_loop(...)` remains as a compatibility wrapper used by
 the CLI follow-up path. It delegates generic collaborator wiring to
-`squid_core.runner.build_agent_loop(...)`. Provider-specific construction and
+`squid_core.spawner.build_agent_loop(...)`. Provider-specific construction and
 replay-mode decisions are delegated to `providers.factory`.
 
 `storage/session_index.py` owns read-only session discovery across registered
@@ -638,7 +657,7 @@ are:
 
 - `skills/` stores user skills such as
   `~/.code-squid/skills/<skill-name>/SKILL.md`.
-- `hooks/` stores user hook packages loaded by `squid_core.hook_loader` when callers
+- `hooks/` stores user hook packages loaded by `squid_core.hooks` when callers
   opt into user hooks.
 - `tools/` stores standalone user Tool packages.
 - `mods/<mod-name>/mod.yaml` stores canonical user Mod packages with optional
@@ -851,7 +870,7 @@ Assistant tool-call/result pairs must stay replayable. This matters for strict
 OpenAI-compatible model templates and for provider adapters that need to
 reconstruct prior tool turns.
 
-`squid_core/tool_results.py` guards against action/result length mismatches. Invalid
+`squid_core/tools/results.py` guards against action/result length mismatches. Invalid
 assistant replies are excluded from normal assistant history; correction
 messages and repeated-invalid failure messages are the durable record of that
 path.
@@ -873,7 +892,7 @@ Current modes:
 
 The policy is UI-agnostic and receives normalized tool actions before
 execution. `TerminalDisplay` is the current prompter used by the CLI.
-`squid_core/action_preflight.py` supplies any workspace, guarded-command, or hook
+`squid_core/safety/preflight.py` supplies any workspace, guarded-command, or hook
 approval reason before this approval check.
 
 If a user denies an action, the action is not executed. Denial returns a normal
@@ -892,7 +911,7 @@ through the shell, and approved file tools still use absolute paths.
 
 ## Workspace Boundary
 
-`squid_core/workspace_boundary.py` checks structured file-tool actions before
+`squid_core/safety/workspace_boundary.py` checks structured file-tool actions before
 execution. It applies to:
 
 - `read_file`
@@ -1153,7 +1172,7 @@ approval, execution, and result handling; it does not own workspace or guarded
 shell policy.
 
 `core/runner.py` owns Code Squid application construction and shared CLI
-helpers. `squid_core/runner.py` owns generic selective construction. Neither is
+helpers. `squid_core/spawner.py` owns generic selective construction. Neither is
 a plugin system, event bus, daemon, server, or future orchestration layer.
 
 `squid_core/model_adapter.py` owns provider response normalization and replay message
@@ -1164,23 +1183,23 @@ shaping. Provider-specific HTTP/API calls stay in `providers/`.
 prompt. Neither imports Code Squid application prompts, and compaction should
 not become workspace memory.
 
-`squid_core/approval.py` owns approval decisions without depending on a concrete UI.
+`squid_core/safety/approval.py` owns approval decisions without depending on a concrete UI.
 The loop enforces those decisions before tool execution.
 
-`squid_core/action_preflight.py` owns accepted-action safety classification and
+`squid_core/safety/preflight.py` owns accepted-action safety classification and
 translates workspace, guarded-command, and hook reasons into the two action
 forms needed by approval and execution. It is a small collaborator, not a
 general policy framework.
 
-`squid_core/command_safety.py` owns guarded-mode command classification. It should
+`squid_core/safety/command_safety.py` owns guarded-mode command classification. It should
 stay conservative and limited to deciding whether approval is required.
 
-`squid_core/workspace_boundary.py` owns structured file-tool workspace checks. It
+`squid_core/safety/workspace_boundary.py` owns structured file-tool workspace checks. It
 should remain a preflight/approval boundary unless a real sandbox is added
 elsewhere.
 
-`squid_core/tool_executor.py` owns mechanical tool dispatch and side-effect tracking.
-Individual tool behavior stays in `tools/`.
+`squid_core/tools/executor.py` owns mechanical tool dispatch and side-effect tracking.
+Individual built-in tool behavior stays in `squid_core/tools/builtins/`.
 
 `storage/` owns durable local state. In-memory session behavior stays in
 `squid_core/session.py`; live display stays in `ui/`.

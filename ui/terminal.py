@@ -12,7 +12,7 @@ import textwrap
 
 from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
 
-from squid_core.approval import ApprovalDecision, USER_DENIED_TOOL_ACTION
+from squid_core.safety import ApprovalDecision, USER_DENIED_TOOL_ACTION
 from ui.prompt_input import prompt_multiline_input
 from ui.spinner import TerminalSpinner
 

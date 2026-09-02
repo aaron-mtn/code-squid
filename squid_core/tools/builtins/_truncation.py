@@ -1,4 +1,4 @@
-# tools/_truncation.py
+# squid_core/tools/builtins/_truncation.py
 
 """Small shared text truncation helpers for tool outputs."""
 

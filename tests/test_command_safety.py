@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from squid_core.command_safety import (
+from squid_core.safety.command_safety import (
     MUTATING_COMMAND_REASON,
     NOT_ALLOWLISTED_REASON,
     OUTSIDE_PATH_REASON,

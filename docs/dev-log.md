@@ -1,3 +1,32 @@
+- 2026-09-01: Completed Patch 5C by renaming `squid_core/runner.py` to
+  `squid_core/spawner.py`, reflecting that the module spawns and constructs a
+  fully wired generic runtime. The `AgentRun`, `AgentLoop`, `build_agent_run`,
+  `build_agent_loop`, and `run_agent_task` API names are unchanged, and no
+  compatibility shim was added. Cleaned stale Code Squid ownership wording in
+  reusable Mod and Skill descriptions and a ModelAdapter boundary comment.
+  Runtime behavior and construction semantics are unchanged. Focused
+  spawner/runner/boundary suite: 55 passed. Full suite: 703 passed (the 702-test
+  baseline plus one old-module-absence boundary test). Production compilation
+  and a fresh 69-module import walk passed. Lightweight test-adapter smoke
+  covered Code Squid application construction, generic spawner construction,
+  and direct `AgentLoop` construction. Stale current imports are absent and
+  both diff checks passed. No live model inference was run.
+- 2026-09-01: Completed Squid Core refactor Patch 5B by organizing the existing
+  reusable runtime into the six intentionally capped subsystem packages:
+  `agent/`, `compaction/`, `mods/`, `tools/`, `hooks/`, and `safety/`. Moved Mod
+  metadata/resolution, Tool execution/results/user metadata/built-ins, Hook
+  lifecycle/loading, and preflight/approval/workspace boundaries under their
+  canonical packages; removed the old repository-root Tool source package and
+  updated production and tests directly with no compatibility wrappers. No
+  runtime behavior changes were intended. Focused subsystem/boundary suite: 240
+  passed. Full suite: 702 passed. Compileall and a fresh 69-module production
+  import walk passed; stale old subsystem imports are absent and both diff
+  checks passed. Manual verification covered normal Code Squid construction,
+  architecture-review Skill resolution, Session/default Tool registry creation,
+  canonical `chat-agent` Mod discovery/resolution, selected-Mod construction,
+  generic construction, and a real local Ollama `gemma3:4b` no-tool run returning
+  `PATCH5B_OLLAMA_OK`. Remaining flat-file ownership, including
+  `context_status.py`, stays deferred to the remaining ownership audit.
 - 2026-09-01: Completed Squid Core refactor Patch 5A by physically moving the
   reusable runtime modules from `core/` into `squid_core/` and updating current
   production, test, CLI, tool, provider, and documentation imports to their

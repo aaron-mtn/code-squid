@@ -10,7 +10,7 @@ import re
 import uuid
 from typing import Any
 
-from tools._truncation import truncate_head_tail
+from .builtins._truncation import truncate_head_tail
 
 
 SAFE_TOOL_NAME_RE = re.compile(r"^[a-z0-9_-]+$")

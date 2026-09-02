@@ -1,4 +1,4 @@
-# tools/__init__.py
+# squid_core/tools/builtins/__init__.py
 
 """Owns the tiny tool registry; must not own policy, execution flow, or dynamic plugin machinery."""
 

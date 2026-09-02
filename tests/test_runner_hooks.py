@@ -92,8 +92,8 @@ def _settings() -> Settings:
 
 def _install_runner_fakes(monkeypatch) -> None:
     FakeModelAdapter.instances = []
-    monkeypatch.setattr("squid_core.runner.build_provider", lambda *args, **kwargs: object())
-    monkeypatch.setattr("squid_core.runner.ModelAdapter", FakeModelAdapter)
+    monkeypatch.setattr("squid_core.spawner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("squid_core.spawner.ModelAdapter", FakeModelAdapter)
 
 
 def _write_saved_hook(

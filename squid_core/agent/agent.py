@@ -3,7 +3,7 @@
 from squid_core.platform_context import PlatformContext
 from squid_core.skills import Skill
 from squid_core.agent.prompts import PromptDefaults, correction_message, system_prompt
-from tools import TOOLS
+from squid_core.tools.builtins import TOOLS
 
 
 INVALID_REPLY_EXPLANATIONS = {

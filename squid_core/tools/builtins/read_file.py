@@ -1,4 +1,4 @@
-# tools/read_file.py
+# squid_core/tools/builtins/read_file.py
 
 """Owns the read_file tool schema and file-reading behavior; must not own agent policy, loop control, or message formatting."""
 

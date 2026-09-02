@@ -6,7 +6,7 @@ import os
 import shlex
 from pathlib import Path
 
-from squid_core.workspace_boundary import is_inside_workspace
+from .workspace_boundary import is_inside_workspace
 
 
 SHELL_SYNTAX_REASON = "Command uses shell syntax that requires approval"
