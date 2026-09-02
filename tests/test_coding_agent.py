@@ -2,7 +2,7 @@ from pathlib import Path
 
 from agent.coding import CodingAgent
 from core.platform_context import PlatformContext
-from agent.prompts import SYSTEM_PROMPT, TOOL_USAGE_GUIDANCE, follow_up_prompt, system_prompt, task_prompt
+from agent.prompts import CODE_SQUID_PROMPT_DEFAULTS, SYSTEM_PROMPT, TOOL_USAGE_GUIDANCE, follow_up_prompt, system_prompt, task_prompt
 from core.session import Session
 from core.skills import PromptSectionOverride, Skill, parse_skill_file
 
@@ -213,7 +213,7 @@ def test_should_stop_returns_false_after_newer_user_message() -> None:
 
 
 def test_failure_message_for_invalid_replies_includes_reason_and_explanation() -> None:
-    agent = CodingAgent("demo task")
+    agent = CodingAgent("demo task", prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS)
 
     message = agent.failure_message_for_invalid_replies(
         "empty_final_reply",
@@ -259,7 +259,9 @@ def test_follow_up_message_returns_user_message() -> None:
 
 
 def test_initial_prompts_encourage_compact_markdown_narration() -> None:
-    messages = CodingAgent(task="Update the UI").initial_messages()
+    messages = CodingAgent(
+        task="Update the UI", prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS
+    ).initial_messages()
     combined_prompt = "\n".join(message["content"] for message in messages)
 
     assert "Write visible action notes in concise lightweight Markdown." in combined_prompt
@@ -269,7 +271,9 @@ def test_initial_prompts_encourage_compact_markdown_narration() -> None:
 
 
 def test_initial_prompts_keep_markdown_final_summary_guidance() -> None:
-    messages = CodingAgent(task="Update the UI").initial_messages()
+    messages = CodingAgent(
+        task="Update the UI", prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS
+    ).initial_messages()
     combined_prompt = "\n".join(message["content"] for message in messages)
 
     assert "write the final summary in simple Markdown" in combined_prompt
@@ -287,7 +291,7 @@ def test_default_task_prompt_renders_section_placeholders() -> None:
     assert "{FINAL_SUMMARY_REQUIREMENTS}" not in prompt
     assert "## Tool usage guidance" in prompt
     assert "Write visible action notes in concise lightweight Markdown." in prompt
-    assert "## Required response format" in prompt
+    assert "## Response protocol" in prompt
     assert "write the final summary in simple Markdown" in prompt
 
 

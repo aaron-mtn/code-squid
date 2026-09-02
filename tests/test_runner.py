@@ -94,7 +94,7 @@ def test_run_construction_supplies_detected_platform_and_resolved_workspace(
             captured_executor.update(kwargs)
 
     monkeypatch.setattr("core.runner.detect_platform_context", lambda: context)
-    monkeypatch.setattr("core.runner.CodingAgent", FakeCodingAgent)
+    monkeypatch.setattr("core.runner.Agent", FakeCodingAgent)
     monkeypatch.setattr("core.runner.ToolExecutor", FakeToolExecutor)
     monkeypatch.setattr("core.runner.build_provider", lambda *args, **kwargs: object())
 

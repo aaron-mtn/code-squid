@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from agent.coding import CodingAgent
+from agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
 from config.settings import Settings, load_settings
 from core.agent_loop import AgentLoop, RunResult
 from core.approval import ApprovalPolicy
@@ -35,6 +35,7 @@ from storage.session_store import SessionStore
 from storage.undo_store import UndoStore
 from tools import TOOLS
 from ui.terminal import StartupInfo, TerminalDisplay
+from squid_core.agent import Agent
 
 
 SessionStoreFactory = Callable[[Path, str], SessionStore]
@@ -156,12 +157,13 @@ def build_coding_task_run(
         )
     append_run_context(session_store, skill, active_tools, mod_id=mod_id)
     platform_context = detect_platform_context()
-    agent = CodingAgent(
+    agent = Agent(
         task=task,
         skill=skill,
         tools=active_tools,
         platform_context=platform_context,
         workspace=str(repo_root),
+        prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS,
     )
     hook_runner = build_hook_runner(
         hooks=hooks,
@@ -194,7 +196,7 @@ def build_agent_loop(
     repo_root: Path,
     session: Session,
     session_store: SessionStore,
-    agent: CodingAgent,
+    agent: Agent,
     undo_store: UndoStore,
     settings: Settings,
     display: TerminalDisplay,

@@ -1,3 +1,15 @@
+- 2026-09-01: Established the generic Squid Core Agent and prompt ownership
+  boundary. `squid_core.agent.Agent` now owns generic agent state, raw initial
+  and follow-up message construction, tool exposure, reply validation,
+  completion rules, reason-specific corrections, and repeated-invalid failure
+  messages. Core also owns protected response protocol, narration guidance,
+  examples, Skill/environment insertion, and prompt assembly. Code Squid keeps
+  its explicit non-replaceable coding baseline and replaceable application
+  defaults in `agent/prompts.py`; runners inject those defaults into Core.
+  `agent.coding.CodingAgent` remains a compatibility alias. Runtime behavior is
+  unchanged: tasks and follow-ups stay raw authored user messages, tool turns
+  accept exactly one action even with blank narration, and non-empty no-tool
+  replies are final. Full suite: 734 passed.
 - 2026-08-30: Added an optional request-scoped streaming trace callback for
   diagnostic callers. OpenAI-compatible and native Ollama providers report the
   exact generation payload, raw chunks, exposed reasoning/thinking fields,

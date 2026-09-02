@@ -5,7 +5,7 @@
 import os
 from pathlib import Path
 
-from agent.coding import CodingAgent
+from agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
 from config.settings import Settings
 from core.agent_loop import AgentLoop, RunResult
 from core.model_adapter import ModelRequestError
@@ -22,6 +22,7 @@ from storage.session_index import latest_session_id, session_dir_for
 from storage.session_store import SessionStore
 from storage.undo_store import UndoStore
 from ui.terminal import TerminalDisplay
+from squid_core.agent import Agent
 
 
 def _session_dir_for_resume(repo_root: Path, session_id: str) -> Path | None:
@@ -119,10 +120,11 @@ def _run_follow_up_task(
     display.run_started()
     skill, active_tools = resolve_skill_tools(skill_name)
     append_run_context(session_store, skill, active_tools)
-    agent = CodingAgent(
+    agent = Agent(
         task=follow_up_task,
         skill=skill,
         tools=active_tools,
+        prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS,
     )
     follow_up_message = agent.follow_up_message(follow_up_task)
     session.add_message(follow_up_message)

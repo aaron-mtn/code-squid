@@ -6,7 +6,7 @@ Code Squid is a minimal standalone coding agent for repository work.
 
 It runs interactive coding tasks from the command line, sends a replayable
 transcript to a model provider, accepts model tool calls, executes a small local
-tool set, persists the session, and keeps looping until the coding-agent policy
+tool set, persists the session, and keeps looping until the Core Agent policy
 accepts a final assistant message.
 
 The codebase is intentionally narrow. It is not a general agent framework, a
@@ -17,7 +17,7 @@ boundaries are small enough to inspect directly.
 The runtime shape is:
 
 ```text
-settings -> runner/wiring -> provider -> model adapter -> coding-agent policy -> agent loop -> approval -> tools -> transcript/session storage
+settings -> runner/wiring -> provider -> model adapter -> Core Agent -> agent loop -> approval -> tools -> transcript/session storage
 ```
 
 `AgentLoop -> on_event callback` is an optional observer path for compact
@@ -45,14 +45,25 @@ machine-readable runtime facts.
   - `skills.py` owns CLI skill command/status helpers, `python main.py skills`,
     and interactive `/skill` handling.
 
+- `squid_core/agent/`
+  - Reusable Core Agent behavior and protected prompt protocol.
+  - `agent.py` owns task and active-Skill state, `skill_name`, active tools,
+    platform/workspace context, raw initial and follow-up message construction,
+    tool definitions, reply validation, completion detection, reason-specific
+    corrections, and repeated-invalid-reply failure construction.
+  - `prompts.py` owns protected one-tool/final-response protocol, strong but
+    non-enforced narration guidance, generic response examples, active-Skill
+    insertion, execution-environment insertion, and prompt assembly.
+  - Core consumes application defaults through `PromptDefaults` and does not
+    import Code Squid's root `agent.prompts`.
+
 - `agent/`
-  - Coding-agent policy and prompt text.
-  - `coding.py` owns initial messages, follow-up messages, exposed tool
-    definitions, reply validation, completion detection, correction messages,
-    and repeated-invalid-reply failure messages.
-  - `prompts.py` owns prompt text, tool-use guidance, final-summary
-    requirements, correction prompts, and compaction-summary prompting.
-  - Prompt guidance is not the same as runtime enforcement.
+  - Code Squid application prompt defaults and migration compatibility.
+  - `prompts.py` owns Code Squid identity, its non-replaceable baseline coding
+    policy, intentionally replaceable tool/final-report defaults, the current
+    compaction prompt, and dead/non-live task/follow-up compatibility renderers.
+  - `coding.py` exposes `CodingAgent` as an alias of
+    `squid_core.agent.Agent`; it contains no agent implementation.
 
 - `config/`
   - Runtime settings loading.
@@ -312,7 +323,7 @@ optional `display`, and optional `on_event`, and returns the existing
 `RunResult`.
 
 `core.runner.build_coding_task_run(...)` constructs the session, session store,
-undo store, coding agent, and loop without starting the loop. The CLI uses this
+undo store, generic Agent with Code Squid prompt defaults, and loop without starting the loop. The CLI uses this
 shape when it needs access to the session and session store for interactive
 follow-ups.
 
@@ -484,22 +495,29 @@ runtime contract:
 - `CORRECTION_MESSAGES`
 - `COMPACTION_PROMPT`
 
-Skills can change the task mode, inspection style, tool guidance, and final
-summary shape, but they cannot override the core one-tool-call contract,
-correction mechanics, compaction prompt, or final-response/no-tool mechanics.
+Skills can change specialization instructions, inspection style, optional tool
+guidance, and final-summary shape. They cannot override the Core one-tool-call
+contract, final-response/no-tool mechanics, narration guidance, response
+examples, active-Skill/environment insertion, or correction mechanics. They
+also cannot remove Code Squid's baseline coding discipline, because that policy
+is outside the replaceable sections.
 
-`TASK_PROMPT` and `FOLLOW_UP_PROMPT` may use `{task}`. The default
-`TASK_PROMPT` also renders section placeholders:
+`TASK_PROMPT` and `FOLLOW_UP_PROMPT` remain supported as non-live compatibility
+sections for existing Skill parsing and UI/run-context metadata. Their render
+helpers may use `{task}`, and the default `TASK_PROMPT` also renders section
+placeholders:
 
 - `{TOOL_USAGE_GUIDANCE}`
 - `{VISIBLE_NARRATION_REQUIREMENTS}`
 - `{REQUIRED_RESPONSE_FORMAT}`
 - `{FINAL_SUMMARY_REQUIREMENTS}`
 
-Prompt rendering uses explicit `.replace()` calls rather than `.format()` so
-user tasks or prompt text containing braces do not break rendering. The default
-follow-up prompt is generic and skill-friendly: it preserves the current task
-mode, active skill, workspace, constraints, and available tools.
+Compatibility rendering uses explicit `.replace()` calls rather than
+`.format()` so user tasks or prompt text containing braces do not break
+rendering. Neither wrapper is inserted into the runtime transcript. New
+sessions persist one assembled system message followed by the raw authored
+task as `role=user`; resumed runs append the raw authored follow-up in the same
+form.
 
 The active skill can be selected from the CLI. Current support is:
 
@@ -734,9 +752,11 @@ error, marks the session failed, and writes diagnostic traceback details to
 
 ### Turn Contract
 
-Before completion, prompts require a brief visible action note plus exactly one
-tool call. An action note is the user-facing text before a non-final tool call
-that explains why the tool call is the immediate next action.
+Before completion, prompts strongly encourage a brief visible action note and
+demonstrate it alongside exactly one tool call. An action note is user-facing
+text that explains why the tool call is the immediate next action. Narration is
+a behavior-shaping preference, especially for smaller models, not a runtime
+invariant.
 
 The runtime enforces:
 
@@ -751,9 +771,9 @@ stores a correction user message instead. A valid reply resets the invalid-reply
 counter. Repeated invalid replies stop after the configured hard-coded loop
 limit, currently 3 consecutive invalid replies.
 
-The prompts require non-final action notes. Current runtime validation does not
-independently reject a one-tool non-final reply solely because the assistant
-content is empty or the action-note content is low quality.
+Runtime validation accepts a one-tool non-final reply even when assistant
+content is blank. It does not independently enforce action-note presence or
+quality.
 
 If `runtime.max_tool_steps` is set, reaching the limit records a failed session
 status and stops the loop.
@@ -763,16 +783,9 @@ status and stops the loop.
 A valid final assistant reply must include no tool calls and must have
 non-empty content.
 
-For coding tasks, prompts ask the agent to keep final summaries compact,
-terminal-friendly, and free of nested bullet lists. They also ask the agent to
-prefer these Markdown headings when they are relevant:
-
-- `## Files changed`
-- `## What changed`
-- `## Verification`
-- `## Remaining risks / notes`
-
-These labels are guidance only, not runtime-enforced. The terminal display still
+For coding tasks, prompts ask the agent to keep final summaries concise and
+precise, identify changed files, summarize the change, state verification, and
+report concrete limitations. Formatting guidance is not runtime-enforced. The terminal display still
 hides a legacy `TASK COMPLETE` marker if a model includes it, but finalization no
 longer depends on that marker.
 
@@ -1061,9 +1074,14 @@ skill commands. It should not grow agent policy, tool behavior,
 provider-specific response parsing, session storage internals, approval logic,
 undo mechanics, compaction strategy, or terminal formatting.
 
-`agent/` owns coding-agent behavior and prompt text. It decides which tools are
-exposed, which replies are valid, when the loop should stop, and what
-correction/failure messages are used.
+`squid_core/agent/` owns generic Agent behavior and protected prompt assembly.
+It decides which supplied tools are exposed, which reply shapes are valid,
+when the loop should stop, and what correction/failure path is used. It does
+not own Code Squid identity or coding workflow policy.
+
+`agent/prompts.py` owns Code Squid's explicit application prompt defaults and
+baseline coding discipline. `agent/coding.py` is compatibility-only and must
+not regain a duplicate or empty subclass implementation.
 
 `config/settings.py` owns local settings parsing and environment overrides. It
 does not decide how settings are enforced.
