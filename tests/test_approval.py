@@ -1,4 +1,4 @@
-from core.approval import ApprovalDecision, ApprovalPolicy, USER_DENIED_TOOL_ACTION
+from squid_core.approval import ApprovalDecision, ApprovalPolicy, USER_DENIED_TOOL_ACTION
 
 
 class FakePrompter:

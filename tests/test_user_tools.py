@@ -2,10 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from core.app_paths import CODE_SQUID_HOME_ENV
-from core.session import Session
-from core.tool_executor import ToolExecutor
-from core.user_tools import (
+from squid_core.session import Session
+from squid_core.tool_executor import ToolExecutor
+from squid_core.user_tools import (
     UserTool,
     UserToolError,
     build_user_tool_registry,
@@ -25,12 +24,8 @@ def _write_tool(home: Path, directory_name: str, metadata: str, source: str = ""
     return tool_dir
 
 
-def test_discovers_valid_user_tool_from_code_squid_home(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
+def test_discovers_valid_user_tool_from_explicit_app_home(tmp_path: Path) -> None:
     home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
     _write_tool(
         home,
         "local_search",
@@ -47,7 +42,7 @@ safety:
 """,
     )
 
-    assert discover_user_tools() == {
+    assert discover_user_tools(app_home=home) == {
         "local_search": UserTool(
             name="local_search",
             description="Search local notes.",
@@ -119,12 +114,10 @@ def test_accepts_python_identifier_function_name(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("function", ["bad-name", "bad name", "123run"])
 def test_discovery_skips_invalid_function_names(
-    monkeypatch,
     tmp_path: Path,
     function: str,
 ) -> None:
     home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
     _write_tool(
         home,
         "invalid_function",
@@ -132,7 +125,7 @@ def test_discovery_skips_invalid_function_names(
     )
     _write_tool(home, "valid", "name: valid\n")
 
-    assert discover_user_tools() == {"valid": UserTool(name="valid")}
+    assert discover_user_tools(app_home=home) == {"valid": UserTool(name="valid")}
 
 
 @pytest.mark.parametrize("function", ["bad-name", "bad name", "123run"])
@@ -185,23 +178,19 @@ def test_rejects_unsupported_tool_metadata_shapes(
 
 
 def test_discovery_skips_malformed_tools_independently(
-    monkeypatch,
     tmp_path: Path,
 ) -> None:
     home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
     _write_tool(home, "broken", "name malformed\n")
     _write_tool(home, "valid", "name: valid\n")
 
-    assert discover_user_tools() == {"valid": UserTool(name="valid")}
+    assert discover_user_tools(app_home=home) == {"valid": UserTool(name="valid")}
 
 
 def test_does_not_import_or_execute_tool_py_during_discovery(
-    monkeypatch,
     tmp_path: Path,
 ) -> None:
     home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
     marker = home / "imported"
     _write_tool(
         home,
@@ -210,16 +199,14 @@ def test_does_not_import_or_execute_tool_py_during_discovery(
         f"from pathlib import Path\nPath({str(marker)!r}).write_text('imported')\n",
     )
 
-    assert discover_user_tools() == {"passive": UserTool(name="passive")}
+    assert discover_user_tools(app_home=home) == {"passive": UserTool(name="passive")}
     assert not marker.exists()
 
 
 def test_user_tool_registry_imports_tool_py_only_during_execution(
-    monkeypatch,
     tmp_path: Path,
 ) -> None:
     home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
     marker = home / "imported"
     _write_tool(
         home,
@@ -234,7 +221,7 @@ def run(args, context=None):
 """,
     )
 
-    registry = build_user_tool_registry()
+    registry = build_user_tool_registry(app_home=home)
 
     assert not marker.exists()
     assert registry["lazy"]["execute"](tmp_path)["message"] == "done"
@@ -254,7 +241,7 @@ def test_explicit_user_tool_metadata_builds_executable_registry_without_discover
     tool = load_user_tool(tool_dir, source="mod", editable=False)
     assert tool is not None
     monkeypatch.setattr(
-        "core.user_tools.discover_user_tools",
+        "squid_core.user_tools.discover_user_tools",
         lambda: pytest.fail("explicit registry must not rediscover tools"),
     )
 
@@ -288,20 +275,17 @@ def test_explicit_user_tool_registry_does_not_import_source_until_execution(
     assert marker.exists()
 
 
-def test_empty_tools_dir_returns_empty_dict(monkeypatch, tmp_path: Path) -> None:
+def test_empty_tools_dir_returns_empty_dict(tmp_path: Path) -> None:
     home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
     (home / "tools").mkdir(parents=True)
 
-    assert discover_user_tools() == {}
+    assert discover_user_tools(app_home=home) == {}
 
 
 def test_user_tool_registry_exposes_schema_from_metadata(
-    monkeypatch,
     tmp_path: Path,
 ) -> None:
     home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
     _write_tool(
         home,
         "local_search",
@@ -316,7 +300,7 @@ args:
         "def run(args, context=None):\n    return None\n",
     )
 
-    definition = build_user_tool_registry()["local_search"]["definition"]()
+    definition = build_user_tool_registry(app_home=home)["local_search"]["definition"]()
     parameters = definition["function"]["parameters"]
 
     assert definition["function"]["name"] == "local_search"
@@ -329,13 +313,11 @@ args:
 
 
 def test_selected_user_tool_executes_and_returns_normalized_dict(
-    monkeypatch,
     tmp_path: Path,
 ) -> None:
     home = tmp_path / "home"
     repo = tmp_path / "repo"
     repo.mkdir()
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
     _write_tool(
         home,
         "echo_args",
@@ -351,7 +333,7 @@ def run(args, context=None):
     }
 """,
     )
-    registry = build_user_tool_registry(session_id="session-1")
+    registry = build_user_tool_registry(app_home=home, session_id="session-1")
     executor = ToolExecutor(
         repo_root=repo,
         session=Session(repo_root=repo),
@@ -376,11 +358,9 @@ def run(args, context=None):
 
 
 def test_selected_user_tool_string_result_is_wrapped(
-    monkeypatch,
     tmp_path: Path,
 ) -> None:
     home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
     _write_tool(
         home,
         "say_hi",
@@ -388,7 +368,7 @@ def test_selected_user_tool_string_result_is_wrapped(
         "def run(args, context=None):\n    return 'hi'\n",
     )
 
-    result = build_user_tool_registry()["say_hi"]["execute"](tmp_path)
+    result = build_user_tool_registry(app_home=home)["say_hi"]["execute"](tmp_path)
 
     assert result == {
         "ok": True,
@@ -399,11 +379,9 @@ def test_selected_user_tool_string_result_is_wrapped(
 
 
 def test_selected_user_tool_none_result_is_wrapped(
-    monkeypatch,
     tmp_path: Path,
 ) -> None:
     home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
     _write_tool(
         home,
         "noop",
@@ -411,7 +389,7 @@ def test_selected_user_tool_none_result_is_wrapped(
         "def run(args, context=None):\n    return None\n",
     )
 
-    result = build_user_tool_registry()["noop"]["execute"](tmp_path)
+    result = build_user_tool_registry(app_home=home)["noop"]["execute"](tmp_path)
 
     assert result == {
         "ok": True,
@@ -422,11 +400,9 @@ def test_selected_user_tool_none_result_is_wrapped(
 
 
 def test_selected_user_tool_exception_becomes_error_result(
-    monkeypatch,
     tmp_path: Path,
 ) -> None:
     home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
     _write_tool(
         home,
         "broken",
@@ -434,7 +410,7 @@ def test_selected_user_tool_exception_becomes_error_result(
         "def run(args, context=None):\n    raise RuntimeError('boom')\n",
     )
 
-    result = build_user_tool_registry()["broken"]["execute"](tmp_path)
+    result = build_user_tool_registry(app_home=home)["broken"]["execute"](tmp_path)
 
     assert result == {
         "ok": False,
@@ -444,11 +420,9 @@ def test_selected_user_tool_exception_becomes_error_result(
 
 
 def test_user_tool_entrypoint_cannot_escape_tool_directory(
-    monkeypatch,
     tmp_path: Path,
 ) -> None:
     home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
     (home / "tools" / "escape").mkdir(parents=True)
     (home / "tools" / "outside.py").write_text(
         "def run(args, context=None):\n    return 'escaped'\n",

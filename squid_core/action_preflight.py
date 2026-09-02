@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from core.command_safety import guarded_run_command_reason
-from core.workspace_boundary import workspace_boundary_reason
+from squid_core.command_safety import guarded_run_command_reason
+from squid_core.workspace_boundary import workspace_boundary_reason
 
 
 @dataclass(frozen=True)

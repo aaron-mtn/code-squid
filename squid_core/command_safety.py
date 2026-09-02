@@ -1,5 +1,3 @@
-# core/command_safety.py
-
 """Conservative guarded-mode checks for run_command approval decisions."""
 
 from __future__ import annotations
@@ -8,7 +6,7 @@ import os
 import shlex
 from pathlib import Path
 
-from core.workspace_boundary import is_inside_workspace
+from squid_core.workspace_boundary import is_inside_workspace
 
 
 SHELL_SYNTAX_REASON = "Command uses shell syntax that requires approval"

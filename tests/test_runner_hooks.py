@@ -7,9 +7,9 @@ from config.settings import (
     RuntimeSettings,
     Settings,
 )
-from core.agent_loop import RunResult
+from squid_core.agent_loop import RunResult
 from core.app_paths import CODE_SQUID_HOME_ENV
-from core.hooks import BeforeRunContext, PromptContextBlock, RunHookDecision
+from squid_core.hooks import BeforeRunContext, PromptContextBlock, RunHookDecision
 from core.runner import build_coding_task_run
 
 
@@ -113,7 +113,7 @@ version: 1
     )
     (hook_dir / "hook.py").write_text(
         f"""
-from core.hooks import PromptContextBlock, RunHookDecision
+from squid_core.hooks import PromptContextBlock, RunHookDecision
 
 
 class DiskContextHook:

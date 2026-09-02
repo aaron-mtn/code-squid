@@ -1,5 +1,3 @@
-# core/platform_context.py
-
 """Small, testable description of the local command environment."""
 
 from __future__ import annotations

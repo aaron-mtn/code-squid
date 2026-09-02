@@ -1,5 +1,3 @@
-# core/tool_results.py
-
 import json
 
 

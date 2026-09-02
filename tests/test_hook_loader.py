@@ -2,8 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from core.app_paths import CODE_SQUID_HOME_ENV
-from core.hook_loader import (
+from squid_core.hook_loader import (
     HookInfo,
     HookLoadError,
     list_user_hooks,

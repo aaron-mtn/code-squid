@@ -1,5 +1,3 @@
-# core/session.py
-
 from pathlib import Path
 from typing import Any
 

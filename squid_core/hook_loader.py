@@ -1,5 +1,3 @@
-# core/hook_loader.py
-
 """Discover and load saved user hook objects from disk."""
 
 from __future__ import annotations
@@ -12,9 +10,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any
-
-from core.app_paths import user_hooks_dir
-
 
 @dataclass(frozen=True)
 class HookInfo:
@@ -36,7 +31,12 @@ def list_user_hooks(
     app_home: Path | str | None = None,
 ) -> list[HookInfo]:
     """Return metadata for saved user hooks in deterministic directory order."""
-    root = hooks_dir if hooks_dir is not None else user_hooks_dir(app_home)
+    if hooks_dir is not None:
+        root = Path(hooks_dir)
+    elif app_home is not None:
+        root = Path(app_home) / "hooks"
+    else:
+        return []
     if not root.exists():
         return []
     if not root.is_dir():

@@ -1,5 +1,3 @@
-# core/approval.py
-
 """Small UI-agnostic approval policy for tool actions."""
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 import pytest
 
-from core.model_adapter import ModelAdapter, ModelRequestError
+from squid_core.model_adapter import ModelAdapter, ModelRequestError
 
 
 class FakeFunction:

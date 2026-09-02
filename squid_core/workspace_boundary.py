@@ -1,5 +1,3 @@
-# core/workspace_boundary.py
-
 """Small preflight checks for structured file tools that target outside the workspace."""
 
 from __future__ import annotations

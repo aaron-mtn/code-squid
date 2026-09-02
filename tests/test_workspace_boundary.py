@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from core.workspace_boundary import workspace_boundary_reason
+from squid_core.workspace_boundary import workspace_boundary_reason
 
 
 def test_absolute_file_path_inside_workspace_allowed(tmp_path: Path) -> None:

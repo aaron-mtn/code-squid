@@ -7,8 +7,8 @@ from pathlib import Path
 
 from agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
 from config.settings import Settings
-from core.agent_loop import AgentLoop, RunResult
-from core.model_adapter import ModelRequestError
+from squid_core.agent_loop import AgentLoop, RunResult
+from squid_core.model_adapter import ModelRequestError
 from core.runner import (
     append_run_context,
     build_agent_loop,
@@ -16,7 +16,7 @@ from core.runner import (
     resolve_skill_tools,
     startup_info,
 )
-from core.session import Session
+from squid_core.session import Session
 from storage.error_log import write_error_log
 from storage.session_index import latest_session_id, session_dir_for
 from storage.session_store import SessionStore

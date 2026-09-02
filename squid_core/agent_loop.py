@@ -1,12 +1,10 @@
-# core/agent_loop.py
-
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
-from core.action_preflight import ActionPreflight
-from core.approval import ApprovalPolicy, denied_result
-from core.events import EventCallback, emit_event
-from core.hooks import (
+from squid_core.action_preflight import ActionPreflight
+from squid_core.approval import ApprovalPolicy, denied_result
+from squid_core.events import EventCallback, emit_event
+from squid_core.hooks import (
     BeforeAcceptFinalContext,
     BeforeModelTurnContext,
     BeforeRunContext,

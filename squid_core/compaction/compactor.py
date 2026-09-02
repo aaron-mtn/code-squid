@@ -1,12 +1,10 @@
-# core/compaction.py
-
 """Minimal transcript compaction for continuation context."""
 
 from __future__ import annotations
 
 import json
 
-from core.token_estimate import estimate_messages_tokens
+from squid_core.token_estimate import estimate_messages_tokens
 from squid_core.compaction.prompts import COMPACTION_SYSTEM_PROMPT, compaction_prompt
 
 

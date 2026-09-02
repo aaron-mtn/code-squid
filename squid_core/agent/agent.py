@@ -1,7 +1,7 @@
 """Generic Core Agent behavior."""
 
-from core.platform_context import PlatformContext
-from core.skills import Skill
+from squid_core.platform_context import PlatformContext
+from squid_core.skills import Skill
 from squid_core.agent.prompts import PromptDefaults, correction_message, system_prompt
 from tools import TOOLS
 

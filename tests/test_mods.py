@@ -9,11 +9,11 @@ from config.settings import (
     RuntimeSettings,
     Settings,
 )
-from core.hook_loader import list_user_hooks, load_user_hooks
-from core.mods import ModResolutionError, discover_mods, load_mod, resolve_mod, validate_mod
+from squid_core.hook_loader import list_user_hooks, load_user_hooks
+from squid_core.mods import ModResolutionError, discover_mods, load_mod, resolve_mod, validate_mod
 from core.runner import build_coding_task_run
-from core.skills import discover_skills
-from core.user_tools import discover_user_tools
+from squid_core.skills import discover_skills
+from squid_core.user_tools import discover_user_tools
 from squid_core import runner as generic_runner
 from tools import TOOLS
 

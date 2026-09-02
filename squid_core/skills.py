@@ -1,14 +1,9 @@
-# core/skills.py
-
 """Minimal Code Squid skill loading."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-
-from core.app_paths import user_skills_dir
-
 
 SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 BUILTIN_SKILLS_DIR = SKILLS_DIR / "builtin"
@@ -85,12 +80,13 @@ def discover_skills(
 ) -> dict[str, Skill]:
     skills = {}
     skills.update(_discover_skills_in(skills_dir / "builtin", source="builtin", editable=False))
-    _merge_missing(
-        skills,
-        _discover_skills_in(
-            user_skills_dir(app_home), source="user", editable=True
-        ),
-    )
+    if app_home is not None:
+        _merge_missing(
+            skills,
+            _discover_skills_in(
+                Path(app_home) / "skills", source="user", editable=True
+            ),
+        )
     return skills
 
 

@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from core.agent_loop import RunResult
+from squid_core.agent_loop import RunResult
 from core.runner import build_coding_task_run, run_coding_task
-from core.platform_context import PlatformContext
+from squid_core.platform_context import PlatformContext
 
 
 class FakeDisplay:

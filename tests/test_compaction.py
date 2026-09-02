@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import core.compaction as compaction_module
-from core.compaction import Compactor
+import squid_core.compaction as compaction_module
+from squid_core.compaction import Compactor
 
 
 class FakeModelAdapter:

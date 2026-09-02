@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 from config.settings import Settings, load_settings
-from core.model_adapter import ModelAdapter
+from squid_core.model_adapter import ModelAdapter
 from providers.factory import build_provider, tool_call_content_mode
 
 

@@ -15,16 +15,16 @@ from typing import Callable
 
 from agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
 from config.settings import Settings, load_settings
-from core.agent_loop import AgentLoop, RunResult
-from core.events import EventCallback
+from squid_core.agent_loop import AgentLoop, RunResult
+from squid_core.events import EventCallback
 from core.app_paths import code_squid_home
-from core.hook_loader import load_user_hooks
-from core.hooks import HookRunner
-from core.mods import ResolvedMod, resolve_mod
-from core.platform_context import PlatformContext, detect_platform_context
-from core.session import Session
-from core.skills import Skill, discover_skills
-from core.user_tools import build_user_tool_registry
+from squid_core.hook_loader import load_user_hooks
+from squid_core.hooks import HookRunner
+from squid_core.mods import ResolvedMod, resolve_mod
+from squid_core.platform_context import PlatformContext, detect_platform_context
+from squid_core.session import Session
+from squid_core.skills import Skill, discover_skills
+from squid_core.user_tools import build_user_tool_registry
 from storage.session_store import SessionStore
 from storage.undo_store import UndoStore
 from tools import TOOLS
@@ -167,6 +167,7 @@ def build_coding_task_run(
         raise ValueError("mod_name cannot be combined with skill_name or resolved components")
 
     repo_root = Path(repo_root).resolve()
+    app_home = code_squid_home(app_home)
     settings = load_settings(repo_root) if settings is None else settings
     selected_mod: ResolvedMod | None = None
 
@@ -193,7 +194,7 @@ def build_coding_task_run(
     if mod_name is not None:
         selected_mod = resolve_mod(
             mod_name,
-            code_squid_home(app_home),
+            app_home,
             repo_root=repo_root,
             session_id=session_store.session_id,
         )
@@ -340,7 +341,7 @@ def build_hook_runner(
 
     combined_hooks = list(hooks or [])
     if include_user_hooks:
-        combined_hooks.extend(load_user_hooks(app_home=app_home))
+        combined_hooks.extend(load_user_hooks(app_home=code_squid_home(app_home)))
 
     return HookRunner(combined_hooks)
 
@@ -355,6 +356,7 @@ def resolve_skill_tools(
     if skill_name is None:
         return None, TOOLS
 
+    app_home = code_squid_home(app_home)
     skills = discover_skills(app_home=app_home)
     skill = skills.get(skill_name)
     if skill is None:

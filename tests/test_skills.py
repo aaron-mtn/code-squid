@@ -2,8 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from core.app_paths import CODE_SQUID_HOME_ENV
-from core.skills import discover_builtin_skills, discover_skills, parse_skill_file
+from squid_core.skills import discover_builtin_skills, discover_skills, parse_skill_file
 
 
 def _write_skill(path: Path, text: str) -> Path:
@@ -255,11 +254,9 @@ def test_builtin_skills_are_still_discovered() -> None:
 
 
 def test_discover_skills_includes_builtin_and_home_user_skills(
-    monkeypatch,
     tmp_path: Path,
 ) -> None:
     home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
     _write_skill(
         tmp_path / "skills" / "builtin" / "architecture-review" / "SKILL.md",
         """---
@@ -283,7 +280,7 @@ Use my workflow.
 """,
     )
 
-    skills = discover_skills(tmp_path / "skills")
+    skills = discover_skills(tmp_path / "skills", app_home=home)
 
     assert set(skills) == {"architecture-review", "my-skill"}
     assert skills["architecture-review"].source == "builtin"
@@ -293,12 +290,10 @@ Use my workflow.
     assert skills["my-skill"].path == home / "skills" / "my-skill" / "SKILL.md"
 
 
-def test_discover_skills_honors_code_squid_home_env_override(
-    monkeypatch,
+def test_discover_skills_honors_explicit_app_home(
     tmp_path: Path,
 ) -> None:
     home = tmp_path / "custom-code-squid-home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
     _write_skill(
         home / "skills" / "home-only" / "SKILL.md",
         """---
@@ -310,17 +305,15 @@ Home instructions.
 """,
     )
 
-    skills = discover_skills(tmp_path / "skills")
+    skills = discover_skills(tmp_path / "skills", app_home=home)
 
     assert "home-only" in skills
     assert skills["home-only"].path == home / "skills" / "home-only" / "SKILL.md"
 
 
 def test_discover_skills_ignores_repo_local_user_skills(
-    monkeypatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(tmp_path / "home"))
     _write_skill(
         tmp_path / "skills" / "user" / "repo-local-skill" / "SKILL.md",
         """---
@@ -332,16 +325,14 @@ Repo-local instructions.
 """,
     )
 
-    skills = discover_skills(tmp_path / "skills")
+    skills = discover_skills(tmp_path / "skills", app_home=tmp_path / "home")
 
     assert "repo-local-skill" not in skills
 
 
 def test_missing_home_user_skills_directory_is_harmless(
-    monkeypatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(tmp_path / "missing-home"))
     _write_skill(
         tmp_path / "skills" / "builtin" / "review" / "SKILL.md",
         """---
@@ -353,18 +344,18 @@ Built-in instructions.
 """,
     )
 
-    skills = discover_skills(tmp_path / "skills")
+    skills = discover_skills(
+        tmp_path / "skills", app_home=tmp_path / "missing-home"
+    )
 
     assert set(skills) == {"review"}
     assert skills["review"].source == "builtin"
 
 
 def test_discover_skills_preserves_builtin_on_duplicate_names(
-    monkeypatch,
     tmp_path: Path,
 ) -> None:
     home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
     _write_skill(
         tmp_path / "skills" / "builtin" / "architecture-review" / "SKILL.md",
         """---
@@ -385,7 +376,7 @@ description: User review.
 User instructions.
 """,
     )
-    skills = discover_skills(tmp_path / "skills")
+    skills = discover_skills(tmp_path / "skills", app_home=home)
 
     assert skills["architecture-review"].description == "Built-in review."
     assert skills["architecture-review"].source == "builtin"

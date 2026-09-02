@@ -12,17 +12,17 @@ from pathlib import Path
 from typing import Callable
 
 from config.settings import Settings
-from core.action_preflight import ActionPreflight
-from core.agent_loop import AgentLoop, RunResult
-from core.approval import ApprovalPolicy
-from core.compaction import Compactor
-from core.events import EventCallback
-from core.hooks import HookRunner
-from core.model_adapter import ModelAdapter
-from core.platform_context import PlatformContext, detect_platform_context
-from core.session import Session
-from core.tool_executor import ToolExecutor
-from core.tool_results import ToolResults
+from squid_core.action_preflight import ActionPreflight
+from squid_core.agent_loop import AgentLoop, RunResult
+from squid_core.approval import ApprovalPolicy
+from squid_core.compaction import Compactor
+from squid_core.events import EventCallback
+from squid_core.hooks import HookRunner
+from squid_core.model_adapter import ModelAdapter
+from squid_core.platform_context import PlatformContext, detect_platform_context
+from squid_core.session import Session
+from squid_core.tool_executor import ToolExecutor
+from squid_core.tool_results import ToolResults
 from providers.factory import build_provider, tool_call_content_mode
 from squid_core.agent import Agent
 from storage.session_store import SessionStore

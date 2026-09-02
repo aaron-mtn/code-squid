@@ -1,3 +1,21 @@
+- 2026-09-01: Completed Squid Core refactor Patch 5A by physically moving the
+  reusable runtime modules from `core/` into `squid_core/` and updating current
+  production, test, CLI, tool, provider, and documentation imports to their
+  canonical locations. `Compactor` now lives inside the existing compaction
+  package and is exposed from `squid_core.compaction`. Resource loaders accept
+  explicit application homes/roots and no longer import Code Squid's home
+  policy. Only application-owned `core/app_paths.py` and `core/runner.py` remain
+  for the later application-package cleanup. Deleted the obsolete Squid Bell
+  installer and its two tests. Patch 4 Mod discovery, precedence, protected
+  tools, ordered Tool equality, lazy Tool loading, and selected-Hook loading are
+  unchanged. Focused runtime/boundary suite: 243 passed. Full suite: 698 passed
+  (697 baseline - 2 deleted Squid Bell tests + 3 boundary tests). Compileall and
+  63-module import checks passed; stale reusable `core.*` imports and current
+  Squid Bell references are absent; both diff checks passed. Manual verification
+  covered normal and selected-Mod Code Squid construction, architecture-review
+  Skill resolution, Session/default Tool registry creation, canonical Mod
+  discovery/resolution, and a real no-tool Ollama `gemma3:4b` run returning
+  `PATCH5A_OLLAMA_OK`.
 - 2026-09-01: Completed Squid Core refactor Patch 4 by deleting the legacy
   Extension runtime, storage/state helpers, CLI commands, and Extension-specific
   tests rather than wrapping them. Added the canonical Core Mod system at

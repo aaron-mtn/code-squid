@@ -1,10 +1,10 @@
 from pathlib import Path
 
 from agent.coding import CodingAgent
-from core.platform_context import PlatformContext
+from squid_core.platform_context import PlatformContext
 from agent.prompts import CODE_SQUID_PROMPT_DEFAULTS, SYSTEM_PROMPT, TOOL_USAGE_GUIDANCE, follow_up_prompt, system_prompt, task_prompt
-from core.session import Session
-from core.skills import PromptSectionOverride, Skill, parse_skill_file
+from squid_core.session import Session
+from squid_core.skills import PromptSectionOverride, Skill, parse_skill_file
 
 
 def test_validate_reply_accepts_no_tool_normal_answer_as_final() -> None:

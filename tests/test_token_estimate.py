@@ -1,6 +1,6 @@
 import json
 
-from core.token_estimate import (
+from squid_core.token_estimate import (
     estimate_message_tokens,
     estimate_messages_tokens,
     estimate_text_tokens,

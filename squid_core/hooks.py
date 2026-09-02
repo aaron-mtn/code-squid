@@ -1,5 +1,3 @@
-# core/hooks.py
-
 """Minimal in-process interceptor hook support."""
 
 from __future__ import annotations

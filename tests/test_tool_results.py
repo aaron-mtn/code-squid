@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from core.tool_results import ToolResults
+from squid_core.tool_results import ToolResults
 
 
 def test_messages_from_action_results_returns_tool_messages_when_lengths_match():

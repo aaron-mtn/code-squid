@@ -1,5 +1,3 @@
-# core/user_tools.py
-
 """Discover saved user tool metadata without executing tool code."""
 
 from __future__ import annotations
@@ -12,7 +10,6 @@ import re
 import uuid
 from typing import Any
 
-from core.app_paths import user_tools_dir
 from tools._truncation import truncate_head_tail
 
 
@@ -43,7 +40,12 @@ def discover_user_tools(
     app_home: Path | str | None = None,
 ) -> dict[str, UserTool]:
     """Return valid user tool metadata in deterministic directory order."""
-    root = Path(tools_dir) if tools_dir is not None else user_tools_dir(app_home)
+    if tools_dir is not None:
+        root = Path(tools_dir)
+    elif app_home is not None:
+        root = Path(app_home) / "tools"
+    else:
+        return {}
     tools: dict[str, UserTool] = {}
 
     if not root.exists():
@@ -223,7 +225,7 @@ def execute_user_tool(
     session_id: str | None = None,
 ) -> dict:
     """Import and execute a discovered user tool with normalized results."""
-    tool_dir = tool.path if tool.path is not None else user_tools_dir() / tool.name
+    tool_dir = tool.path if tool.path is not None else Path(tool.name)
     try:
         entrypoint = _resolve_entrypoint(tool_dir, tool.entrypoint)
         module = _load_user_tool_module(tool.name, entrypoint)

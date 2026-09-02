@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-import core.generation as generation
+import squid_core.generation as generation
 from config.settings import DisplaySettings, ModelSettings, RuntimeSettings, Settings
-from core.model_adapter import ModelRequestError
+from squid_core.model_adapter import ModelRequestError
 
 
 class FakeMessage:

@@ -2,7 +2,8 @@
 
 """Skill command and status helpers for the Code Squid CLI."""
 
-from core.skills import discover_skills
+from core.app_paths import code_squid_home
+from squid_core.skills import discover_skills
 
 
 SKILL_COMMAND = "/skill"
@@ -17,7 +18,7 @@ def _format_skill_details(skill_name: str | None) -> list[str]:
     if skill_name is None:
         return ["Current skill: none"]
 
-    skill = discover_skills().get(skill_name)
+    skill = discover_skills(app_home=code_squid_home()).get(skill_name)
     lines = [f"Current skill: {skill_name}"]
     if skill is None:
         return lines
@@ -30,7 +31,7 @@ def _format_skill_details(skill_name: str | None) -> list[str]:
 
 
 def _format_available_skills() -> list[str]:
-    skills = discover_skills()
+    skills = discover_skills(app_home=code_squid_home())
     if not skills:
         return ["Available skills:", "none"]
 
@@ -69,7 +70,7 @@ def _handle_skill_input(task: str, skill_name: str | None) -> str | None:
         print("Active skill cleared.")
         return None
 
-    skills = discover_skills()
+    skills = discover_skills(app_home=code_squid_home())
     skill = skills.get(requested_skill)
     if skill is None:
         print(f"Unknown skill: {requested_skill}")

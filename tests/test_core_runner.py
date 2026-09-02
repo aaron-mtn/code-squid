@@ -9,7 +9,7 @@ from config.settings import (
     RuntimeSettings,
     Settings,
 )
-from core.session import Session
+from squid_core.session import Session
 from squid_core.agent import Agent
 from storage.session_store import SessionStore
 from storage.undo_store import UndoStore
@@ -31,7 +31,7 @@ def test_generic_module_has_no_coding_or_terminal_ui_dependency() -> None:
     assert "agent.prompts" not in source
     assert "ui.terminal" not in source
     assert "TerminalDisplay" not in source
-    assert "core.mods" not in source
+    assert "squid_core.mods" not in source
 
 
 def test_generic_run_builds_default_agent_and_ui_neutral_display(tmp_path: Path) -> None:
@@ -234,7 +234,7 @@ def test_precreated_session_and_stores_skip_default_construction(
 
 
 def test_direct_agent_loop_construction_remains_available(tmp_path: Path) -> None:
-    from core.agent_loop import AgentLoop
+    from squid_core.agent_loop import AgentLoop
 
     loop = AgentLoop(
         session=Session(tmp_path),

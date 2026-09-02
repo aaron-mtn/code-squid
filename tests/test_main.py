@@ -16,8 +16,8 @@ from cli.interactive import (
 from cli.run import _run_follow_up_task, _run_loop
 from cli.skills import _format_skill_status
 from config.settings import load_settings
-from core.agent_loop import RunResult
-from core.model_adapter import ModelRequestError
+from squid_core.agent_loop import RunResult
+from squid_core.model_adapter import ModelRequestError
 from main import main
 from storage.session_store import SessionStore
 from ui.terminal import (
@@ -314,7 +314,7 @@ def test_run_loop_handles_model_request_error_with_log_and_status(tmp_path) -> N
     assert display.finished is False
     assert session_store.statuses == ["failed"]
     assert "RuntimeError: provider unavailable" in log_text
-    assert "core.model_adapter.ModelRequestError: Model request failed" in log_text
+    assert "squid_core.model_adapter.ModelRequestError: Model request failed" in log_text
 
 
 def test_run_loop_returns_zero_for_complete_result(tmp_path) -> None:

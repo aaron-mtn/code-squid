@@ -1,9 +1,7 @@
-# core/tool_executor.py
-
 from pathlib import Path
 
-from core.platform_context import PlatformContext
-from core.workspace_boundary import workspace_boundary_reason
+from squid_core.platform_context import PlatformContext
+from squid_core.workspace_boundary import workspace_boundary_reason
 from tools import TOOLS
 
 

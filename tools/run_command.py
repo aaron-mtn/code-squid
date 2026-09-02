@@ -5,7 +5,7 @@
 import subprocess
 from pathlib import Path
 
-from core.platform_context import PlatformContext, detect_platform_context
+from squid_core.platform_context import PlatformContext, detect_platform_context
 
 from ._truncation import truncate_head_tail
 

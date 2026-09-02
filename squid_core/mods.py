@@ -13,9 +13,9 @@ from pathlib import Path
 import re
 from typing import Any
 
-from core.hook_loader import HookInfo, HookLoadError, load_hook_infos, read_hook_info
-from core.skills import Skill, discover_skills, parse_skill_file
-from core.user_tools import (
+from squid_core.hook_loader import HookInfo, HookLoadError, load_hook_infos, read_hook_info
+from squid_core.skills import Skill, discover_skills, parse_skill_file
+from squid_core.user_tools import (
     UserTool,
     UserToolError,
     build_user_tool_registry_from_metadata,

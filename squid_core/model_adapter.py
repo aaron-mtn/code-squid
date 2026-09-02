@@ -1,5 +1,3 @@
-# core/model_adapter.py
-
 import json
 
 TOOL_CALL_CONTENT_MODES = {"omit", "empty", "null"}

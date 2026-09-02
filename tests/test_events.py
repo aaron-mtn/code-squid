@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from core.events import emit_event
+from squid_core.events import emit_event
 
 
 def test_no_callback_does_nothing() -> None:

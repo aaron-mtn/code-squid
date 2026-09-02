@@ -1,4 +1,4 @@
-from core.action_preflight import ActionPreflight
+from squid_core.action_preflight import ActionPreflight
 
 
 def test_allowed_guarded_action_passes_through_unchanged(tmp_path) -> None:

@@ -5,8 +5,8 @@ The live transcript uses :func:`system_prompt` plus raw authored user messages.
 existing Skills and UI metadata; neither wrapper is inserted into transcripts.
 """
 
-from core.platform_context import PlatformContext
-from core.skills import Skill
+from squid_core.platform_context import PlatformContext
+from squid_core.skills import Skill
 from squid_core.agent.prompts import (
     PROTECTED_RESPONSE_PROTOCOL as REQUIRED_RESPONSE_FORMAT,
     VISIBLE_NARRATION_GUIDANCE as VISIBLE_NARRATION_REQUIREMENTS,

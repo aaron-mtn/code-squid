@@ -1,4 +1,4 @@
-from core.platform_context import detect_platform_context
+from squid_core.platform_context import detect_platform_context
 
 
 def lookup_with(*available: str):

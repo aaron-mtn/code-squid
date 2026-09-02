@@ -1,10 +1,10 @@
 from pathlib import Path
 import sys
 
-from core.session import Session
-import core.tool_executor as tool_executor_module
-from core.tool_executor import ToolExecutor
-from core.platform_context import PlatformContext
+from squid_core.session import Session
+import squid_core.tool_executor as tool_executor_module
+from squid_core.tool_executor import ToolExecutor
+from squid_core.platform_context import PlatformContext
 from storage.undo_store import UndoStore
 
 

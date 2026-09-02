@@ -1,5 +1,3 @@
-# core/token_estimate.py
-
 """Rough token estimates for transcript-sized message payloads."""
 
 from __future__ import annotations

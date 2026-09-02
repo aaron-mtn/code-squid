@@ -293,7 +293,7 @@ def test_run_command_timeout_returns_normal_failure_result(monkeypatch: pytest.M
 def test_run_command_uses_selected_powershell_on_windows(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from core.platform_context import PlatformContext
+    from squid_core.platform_context import PlatformContext
 
     calls = []
 
@@ -328,7 +328,7 @@ def test_run_command_uses_selected_powershell_on_windows(
 
 
 def test_run_command_uses_supplied_context_without_redetecting(monkeypatch, tmp_path: Path) -> None:
-    from core.platform_context import PlatformContext
+    from squid_core.platform_context import PlatformContext
 
     calls = []
 

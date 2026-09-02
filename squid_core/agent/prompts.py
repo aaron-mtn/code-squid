@@ -2,8 +2,8 @@
 
 from dataclasses import dataclass
 
-from core.platform_context import PlatformContext
-from core.skills import Skill
+from squid_core.platform_context import PlatformContext
+from squid_core.skills import Skill
 
 
 @dataclass(frozen=True)

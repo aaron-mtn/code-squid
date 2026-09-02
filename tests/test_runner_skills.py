@@ -6,7 +6,7 @@ import pytest
 from agent.coding import CodingAgent
 from core.app_paths import CODE_SQUID_HOME_ENV
 from core.runner import build_coding_task_run, resolve_skill_tools
-from core.skills import Skill
+from squid_core.skills import Skill
 from tools import TOOLS
 
 

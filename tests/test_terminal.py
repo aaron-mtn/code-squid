@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import pytest
 from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
 
-from core.approval import USER_DENIED_TOOL_ACTION
-from core.agent_loop import RunResult
+from squid_core.approval import USER_DENIED_TOOL_ACTION
+from squid_core.agent_loop import RunResult
 from ui.terminal import (
     APPROVAL_PANEL_WIDTH,
     BOLD_STYLE,

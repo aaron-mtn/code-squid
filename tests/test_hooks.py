@@ -1,5 +1,5 @@
-from core.agent_loop import AgentLoop, RunResult
-from core.hooks import (
+from squid_core.agent_loop import AgentLoop, RunResult
+from squid_core.hooks import (
     BeforeAcceptFinalContext,
     BeforeModelTurnContext,
     BeforeRunContext,
@@ -14,7 +14,7 @@ from core.hooks import (
     ToolHookDecision,
     ToolResultContext,
 )
-from core.session import Session
+from squid_core.session import Session
 
 
 class FakeAgent:
