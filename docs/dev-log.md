@@ -1,3 +1,15 @@
+- 2026-09-01: Completed Squid Core refactor Patch 2 after the Patch 1
+  Agent/prompt split. `AgentLoop` now delegates workspace-boundary and guarded
+  `run_command` decisions to a small action-preflight collaborator, while its
+  orchestration order remains hook, preflight, approval, execution, and result.
+  The generic compaction prompt moved to `squid_core/compaction/prompts.py`, so
+  Core compaction no longer imports Code Squid application prompts. Workspace
+  safety, guarded commands, approval/denial and yolo behavior, hook and
+  cancellation ordering, transcripts, and compaction trigger/chunk/retention
+  behavior were intentionally preserved. Focused suite: 122 passed. Full
+  suite: 741 passed. Broader physical package moves, Mods/Extensions
+  unification, runner customization, and Desktop migration remain deferred to
+  later patches.
 - 2026-09-01: Established the generic Squid Core Agent and prompt ownership
   boundary. `squid_core.agent.Agent` now owns generic agent state, raw initial
   and follow-up message construction, tool exposure, reply validation,

@@ -17,6 +17,7 @@ from typing import Callable
 
 from agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
 from config.settings import Settings, load_settings
+from core.action_preflight import ActionPreflight
 from core.agent_loop import AgentLoop, RunResult
 from core.approval import ApprovalPolicy
 from core.compaction import Compactor
@@ -234,6 +235,10 @@ def build_agent_loop(
         mode=settings.runtime.approval_mode,
         prompter=display,
     )
+    action_preflight = ActionPreflight(
+        workspace_root=repo_root,
+        approval_mode=settings.runtime.approval_mode,
+    )
     hook_runner = build_hook_runner(
         hooks=hooks,
         hook_runner=hook_runner,
@@ -251,6 +256,7 @@ def build_agent_loop(
         compactor=compactor,
         max_tool_steps=settings.runtime.max_tool_steps,
         approval_policy=approval_policy,
+        action_preflight=action_preflight,
         stream_assistant_text=settings.runtime.stream_assistant_text,
         on_event=on_event,
         should_cancel=should_cancel,

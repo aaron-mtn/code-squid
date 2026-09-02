@@ -144,18 +144,3 @@ def task_prompt(task: str, skill: Skill | None = None) -> str:
 def follow_up_prompt(task: str, skill: Skill | None = None) -> str:
     prompt = prompt_section("FOLLOW_UP_PROMPT", DEFAULT_FOLLOW_UP_PROMPT, skill)
     return prompt.replace("{task}", task).strip()
-
-
-def compaction_prompt(prior_context: str) -> str:
-    # Compaction stays application-owned for this patch; its refactor is deferred.
-    return f"""
-Summarize this prior Code Squid task context so another coding-agent turn can continue safely.
-
-Preserve the original task, files read, files changed, important findings, commands run and verification results, failed attempts and corrections, current next step, and remaining risks.
-Use exact file paths when available. Do not invent facts. Do not add speculative risks.
-Prefer recent tool results over older assumptions.
-Do not include a title or top-level heading. Return only the summary body.
-
-Prior context:
-{prior_context}
-""".strip()

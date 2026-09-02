@@ -1,13 +1,13 @@
 # core/compaction.py
 
-"""Minimal transcript compaction for coding-agent continuation context."""
+"""Minimal transcript compaction for continuation context."""
 
 from __future__ import annotations
 
 import json
 
-from agent.prompts import compaction_prompt
 from core.token_estimate import estimate_messages_tokens
+from squid_core.compaction.prompts import COMPACTION_SYSTEM_PROMPT, compaction_prompt
 
 
 class Compactor:
@@ -37,7 +37,7 @@ class Compactor:
             [
                 {
                     "role": "system",
-                    "content": "You summarize coding-agent transcripts for safe continuation.",
+                    "content": COMPACTION_SYSTEM_PROMPT,
                 },
                 {
                     "role": "user",

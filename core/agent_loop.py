@@ -3,8 +3,8 @@
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
+from core.action_preflight import ActionPreflight
 from core.approval import ApprovalPolicy, denied_result
-from core.command_safety import guarded_run_command_reason
 from core.events import EventCallback, emit_event
 from core.hooks import (
     BeforeAcceptFinalContext,
@@ -18,9 +18,6 @@ from core.hooks import (
     RunFinishedDecision,
     ToolResultContext,
 )
-from core.workspace_boundary import workspace_boundary_reason
-
-
 MAX_CONSECUTIVE_INVALID_REPLIES = 3
 REJECTION_REASON_EVENT_MAX_CHARS = 500
 
@@ -63,6 +60,7 @@ class AgentLoop:
         on_event: EventCallback | None = None,
         should_cancel: Callable[[], bool] | None = None,
         hook_runner: HookRunner | None = None,
+        action_preflight: ActionPreflight | None = None,
     ) -> None:
         self.session = session
         self.model_adapter = model_adapter
@@ -74,6 +72,10 @@ class AgentLoop:
         self.compactor = compactor
         self.max_tool_steps = max_tool_steps
         self.approval_policy = approval_policy or ApprovalPolicy("never")
+        self.action_preflight = action_preflight or ActionPreflight.from_runtime(
+            tool_executor,
+            self.approval_policy,
+        )
         self.stream_assistant_text = stream_assistant_text
         self.on_event = on_event
         self.should_cancel = should_cancel or (lambda: False)
@@ -582,31 +584,15 @@ class AgentLoop:
                     else:
                         action = tool_decision.action or action
                         pending_tool_action = action
-                        workspace_boundary_reason_value = self._workspace_boundary_reason(
-                            action
+                        preflight = self.action_preflight.check(
+                            action,
+                            additional_approval_reason=tool_decision.approval_reason,
                         )
-                        approval_reasons = [
-                            tool_decision.approval_reason,
-                            workspace_boundary_reason_value,
-                            self._guarded_run_command_reason(action),
-                        ]
-                        approval_reason = "; ".join(
-                            reason for reason in approval_reasons if reason
-                        ) or None
-                        approval_action = (
-                            {**action, "approval_reason": approval_reason}
-                            if approval_reason is not None
-                            else action
-                        )
+                        approval_action = preflight.approval_action
                         self._check_cancelled()
                         decision = self.approval_policy.check(approval_action)
                         self._check_cancelled()
                         if decision.approved:
-                            execute_action = (
-                                {**action, "outside_workspace_approved": True}
-                                if workspace_boundary_reason_value is not None
-                                else action
-                            )
                             self.display.action_started(approval_action)
                             self._check_cancelled()
                             self._emit_event(
@@ -616,7 +602,9 @@ class AgentLoop:
                                 }
                             )
                             self._check_cancelled()
-                            result = self.tool_executor.execute(execute_action)
+                            result = self.tool_executor.execute(
+                                preflight.execution_action
+                            )
                             pending_tool_result = result
                             self._check_cancelled()
                         else:
@@ -738,30 +726,3 @@ class AgentLoop:
             # Repair any committed tool-call pair before preserving that flow.
             persist_pending_tool_result()
             raise
-
-    def _workspace_boundary_reason(self, action: dict) -> str | None:
-        repo_root = getattr(self.tool_executor, "repo_root", None)
-        if repo_root is None:
-            return None
-
-        return workspace_boundary_reason(action, repo_root)
-
-    def _guarded_run_command_reason(self, action: dict) -> str | None:
-        if self.approval_policy.mode != "guarded":
-            return None
-        if action.get("tool") != "run_command":
-            return None
-
-        args = action.get("args", {})
-        if not isinstance(args, dict):
-            return "Command is not on the guarded allowlist"
-
-        command = args.get("command")
-        if not isinstance(command, str):
-            return "Command is not on the guarded allowlist"
-
-        repo_root = getattr(self.tool_executor, "repo_root", None)
-        if repo_root is None:
-            return "Command is not on the guarded allowlist"
-
-        return guarded_run_command_reason(command, repo_root)

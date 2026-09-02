@@ -1,8 +1,12 @@
+import inspect
 import json
 
+import core.agent_loop as agent_loop_module
 from agent.coding import CodingAgent
+from core.action_preflight import ActionPreflightDecision
 from core.agent_loop import AgentLoop, RunResult
 from core.approval import ApprovalDecision, ApprovalPolicy
+from core.hooks import HookRunner
 from core.session import Session
 from core.tool_results import ToolResults
 from storage.session_store import SessionStore
@@ -261,6 +265,13 @@ class FakeCompactor:
 class StopImmediatelyAgent(FakeAgent):
     def should_stop(self, session: Session) -> bool:
         return True
+
+
+def test_agent_loop_does_not_import_domain_safety_functions() -> None:
+    source = inspect.getsource(agent_loop_module)
+
+    assert "workspace_boundary_reason" not in source
+    assert "guarded_run_command_reason" not in source
 
 
 def run_loop(
@@ -1522,6 +1533,47 @@ def test_guarded_asks_for_risky_run_command(tmp_path) -> None:
             "args": {"command": "mkdir build"},
             "approval_reason": "Command may modify files",
         }
+    ]
+
+
+def test_hook_preflight_execution_and_result_order_is_preserved(tmp_path) -> None:
+    events: list[str] = []
+
+    class RecordingHook:
+        def before_tool_execute(self, context) -> None:
+            events.append("before_tool_execute")
+
+        def tool_result(self, context) -> None:
+            events.append("tool_result")
+
+    class RecordingPreflight:
+        def check(self, action, *, additional_approval_reason=""):
+            events.append("preflight")
+            return ActionPreflightDecision(action, action)
+
+    loop = AgentLoop(
+        session=Session(repo_root=tmp_path),
+        model_adapter=FakeModelAdapter(
+            [
+                reply("valid", actions=[{"tool": "read_file"}]),
+                reply("TASK COMPLETE"),
+            ]
+        ),
+        tool_executor=FakeToolExecutor(repo_root=tmp_path, events=events),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        hook_runner=HookRunner([RecordingHook()]),
+        action_preflight=RecordingPreflight(),
+    )
+
+    loop.run()
+
+    assert events == [
+        "before_tool_execute",
+        "preflight",
+        "execute:read_file",
+        "tool_result",
     ]
 
 

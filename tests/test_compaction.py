@@ -1,7 +1,9 @@
+import inspect
 from types import SimpleNamespace
 
 import pytest
 
+import core.compaction as compaction_module
 from core.compaction import Compactor
 
 
@@ -178,7 +180,39 @@ def test_summary_request_uses_compaction_prompt_with_json_context() -> None:
 
     assert model_adapter.requests[0][0] == {
         "role": "system",
-        "content": "You summarize coding-agent transcripts for safe continuation.",
+        "content": "You summarize prior agent interaction context for safe continuation.",
     }
     assert model_adapter.requests[0][1]["role"] == "user"
     assert "Prior context:" in model_adapter.requests[0][1]["content"]
+
+
+def test_compaction_does_not_import_code_squid_application_prompts() -> None:
+    source = inspect.getsource(compaction_module)
+
+    assert "agent.prompts" not in source
+    assert "squid_core.compaction.prompts" in source
+
+
+def test_generic_prompt_carries_task_tool_verification_and_failure_context() -> None:
+    model_adapter = FakeModelAdapter("continuation summary")
+    messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "original research task"},
+        long_message("assistant", "important finding in resource.txt "),
+        long_message("tool", "command failed, corrected invocation "),
+        long_message("assistant", "verification passed; next inspect remaining risk "),
+        long_message("user", "retain this recent request "),
+    ]
+    current_session = session(messages)
+
+    Compactor(settings(keep_recent_turns=1), model_adapter).maybe_compact(
+        current_session
+    )
+
+    prompt = model_adapter.requests[0][1]["content"]
+    assert "important finding in resource.txt" in prompt
+    assert "command failed, corrected invocation" in prompt
+    assert "verification passed; next inspect remaining risk" in prompt
+    assert "tool and command results" in prompt
+    assert "failed attempts and corrections" in prompt
+    assert current_session.messages[:2] == messages[:2]
