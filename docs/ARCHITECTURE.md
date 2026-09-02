@@ -17,7 +17,8 @@ boundaries are small enough to inspect directly.
 The construction and runtime shape is:
 
 ```text
-Code Squid application builder -> generic Squid Core builder -> AgentLoop
+Code Squid host selects Mod -> Core resolves Skill/Tools/Hooks
+-> Code Squid application builder -> generic Squid Core builder -> AgentLoop
 settings -> provider -> model adapter -> Core Agent -> action preflight -> approval -> tools -> transcript/session storage
 ```
 
@@ -75,7 +76,7 @@ its legacy location and injects the app-owned defaults into Core.
   - Creates ordinary runtime collaborators when omitted and accepts selected
     collaborators directly when an embedding application replaces them.
   - Does not import Code Squid prompts, CodingAgent compatibility, terminal
-    presentation, or Code Squid Skill/Extension discovery.
+    presentation, or Code Squid resource/Mod discovery.
 
 - `agent/`
   - Code Squid application prompt defaults and migration compatibility.
@@ -103,24 +104,22 @@ its legacy location and injects the app-owned defaults into Core.
     per-action outside-workspace execution marker.
   - `events.py` owns the tiny best-effort observer callback helper.
   - `hooks.py` owns hook context/decision dataclasses and `HookRunner`.
-  - `extension_paths.py` owns Code Squid home path resolution and user extension
-    storage directories.
-  - `extensions.py` owns extension bundle metadata discovery, active-extension
-    state, and validation. It must not own runtime tool execution, skill prompt
-    parsing beyond metadata validation, hook loading/execution, or Desktop UI.
-  - `skills.py` owns skill prompt parsing and discovery. It includes bundled
-    built-in skills, user skills from the Code Squid home directory, and skills
-    from the active valid extension.
-  - `user_tools.py` owns loose user-tool discovery/execution metadata and can
-    include tools from the active valid extension without importing tool code
-    during discovery.
+  - `app_paths.py` owns Code Squid application-home policy and paths for loose
+    resources and Mods. Reusable Mod machinery receives the application home
+    explicitly; Squid Core does not define a global home.
+  - `mods.py` owns canonical `mod.yaml` parsing, discovery, validation, and
+    host-selected runtime resolution into `ResolvedMod` metadata, Skill,
+    executable Tools, and loaded Hooks.
+  - `skills.py` owns Skill prompt parsing plus built-in and standalone user
+    Skill discovery.
+  - `user_tools.py` owns standalone user-Tool metadata, lazy registry entries,
+    source loading at execution, and normalized results.
   - `hook_loader.py` owns loading enabled loose user hooks from disk when
-    callers opt into user hooks. It also loads hooks listed by the active valid
-    extension while preserving loose hook behavior.
+    callers opt into user hooks, plus loading explicitly selected Mod Hooks.
   - `runner.py` is the Code Squid application builder and compatibility layer.
-    It owns Code Squid prompt defaults, Skill/tool discovery, active-extension
-    hooks, run-context metadata, and terminal-display construction, then passes
-    selected components to `squid_core.runner`.
+    It owns Code Squid prompt defaults, invokes Core Mod resolution for an
+    explicitly selected `mod_name`, records run context, constructs terminal
+    presentation, and passes selected resources to `squid_core.runner`.
   - `session.py` owns in-memory transcript state and lightweight read/write
     side-effect tracking.
   - `model_adapter.py` owns provider response normalization, tool-call parsing,
@@ -319,8 +318,9 @@ model request
 
 `core/hooks.py` owns the hook context and decision dataclasses plus
 `HookRunner`. `core/agent_loop.py` owns where hook calls happen in the loop.
-`core/runner.py` wires optional `hooks`, optionally loads user hooks from
-`CODE_SQUID_HOME/hooks`, or accepts an explicit `hook_runner`. `core/events.py`
+`core/runner.py` wires optional `hooks`, optionally loads standalone hooks from
+the supplied application home's `hooks/`, or accepts an explicit `hook_runner`.
+Selected Mod Hooks arrive through `ResolvedMod`. `core/events.py`
 remains observer-only.
 
 Known limitations:
@@ -407,9 +407,11 @@ persistence location while `repo_root` continues to define tool execution.
 Hosts that already resolved a Skill and its executable tool registry may pass
 them together as `resolved_skill` and `resolved_tools`. Core then skips Skill
 discovery while retaining ownership of run construction, metadata, and
-execution. This is a package-agnostic handoff: frontends may resolve packaged
-resources, but Core has no knowledge of package or Mod paths. Passing neither
-argument preserves `skill_name` discovery; passing only one raises `ValueError`.
+execution. The normal Code Squid builder also accepts `mod_name` and
+`app_home`; it asks `core.mods.resolve_mod(...)` for the selected resources.
+Passing neither path preserves standalone `skill_name` discovery. Generic
+`squid_core.runner` receives only selected resources and remains unaware of
+Mod names, paths, discovery, or selection policy.
 
 `core.runner.build_agent_loop(...)` remains as a compatibility wrapper used by
 the CLI follow-up path. It delegates generic collaborator wiring to
@@ -427,38 +429,51 @@ server mode. It gives external Python code a clean way to call Code Squid
 without copying CLI wiring. Terminal CLI wrapper behavior lives under `cli/`;
 `main.py` only delegates to `cli.commands.run_cli()`.
 
-### Explicit component loading for package hosts
+### Core Mod resolution
 
-Core separates metadata discovery from runtime source loading. A host such as
-Code Squid Desktop owns package-aware resolution: it knows which Mod and Skill
-were selected, whether a component is Mod-local or shared, and which precedence
-rule applies. Core does not contain Mod resolution policy.
+The host owns selection and passes a Mod name plus the application home to
+Core. `discover_mods(app_home)`, `load_mod(name, app_home)`, and
+`validate_mod(mod, app_home)` operate on metadata; `resolve_mod(...)` produces
+one `ResolvedMod` containing validated metadata, the selected Skill, a
+normalized executable Tool registry, and loaded selected Hooks. There is no
+automatic routing, agent-driven switching, or active-Mod state file.
 
-After resolving exact components from metadata, a host uses two public seams:
+The canonical user package is:
 
-- `build_user_tool_registry_from_metadata(...)` converts an explicitly selected
-  `dict[str, UserTool]` into the same lazy executable registry entries used by
-  normal Core discovery. It does not rediscover global tools or import source.
-- `load_hook_infos(...)` instantiates an explicitly selected list of
-  `HookInfo` objects through Core's normal hook loader.
+```text
+<app-home>/mods/<mod-name>/
+  mod.yaml
+  skills/<skill-name>/SKILL.md
+  tools/<tool-name>/tool.yaml
+  tools/<tool-name>/tool.py
+  hooks/<hook-name>/hook.yaml
+  hooks/<hook-name>/hook.py
+```
 
-This boundary keeps package selection in Desktop while Core remains responsible
-for execution wrappers, normalized tool results, entrypoint safety, source
-imports, hook factories, and hook configuration. Metadata operations
-(`load_user_tool`, `discover_user_tools`, and `list_user_hooks`) never execute
-`tool.py` or `hook.py`. A selected tool imports only when it executes; a
-selected hook imports only when `load_hook_infos` intentionally instantiates
-it.
+`mod.yaml` uses Desktop's current one-Skill fields: `name`, `description`,
+`default_skill`, optional semantic `accent`, `tools`, and `hooks`. The selected
+Skill must explicitly declare `allowed-tools`, and that ordered list must match
+the Mod Tool inventory exactly. Core preserves accent metadata but does not
+interpret its presentation.
 
-The existing discovery APIs remain unchanged: standalone Skills, loose Tools,
-loose Hooks, CLI runs, and active extensions continue using their established
-paths under `CODE_SQUID_HOME`. The explicit seams supplement rather than replace
-those workflows.
+A referenced component may be Mod-local or standalone under the same supplied
+application home. A Mod-local Skill, Tool, or Hook wins over a same-named loose
+user component. Built-in Tools are protected: they win over loose user
+collisions, and a Mod-local package may not define a replacement directory for
+a listed built-in name. Built-in Skills retain precedence during ordinary
+standalone discovery; direct Mod-local Skill selection is package-scoped.
 
-Current Desktop Mods select a default Skill, but these Core APIs accept already
-selected metadata and do not encode a one-Skill assumption. This leaves a clean
-boundary for a future host to select another Skill while continuing to enforce
-that Skill's permissions. Multi-Skill Mod selection is not implemented here.
+Discovery and validation parse `mod.yaml`, `SKILL.md`, `tool.yaml`, and
+`hook.yaml`, and verify Hook source presence, but do not import Tool or Hook
+Python source. A selected Mod Hook is imported when runtime resolution loads
+it through the normal Hook loader. A selected Tool remains lazy and imports
+only when its registry entry executes.
+
+Desktop still owns presentation, Mod Builder workflows, first-party package
+location/packaging, and the user's selection. Core owns canonical user-Mod
+parsing and runtime resolution. Desktop's older parser/resolver is temporarily
+left for the next Desktop migration patch and should become a thin caller of
+this API rather than remain an independent parser.
 
 ## Skill System
 
@@ -633,38 +648,38 @@ replaces `FINAL_SUMMARY_REQUIREMENTS`, and appends `TOOL_USAGE_GUIDANCE`.
 Core CLI skill creation/editing commands and new discovery tools such as repo
 tree/search helpers are not implemented yet.
 
-## Extension Storage
+## Application Resources and Mods
 
-User-level extension storage is rooted at the Code Squid home directory:
+Code Squid chooses an application home, defaulting to:
 
 ```text
 ~/.code-squid/
 ```
 
-Setting `CODE_SQUID_HOME` redirects this home directory. Current and planned
-extension paths are:
+Setting `CODE_SQUID_HOME` redirects the Code Squid application home. Embedding
+applications may instead pass an explicit root. Core resource machinery uses
+that supplied root and does not define a universal Squid Core home. Its paths
+are:
 
 - `skills/` stores user skills such as
   `~/.code-squid/skills/<skill-name>/SKILL.md`.
 - `hooks/` stores user hook packages loaded by `core.hook_loader` when callers
   opt into user hooks.
-- `tools/` is reserved for future user tool storage.
-- `extensions/` stores user extension bundles with `extension.yaml` metadata.
-- `extension-state.json` stores the single active extension name.
+- `tools/` stores standalone user Tool packages.
+- `mods/<mod-name>/mod.yaml` stores canonical user Mod packages with optional
+  package-local Skills, Tools, and Hooks.
 
 These directories are separate from the repo-local `skills/builtin/` bundled
 skill directory.
 
-Extension metadata supports an optional top-level semantic accent, for example
+Mod metadata supports an optional top-level semantic accent, for example
 `accent: purple`. The effective default is `cyan`; allowed names are `cyan`,
 `blue`, `green`, `yellow`, `orange`, `red`, `pink`, `purple`, `white`, and
 `gray`.
 
-The CLI exposes extension management through `extensions list`,
-`extensions active`, `extensions activate <name>`, `extensions deactivate`, and
-`extensions validate <name>`. These commands only inspect or update extension
-metadata/state; extension creation, install, export, and import flows are not
-implemented.
+There is no legacy Extension directory, manifest, active-state file, or CLI.
+The host selects a Mod for each run; Core does not persist a globally active
+selection.
 
 ## Settings
 

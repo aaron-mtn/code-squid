@@ -31,6 +31,7 @@ def test_generic_module_has_no_coding_or_terminal_ui_dependency() -> None:
     assert "agent.prompts" not in source
     assert "ui.terminal" not in source
     assert "TerminalDisplay" not in source
+    assert "core.mods" not in source
 
 
 def test_generic_run_builds_default_agent_and_ui_neutral_display(tmp_path: Path) -> None:

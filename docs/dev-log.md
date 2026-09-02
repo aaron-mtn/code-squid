@@ -1,3 +1,25 @@
+- 2026-09-01: Completed Squid Core refactor Patch 4 by deleting the legacy
+  Extension runtime, storage/state helpers, CLI commands, and Extension-specific
+  tests rather than wrapping them. Added the canonical Core Mod system at
+  `<app-home>/mods/<mod-name>/mod.yaml`, using Desktop's current one-Skill
+  metadata fields and ordered `mod.yaml tools`/Skill `allowed-tools` contract.
+  The host supplies the application home and selects the Mod; Core discovers,
+  parses, validates, and resolves it into `ResolvedMod` metadata, Skill, lazy
+  executable Tools, and loaded selected Hooks. Standalone `skills/`, `tools/`,
+  and `hooks/` remain supported. Mod-local resources win over same-named loose
+  user resources; protected built-in Tools win loose collisions and reject
+  Mod-local replacement packages. Metadata discovery/validation imports
+  neither Tool nor Hook source. `core.runner` now accepts `mod_name` plus
+  `app_home` and supplies resolved components to the unchanged Mod-agnostic
+  `squid_core.runner`. Before changes, local CLI startup and a fake-adapter
+  architecture-review run constructed a session and completed. After changes,
+  canonical Mod discovery/resolution and a fake-adapter selected-Mod run did
+  the same; a real localhost Ollama `gemma3:270m` attempt failed to produce an
+  accepted final, while the installed `gemma3:4b` completed the no-tool Mod
+  smoke with `PATCH4_SMOKE_OK`. Focused Mod/Skill/Tool/Hook/runner suite: 117
+  passed. Full suite: 697 passed. Compile/import checks and `git diff --check`
+  passed. Desktop parser/call-site migration and the physical `core/` to
+  `squid_core/` package migration remain deferred.
 - 2026-09-01: Simplified the Patch 3 generic construction API before treating
   it as permanent. Removed factory arguments for provider, ModelAdapter,
   Compactor, ToolExecutor, ToolResults, ApprovalPolicy, ActionPreflight,

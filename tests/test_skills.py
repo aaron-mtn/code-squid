@@ -2,8 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from core.extension_paths import CODE_SQUID_HOME_ENV
-from core.extensions import set_active_extension
+from core.app_paths import CODE_SQUID_HOME_ENV
 from core.skills import discover_builtin_skills, discover_skills, parse_skill_file
 
 
@@ -11,30 +10,6 @@ def _write_skill(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
-
-
-def _write_extension_skill(
-    home: Path,
-    extension_name: str,
-    skill_name: str,
-    skill_text: str,
-    *,
-    metadata: str | None = None,
-) -> Path:
-    extension_dir = home / "extensions" / extension_name
-    extension_dir.mkdir(parents=True, exist_ok=True)
-    (extension_dir / "extension.yaml").write_text(
-        metadata
-        or f"""name: {extension_name}
-skills:
-  - {skill_name}
-""",
-        encoding="utf-8",
-    )
-    return _write_skill(
-        extension_dir / "skills" / skill_name / "SKILL.md",
-        skill_text,
-    )
 
 
 def test_parse_valid_skill_file(tmp_path: Path) -> None:
@@ -415,155 +390,6 @@ User instructions.
     assert skills["architecture-review"].description == "Built-in review."
     assert skills["architecture-review"].source == "builtin"
     assert skills["architecture-review"].editable is False
-
-
-def test_no_active_extension_leaves_skill_discovery_unchanged(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
-    _write_skill(
-        tmp_path / "skills" / "builtin" / "builtin-only" / "SKILL.md",
-        """---
-name: builtin-only
-description: Built in.
----
-
-Builtin instructions.
-""",
-    )
-    _write_extension_skill(
-        home,
-        "bundle",
-        "extension-skill",
-        """---
-name: extension-skill
-description: Extension skill.
----
-
-Extension instructions.
-""",
-    )
-
-    skills = discover_skills(tmp_path / "skills")
-
-    assert set(skills) == {"builtin-only"}
-
-
-def test_active_valid_extension_skill_appears_in_discovery(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
-    skill_path = _write_extension_skill(
-        home,
-        "repo-inspector",
-        "repo-inspector",
-        """---
-name: repo-inspector
-description: Inspect repositories.
-allowed-tools: read_file
----
-
-Inspect repositories.
-""",
-    )
-    set_active_extension("repo-inspector")
-
-    skills = discover_skills(tmp_path / "skills")
-
-    assert "repo-inspector" in skills
-    assert skills["repo-inspector"].source == "extension"
-    assert skills["repo-inspector"].editable is False
-    assert skills["repo-inspector"].path == skill_path
-
-
-def test_inactive_extension_skill_does_not_appear(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
-    _write_extension_skill(
-        home,
-        "repo-inspector",
-        "repo-inspector",
-        """---
-name: repo-inspector
-description: Inspect repositories.
----
-
-Inspect repositories.
-""",
-    )
-
-    assert "repo-inspector" not in discover_skills(tmp_path / "skills")
-
-
-def test_invalid_active_extension_skill_does_not_appear(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
-    _write_extension_skill(
-        home,
-        "repo-inspector",
-        "repo-inspector",
-        """---
-name: repo-inspector
-description: Inspect repositories.
----
-
-Inspect repositories.
-""",
-        metadata="""name: repo-inspector
-default_skill: missing
-skills:
-  - repo-inspector
-""",
-    )
-    set_active_extension("repo-inspector")
-
-    assert "repo-inspector" not in discover_skills(tmp_path / "skills")
-
-
-def test_loose_user_skill_wins_over_active_extension_duplicate(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
-    _write_skill(
-        home / "skills" / "review" / "SKILL.md",
-        """---
-name: review
-description: Loose user review.
----
-
-Loose instructions.
-""",
-    )
-    _write_extension_skill(
-        home,
-        "repo-inspector",
-        "review",
-        """---
-name: review
-description: Extension review.
----
-
-Extension instructions.
-""",
-    )
-    set_active_extension("repo-inspector")
-
-    skills = discover_skills(tmp_path / "skills")
-
-    assert skills["review"].description == "Loose user review."
-    assert skills["review"].source == "user"
 
 
 def test_unknown_prompt_section_override_fails(tmp_path: Path) -> None:

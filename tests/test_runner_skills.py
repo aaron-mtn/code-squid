@@ -4,8 +4,7 @@ from pathlib import Path
 import pytest
 
 from agent.coding import CodingAgent
-from core.extension_paths import CODE_SQUID_HOME_ENV
-from core.extensions import set_active_extension
+from core.app_paths import CODE_SQUID_HOME_ENV
 from core.runner import build_coding_task_run, resolve_skill_tools
 from core.skills import Skill
 from tools import TOOLS
@@ -29,50 +28,6 @@ def write_user_tool(home: Path, name: str, metadata: str | None = None) -> None:
     )
 
 
-def write_extension(
-    home: Path,
-    extension_name: str,
-    skill_name: str,
-    skill_frontmatter: str,
-    *,
-    tool_name: str = "extension_tool",
-    tool_metadata: str | None = None,
-) -> None:
-    extension_dir = home / "extensions" / extension_name
-    extension_dir.mkdir(parents=True)
-    (extension_dir / "extension.yaml").write_text(
-        f"""name: {extension_name}
-skills:
-  - {skill_name}
-tools:
-  - {tool_name}
-""",
-        encoding="utf-8",
-    )
-    skill_dir = extension_dir / "skills" / skill_name
-    skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text(
-        f"""---
-name: {skill_name}
-description: Extension skill.
-{skill_frontmatter}---
-
-Extension instructions.
-""",
-        encoding="utf-8",
-    )
-    tool_dir = extension_dir / "tools" / tool_name
-    tool_dir.mkdir(parents=True)
-    (tool_dir / "tool.yaml").write_text(
-        tool_metadata or f"name: {tool_name}\ndescription: Extension tool.\n",
-        encoding="utf-8",
-    )
-    (tool_dir / "tool.py").write_text(
-        "def run(args, context=None):\n    return {'ok': True, 'source': 'extension'}\n",
-        encoding="utf-8",
-    )
-
-
 def test_selecting_skill_filters_tool_definitions(monkeypatch, tmp_path: Path) -> None:
     skill = Skill(
         name="read-only",
@@ -82,7 +37,7 @@ def test_selecting_skill_filters_tool_definitions(monkeypatch, tmp_path: Path) -
         path=tmp_path / "SKILL.md",
     )
 
-    monkeypatch.setattr("core.runner.discover_skills", lambda: {"read-only": skill})
+    monkeypatch.setattr("core.runner.discover_skills", lambda **_kwargs: {"read-only": skill})
 
     selected_skill, tools = resolve_skill_tools("read-only")
     agent = CodingAgent("review this", skill=selected_skill, tools=tools)
@@ -103,7 +58,7 @@ def test_selecting_user_skill_uses_same_resolution_path(monkeypatch, tmp_path: P
         editable=True,
     )
 
-    monkeypatch.setattr("core.runner.discover_skills", lambda: {"user-review": skill})
+    monkeypatch.setattr("core.runner.discover_skills", lambda **_kwargs: {"user-review": skill})
 
     selected_skill, tools = resolve_skill_tools("user-review")
 
@@ -123,7 +78,7 @@ def test_skill_with_explicit_empty_tools_resolves_to_no_tools(monkeypatch, tmp_p
         path=tmp_path / "SKILL.md",
     )
 
-    monkeypatch.setattr("core.runner.discover_skills", lambda: {"chat-only": skill})
+    monkeypatch.setattr("core.runner.discover_skills", lambda **_kwargs: {"chat-only": skill})
 
     selected_skill, tools = resolve_skill_tools("chat-only")
     agent = CodingAgent("plan this", skill=selected_skill, tools=tools)
@@ -143,7 +98,7 @@ def test_skill_with_omitted_tools_keeps_full_tool_default(monkeypatch, tmp_path:
         path=tmp_path / "SKILL.md",
     )
 
-    monkeypatch.setattr("core.runner.discover_skills", lambda: {"legacy": skill})
+    monkeypatch.setattr("core.runner.discover_skills", lambda **_kwargs: {"legacy": skill})
 
     selected_skill, tools = resolve_skill_tools("legacy")
 
@@ -164,27 +119,6 @@ def test_no_selected_skill_preserves_full_tool_behavior(monkeypatch, tmp_path: P
     assert names == ["read_file", "write_file", "apply_patch", "run_command"]
 
 
-def test_no_selected_skill_ignores_active_extension_tools(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
-    write_extension(
-        home,
-        "repo-inspector",
-        "repo-inspector",
-        "allowed-tools:\n  - extension_tool\n",
-    )
-    set_active_extension("repo-inspector")
-
-    skill, tools = resolve_skill_tools(None)
-
-    assert skill is None
-    assert list(tools) == ["read_file", "write_file", "apply_patch", "run_command"]
-    assert "extension_tool" not in tools
-
-
 def test_skill_listing_user_tool_activates_it(monkeypatch, tmp_path: Path) -> None:
     home = tmp_path / "home"
     monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
@@ -201,7 +135,7 @@ def test_skill_listing_user_tool_activates_it(monkeypatch, tmp_path: Path) -> No
         path=tmp_path / "SKILL.md",
     )
 
-    monkeypatch.setattr("core.runner.discover_skills", lambda: {"custom": skill})
+    monkeypatch.setattr("core.runner.discover_skills", lambda **_kwargs: {"custom": skill})
 
     selected_skill, tools = resolve_skill_tools("custom")
     agent = CodingAgent("use it", skill=selected_skill, tools=tools)
@@ -211,83 +145,6 @@ def test_skill_listing_user_tool_activates_it(monkeypatch, tmp_path: Path) -> No
     assert list(tools) == ["custom_tool"]
     assert names == ["custom_tool"]
     assert tools["custom_tool"]["definition"]()["function"]["description"] == "Custom user tool."
-
-
-def test_extension_skill_listing_extension_tool_activates_it(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
-    write_extension(
-        home,
-        "repo-inspector",
-        "repo-inspector",
-        "allowed-tools:\n  - extension_tool\n",
-    )
-    set_active_extension("repo-inspector")
-
-    selected_skill, tools = resolve_skill_tools("repo-inspector")
-
-    assert selected_skill is not None
-    assert selected_skill.source == "extension"
-    assert list(tools) == ["extension_tool"]
-    assert tools["extension_tool"]["source"] == "extension"
-
-
-def test_extension_skill_with_omitted_tools_gets_builtins_only(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
-    write_extension(home, "repo-inspector", "repo-inspector", "")
-    set_active_extension("repo-inspector")
-
-    selected_skill, tools = resolve_skill_tools("repo-inspector")
-
-    assert selected_skill is not None
-    assert selected_skill.allowed_tools_explicit is False
-    assert list(tools) == ["read_file", "write_file", "apply_patch", "run_command"]
-    assert "extension_tool" not in tools
-
-
-def test_extension_skill_with_explicit_empty_tools_gets_no_tools(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
-    write_extension(home, "repo-inspector", "repo-inspector", "allowed-tools: []\n")
-    set_active_extension("repo-inspector")
-
-    selected_skill, tools = resolve_skill_tools("repo-inspector")
-
-    assert selected_skill is not None
-    assert selected_skill.allowed_tools_explicit is True
-    assert tools == {}
-
-
-def test_extension_skill_unknown_tool_fails_clearly(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    home = tmp_path / "home"
-    monkeypatch.setenv(CODE_SQUID_HOME_ENV, str(home))
-    write_extension(
-        home,
-        "repo-inspector",
-        "repo-inspector",
-        "allowed-tools:\n  - missing_tool\n",
-    )
-    set_active_extension("repo-inspector")
-
-    try:
-        resolve_skill_tools("repo-inspector")
-    except ValueError as error:
-        assert str(error) == "Skill repo-inspector lists unknown tool(s): missing_tool"
-    else:
-        raise AssertionError("Expected unknown extension skill tool to fail")
 
 
 def test_builtin_tool_name_wins_over_user_tool_collision(
@@ -309,7 +166,7 @@ def test_builtin_tool_name_wins_over_user_tool_collision(
         path=tmp_path / "SKILL.md",
     )
 
-    monkeypatch.setattr("core.runner.discover_skills", lambda: {"read": skill})
+    monkeypatch.setattr("core.runner.discover_skills", lambda **_kwargs: {"read": skill})
 
     _selected_skill, tools = resolve_skill_tools("read")
 
@@ -326,7 +183,7 @@ def test_unknown_tool_in_allowed_tools_fails_clearly(monkeypatch, tmp_path: Path
         path=tmp_path / "SKILL.md",
     )
 
-    monkeypatch.setattr("core.runner.discover_skills", lambda: {"bad": skill})
+    monkeypatch.setattr("core.runner.discover_skills", lambda **_kwargs: {"bad": skill})
 
     try:
         resolve_skill_tools("bad")
@@ -355,7 +212,7 @@ def test_build_coding_task_run_passes_filtered_tools_to_executor(
             captured["tool_executor"] = kwargs["tool_executor"]
             self.display = kwargs["display"]
 
-    monkeypatch.setattr("core.runner.discover_skills", lambda: {"review": skill})
+    monkeypatch.setattr("core.runner.discover_skills", lambda **_kwargs: {"review": skill})
     monkeypatch.setattr("squid_core.runner.build_provider", lambda *args, **kwargs: object())
     monkeypatch.setattr("squid_core.runner.AgentLoop", FakeAgentLoop)
 

@@ -13,8 +13,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from core.extension_paths import user_hooks_dir
-from core.extensions import get_active_extension
+from core.app_paths import user_hooks_dir
 
 
 @dataclass(frozen=True)
@@ -31,9 +30,13 @@ class HookLoadError(RuntimeError):
     pass
 
 
-def list_user_hooks(hooks_dir: Path | None = None) -> list[HookInfo]:
+def list_user_hooks(
+    hooks_dir: Path | None = None,
+    *,
+    app_home: Path | str | None = None,
+) -> list[HookInfo]:
     """Return metadata for saved user hooks in deterministic directory order."""
-    root = hooks_dir if hooks_dir is not None else user_hooks_dir()
+    root = hooks_dir if hooks_dir is not None else user_hooks_dir(app_home)
     if not root.exists():
         return []
     if not root.is_dir():
@@ -45,21 +48,17 @@ def list_user_hooks(hooks_dir: Path | None = None) -> list[HookInfo]:
         key=_path_sort_key,
     )
     for hook_dir in hook_dirs:
-        hooks.append(_read_hook_info(hook_dir))
+        hooks.append(read_hook_info(hook_dir))
     return hooks
 
 
-def load_user_hooks(hooks_dir: Path | None = None) -> list[object]:
-    """Import enabled saved user hooks and active extension hooks."""
-    hook_infos = list_user_hooks(hooks_dir)
-    if hooks_dir is None:
-        hook_infos.extend(_active_extension_hook_infos(hook_infos))
-    return load_hook_infos(hook_infos)
-
-
-def load_active_extension_hooks() -> list[object]:
-    """Import hooks listed by the active valid extension."""
-    return load_hook_infos(_active_extension_hook_infos([]))
+def load_user_hooks(
+    hooks_dir: Path | None = None,
+    *,
+    app_home: Path | str | None = None,
+) -> list[object]:
+    """Import enabled saved user hooks."""
+    return load_hook_infos(list_user_hooks(hooks_dir, app_home=app_home))
 
 
 def load_hook_infos(hook_infos: list[HookInfo]) -> list[object]:
@@ -92,29 +91,7 @@ def load_hook_infos(hook_infos: list[HookInfo]) -> list[object]:
     return loaded_hooks
 
 
-def _active_extension_hook_infos(user_hook_infos: list[HookInfo]) -> list[HookInfo]:
-    active_extension = get_active_extension()
-    if active_extension is None or not active_extension.valid:
-        return []
-
-    user_hook_names = {info.name for info in user_hook_infos}
-    hook_infos: list[HookInfo] = []
-    for hook_name in active_extension.hooks:
-        hook_dir = active_extension.path / "hooks" / hook_name
-        if not hook_dir.is_dir():
-            continue
-        info = _read_hook_info(
-            hook_dir,
-            source="extension",
-            enabled_override=True,
-        )
-        if info.name in user_hook_names:
-            continue
-        hook_infos.append(info)
-    return hook_infos
-
-
-def _read_hook_info(
+def read_hook_info(
     hook_dir: Path,
     *,
     source: str = "user",

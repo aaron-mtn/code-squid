@@ -12,8 +12,7 @@ import re
 import uuid
 from typing import Any
 
-from core.extension_paths import user_tools_dir
-from core.extensions import get_active_extension
+from core.app_paths import user_tools_dir
 from tools._truncation import truncate_head_tail
 
 
@@ -38,9 +37,13 @@ class UserToolError(RuntimeError):
     pass
 
 
-def discover_user_tools() -> dict[str, UserTool]:
+def discover_user_tools(
+    tools_dir: Path | str | None = None,
+    *,
+    app_home: Path | str | None = None,
+) -> dict[str, UserTool]:
     """Return valid user tool metadata in deterministic directory order."""
-    root = user_tools_dir()
+    root = Path(tools_dir) if tools_dir is not None else user_tools_dir(app_home)
     tools: dict[str, UserTool] = {}
 
     if not root.exists():
@@ -59,27 +62,18 @@ def discover_user_tools() -> dict[str, UserTool]:
             if tool is not None:
                 tools[tool.name] = tool
 
-    active_extension = get_active_extension()
-    if active_extension is not None and active_extension.valid:
-        extension_tools = _discover_user_tools_in(
-            active_extension.path / "tools",
-            active_extension.tools,
-            source="extension",
-            editable=False,
-        )
-        for name, tool in extension_tools.items():
-            tools.setdefault(name, tool)
     return tools
 
 
 def build_user_tool_registry(
     *,
+    app_home: Path | str | None = None,
     repo_root: Path | str | None = None,
     session_id: str | None = None,
 ) -> dict[str, dict]:
     """Return executable registry entries for discovered user tools."""
     return build_user_tool_registry_from_metadata(
-        discover_user_tools(),
+        discover_user_tools(app_home=app_home),
         repo_root=repo_root,
         session_id=session_id,
     )
@@ -167,32 +161,6 @@ def load_user_tool(
         editable=editable,
         path=tool_dir,
     )
-
-
-def _discover_user_tools_in(
-    directory: Path,
-    names: tuple[str, ...],
-    *,
-    source: str,
-    editable: bool,
-) -> dict[str, UserTool]:
-    if not directory.exists():
-        return {}
-    if not directory.is_dir():
-        return {}
-
-    tools: dict[str, UserTool] = {}
-    for name in names:
-        tool_dir = directory / name
-        if not tool_dir.is_dir():
-            continue
-        try:
-            tool = load_user_tool(tool_dir, source=source, editable=editable)
-        except UserToolError:
-            continue
-        if tool is not None:
-            tools[tool.name] = tool
-    return tools
 
 
 def _parse_metadata_file(path: Path) -> dict[str, Any]:

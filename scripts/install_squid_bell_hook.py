@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.extension_paths import user_hooks_dir
+from core.app_paths import user_hooks_dir
 
 
 HOOK_METADATA = """name: squid-bell

@@ -17,8 +17,10 @@ from agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
 from config.settings import Settings, load_settings
 from core.agent_loop import AgentLoop, RunResult
 from core.events import EventCallback
-from core.hook_loader import load_active_extension_hooks, load_user_hooks
+from core.app_paths import code_squid_home
+from core.hook_loader import load_user_hooks
 from core.hooks import HookRunner
+from core.mods import ResolvedMod, resolve_mod
 from core.platform_context import PlatformContext, detect_platform_context
 from core.session import Session
 from core.skills import Skill, discover_skills
@@ -58,6 +60,8 @@ def run_coding_task(
     settings: Settings | None = None,
     display: TerminalDisplay | None = None,
     skill_name: str | None = None,
+    mod_name: str | None = None,
+    app_home: Path | str | None = None,
     mod_id: str | None = None,
     resolved_skill: Skill | None = None,
     resolved_tools: dict | None = None,
@@ -92,6 +96,8 @@ def run_coding_task(
         settings=settings,
         display=display,
         skill_name=skill_name,
+        mod_name=mod_name,
+        app_home=app_home,
         mod_id=mod_id,
         resolved_skill=resolved_skill,
         resolved_tools=resolved_tools,
@@ -126,6 +132,8 @@ def build_coding_task_run(
     settings: Settings | None = None,
     display: TerminalDisplay | None = None,
     skill_name: str | None = None,
+    mod_name: str | None = None,
+    app_home: Path | str | None = None,
     mod_id: str | None = None,
     resolved_skill: Skill | None = None,
     resolved_tools: dict | None = None,
@@ -155,15 +163,12 @@ def build_coding_task_run(
 
     if (resolved_skill is None) != (resolved_tools is None):
         raise ValueError("resolved_skill and resolved_tools must be supplied together")
+    if mod_name is not None and (skill_name is not None or resolved_skill is not None):
+        raise ValueError("mod_name cannot be combined with skill_name or resolved components")
 
     repo_root = Path(repo_root).resolve()
     settings = load_settings(repo_root) if settings is None else settings
-    display_skill_name = resolved_skill.name if resolved_skill is not None else skill_name
-    display = (
-        build_run_display(repo_root, settings, display_skill_name)
-        if display is None
-        else display
-    )
+    selected_mod: ResolvedMod | None = None
 
     if session_store is not None and session_store_factory is not None:
         raise ValueError("session_store and session_store_factory are mutually exclusive")
@@ -185,15 +190,31 @@ def build_coding_task_run(
         )
     elif undo_store is None and undo_store_factory is not None:
         undo_store = undo_store_factory(repo_root, session_store.session_id)
-    if resolved_skill is not None and resolved_tools is not None:
+    if mod_name is not None:
+        selected_mod = resolve_mod(
+            mod_name,
+            code_squid_home(app_home),
+            repo_root=repo_root,
+            session_id=session_store.session_id,
+        )
+        skill, active_tools = selected_mod.skill, selected_mod.tools
+    elif resolved_skill is not None and resolved_tools is not None:
         skill, active_tools = resolved_skill, resolved_tools
     else:
         skill, active_tools = resolve_skill_tools(
             skill_name,
             repo_root=repo_root,
             session_id=session_store.session_id,
+            app_home=app_home,
         )
-    append_run_context(session_store, skill, active_tools, mod_id=mod_id)
+    if display is None:
+        display = build_run_display(
+            repo_root,
+            settings,
+            skill.name if skill is not None else None,
+        )
+    selected_mod_id = selected_mod.metadata.name if selected_mod is not None else mod_id
+    append_run_context(session_store, skill, active_tools, mod_id=selected_mod_id)
     platform_context = (
         detect_platform_context()
         if agent is None or tool_executor is None
@@ -208,10 +229,14 @@ def build_coding_task_run(
             workspace=str(repo_root),
             prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS,
         )
+    selected_hooks = list(hooks or [])
+    if selected_mod is not None:
+        selected_hooks.extend(selected_mod.hooks)
     hook_runner = build_hook_runner(
-        hooks=hooks,
+        hooks=selected_hooks,
         hook_runner=hook_runner,
         include_user_hooks=include_user_hooks,
+        app_home=app_home,
     )
     loop = build_agent_loop(
         repo_root=repo_root,
@@ -258,6 +283,7 @@ def build_agent_loop(
     hooks: list[object] | None = None,
     hook_runner: HookRunner | None = None,
     include_user_hooks: bool = False,
+    app_home: Path | str | None = None,
     platform_context: PlatformContext | None = None,
     approval_prompter=None,
     provider=None,
@@ -274,6 +300,7 @@ def build_agent_loop(
         hooks=hooks,
         hook_runner=hook_runner,
         include_user_hooks=include_user_hooks,
+        app_home=app_home,
     )
 
     return build_core_agent_loop(
@@ -306,15 +333,14 @@ def build_hook_runner(
     hooks: list[object] | None = None,
     hook_runner: HookRunner | None = None,
     include_user_hooks: bool = False,
+    app_home: Path | str | None = None,
 ) -> HookRunner:
     if hook_runner is not None:
         return hook_runner
 
     combined_hooks = list(hooks or [])
     if include_user_hooks:
-        combined_hooks.extend(load_user_hooks())
-    else:
-        combined_hooks.extend(load_active_extension_hooks())
+        combined_hooks.extend(load_user_hooks(app_home=app_home))
 
     return HookRunner(combined_hooks)
 
@@ -324,11 +350,12 @@ def resolve_skill_tools(
     *,
     repo_root: Path | str | None = None,
     session_id: str | None = None,
+    app_home: Path | str | None = None,
 ) -> tuple[Skill | None, dict]:
     if skill_name is None:
         return None, TOOLS
 
-    skills = discover_skills()
+    skills = discover_skills(app_home=app_home)
     skill = skills.get(skill_name)
     if skill is None:
         available = ", ".join(sorted(skills)) or "none"
@@ -340,7 +367,11 @@ def resolve_skill_tools(
     if not skill.allowed_tools:
         return skill, TOOLS
 
-    user_tools = build_user_tool_registry(repo_root=repo_root, session_id=session_id)
+    user_tools = build_user_tool_registry(
+        app_home=app_home,
+        repo_root=repo_root,
+        session_id=session_id,
+    )
     available_tools = {**user_tools, **TOOLS}
     unknown_tools = [
         tool_name

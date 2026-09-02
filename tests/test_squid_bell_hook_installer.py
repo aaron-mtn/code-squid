@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from core.extension_paths import CODE_SQUID_HOME_ENV
+from core.app_paths import CODE_SQUID_HOME_ENV
 from core.hook_loader import load_user_hooks
 from core.hooks import (
     BeforeAcceptFinalContext,
