@@ -1,7 +1,10 @@
 from types import SimpleNamespace
 
-from squid_core.context_status import build_context_status, format_token_count
-from squid_core.token_estimate import estimate_messages_tokens
+from squid_core.compaction.compaction_status import (
+    build_context_status,
+    format_token_count,
+)
+from squid_core.compaction.token_estimate import estimate_messages_tokens
 
 
 def settings(

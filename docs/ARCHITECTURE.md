@@ -82,12 +82,16 @@ and application layer; `squid_core/` is the reusable agent runtime.
     import `code_squid.agent.prompts`.
 
 - `squid_core/compaction/`
-  - Generic transcript compaction mechanics and prompt ownership.
+  - Generic transcript compaction mechanics, prompt ownership, trigger-status
+    reporting, and rough transcript token estimation.
   - `compactor.py` owns trigger, chunking, summary, and retention behavior and
     is exposed as `squid_core.compaction.Compactor`.
   - `prompts.py` asks for continuation-critical task, finding, resource,
     action, result, verification, correction, next-step, and risk context
     without Code Squid identity or coding-only language.
+  - `compaction_status.py` owns context usage and compaction-trigger reporting.
+  - `token_estimate.py` owns the rough transcript token estimation used by
+    compaction and status reporting.
 
 - `squid_core/mods/`
   - Mod metadata, validation, discovery, and runtime composition.
@@ -150,10 +154,7 @@ and application layer; `squid_core/` is the reusable agent runtime.
     normalization; `settings.py` owns generic provider/runtime/compaction
     semantics; `platform_context.py` describes the environment;
     `spawner.py` owns generic construction; `session.py` owns in-memory
-    transcript state; `skills.py` owns standalone Skills; and
-    `token_estimate.py` owns token estimation.
-  - Existing `context_status.py` remains flat pending the remaining ownership
-    audit; Patch 5B does not create another subsystem for it.
+    transcript state; and `skills.py` owns standalone Skills.
   - Resource modules accept explicit application homes or resource roots. They
     do not import Code Squid's application-home policy.
 
@@ -942,9 +943,12 @@ approval prompts for some obvious `run_command` cases.
 
 Compaction runs before model calls inside `AgentLoop`.
 
-`squid_core/compaction/compactor.py` asks `squid_core/token_estimate.py` for a rough estimate of the
-current transcript size. The estimate serializes messages to JSON/text and uses
-simple length math; it is not an exact model tokenizer.
+`squid_core/compaction/compactor.py` asks
+`squid_core/compaction/token_estimate.py` for a rough estimate of the current
+transcript size. The estimate serializes messages to JSON/text and uses simple
+length math; it is not an exact model tokenizer. The adjacent
+`compaction_status.py` reports context usage against the configured compaction
+trigger without changing those estimation semantics.
 
 The compaction request uses the generic Core-owned prompt in
 `squid_core/compaction/prompts.py`. It has no dependency on Code Squid's
@@ -1182,10 +1186,13 @@ a plugin system, event bus, daemon, server, or future orchestration layer.
 `squid_core/model_adapter.py` owns provider response normalization and replay message
 shaping. Provider-specific HTTP/API calls stay in `squid_core/providers/`.
 
-`squid_core/compaction/compactor.py` owns transcript compression mechanics, while
+`squid_core/compaction/compactor.py` owns transcript compression mechanics;
 `squid_core/compaction/prompts.py` owns the generic continuation-summary
-prompt. Neither imports Code Squid application prompts, and compaction should
-not become workspace memory.
+prompt; `squid_core/compaction/compaction_status.py` owns context usage and
+compaction-trigger reporting; and `squid_core/compaction/token_estimate.py`
+owns their shared rough transcript token estimate. These modules do not import
+Code Squid application prompts, and compaction should not become workspace
+memory.
 
 `squid_core/safety/approval.py` owns approval decisions without depending on a concrete UI.
 The loop enforces those decisions before tool execution.

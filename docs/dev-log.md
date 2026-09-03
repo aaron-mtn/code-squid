@@ -1,3 +1,14 @@
+- 2026-09-02: Moved the remaining compaction-support modules into
+  `squid_core/compaction/`: context usage/trigger reporting now lives in
+  `compaction_status.py`, and the existing rough transcript token helpers live
+  in `token_estimate.py`. Updated production and test imports directly and
+  removed the old flat module paths without compatibility shims. The
+  `ContextStatus` name, status data shape, compaction semantics, and rough
+  `len(text) // 4` heuristic are unchanged. Focused compaction/status/token/
+  boundary suite: 37 passed. Full suite: 725 passed (the 724-test baseline plus
+  one old-module-absence boundary test). Production compileall and a fresh
+  67-module import walk passed; stale old imports and flat module files are
+  absent. Both diff checks passed. No live model inference was run.
 - 2026-09-02: Completed the final Code Squid application package cleanup by
   moving the product-owned Agent/prompt policy, settings, application paths,
   run setup, CLI workflow, and terminal UI into `code_squid/`. Renamed the CLI

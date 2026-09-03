@@ -7,7 +7,6 @@ REUSABLE_MODULES = (
     "agent",
     "agent_loop",
     "compaction",
-    "context_status",
     "events",
     "generation",
     "hooks",
@@ -21,7 +20,6 @@ REUSABLE_MODULES = (
     "session",
     "skills",
     "storage",
-    "token_estimate",
     "tools",
 )
 
@@ -74,6 +72,13 @@ def test_old_core_runner_module_is_removed() -> None:
     package_root = Path(__file__).resolve().parents[1] / "squid_core"
 
     assert not (package_root / "runner.py").exists()
+
+
+def test_old_flat_compaction_support_modules_are_removed() -> None:
+    package_root = Path(__file__).resolve().parents[1] / "squid_core"
+
+    assert not (package_root / "context_status.py").exists()
+    assert not (package_root / "token_estimate.py").exists()
 
 
 def test_old_provider_source_package_is_removed() -> None:

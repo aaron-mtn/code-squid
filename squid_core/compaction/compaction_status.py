@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from squid_core.token_estimate import estimate_messages_tokens
+from squid_core.compaction.token_estimate import estimate_messages_tokens
 
 
 @dataclass(frozen=True)
