@@ -4,6 +4,7 @@ from code_squid.app_paths import session_indexes_path
 from squid_core.agent_loop import RunResult
 from code_squid.agent_setup import build_coding_task_run, run_coding_task
 from squid_core.platform_context import PlatformContext
+from squid_core.spawner import NullDisplay
 
 
 class FakeDisplay:
@@ -14,6 +15,31 @@ class FakeDisplay:
 
     def run_started(self) -> None:
         self.run_starts += 1
+
+
+def test_run_construction_uses_core_null_display_when_omitted(tmp_path: Path) -> None:
+    run = build_coding_task_run(
+        tmp_path,
+        "Headless task",
+        model_adapter=object(),
+    )
+
+    assert type(run.loop.display) is NullDisplay
+    assert run.loop.approval_policy.prompter is None
+
+
+def test_run_construction_uses_supplied_display_for_approvals(tmp_path: Path) -> None:
+    display = FakeDisplay()
+
+    run = build_coding_task_run(
+        tmp_path,
+        "Presented task",
+        display=display,
+        model_adapter=object(),
+    )
+
+    assert run.loop.display is display
+    assert run.loop.approval_policy.prompter is display
 
 
 def test_run_coding_task_passes_callbacks_to_agent_loop(monkeypatch, tmp_path) -> None:

@@ -1,12 +1,11 @@
 """Code Squid application wiring for normal coding tasks.
 
-This layer owns Code Squid prompts, Skill/tool discovery, hooks, and terminal
-presentation. Generic collaborator construction lives in ``squid_core.spawner``.
+This layer owns Code Squid prompts, Skill/tool discovery, hooks, and application
+paths. Generic collaborator construction lives in ``squid_core.spawner``.
 """
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -30,21 +29,12 @@ from squid_core.tools.user_tools import build_user_tool_registry
 from squid_core.storage import SessionStore, UndoStore
 from squid_core.storage.session_index import register_session_root
 from squid_core.tools.builtins import TOOLS
-from code_squid.console.ui.banner import StartupInfo
-from code_squid.console.ui.display import TerminalDisplay
 from squid_core.agent import Agent
 from squid_core.spawner import build_agent_loop as build_core_agent_loop
 
 
 SessionStoreFactory = Callable[[Path, str], SessionStore]
 UndoStoreFactory = Callable[[Path, str], UndoStore]
-
-
-FRIENDLY_MODES = {
-    "always": "strict",
-    "guarded": "balanced",
-    "never": "yolo",
-}
 
 
 @dataclass(frozen=True)
@@ -61,7 +51,7 @@ def run_coding_task(
     on_event: EventCallback | None = None,
     should_cancel: Callable[[], bool] | None = None,
     settings: Settings | None = None,
-    display: TerminalDisplay | None = None,
+    display=None,
     skill_name: str | None = None,
     mod_name: str | None = None,
     app_home: Path | str | None = None,
@@ -88,7 +78,8 @@ def run_coding_task(
 ) -> RunResult:
     """Simple call-and-run entry point for a new coding task.
 
-    ``on_event`` is passed through to ``AgentLoop`` for external wrappers.
+    ``on_event`` is passed through to ``AgentLoop`` for external wrappers. When
+    no display is supplied, Squid Core uses its UI-neutral null presentation.
     """
 
     run = build_coding_task_run(
@@ -133,7 +124,7 @@ def build_coding_task_run(
     on_event: EventCallback | None = None,
     should_cancel: Callable[[], bool] | None = None,
     settings: Settings | None = None,
-    display: TerminalDisplay | None = None,
+    display=None,
     skill_name: str | None = None,
     mod_name: str | None = None,
     app_home: Path | str | None = None,
@@ -161,7 +152,8 @@ def build_coding_task_run(
     """Construct a new coding-task run without starting it.
 
     CLI code uses this when it needs direct access to the session and
-    ``SessionStore`` for interactive follow-ups after the first run.
+    ``SessionStore`` for interactive follow-ups after the first run. Frontends
+    supply their own display; omitted presentation uses Squid Core's default.
     """
 
     if (resolved_skill is None) != (resolved_tools is None):
@@ -223,12 +215,6 @@ def build_coding_task_run(
             repo_root=repo_root,
             session_id=session_store.session_id,
             app_home=app_home,
-        )
-    if display is None:
-        display = build_run_display(
-            repo_root,
-            settings,
-            skill.name if skill is not None else None,
         )
     selected_mod_id = selected_mod.metadata.name if selected_mod is not None else mod_id
     append_run_context(session_store, skill, active_tools, mod_id=selected_mod_id)
@@ -354,32 +340,4 @@ def append_run_context(
         allowed_tools=sorted(active_tools),
         prompt_overrides=sorted(skill.prompt_sections) if skill is not None else [],
         mod_id=mod_id,
-    )
-
-
-def startup_info(
-    repo_root: Path,
-    settings: Settings,
-    skill_name: str | None = None,
-) -> StartupInfo:
-    return StartupInfo(
-        directory=repo_root,
-        provider=settings.model.provider,
-        model=settings.model.name,
-        approval_mode=FRIENDLY_MODES[settings.runtime.approval_mode],
-        skill_name=skill_name,
-    )
-
-
-def build_run_display(
-    repo_root: Path,
-    settings: Settings,
-    skill_name: str | None = None,
-) -> TerminalDisplay:
-    trace = os.getenv("CODE_SQUID_TRACE") == "1"
-    debug = settings.display.debug or trace
-    return TerminalDisplay(
-        debug=debug,
-        show_transcript=trace,
-        startup_info=startup_info(repo_root, settings, skill_name),
     )

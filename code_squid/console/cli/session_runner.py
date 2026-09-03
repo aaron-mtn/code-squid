@@ -11,7 +11,6 @@ from code_squid.agent_setup import (
     append_run_context,
     build_coding_task_run,
     resolve_skill_tools,
-    startup_info,
 )
 from code_squid.app_paths import (
     workspace_error_log_path,
@@ -22,6 +21,7 @@ from squid_core.session import Session
 from squid_core.spawner import build_agent_loop
 from squid_core.storage import SessionStore, UndoStore, write_error_log
 from squid_core.storage.session_index import latest_session_id, session_dir_for
+from code_squid.console.ui.banner import FRIENDLY_APPROVAL_MODES, StartupInfo
 from code_squid.console.ui.display import TerminalDisplay
 from squid_core.agent import Agent
 
@@ -49,7 +49,13 @@ def _run_display(
     return TerminalDisplay(
         debug=debug,
         show_transcript=trace,
-        startup_info=startup_info(repo_root, settings, skill_name),
+        startup_info=StartupInfo(
+            directory=repo_root,
+            provider=settings.model.provider,
+            model=settings.model.name,
+            approval_mode=FRIENDLY_APPROVAL_MODES[settings.runtime.approval_mode],
+            skill_name=skill_name,
+        ),
     )
 
 

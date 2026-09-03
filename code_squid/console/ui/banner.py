@@ -21,6 +21,11 @@ CODE_SQUID_BANNER = """\
 
                  🦑 A small coding agent with tentacles."""
 STARTUP_PANEL_WIDTH = 76
+FRIENDLY_APPROVAL_MODES = {
+    "always": "strict",
+    "guarded": "balanced",
+    "never": "yolo",
+}
 STARTUP_CONTROLS = "Enter send • Alt+Enter newline • Ctrl+C stop"
 
 

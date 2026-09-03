@@ -14,11 +14,11 @@ multi-agent system, a hardened sandbox, or a polished TUI. The main value of the
 architecture is that the loop, contracts, storage, configuration, and tool
 boundaries are small enough to inspect directly.
 
-The construction and runtime shape is:
+The construction and runtime shapes are:
 
 ```text
-Code Squid host/app -> Code Squid application setup -> Squid Core spawner
--> AgentLoop
+console CLI -> code_squid.agent_setup -> squid_core -> AgentLoop
+desktop/other frontend -> code_squid.agent_setup -> squid_core -> AgentLoop
 settings -> provider -> model adapter -> Core Agent -> action preflight -> approval -> tools -> transcript/session storage
 ```
 
@@ -49,8 +49,9 @@ and application layer; `squid_core/` is the reusable agent runtime.
     coding policy and intentionally replaceable tool/final-report defaults.
   - `agent_setup.py` owns Code Squid run preparation and wiring: settings,
     prompt defaults, application/workspace paths, storage locations, resource
-    resolution, hooks, terminal display construction, platform context, Agent
-    configuration, and translation into the generic `squid_core.spawner` seam.
+    resolution, hooks, platform context, Agent configuration, and translation
+    into the generic `squid_core.spawner` seam. It is presentation-neutral and
+    does not import the console frontend.
   - `app_paths.py` owns Code Squid application-home policy, repository-local
     session/undo/error-log locations, the global session-index location, and
     paths for loose resources and Mods. Reusable Core machinery receives these
@@ -61,13 +62,15 @@ and application layer; `squid_core/` is the reusable agent runtime.
   - `console/cli/` owns terminal workflow and control. `cli_options.py` handles
     CLI options and workspace resolution; `cli_commands.py` handles launch-time
     dispatch; `prompt_loop.py` handles interactive prompts and slash commands;
-    `session_runner.py` handles new/resumed session-backed runs; and
+    `session_runner.py` constructs the terminal display, including startup
+    information and trace/debug settings, and handles new/resumed
+    session-backed runs; and
     `skill_commands.py` handles Skill status, listing, and selection.
   - `console/ui/` owns terminal presentation and input. `display.py` keeps
     `TerminalDisplay` as the lifecycle coordinator used by the Agent loop.
-    `banner.py` owns startup data and rendering; `approval.py` owns approval
-    panels, prompts, and compact results; `tool_display.py` owns tool/action
-    labels, command recognition, and debug result projection; and
+    `banner.py` owns startup data, display labels, and rendering; `approval.py`
+    owns approval panels, prompts, and compact results; `tool_display.py` owns
+    tool/action labels, command recognition, and debug result projection; and
     `formatting.py` owns shared styles, links, path shortening, wrapping, and
     final-summary Markdown rendering. `prompt_input.py`, `sessions.py`, and
     `spinner.py` retain their focused input, saved-session, and animation
@@ -335,10 +338,11 @@ complete control over construction is required. Generic constructor factories
 for providers, adapters, compactors, executors, policies, hooks, or the loop
 itself are not part of the API.
 
-The dependency direction is Code Squid application construction to generic
-Squid Core construction to Core collaborators to `AgentLoop`; generic
-construction never calls back into Code Squid prompt, terminal, or discovery
-policy.
+The dependency direction is a frontend into Code Squid application
+construction, then generic Squid Core construction, Core collaborators, and
+`AgentLoop`. `code_squid.agent_setup` does not import the console frontend, and
+generic construction never calls back into Code Squid prompt, terminal, or
+discovery policy.
 
 `code_squid.agent_setup.run_coding_task(...)` is the Code Squid application
 entry point for starting a new coding task. `repo_root` and `task` are required;
@@ -347,9 +351,13 @@ returns `RunResult`.
 
 `code_squid.agent_setup.build_coding_task_run(...)` constructs the session,
 session store, undo store, generic Agent with `CODE_SQUID_PROMPT_DEFAULTS`, selected tools,
-application hooks, terminal display, and generic loop wiring without starting
-the loop. The CLI uses this shape when it needs access to the session and
-session store for interactive follow-ups. Its Skill/tool resolution and
+application hooks, and generic loop wiring without starting the loop. The CLI
+constructs and passes a `TerminalDisplay` before calling this seam because it
+needs terminal startup, debug/trace, Skill, and approval-mode presentation as
+well as access to the session and session store for interactive follow-ups.
+Programmatic callers may omit presentation; Core then installs its no-op
+`NullDisplay`. A supplied display is also the default approval prompter unless
+the caller supplies `approval_prompter` explicitly. Skill/tool resolution and
 precedence rules remain application-owned; the generic builder accepts tools
 and Agent objects already selected by its caller.
 
@@ -1150,9 +1158,11 @@ coding-task prompt text. Its tool path remains visibly hook, action preflight,
 approval, execution, and result handling; it does not own workspace or guarded
 shell policy.
 
-`code_squid/agent_setup.py` owns Code Squid application construction and shared CLI
-helpers. `squid_core/spawner.py` owns generic selective construction. Neither
-orchestrates multiple runs or provides an event bus, daemon, or server.
+`code_squid/agent_setup.py` owns presentation-neutral Code Squid application
+construction. `code_squid/console/cli/session_runner.py` owns terminal display
+construction and passes that collaborator inward. `squid_core/spawner.py` owns
+generic selective construction and the null-display default. None orchestrates
+multiple runs or provides an event bus, daemon, or server.
 
 `squid_core/model_adapter.py` owns provider response normalization and replay message
 shaping. Provider-specific HTTP/API calls stay in `squid_core/providers/`.
@@ -1210,8 +1220,9 @@ narration is encouraged by prompts.
 - Event callback support currently covers normal loop-level events. Outer
   CLI-caught failures such as some model request errors or keyboard interrupts
   may need explicit wrapper handling depending on the caller path.
-- Code Squid application setup uses `TerminalDisplay`; generic Squid Core
-  construction uses `NullDisplay` unless the host supplies presentation.
+- The console frontend supplies `TerminalDisplay`; Code Squid application and
+  generic Core construction use Core's `NullDisplay` when a host omits
+  presentation.
 - Resume support is CLI-owned under `code_squid/console/cli/`.
 - No JSONL/file event sink is included.
 - `allowed-tools: none` is not a supported special case.

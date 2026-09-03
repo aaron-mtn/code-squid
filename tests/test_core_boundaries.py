@@ -1,6 +1,8 @@
 import importlib
 from pathlib import Path
 import re
+import subprocess
+import sys
 
 
 REUSABLE_MODULES = (
@@ -166,6 +168,38 @@ def test_application_setup_has_no_agent_loop_compatibility_wrapper() -> None:
     from code_squid import agent_setup
 
     assert not hasattr(agent_setup, "build_agent_loop")
+
+
+def test_application_setup_import_does_not_load_console_or_prompt_toolkit() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    script = """
+import sys
+
+class BlockFrontendImports:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "code_squid.console" or fullname.startswith("code_squid.console."):
+            raise RuntimeError(f"console import attempted: {fullname}")
+        if fullname == "prompt_toolkit" or fullname.startswith("prompt_toolkit."):
+            raise RuntimeError(f"prompt_toolkit import attempted: {fullname}")
+        return None
+
+sys.meta_path.insert(0, BlockFrontendImports())
+import code_squid.agent_setup
+assert not any(
+    name == "code_squid.console" or name.startswith("code_squid.console.")
+    for name in sys.modules
+)
+assert not any(
+    name == "prompt_toolkit" or name.startswith("prompt_toolkit.")
+    for name in sys.modules
+)
+"""
+
+    subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=repo_root,
+        check=True,
+    )
 
 
 def test_code_squid_application_package_has_expected_layout() -> None:

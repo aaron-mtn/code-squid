@@ -7,8 +7,8 @@ from code_squid.console.cli.prompt_loop import _resume_session, _run_interactive
 from code_squid.console.cli.skill_commands import handle_skills
 from code_squid.settings import load_settings, write_approval_mode
 from code_squid.app_paths import workspace_undo_dir
-from code_squid.agent_setup import FRIENDLY_MODES
 from squid_core.storage import UndoStore
+from code_squid.console.ui.banner import FRIENDLY_APPROVAL_MODES
 from code_squid.console.ui.sessions import USAGE, handle_session_viewer
 
 
@@ -35,7 +35,7 @@ def _mode(repo_root: Path, args: list[str]) -> int:
     if not args:
         settings = load_settings(repo_root)
         approval_mode = settings.runtime.approval_mode
-        friendly_mode = FRIENDLY_MODES[approval_mode]
+        friendly_mode = FRIENDLY_APPROVAL_MODES[approval_mode]
         print(f"Current mode: {friendly_mode} (approval_mode={approval_mode})")
         return 0
 

@@ -1,3 +1,17 @@
+- 2026-09-03: Made `code_squid.agent_setup` presentation-neutral by removing
+  its console UI imports, startup-info helper, terminal display construction,
+  and CLI approval-mode labels. The existing console session runner now owns
+  complete `TerminalDisplay` construction, including startup provider/model,
+  friendly approval-mode and Skill labels, plus `CODE_SQUID_TRACE` and debug
+  behavior; CLI callers continue passing that display explicitly. Programmatic
+  callers that omit a display now use Squid Core's existing `NullDisplay`,
+  while a supplied display remains the default approval prompter. Added focused
+  tests for null/supplied display semantics and a clean-interpreter boundary
+  test that blocks console and `prompt_toolkit` imports. Focused setup/CLI/UI
+  suite: 180 passed. Full suite: 717 passed. Affected production modules
+  compiled and imported successfully; the isolated application-setup import,
+  stale-name searches, and `git diff --check` passed. No live model inference
+  was run. No behavior differences or deferred follow-ups are known.
 - 2026-09-03: Split the console's monolithic terminal display into coherent
   presentation owners without changing the `TerminalDisplay` lifecycle API or
   visible behavior. `banner.py` now owns startup data/rendering, `approval.py`
