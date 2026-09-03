@@ -49,7 +49,7 @@ Shell commands:
   python main.py mode balanced
   python main.py mode yolo
   python main.py skills
-  python main.py --skill architecture-review
+  python main.py --skill <name>
   python main.py sessions
   python main.py show latest
   python main.py resume latest

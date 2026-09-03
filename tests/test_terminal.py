@@ -467,11 +467,11 @@ def test_startup_panel_includes_active_skill_when_set() -> None:
             provider="openai_compatible",
             model="qwen3.5-9b",
             approval_mode="yolo",
-            skill_name="architecture-review",
+            skill_name="user-review",
         )
     )
 
-    assert "Skill:         architecture-review" in panel
+    assert "Skill:         user-review" in panel
 
 
 def test_startup_panel_colors_only_structural_borders_in_tty(

@@ -124,9 +124,9 @@ def test_append_run_context_writes_sorted_non_message_entry_and_updates_active_l
     store = SessionStore.create(tmp_path, "context")
 
     entry = store.append_run_context(
-        skill_name="architecture-review",
+        skill_name="user-review",
         allowed_tools=["run_command", "read_file"],
-        prompt_overrides=["TOOL_USAGE_GUIDANCE", "TASK_PROMPT"],
+        prompt_overrides=["TOOL_USAGE_GUIDANCE", "FINAL_SUMMARY_REQUIREMENTS"],
     )
     entries = read_entries(store)
     metadata = read_metadata(store)
@@ -135,10 +135,10 @@ def test_append_run_context_writes_sorted_non_message_entry_and_updates_active_l
     assert entries[0]["id"] == "e_000001"
     assert entries[0]["parent_id"] is None
     assert entries[0]["type"] == "run_context"
-    assert entries[0]["skill_name"] == "architecture-review"
+    assert entries[0]["skill_name"] == "user-review"
     assert entries[0]["allowed_tools"] == ["read_file", "run_command"]
     assert entries[0]["prompt_overrides"] == [
-        "TASK_PROMPT",
+        "FINAL_SUMMARY_REQUIREMENTS",
         "TOOL_USAGE_GUIDANCE",
     ]
     assert metadata["active_leaf_id"] == "e_000001"

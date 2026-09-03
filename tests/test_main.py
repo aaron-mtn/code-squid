@@ -91,6 +91,32 @@ def _read_entries(session_store: SessionStore) -> list[dict]:
     ]
 
 
+def _write_user_review_skill(monkeypatch, tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    skill_dir = home / "skills" / "user-review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        """---
+name: user-review
+description: Review architecture and design without modifying files.
+allowed-tools: read_file run_command
+---
+
+Review architecture without modifying files.
+
+## FINAL_SUMMARY_REQUIREMENTS replace
+
+Write a focused architecture review.
+
+## TOOL_USAGE_GUIDANCE append
+
+Use inspection tools only.
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CODE_SQUID_HOME", str(home))
+
+
 def test_resolve_workspace_root_omitted_uses_current_directory(
     monkeypatch,
     tmp_path,
@@ -158,8 +184,8 @@ def test_main_passes_selected_skill_to_interactive(
 
     monkeypatch.setattr("code_squid.console.cli.cli_commands._run_interactive", fake_interactive)
 
-    assert run_cli(["--cwd", str(tmp_path), "--skill", "architecture-review"]) == 0
-    assert calls == [(tmp_path.resolve(), "architecture-review")]
+    assert run_cli(["--cwd", str(tmp_path), "--skill", "user-review"]) == 0
+    assert calls == [(tmp_path.resolve(), "user-review")]
 
 
 def test_main_missing_cwd_value_fails_clearly(monkeypatch, capsys) -> None:
@@ -273,22 +299,27 @@ def test_help_text_lists_new_friendly_modes() -> None:
     assert "  python main.py mode guarded\n" not in HELP_TEXT
 
 
-def test_format_skill_status_lists_current_skill_and_available_skills() -> None:
+def test_format_skill_status_lists_current_skill_and_available_skills(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _write_user_review_skill(monkeypatch, tmp_path)
     status = _format_skill_status(None)
 
     assert "Current skill: none" in status
     assert "Available skills:" in status
-    assert "- architecture-review: Review architecture and design without modifying files." in status
+    assert "- user-review: Review architecture and design without modifying files." in status
     assert "- bug-fix: Fix bugs with small targeted edits." not in status
 
 
-def test_format_skill_status_includes_active_skill_details() -> None:
-    status = _format_skill_status("architecture-review")
+def test_format_skill_status_includes_active_skill_details(monkeypatch, tmp_path) -> None:
+    _write_user_review_skill(monkeypatch, tmp_path)
+    status = _format_skill_status("user-review")
 
-    assert "Current skill: architecture-review" in status
+    assert "Current skill: user-review" in status
     assert "Tools: read_file, run_command" in status
     assert (
-        "Prompt overrides: TASK_PROMPT, FINAL_SUMMARY_REQUIREMENTS, TOOL_USAGE_GUIDANCE"
+        "Prompt overrides: FINAL_SUMMARY_REQUIREMENTS, TOOL_USAGE_GUIDANCE"
         in status
     )
 
@@ -436,7 +467,7 @@ def test_prompt_task_uses_agent_prompt_without_toolbar(monkeypatch) -> None:
     assert PROMPT_STYLE != "ansicyan bold"
 
 
-def test_new_session_prints_banner_before_task_prompt(monkeypatch, tmp_path, capsys) -> None:
+def test_new_session_prints_banner_before_task_input(monkeypatch, tmp_path, capsys) -> None:
     displays: list[BannerDisplay] = []
 
     def fake_display(**kwargs) -> BannerDisplay:
@@ -520,7 +551,7 @@ def test_new_session_cancelled_task_exits_without_run(monkeypatch, tmp_path, cap
     assert not (tmp_path / ".code-squid" / "sessions").exists()
 
 
-def test_resume_session_prints_banner_before_follow_up_prompt(
+def test_resume_session_prints_banner_before_follow_up_input(
     monkeypatch,
     tmp_path,
     capsys,
@@ -562,6 +593,7 @@ def test_follow_up_records_current_skill_run_context(
     monkeypatch,
     tmp_path,
 ) -> None:
+    _write_user_review_skill(monkeypatch, tmp_path)
     session_store = SessionStore.create(tmp_path, "original task")
     session_store.append_run_context(
         skill_name=None,
@@ -582,7 +614,7 @@ def test_follow_up_records_current_skill_run_context(
         "review the architecture",
         load_settings(tmp_path),
         FakeDisplay(),
-        skill_name="architecture-review",
+        skill_name="user-review",
     )
 
     entries = _read_entries(session_store)
@@ -596,11 +628,10 @@ def test_follow_up_records_current_skill_run_context(
         "run_command",
         "write_file",
     ]
-    assert contexts[1]["skill_name"] == "architecture-review"
+    assert contexts[1]["skill_name"] == "user-review"
     assert contexts[1]["allowed_tools"] == ["read_file", "run_command"]
     assert contexts[1]["prompt_overrides"] == [
         "FINAL_SUMMARY_REQUIREMENTS",
-        "TASK_PROMPT",
         "TOOL_USAGE_GUIDANCE",
     ]
 
@@ -806,6 +837,8 @@ def test_interactive_skill_command_lists_current_and_available_skills(
     tmp_path,
     capsys,
 ) -> None:
+    _write_user_review_skill(monkeypatch, tmp_path)
+
     def fail_run(*args):
         raise AssertionError("interactive /skill should not start a run")
 
@@ -819,7 +852,7 @@ def test_interactive_skill_command_lists_current_and_available_skills(
     output = capsys.readouterr().out
     assert "Current skill: none" in output
     assert "Available skills:" in output
-    assert "- architecture-review: Review architecture and design without modifying files." in output
+    assert "- user-review: Review architecture and design without modifying files." in output
 
 
 def test_interactive_skill_command_sets_active_skill_for_new_and_follow_up(
@@ -827,6 +860,7 @@ def test_interactive_skill_command_sets_active_skill_for_new_and_follow_up(
     tmp_path,
     capsys,
 ) -> None:
+    _write_user_review_skill(monkeypatch, tmp_path)
     new_runs = []
     follow_up_runs = []
 
@@ -842,7 +876,7 @@ def test_interactive_skill_command_sets_active_skill_for_new_and_follow_up(
     monkeypatch.setattr(
         "code_squid.console.cli.prompt_loop._prompt_task",
         _fake_prompt_tasks(
-            ["/skill architecture-review", "first task", "follow up", "/exit"]
+            ["/skill user-review", "first task", "follow up", "/exit"]
         ),
     )
     monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_new_session_task", fake_new)
@@ -851,10 +885,10 @@ def test_interactive_skill_command_sets_active_skill_for_new_and_follow_up(
     assert _run_interactive(tmp_path) == 0
 
     output = capsys.readouterr().out
-    assert "Active skill set to: architecture-review" in output
+    assert "Active skill set to: user-review" in output
     assert "Tools: read_file, run_command" in output
-    assert new_runs == [("first task", "architecture-review")]
-    assert follow_up_runs == [("active-session", "follow up", "architecture-review")]
+    assert new_runs == [("first task", "user-review")]
+    assert follow_up_runs == [("active-session", "follow up", "user-review")]
 
 
 def test_interactive_skill_none_clears_active_skill(monkeypatch, tmp_path, capsys) -> None:
@@ -877,10 +911,10 @@ def test_interactive_skill_none_clears_active_skill(monkeypatch, tmp_path, capsy
     monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_new_session_task", fake_new)
     monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_follow_up_task", fake_follow_up)
 
-    assert _run_interactive(tmp_path, "architecture-review") == 0
+    assert _run_interactive(tmp_path, "user-review") == 0
 
     assert "Active skill cleared." in capsys.readouterr().out
-    assert new_runs == [("first task", "architecture-review")]
+    assert new_runs == [("first task", "user-review")]
     assert follow_up_runs == [("active-session", "follow up", None)]
 
 
@@ -902,12 +936,12 @@ def test_interactive_unknown_skill_does_not_change_active_skill(
     )
     monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_new_session_task", fake_new)
 
-    assert _run_interactive(tmp_path, "architecture-review") == 0
+    assert _run_interactive(tmp_path, "user-review") == 0
 
     output = capsys.readouterr().out
     assert "Unknown skill: some-skill" in output
     assert "Run /skill to see available skills." in output
-    assert new_runs == [("first task", "architecture-review")]
+    assert new_runs == [("first task", "user-review")]
 
 
 def test_new_session_passes_debug_without_trace_to_terminal_display(

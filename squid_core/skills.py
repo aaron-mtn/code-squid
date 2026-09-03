@@ -5,13 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
-BUILTIN_SKILLS_DIR = SKILLS_DIR / "builtin"
 PROMPT_SECTION_MODES = {"replace", "append"}
 SUPPORTED_PROMPT_SECTIONS = {
     "SYSTEM_PROMPT_INTRO",
-    "TASK_PROMPT",
-    "FOLLOW_UP_PROMPT",
     "TOOL_USAGE_GUIDANCE",
     "FINAL_SUMMARY_REQUIREMENTS",
 }
@@ -38,12 +34,12 @@ class Skill:
     allowed_tools: tuple[str, ...]
     path: Path
     allowed_tools_explicit: bool = False
-    source: str = "builtin"
-    editable: bool = False
+    source: str = "user"
+    editable: bool = True
     prompt_sections: dict[str, PromptSectionOverride] = field(default_factory=dict)
 
 
-def parse_skill_file(path: Path, *, source: str = "builtin", editable: bool = False) -> Skill:
+def parse_skill_file(path: Path, *, source: str = "user", editable: bool = True) -> Skill:
     text = path.read_text(encoding="utf-8")
     frontmatter, instructions = _split_frontmatter(text, path)
     data = _parse_simple_frontmatter(frontmatter, path)
@@ -74,24 +70,16 @@ def parse_skill_file(path: Path, *, source: str = "builtin", editable: bool = Fa
 
 
 def discover_skills(
-    skills_dir: Path = SKILLS_DIR,
     *,
-    app_home: Path | str | None = None,
+    app_home: Path | str,
 ) -> dict[str, Skill]:
-    skills = {}
-    skills.update(_discover_skills_in(skills_dir / "builtin", source="builtin", editable=False))
-    if app_home is not None:
-        _merge_missing(
-            skills,
-            _discover_skills_in(
-                Path(app_home) / "skills", source="user", editable=True
-            ),
-        )
-    return skills
+    """Discover standalone Skills under the supplied application home."""
 
-
-def discover_builtin_skills() -> dict[str, Skill]:
-    return _discover_skills_in(BUILTIN_SKILLS_DIR, source="builtin", editable=False)
+    return _discover_skills_in(
+        Path(app_home) / "skills",
+        source="user",
+        editable=True,
+    )
 
 
 def _discover_skills_in(directory: Path, *, source: str, editable: bool) -> dict[str, Skill]:
@@ -103,11 +91,6 @@ def _discover_skills_in(directory: Path, *, source: str, editable: bool) -> dict
         skill = parse_skill_file(skill_file, source=source, editable=editable)
         skills[skill.name] = skill
     return skills
-
-
-def _merge_missing(skills: dict[str, Skill], discovered: dict[str, Skill]) -> None:
-    for name, skill in discovered.items():
-        skills.setdefault(name, skill)
 
 
 def _split_frontmatter(text: str, path: Path) -> tuple[str, str]:

@@ -320,7 +320,7 @@ def test_before_run_block_fails_without_calling_model() -> None:
 
 
 def test_run_finished_complete_receives_context_after_final_is_stored() -> None:
-    request = FollowUpRunRequest(task="Run architecture-review skill next.")
+    request = FollowUpRunRequest(task="Run user-review skill next.")
 
     class FinishedHook:
         def __init__(self) -> None:

@@ -284,65 +284,6 @@ def build_coding_task_run(
     )
 
 
-def build_agent_loop(
-    repo_root: Path,
-    session: Session,
-    session_store: SessionStore,
-    agent: Agent,
-    undo_store: UndoStore,
-    settings: Settings,
-    display=None,
-    *,
-    tools: dict | None = None,
-    on_event: EventCallback | None = None,
-    should_cancel: Callable[[], bool] | None = None,
-    hooks: list[object] | None = None,
-    hook_runner: HookRunner | None = None,
-    include_user_hooks: bool = False,
-    app_home: Path | str | None = None,
-    platform_context: PlatformContext | None = None,
-    approval_prompter=None,
-    provider=None,
-    model_adapter=None,
-    compactor=None,
-    tool_executor=None,
-    tool_results=None,
-    approval_policy=None,
-    action_preflight=None,
-) -> AgentLoop:
-    """Compatibility wrapper around generic Squid Core construction."""
-
-    hook_runner = build_hook_runner(
-        hooks=hooks,
-        hook_runner=hook_runner,
-        include_user_hooks=include_user_hooks,
-        app_home=app_home,
-    )
-
-    return build_core_agent_loop(
-        repo_root=repo_root,
-        session=session,
-        session_store=session_store,
-        undo_store=undo_store,
-        settings=settings.to_runtime_settings(),
-        tools=tools,
-        display=display,
-        approval_prompter=approval_prompter,
-        provider=provider,
-        model_adapter=model_adapter,
-        compactor=compactor,
-        tool_executor=tool_executor,
-        tool_results=tool_results,
-        agent=agent,
-        approval_policy=approval_policy,
-        action_preflight=action_preflight,
-        on_event=on_event,
-        should_cancel=should_cancel,
-        hook_runner=hook_runner,
-        platform_context=platform_context,
-    )
-
-
 def build_hook_runner(
     *,
     hooks: list[object] | None = None,

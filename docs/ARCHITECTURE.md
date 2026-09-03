@@ -17,7 +17,7 @@ boundaries are small enough to inspect directly.
 The construction and runtime shape is:
 
 ```text
-Code Squid host/app -> Code Squid application runner -> Squid Core spawner
+Code Squid host/app -> Code Squid application setup -> Squid Core spawner
 -> AgentLoop
 settings -> provider -> model adapter -> Core Agent -> action preflight -> approval -> tools -> transcript/session storage
 ```
@@ -46,8 +46,7 @@ and application layer; `squid_core/` is the reusable agent runtime.
   - `agent/coding.py` keeps the explicit `CodingAgent` specialization point
     around `squid_core.agent.Agent`; it intentionally adds no behavior today.
     `agent/prompts.py` owns Code Squid identity, its non-replaceable baseline
-    coding policy, intentionally replaceable tool/final-report defaults, and
-    dead/non-live task/follow-up compatibility renderers.
+    coding policy and intentionally replaceable tool/final-report defaults.
   - `agent_setup.py` owns Code Squid run preparation and wiring: settings,
     prompt defaults, application/workspace paths, storage locations, resource
     resolution, hooks, terminal display construction, platform context, Agent
@@ -314,7 +313,7 @@ Known limitations:
 - `run_finished` follow-up requests are returned to the host; core does not
   orchestrate them
 
-## Runner / Python Wrapping
+## Application Setup / Python Embedding
 
 Runtime construction has three explicit levels:
 
@@ -384,7 +383,7 @@ session-store-first ordering and supplies its session ID to delayed undo
 construction. Direct `AgentLoop(...)` construction remains unchanged.
 
 This seam lets a host persist outside the workspace without teaching Core its
-storage layout, indexes, or adapter types. Code Squid's application runner uses
+storage layout, indexes, or adapter types. Code Squid's application setup uses
 `code_squid.app_paths` to supply `<repo>/.code-squid/sessions` and
 `<repo>/.code-squid/undo`, while `repo_root` separately continues to define tool
 execution. Desktop is one possible host, not a special Core concern.
@@ -398,9 +397,9 @@ Passing neither path preserves standalone `skill_name` discovery. Generic
 `squid_core.spawner` receives only selected resources and remains unaware of
 Mod names, paths, discovery, or selection policy.
 
-`code_squid.agent_setup.build_agent_loop(...)` is the application wrapper used
-by the CLI follow-up path. It delegates generic collaborator wiring to
-`squid_core.spawner.build_agent_loop(...)`. Provider-specific construction and
+The CLI follow-up path calls `squid_core.spawner.build_agent_loop(...)`
+directly after Code Squid has selected application settings, prompts, Skills,
+tools, storage, and terminal presentation. Provider-specific construction and
 replay-mode decisions are delegated to `squid_core.providers`.
 
 `squid_core.storage.session_index` owns generic inspection, registration, and
@@ -412,7 +411,7 @@ supplementary and does not invalidate usable local storage. App-specific UIs
 own their presentation projection while Core owns the persistence formats and
 mechanics.
 
-This runner layer is not a plugin system, orchestration layer, daemon, or
+This setup layer is not a plugin system, orchestration layer, daemon, or
 server mode. It gives external Python code a clean way to call Code Squid
 without copying CLI wiring. Terminal workflow and presentation live under
 `code_squid/console/`; `main.py` only delegates to
@@ -449,8 +448,7 @@ A referenced component may be Mod-local or standalone under the same supplied
 application home. A Mod-local Skill, Tool, or Hook wins over a same-named loose
 user component. Built-in Tools are protected: they win over loose user
 collisions, and a Mod-local package may not define a replacement directory for
-a listed built-in name. Built-in Skills retain precedence during ordinary
-standalone discovery; direct Mod-local Skill selection is package-scoped.
+a listed built-in name. Direct Mod-local Skill selection is package-scoped.
 
 Discovery and validation parse `mod.yaml`, `SKILL.md`, `tool.yaml`, and
 `hook.yaml`, and verify Hook source presence, but do not import Tool or Hook
@@ -466,20 +464,8 @@ this API rather than remain an independent parser.
 
 ## Skill System
 
-Skills are file-backed prompt/tool profiles. Discovery order is:
-
-1. Built-in skills bundled with the repo.
-2. User skills in the Code Squid home directory.
-
-Built-ins win over user duplicates.
-
-Built-in skills are bundled with the repo under:
-
-```text
-skills/builtin/<skill-name>/SKILL.md
-```
-
-Primary user skills are stored in the Code Squid home directory:
+Skills are file-backed prompt/tool profiles. Standalone user Skills are
+discovered from the Code Squid home directory:
 
 ```text
 ~/.code-squid/skills/<skill-name>/SKILL.md
@@ -532,9 +518,9 @@ Code Squid-native prompt-section overrides. Overrides are written as Markdown
 headings:
 
 ```md
-## TASK_PROMPT replace
+## FINAL_SUMMARY_REQUIREMENTS replace
 
-...
+Write a focused review.
 
 ## TOOL_USAGE_GUIDANCE append
 
@@ -549,8 +535,6 @@ Supported override modes are:
 Supported override sections are:
 
 - `SYSTEM_PROMPT_INTRO`
-- `TASK_PROMPT`
-- `FOLLOW_UP_PROMPT`
 - `TOOL_USAGE_GUIDANCE`
 - `FINAL_SUMMARY_REQUIREMENTS`
 
@@ -569,22 +553,9 @@ examples, active-Skill/environment insertion, or correction mechanics. They
 also cannot remove Code Squid's baseline coding discipline, because that policy
 is outside the replaceable sections.
 
-`TASK_PROMPT` and `FOLLOW_UP_PROMPT` remain supported as non-live compatibility
-sections for existing Skill parsing and UI/run-context metadata. Their render
-helpers may use `{task}`, and the default `TASK_PROMPT` also renders section
-placeholders:
-
-- `{TOOL_USAGE_GUIDANCE}`
-- `{VISIBLE_NARRATION_REQUIREMENTS}`
-- `{REQUIRED_RESPONSE_FORMAT}`
-- `{FINAL_SUMMARY_REQUIREMENTS}`
-
-Compatibility rendering uses explicit `.replace()` calls rather than
-`.format()` so user tasks or prompt text containing braces do not break
-rendering. Neither wrapper is inserted into the runtime transcript. New
-sessions persist one assembled system message followed by the raw authored
+New sessions persist one assembled system message followed by the raw authored
 task as `role=user`; resumed runs append the raw authored follow-up in the same
-form.
+form. There are no runtime task or follow-up wrappers.
 
 The active skill can be selected from the CLI. Current support is:
 
@@ -613,9 +584,9 @@ Each new run and follow-up appends a non-transcript `run_context` event to
 ```json
 {
   "type": "run_context",
-  "skill_name": "architecture-review",
+  "skill_name": "user-review",
   "allowed_tools": ["read_file", "run_command"],
-  "prompt_overrides": ["FINAL_SUMMARY_REQUIREMENTS", "TASK_PROMPT", "TOOL_USAGE_GUIDANCE"]
+  "prompt_overrides": ["FINAL_SUMMARY_REQUIREMENTS", "TOOL_USAGE_GUIDANCE"]
 }
 ```
 
@@ -624,15 +595,10 @@ model, and `SessionStore.load_messages()` ignores non-message events.
 `python main.py show <session_id>` displays compact `[run context]` blocks so
 tool exposure and prompt overrides can be inspected after a run.
 
-Discovered skills include source metadata: built-in skills have
-`source="builtin"` and `editable=false`; user skills discovered from the Code
-Squid home directory have `source="user"` and
-`editable=true`. Both sources use the same parsing, prompt override, selection,
-and tool filtering path once discovered.
-
-The current built-in example is `architecture-review`, an inspection-only review
-skill. It allows only `read_file` and `run_command`, replaces `TASK_PROMPT`,
-replaces `FINAL_SUMMARY_REQUIREMENTS`, and appends `TOOL_USAGE_GUIDANCE`.
+Standalone Skills discovered from the Code Squid home directory have
+`source="user"` and `editable=true`. Mod-local Skills remain package-scoped and
+are resolved through the Mod path instead of standalone discovery. Code Squid
+currently ships no repo-root bundled Skills.
 
 Core CLI skill creation/editing commands and new discovery tools such as repo
 tree/search helpers are not implemented yet.
@@ -657,9 +623,6 @@ are:
 - `tools/` stores standalone user Tool packages.
 - `mods/<mod-name>/mod.yaml` stores canonical user Mod packages with optional
   package-local Skills, Tools, and Hooks.
-
-These directories are separate from the repo-local `skills/builtin/` bundled
-skill directory.
 
 Mod metadata supports an optional top-level semantic accent, for example
 `accent: purple`. The effective default is `cyan`; allowed names are `cyan`,
@@ -756,7 +719,7 @@ Current commands:
 python main.py
 python main.py --cwd /path/to/project
 python main.py skills
-python main.py --skill architecture-review
+python main.py --skill <name>
 python main.py sessions
 python main.py show latest
 python main.py show <session_id>
@@ -1238,7 +1201,7 @@ narration is encouraged by prompts.
 - Event callback support currently covers normal loop-level events. Outer
   CLI-caught failures such as some model request errors or keyboard interrupts
   may need explicit wrapper handling depending on the caller path.
-- The Code Squid application runner uses `TerminalDisplay`; generic Squid Core
+- Code Squid application setup uses `TerminalDisplay`; generic Squid Core
   construction uses `NullDisplay` unless the host supplies presentation.
 - Resume support is CLI-owned under `code_squid/console/cli/`.
 - JSONL/file event output is intentionally not implemented yet.

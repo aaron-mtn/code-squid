@@ -1,3 +1,19 @@
+- 2026-09-02: Completed a focused dead-weight cleanup of bundled Skills,
+  prompt compatibility, and application setup. Removed the repo-root
+  `skills/` tree and its `architecture-review` example after confirming that
+  standalone user Skills under the supplied application home and Mod-local
+  Skills are the live resource paths. Simplified Skill discovery accordingly.
+  Removed the non-live task/follow-up prompt templates, render helpers, and
+  Skill override sections while preserving the canonical system message plus
+  raw authored user task/follow-up transcript. The CLI follow-up path now calls
+  `squid_core.spawner.build_agent_loop(...)` directly, and the redundant Code
+  Squid compatibility wrapper is gone. Retained live system-prompt assembly,
+  user Skill discovery, Mod Skill resolution, and system/tool/final-summary
+  Skill overrides. Focused Skill/prompt/setup/CLI/spawner/storage/UI/boundary
+  suite: 267 passed. Full suite: 714 passed. Production compileall and a fresh
+  54-module import walk passed; generated `docs/filetree.md`, stale current
+  references are absent, and both diff checks passed. No live model inference
+  was run.
 - 2026-09-02: Moved the remaining compaction-support modules into
   `squid_core/compaction/`: context usage/trigger reporting now lives in
   `compaction_status.py`, and the existing rough transcript token helpers live

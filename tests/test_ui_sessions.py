@@ -15,9 +15,9 @@ def test_print_session_shows_run_context_events(
         workspace_root=tmp_path,
     )
     store.append_run_context(
-        skill_name="architecture-review",
+        skill_name="user-review",
         allowed_tools=["run_command", "read_file"],
-        prompt_overrides=["TOOL_USAGE_GUIDANCE", "TASK_PROMPT"],
+        prompt_overrides=["TOOL_USAGE_GUIDANCE", "FINAL_SUMMARY_REQUIREMENTS"],
     )
     store.append_message({"role": "user", "content": "review it"})
 
@@ -25,9 +25,9 @@ def test_print_session_shows_run_context_events(
 
     output = capsys.readouterr().out
     assert "[run context]" in output
-    assert "skill: architecture-review" in output
+    assert "skill: user-review" in output
     assert "tools: read_file, run_command" in output
-    assert "prompt overrides: TASK_PROMPT, TOOL_USAGE_GUIDANCE" in output
+    assert "prompt overrides: FINAL_SUMMARY_REQUIREMENTS, TOOL_USAGE_GUIDANCE" in output
     assert "[user]" in output
 
 

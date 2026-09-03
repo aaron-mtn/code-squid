@@ -1,20 +1,10 @@
-"""Code Squid application prompt defaults and legacy prompt compatibility.
-
-The live transcript uses :func:`system_prompt` plus raw authored user messages.
-``TASK_PROMPT`` and ``FOLLOW_UP_PROMPT`` remain parseable/renderable only for
-existing Skills and UI metadata; neither wrapper is inserted into transcripts.
-"""
+"""Code Squid application prompt defaults and system-prompt assembly."""
 
 from squid_core.platform_context import PlatformContext
 from squid_core.skills import Skill
 from squid_core.agent.prompts import (
-    PROTECTED_RESPONSE_PROTOCOL as REQUIRED_RESPONSE_FORMAT,
-    VISIBLE_NARRATION_GUIDANCE as VISIBLE_NARRATION_REQUIREMENTS,
     PromptDefaults,
-    correction_message,
-    prompt_section,
     system_prompt as core_system_prompt,
-    tool_usage_guidance as core_tool_usage_guidance,
 )
 
 
@@ -25,8 +15,8 @@ You have tools for reading files, writing and patching files, and running comman
 """.strip()
 
 
-# This policy is deliberately outside Skill-replaceable sections. It contains
-# the fundamental coding discipline audited out of DEFAULT_TASK_PROMPT.
+# This policy is deliberately outside Skill-replaceable sections so Skills
+# cannot remove the application's fundamental coding discipline.
 BASELINE_CODING_POLICY = """
 ## Baseline coding policy
 
@@ -76,10 +66,6 @@ CODE_SQUID_PROMPT_DEFAULTS = PromptDefaults(
 )
 
 
-def tool_usage_guidance(skill: Skill | None = None) -> str:
-    return core_tool_usage_guidance(TOOL_USAGE_GUIDANCE, skill)
-
-
 def system_prompt(
     skill: Skill | None = None,
     platform_context: PlatformContext | None = None,
@@ -94,53 +80,3 @@ def system_prompt(
 
 
 SYSTEM_PROMPT = system_prompt()
-
-
-# Dead/non-live compatibility template. Its useful protocol, narration, coding
-# workflow, verification, and finish-when-complete guidance now lives above or
-# in squid_core.agent.prompts and is therefore present in the live system prompt.
-DEFAULT_TASK_PROMPT = """
-Solve this coding task: {task}
-
-{TOOL_USAGE_GUIDANCE}
-
-{VISIBLE_NARRATION_REQUIREMENTS}
-
-{REQUIRED_RESPONSE_FORMAT}
-
-{FINAL_SUMMARY_REQUIREMENTS}
-""".strip()
-
-
-# Dead/non-live compatibility template for existing Skill section parsing and
-# inspection. Follow-ups remain raw authored user messages at runtime.
-DEFAULT_FOLLOW_UP_PROMPT = """
-Continue this saved Code Squid session with this follow-up request:
-
-{task}
-
-Use the existing transcript as context. Preserve the current task mode, active skill, workspace, constraints, and available tools.
-If the follow-up can be answered from existing context, answer directly. Keep the response aligned with the active skill. Do not reset the session.
-""".strip()
-
-
-def task_prompt(task: str, skill: Skill | None = None) -> str:
-    prompt = prompt_section("TASK_PROMPT", DEFAULT_TASK_PROMPT, skill)
-    return (
-        prompt.replace("{task}", task)
-        .replace("{TOOL_USAGE_GUIDANCE}", tool_usage_guidance(skill))
-        .replace("{VISIBLE_NARRATION_REQUIREMENTS}", VISIBLE_NARRATION_REQUIREMENTS)
-        .replace("{REQUIRED_RESPONSE_FORMAT}", REQUIRED_RESPONSE_FORMAT)
-        .replace(
-            "{FINAL_SUMMARY_REQUIREMENTS}",
-            prompt_section(
-                "FINAL_SUMMARY_REQUIREMENTS", FINAL_SUMMARY_REQUIREMENTS, skill
-            ),
-        )
-        .strip()
-    )
-
-
-def follow_up_prompt(task: str, skill: Skill | None = None) -> str:
-    prompt = prompt_section("FOLLOW_UP_PROMPT", DEFAULT_FOLLOW_UP_PROMPT, skill)
-    return prompt.replace("{task}", task).strip()

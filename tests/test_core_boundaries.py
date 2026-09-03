@@ -156,6 +156,18 @@ def test_old_application_packages_are_removed() -> None:
         assert not (repo_root / package_name).exists()
 
 
+def test_repo_root_bundled_skills_are_removed() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+
+    assert not (repo_root / "skills").exists()
+
+
+def test_application_setup_has_no_agent_loop_compatibility_wrapper() -> None:
+    from code_squid import agent_setup
+
+    assert not hasattr(agent_setup, "build_agent_loop")
+
+
 def test_code_squid_application_package_has_expected_layout() -> None:
     package_root = Path(__file__).resolve().parents[1] / "code_squid"
     relative_modules = sorted(

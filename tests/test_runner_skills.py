@@ -28,6 +28,30 @@ def write_user_tool(home: Path, name: str, metadata: str | None = None) -> None:
     )
 
 
+def write_user_skill(home: Path, name: str) -> None:
+    skill_dir = home / "skills" / name
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"""---
+name: {name}
+description: Review architecture.
+allowed-tools: read_file run_command
+---
+
+Review architecture without modifying files.
+
+## FINAL_SUMMARY_REQUIREMENTS replace
+
+Write a focused architecture review.
+
+## TOOL_USAGE_GUIDANCE append
+
+Use inspection tools only.
+""",
+        encoding="utf-8",
+    )
+
+
 def test_selecting_skill_filters_tool_definitions(monkeypatch, tmp_path: Path) -> None:
     skill = Skill(
         name="read-only",
@@ -297,6 +321,9 @@ def test_build_coding_task_run_records_architecture_review_run_context(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
+    app_home = tmp_path / "home"
+    write_user_skill(app_home, "user-review")
+
     class FakeAgentLoop:
         def __init__(self, **kwargs) -> None:
             self.display = kwargs["display"]
@@ -308,18 +335,18 @@ def test_build_coding_task_run_records_architecture_review_run_context(
         repo_root=tmp_path,
         task="review this",
         display=type("FakeDisplay", (), {"debug": False})(),
-        skill_name="architecture-review",
+        skill_name="user-review",
+        app_home=app_home,
         mod_id="architecture-mod",
     )
 
     entries = read_entries(run.session_store.jsonl_path)
     assert entries[0]["type"] == "run_context"
-    assert entries[0]["skill_name"] == "architecture-review"
+    assert entries[0]["skill_name"] == "user-review"
     assert entries[0]["mod_id"] == "architecture-mod"
     assert entries[0]["allowed_tools"] == ["read_file", "run_command"]
     assert entries[0]["prompt_overrides"] == [
         "FINAL_SUMMARY_REQUIREMENTS",
-        "TASK_PROMPT",
         "TOOL_USAGE_GUIDANCE",
     ]
 

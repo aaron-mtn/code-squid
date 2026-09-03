@@ -9,7 +9,6 @@ from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.model_adapter import ModelRequestError
 from code_squid.agent_setup import (
     append_run_context,
-    build_agent_loop,
     build_coding_task_run,
     resolve_skill_tools,
     startup_info,
@@ -20,6 +19,7 @@ from code_squid.app_paths import (
     workspace_undo_dir,
 )
 from squid_core.session import Session
+from squid_core.spawner import build_agent_loop
 from squid_core.storage import SessionStore, UndoStore, write_error_log
 from squid_core.storage.session_index import latest_session_id, session_dir_for
 from code_squid.console.ui.display import TerminalDisplay
@@ -144,7 +144,7 @@ def _run_follow_up_task(
         session_store=session_store,
         agent=agent,
         undo_store=undo_store,
-        settings=settings,
+        settings=settings.to_runtime_settings(),
         display=display,
         tools=active_tools,
     )
