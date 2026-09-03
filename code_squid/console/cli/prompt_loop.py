@@ -15,11 +15,11 @@ from code_squid.console.cli.skill_commands import (
 )
 from code_squid.settings import load_settings
 from code_squid.console.ui.prompt_input import prompt_multiline_input
-from code_squid.console.ui.display import (
-    INPUT_IDENTITY_LINE,
+from code_squid.console.ui.approval import (
     INPUT_PROMPT_PREFIX,
     INPUT_PROMPT_STYLE,
 )
+from code_squid.console.ui.display import INPUT_IDENTITY_LINE
 
 
 PROMPT_PREFIX = INPUT_PROMPT_PREFIX

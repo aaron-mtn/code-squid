@@ -1,3 +1,29 @@
+- 2026-09-03: Split the console's monolithic terminal display into coherent
+  presentation owners without changing the `TerminalDisplay` lifecycle API or
+  visible behavior. `banner.py` now owns startup data/rendering, `approval.py`
+  owns approval panels/prompts/results, `tool_display.py` owns Tool and command
+  labels plus debug result projection, and `formatting.py` owns shared styles,
+  links, path shortening, wrapping, and final-summary Markdown. `display.py`
+  remains the Agent-loop coordinator and continues exposing established public
+  imports. Updated terminal-width test patch points to the new formatting
+  owner. Focused console/UI suite: 165 passed. Full suite: 714 passed. Affected
+  modules compiled and imported successfully; `git diff --check` and stale-name
+  searches passed. No live model inference was run. No behavior differences or
+  deferred follow-ups are known.
+- 2026-09-02: Completed a documentation-only truth pass on
+  `docs/ARCHITECTURE.md`. Corrected the Tool Model to distinguish the four
+  protected built-ins from Skill-filtered, standalone user, Mod, and
+  host-supplied Tool registries; documented the Windows PowerShell execution
+  path and generic spawner's empty-registry default. Aligned Hook loading and
+  cancellation-event descriptions, described the live Skill Tool-guidance
+  override behavior, replaced the `CodingAgent` specialization claim with its
+  actual alias relationship, and removed stale Desktop migration, Extension,
+  plugin, packaging, and speculative future-architecture wording. No
+  production code changed and no production mismatch required a code change.
+  Focused Agent/Skill/Tool/Mod/Hook/event/spawner/platform suite: 204 passed.
+  `git diff --check` passed. The full suite and live model inference were not
+  run because this patch changes documentation only. No follow-up work was
+  intentionally deferred.
 - 2026-09-02: Completed a focused dead-weight cleanup of bundled Skills,
   prompt compatibility, and application setup. Removed the repo-root
   `skills/` tree and its `architecture-review` example after confirming that

@@ -43,8 +43,8 @@ and application layer; `squid_core/` is the reusable agent runtime.
   - Code Squid-specific product and application package. It owns coding-agent
     prompt/behavior policy, application setup, paths/settings, and console
     behavior and presentation.
-  - `agent/coding.py` keeps the explicit `CodingAgent` specialization point
-    around `squid_core.agent.Agent`; it intentionally adds no behavior today.
+  - `agent/coding.py` exports `CodingAgent` as a product-owned alias of
+    `squid_core.agent.Agent`; it adds no behavior.
     `agent/prompts.py` owns Code Squid identity, its non-replaceable baseline
     coding policy and intentionally replaceable tool/final-report defaults.
   - `agent_setup.py` owns Code Squid run preparation and wiring: settings,
@@ -63,10 +63,16 @@ and application layer; `squid_core/` is the reusable agent runtime.
     dispatch; `prompt_loop.py` handles interactive prompts and slash commands;
     `session_runner.py` handles new/resumed session-backed runs; and
     `skill_commands.py` handles Skill status, listing, and selection.
-  - `console/ui/` owns terminal presentation and input. `display.py` keeps the
-    current display, formatting, approvals, action/report rendering, and error
-    presentation together; `prompt_input.py`, `sessions.py`, and `spinner.py`
-    retain their focused input, saved-session, and animation responsibilities.
+  - `console/ui/` owns terminal presentation and input. `display.py` keeps
+    `TerminalDisplay` as the lifecycle coordinator used by the Agent loop.
+    `banner.py` owns startup data and rendering; `approval.py` owns approval
+    panels, prompts, and compact results; `tool_display.py` owns tool/action
+    labels, command recognition, and debug result projection; and
+    `formatting.py` owns shared styles, links, path shortening, wrapping, and
+    final-summary Markdown rendering. `prompt_input.py`, `sessions.py`, and
+    `spinner.py` retain their focused input, saved-session, and animation
+    responsibilities. Presentation modules do not own approval policy, Tool
+    execution, or Tool-result semantics.
 
 - `squid_core/agent/`
   - Reusable Core Agent behavior and protected prompt protocol.
@@ -193,6 +199,7 @@ Current loop-level event types include:
 - `reply_rejected`
 - `final_message`
 - `run_failed`
+- `run_cancelled`
 - `run_finished`
 
 Event payloads should stay compact. They must not include raw file contents,
@@ -202,11 +209,13 @@ Callback delivery is best-effort. Observer failures must not crash the run.
 
 ## Hooks And Interceptors
 
-Hooks are minimal in-process extension seams for hosts that need to influence a
-run at specific lifecycle points. They are not a marketplace, plugin ecosystem,
-pack system, settings system, or user hook discovery mechanism. Current hooks
-are Python objects passed by callers through `code_squid.agent_setup` and `AgentLoop`
-wiring. Code Squid core calls supported hook methods directly as the loop runs.
+Hooks are minimal in-process interceptor seams for hosts that need to influence
+a run at specific lifecycle points. Hook objects can be passed through
+`code_squid.agent_setup` and `AgentLoop` wiring. Code Squid can also load enabled
+standalone Hooks from an application home's `hooks/` directory when the caller
+sets `include_user_hooks=True`; selected Mod Hooks are loaded during Mod
+resolution. `AgentLoop` calls supported hook methods directly as the run
+progresses.
 
 Hooks are deliberately narrower than passing whole runtime objects around. They
 receive typed context dataclasses and return structured decisions or context.
@@ -227,8 +236,7 @@ Hooks:
 - return structured decisions/context
 - can influence the current run within narrow limits
 - failures are not swallowed
-- optional disk loading exists only when callers opt into user hooks
-- no plugin registry yet
+- standalone disk loading is opt-in; selected Mod Hooks are loaded automatically
 
 ### before_run
 
@@ -276,8 +284,8 @@ a report note to an accepted final.
 Runs after a terminal state is reached: `complete`, `failed`, or `interrupted`.
 
 Returns structured follow-up requests through `RunResult.follow_up_requests`.
-It does not directly start another run. This is a handoff seam for
-hosts/orchestrators such as Desktop or a future Squid OS.
+It does not directly start another run; the calling host decides what to do
+with those requests.
 
 The compact loop shape is:
 
@@ -302,16 +310,10 @@ the supplied application home's `hooks/`, or accepts an explicit `hook_runner`.
 Selected Mod Hooks arrive through `ResolvedMod`. `squid_core/events.py`
 remains observer-only.
 
-Known limitations:
-
-- no hook builder yet
-- no pack import/export yet
-- no settings-driven hook activation yet
-- hooks are still in-process Python objects
-- broader user-loaded hook workflows will need review/enable/disable/safety
-  boundaries
-- `run_finished` follow-up requests are returned to the host; core does not
-  orchestrate them
+Hooks are in-process Python objects. Standalone Hook activation is read from
+`hook.yaml` only when the caller opts into user Hooks. Mod-listed Hooks are
+treated as enabled for that selected Mod. `run_finished` follow-up requests are
+returned to the host; Core does not execute them.
 
 ## Application Setup / Python Embedding
 
@@ -339,9 +341,9 @@ construction never calls back into Code Squid prompt, terminal, or discovery
 policy.
 
 `code_squid.agent_setup.run_coding_task(...)` is the Code Squid application
-entry point for starting a new coding task. It accepts `repo_root`, `task`,
-optional `settings`, optional `display`, and optional `on_event`, and returns
-the existing `RunResult`.
+entry point for starting a new coding task. `repo_root` and `task` are required;
+optional inputs select Skills or Mods and replace runtime collaborators. It
+returns `RunResult`.
 
 `code_squid.agent_setup.build_coding_task_run(...)` constructs the session,
 session store, undo store, generic Agent with `CODE_SQUID_PROMPT_DEFAULTS`, selected tools,
@@ -358,6 +360,10 @@ provided. It creates a provider, `ModelAdapter`, `Compactor`, `ToolExecutor`,
 `SessionStore`, and `UndoStore` when those concerns are omitted. It requires
 typed settings supplied by the application and does not load Code Squid
 settings or defaults itself.
+
+The generic builder uses an empty Tool registry when `tools` is omitted. Code
+Squid's application builder is what selects the four built-ins by default.
+Direct `Agent(...)` construction has its own default of the built-in registry.
 
 Callers may replace any of those major runtime collaborators selectively. A
 supplied `ModelAdapter` bypasses provider construction; a supplied provider is
@@ -386,7 +392,7 @@ This seam lets a host persist outside the workspace without teaching Core its
 storage layout, indexes, or adapter types. Code Squid's application setup uses
 `code_squid.app_paths` to supply `<repo>/.code-squid/sessions` and
 `<repo>/.code-squid/undo`, while `repo_root` separately continues to define tool
-execution. Desktop is one possible host, not a special Core concern.
+execution. Embedding hosts are not special Core concerns.
 
 Hosts that already resolved a Skill and its executable tool registry may pass
 them together as `resolved_skill` and `resolved_tools`. Core then skips Skill
@@ -411,10 +417,10 @@ supplementary and does not invalidate usable local storage. App-specific UIs
 own their presentation projection while Core owns the persistence formats and
 mechanics.
 
-This setup layer is not a plugin system, orchestration layer, daemon, or
-server mode. It gives external Python code a clean way to call Code Squid
-without copying CLI wiring. Terminal workflow and presentation live under
-`code_squid/console/`; `main.py` only delegates to
+This setup layer gives external Python code a way to call Code Squid without
+copying CLI wiring. It only constructs a run; it does not orchestrate multiple
+runs or provide a daemon or server. Terminal workflow and presentation live
+under `code_squid/console/`; `main.py` only delegates to
 `code_squid.console.cli.cli_commands.run_cli()`.
 
 ### Core Mod resolution
@@ -438,11 +444,11 @@ The canonical user package is:
   hooks/<hook-name>/hook.py
 ```
 
-`mod.yaml` uses Desktop's current one-Skill fields: `name`, `description`,
-`default_skill`, optional semantic `accent`, `tools`, and `hooks`. The selected
-Skill must explicitly declare `allowed-tools`, and that ordered list must match
-the Mod Tool inventory exactly. Core preserves accent metadata but does not
-interpret its presentation.
+`mod.yaml` uses the fields `name`, `description`, `default_skill`, optional
+`accent`, `tools`, and `hooks`. The selected Skill must explicitly declare
+`allowed-tools`, and that ordered list must match the Mod Tool inventory
+exactly. Core preserves accent metadata but does not interpret its
+presentation.
 
 A referenced component may be Mod-local or standalone under the same supplied
 application home. A Mod-local Skill, Tool, or Hook wins over a same-named loose
@@ -456,11 +462,8 @@ Python source. A selected Mod Hook is imported when runtime resolution loads
 it through the normal Hook loader. A selected Tool remains lazy and imports
 only when its registry entry executes.
 
-Desktop still owns presentation, Mod Builder workflows, first-party package
-location/packaging, and the user's selection. Core owns canonical user-Mod
-parsing and runtime resolution. Desktop's older parser/resolver is temporarily
-left for the next Desktop migration patch and should become a thin caller of
-this API rather than remain an independent parser.
+The host owns presentation and the user's Mod selection. Core owns Mod parsing,
+validation, and runtime resolution.
 
 ## Skill System
 
@@ -503,15 +506,10 @@ allowed-tools: read_file run_command
 - explicit `allowed-tools: []` means the skill intentionally has no tools.
 - listed `allowed-tools` restricts the run to that tool set.
 
-Unknown tool names should fail clearly during run construction before any tool
-action is executed.
-
-Explicit no-tool skills are useful for future chat-only, planning-only,
-review-only, or explanation-only profiles, but the prompt and loop contract is
-not fully tool-aware yet. Prompt assembly and/or loop validation should become
-aware of empty active tool sets; no-tool skills likely need a no-tool/chat-style
-response contract, and non-final "exactly one tool call" requirements should not
-apply when the active tool set is empty.
+Unknown Tool names fail during run construction before any Tool action is
+executed. An explicit no-Tool Skill exposes no Tool definitions. The current
+response protocol is otherwise unchanged, so such a run can only complete with
+a non-empty final response and no Tool call.
 
 Code Squid supports normal Agent Skills-style Markdown instructions plus
 Code Squid-native prompt-section overrides. Overrides are written as Markdown
@@ -522,12 +520,12 @@ headings:
 
 Write a focused review.
 
-## TOOL_USAGE_GUIDANCE append
+## TOOL_USAGE_GUIDANCE replace
 
 ...
 ```
 
-Supported override modes are:
+The parser accepts these override modes:
 
 - `replace`
 - `append`
@@ -546,7 +544,13 @@ runtime contract:
 - `CORRECTION_MESSAGES`
 - `COMPACTION_PROMPT`
 
-Skills can change specialization instructions, inspection style, optional tool
+`replace` and `append` have their literal meanings for `SYSTEM_PROMPT_INTRO` and
+`FINAL_SUMMARY_REQUIREMENTS`. Active Skills omit Code Squid's default
+`TOOL_USAGE_GUIDANCE`; when a Skill supplies that section, its content is used
+as the Tool guidance. The parser accepts either mode on that section, but the
+current prompt assembly does not prepend the application default for `append`.
+
+Skills can change specialization instructions, inspection style, optional Tool
 guidance, and final-summary shape. They cannot override the Core one-tool-call
 contract, final-response/no-tool mechanics, narration guidance, response
 examples, active-Skill/environment insertion, or correction mechanics. They
@@ -600,9 +604,6 @@ Standalone Skills discovered from the Code Squid home directory have
 are resolved through the Mod path instead of standalone discovery. Code Squid
 currently ships no repo-root bundled Skills.
 
-Core CLI skill creation/editing commands and new discovery tools such as repo
-tree/search helpers are not implemented yet.
-
 ## Application Resources and Mods
 
 Code Squid chooses an application home, defaulting to:
@@ -629,7 +630,6 @@ Mod metadata supports an optional top-level semantic accent, for example
 `blue`, `green`, `yellow`, `orange`, `red`, `pink`, `purple`, `white`, and
 `gray`.
 
-There is no legacy Extension directory, manifest, active-state file, or CLI.
 The host selects a Mod for each run; Core does not persist a globally active
 selection.
 
@@ -754,9 +754,9 @@ map to settings values this way:
 
 ## Provider Model
 
-LM Studio or another generic OpenAI-compatible server is the recommended default
-path. `openai_compatible` uses `squid_core/providers/openai_compatible.py` and sends
-chat-completions requests through the OpenAI Python client.
+The default settings target LM Studio through the generic OpenAI-compatible
+path. `openai_compatible` uses `squid_core/providers/openai_compatible.py` and
+sends chat-completions requests through the OpenAI Python client.
 
 OpenRouter is supported through the OpenAI-compatible provider path by setting
 `model.provider` or `CODE_SQUID_PROVIDER` to `openrouter`. It still uses
@@ -822,9 +822,9 @@ non-empty content.
 
 For coding tasks, prompts ask the agent to keep final summaries concise and
 precise, identify changed files, summarize the change, state verification, and
-report concrete limitations. Formatting guidance is not runtime-enforced. The terminal display still
-hides a legacy `TASK COMPLETE` marker if a model includes it, but finalization no
-longer depends on that marker.
+report concrete limitations. Formatting guidance is not runtime-enforced. The
+terminal display removes a `TASK COMPLETE` marker if a model includes it;
+finalization does not depend on that marker.
 
 ### Tool Transcript Contract
 
@@ -940,9 +940,8 @@ If persistence is wired in, `AgentLoop` logs compaction metadata to
 `session.jsonl` through `SessionStore.append_compaction(...)`. `load_messages()`
 ignores compaction events and loads only transcript message entries.
 
-Compaction is transcript compression for continuation context. It is not durable
-workspace memory and should stay separate from any future workspace memory
-feature.
+Compaction is transcript compression for continuation context. It does not
+provide durable workspace memory.
 
 ## Sessions, Resume, Undo, And Interruption
 
@@ -1051,7 +1050,7 @@ session workflow in the current MVP.
 
 ## Tool Model
 
-The active tool surface is:
+The protected built-in Tool surface is:
 
 - `read_file(path, start_line=None, end_line=None)`
 - `write_file(path, content)`
@@ -1096,7 +1095,9 @@ The active tool surface is:
 
 `run_command`:
 
-- runs a shell command with `shell=True`
+- on Windows, invokes the detected PowerShell executable with `-NoProfile` and
+  `-Command`, without `shell=True`
+- on other platforms, executes through the system shell with `shell=True`
 - uses `repo_root` as the working directory
 - merges stderr into stdout
 - times out after 15 seconds
@@ -1106,9 +1107,17 @@ The active tool surface is:
 - is used for discovery, verification, and shell behavior
 - is not undo-protected, even if it mutates files
 
-There is no structured search tool, repo-policy tool, dedicated test runner,
-browser tool, or plugin-provided tool. Discovery, verification, and most shell
-behavior go through `run_command`.
+There is no built-in structured search Tool, repo-policy Tool, dedicated test
+runner, or browser Tool. Discovery, verification, and most shell behavior use
+`run_command`.
+
+These four built-ins are the normal active registry when no Skill or Mod is
+selected. A standalone Skill can filter the built-ins and can activate named
+standalone user Tools from `<app-home>/tools/`. A selected Mod uses the exact
+ordered Tool inventory shared by `mod.yaml` and its default Skill, drawing
+custom Tools from the Mod first and then from standalone user Tools. Built-ins
+win name collisions. Generic Core callers may instead supply their own Tool
+registry. An explicit `allowed-tools: []` produces an empty active registry.
 
 ## Ownership Boundaries
 
@@ -1127,9 +1136,8 @@ when the loop should stop, and what correction/failure path is used. It does
 not own Code Squid identity or coding workflow policy.
 
 `code_squid/agent/prompts.py` owns Code Squid's explicit application prompt
-defaults and baseline coding discipline. `code_squid/agent/coding.py` is the
-intentional specialization point around the generic Core Agent and must not
-regain a duplicate or empty subclass implementation.
+defaults and baseline coding discipline. `code_squid/agent/coding.py` exports
+the product-owned `CodingAgent` name as an alias of the generic Core Agent.
 
 `code_squid/settings.py` owns local settings parsing, persistence, Code Squid
 defaults and selection, and optional environment overrides. It produces
@@ -1143,8 +1151,8 @@ approval, execution, and result handling; it does not own workspace or guarded
 shell policy.
 
 `code_squid/agent_setup.py` owns Code Squid application construction and shared CLI
-helpers. `squid_core/spawner.py` owns generic selective construction. Neither is
-a plugin system, event bus, daemon, server, or future orchestration layer.
+helpers. `squid_core/spawner.py` owns generic selective construction. Neither
+orchestrates multiple runs or provides an event bus, daemon, or server.
 
 `squid_core/model_adapter.py` owns provider response normalization and replay message
 shaping. Provider-specific HTTP/API calls stay in `squid_core/providers/`.
@@ -1183,11 +1191,13 @@ those mechanisms. In-memory session behavior stays in `squid_core/session.py`;
 live display stays in `code_squid/console/ui/`.
 
 `code_squid/console/cli/` owns terminal workflow and control.
-`code_squid/console/ui/` owns terminal presentation and input. Tool-event
-display is the reliable UX layer for what happened, while model-native
+`code_squid/console/ui/` owns terminal presentation and input. `TerminalDisplay`
+coordinates lifecycle state and delegates startup, approval, Tool, and reusable
+formatting details to the sibling presentation modules described above. Tool
+event display is the reliable UX layer for what happened, while model-native
 narration is encouraged by prompts.
 
-## Known Limitations / Notes For Later
+## Current Limitations
 
 - OpenRouter may produce invalid multi-tool replies despite
   `parallel_tool_calls=False`; current handling is reject-and-retry through
@@ -1197,29 +1207,18 @@ narration is encouraged by prompts.
 - Command and file access is not a hardened sandbox. Workspace checks and
   guarded command checks are approval/preflight mechanisms.
 - Compaction uses rough JSON/text length estimates, not exact tokenization.
-- Compaction should remain separate from future workspace memory.
 - Event callback support currently covers normal loop-level events. Outer
   CLI-caught failures such as some model request errors or keyboard interrupts
   may need explicit wrapper handling depending on the caller path.
 - Code Squid application setup uses `TerminalDisplay`; generic Squid Core
   construction uses `NullDisplay` unless the host supplies presentation.
 - Resume support is CLI-owned under `code_squid/console/cli/`.
-- JSONL/file event output is intentionally not implemented yet.
-- User skill discovery checks `<CODE_SQUID_HOME>/skills/*/SKILL.md`, defaulting
-  to `~/.code-squid/skills/*/SKILL.md`.
-- Core CLI skill creation/editing commands are not implemented yet.
+- No JSONL/file event sink is included.
 - `allowed-tools: none` is not a supported special case.
-- New discovery tools such as repo tree/search helpers are not part of
-  Skills v1.
 - Run-context events are debug metadata, not model memory.
-- Future tool libraries should stay small per active agent/task, even if more
-  tools exist globally.
-- Do not turn Code Squid into a broad framework prematurely.
 - There are no live provider integration tests in the focused unit suite.
-- LM Studio still uses the OpenAI-compatible `/v1` path; native `/api/v1/*`
-  integration and explicit model load/unload/download support are deferred.
-- Future Squid Models provider/runtime integration is deferred; the existing
-  OpenAI-compatible request behavior is not a dedicated transport.
+- LM Studio uses the OpenAI-compatible `/v1` path; Code Squid does not implement
+  native `/api/v1/*` model load, unload, or download operations.
 
 ## Practical Principles
 

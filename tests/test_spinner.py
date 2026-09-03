@@ -1,5 +1,5 @@
 from code_squid.console.ui.spinner import RESET_STYLE, SPINNER_FRAMES, TerminalSpinner
-from code_squid.console.ui.display import SOFT_CYAN_STYLE
+from code_squid.console.ui.formatting import SOFT_CYAN_STYLE
 
 
 class FakeStream:

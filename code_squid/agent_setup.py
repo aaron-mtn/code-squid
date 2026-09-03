@@ -30,7 +30,8 @@ from squid_core.tools.user_tools import build_user_tool_registry
 from squid_core.storage import SessionStore, UndoStore
 from squid_core.storage.session_index import register_session_root
 from squid_core.tools.builtins import TOOLS
-from code_squid.console.ui.display import StartupInfo, TerminalDisplay
+from code_squid.console.ui.banner import StartupInfo
+from code_squid.console.ui.display import TerminalDisplay
 from squid_core.agent import Agent
 from squid_core.spawner import build_agent_loop as build_core_agent_loop
 

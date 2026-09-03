@@ -1150,7 +1150,7 @@ def test_assistant_message_wraps_to_terminal_width(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
-        "code_squid.console.ui.display.shutil.get_terminal_size",
+        "code_squid.console.ui.formatting.shutil.get_terminal_size",
         lambda fallback: os.terminal_size((44, 24)),
     )
 
@@ -1591,7 +1591,7 @@ def test_final_summary_long_unordered_bullet_does_not_orphan_marker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "code_squid.console.ui.display.shutil.get_terminal_size",
+        "code_squid.console.ui.formatting.shutil.get_terminal_size",
         lambda fallback: os.terminal_size((20, 24)),
     )
 
@@ -1605,7 +1605,7 @@ def test_final_summary_unordered_bullet_continuation_aligns_under_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "code_squid.console.ui.display.shutil.get_terminal_size",
+        "code_squid.console.ui.formatting.shutil.get_terminal_size",
         lambda fallback: os.terminal_size((18, 24)),
     )
 
@@ -1654,7 +1654,7 @@ def test_final_summary_wrapped_bullet_continuation_is_not_spaced(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "code_squid.console.ui.display.shutil.get_terminal_size",
+        "code_squid.console.ui.formatting.shutil.get_terminal_size",
         lambda fallback: os.terminal_size((38, 24)),
     )
 
@@ -1737,7 +1737,7 @@ def test_final_message_wraps_body_lines(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
-        "code_squid.console.ui.display.shutil.get_terminal_size",
+        "code_squid.console.ui.formatting.shutil.get_terminal_size",
         lambda fallback: os.terminal_size((44, 24)),
     )
 
@@ -1766,7 +1766,7 @@ def test_final_message_wraps_unordered_bullet_continuation_under_text(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
-        "code_squid.console.ui.display.shutil.get_terminal_size",
+        "code_squid.console.ui.formatting.shutil.get_terminal_size",
         lambda fallback: os.terminal_size((38, 24)),
     )
 
