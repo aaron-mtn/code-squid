@@ -1,24 +1,24 @@
-"""Tests for reading saved Code Squid session folders."""
+"""Tests for Code Squid paths passed to generic session discovery."""
 
 import json
 from pathlib import Path
 
 import pytest
 
-from storage.session_index import (
+from core.app_paths import session_indexes_path, workspace_sessions_dir
+from squid_core.storage.session_index import (
     latest_session_id,
     list_all_sessions,
+    list_registered_session_roots,
     list_sessions,
     load_session_entries,
-    register_session_index,
+    register_session_root,
     session_dir_for,
-    session_indexes_path,
-    sessions_dir,
 )
 
 
 def write_session(repo_root: Path, session_id: str, metadata: dict) -> Path:
-    session_dir = sessions_dir(repo_root) / session_id
+    session_dir = workspace_sessions_dir(repo_root) / session_id
     session_dir.mkdir(parents=True)
     (session_dir / "metadata.json").write_text(
         json.dumps(metadata),
@@ -36,7 +36,8 @@ def test_session_registry_uses_configured_override(
     fake_home = tmp_path / "home"
     monkeypatch.setattr(Path, "home", lambda: fake_home)
 
-    register_session_index(tmp_path)
+    sessions_dir = workspace_sessions_dir(tmp_path)
+    register_session_root(session_indexes_path(), sessions_dir)
 
     assert session_indexes_path() == isolated_session_indexes
     registered = [
@@ -46,7 +47,10 @@ def test_session_registry_uses_configured_override(
         ).splitlines()
         if line.strip()
     ]
-    assert {"repo_root": str(tmp_path.resolve())} in registered
+    assert {"sessions_dir": str(sessions_dir.resolve())} in registered
+    assert sessions_dir.resolve() in list_registered_session_roots(
+        isolated_session_indexes
+    )
     assert not (fake_home / ".code-squid" / "session-indexes.jsonl").exists()
 
 
@@ -68,7 +72,10 @@ def test_list_sessions_returns_metadata_sorted_by_updated_at_descending(tmp_path
         },
     )
 
-    assert [session["session_id"] for session in list_sessions(tmp_path)] == ["newer", "older"]
+    assert [
+        session["session_id"]
+        for session in list_sessions(workspace_sessions_dir(tmp_path))
+    ] == ["newer", "older"]
 
 
 def test_list_sessions_skips_invalid_and_missing_metadata_folders(tmp_path: Path) -> None:
@@ -78,14 +85,14 @@ def test_list_sessions_skips_invalid_and_missing_metadata_folders(tmp_path: Path
     }
     write_session(tmp_path, "valid", valid)
 
-    missing_metadata = sessions_dir(tmp_path) / "missing-metadata"
+    missing_metadata = workspace_sessions_dir(tmp_path) / "missing-metadata"
     missing_metadata.mkdir(parents=True)
 
-    invalid_metadata = sessions_dir(tmp_path) / "invalid-metadata"
+    invalid_metadata = workspace_sessions_dir(tmp_path) / "invalid-metadata"
     invalid_metadata.mkdir(parents=True)
     (invalid_metadata / "metadata.json").write_text("{broken", encoding="utf-8")
 
-    assert list_sessions(tmp_path) == [valid]
+    assert list_sessions(workspace_sessions_dir(tmp_path)) == [valid]
 
 
 def test_list_all_sessions_returns_registered_workspaces_newest_first(
@@ -114,10 +121,10 @@ def test_list_all_sessions_returns_registered_workspaces_newest_first(
             "updated_at": "2026-05-14T16:00:00+00:00",
         },
     )
-    register_session_index(older_workspace)
-    register_session_index(newer_workspace)
+    register_session_root(index_path, workspace_sessions_dir(older_workspace))
+    register_session_root(index_path, workspace_sessions_dir(newer_workspace))
 
-    assert [session["session_id"] for session in list_all_sessions()] == [
+    assert [session["session_id"] for session in list_all_sessions(index_path)] == [
         "newer",
         "older",
     ]
@@ -140,20 +147,22 @@ def test_list_all_sessions_skips_bad_registered_workspace(
             "updated_at": "2026-05-14T16:00:00+00:00",
         },
     )
-    register_session_index(valid_workspace)
-    register_session_index(broken_workspace)
-    sessions_dir(broken_workspace).mkdir(parents=True)
+    register_session_root(index_path, workspace_sessions_dir(valid_workspace))
+    register_session_root(index_path, workspace_sessions_dir(broken_workspace))
+    workspace_sessions_dir(broken_workspace).mkdir(parents=True)
 
     original_iterdir = Path.iterdir
 
     def fail_for_broken(path):
-        if path == sessions_dir(broken_workspace):
+        if path == workspace_sessions_dir(broken_workspace):
             raise OSError("unreadable workspace")
         return original_iterdir(path)
 
     monkeypatch.setattr(Path, "iterdir", fail_for_broken)
 
-    assert [session["session_id"] for session in list_all_sessions()] == ["valid"]
+    assert [session["session_id"] for session in list_all_sessions(index_path)] == [
+        "valid"
+    ]
 
 
 def test_latest_session_id_returns_newest_session_id(tmp_path: Path) -> None:
@@ -174,11 +183,11 @@ def test_latest_session_id_returns_newest_session_id(tmp_path: Path) -> None:
         },
     )
 
-    assert latest_session_id(tmp_path) == "newer"
+    assert latest_session_id(workspace_sessions_dir(tmp_path)) == "newer"
 
 
 def test_latest_session_id_returns_none_when_no_sessions_exist(tmp_path: Path) -> None:
-    assert latest_session_id(tmp_path) is None
+    assert latest_session_id(workspace_sessions_dir(tmp_path)) is None
 
 
 def test_session_dir_for_returns_exact_session_dir(tmp_path: Path) -> None:
@@ -199,12 +208,12 @@ def test_session_dir_for_returns_exact_session_dir(tmp_path: Path) -> None:
         },
     )
 
-    assert session_dir_for(tmp_path, "exact-id") == expected
+    assert session_dir_for(workspace_sessions_dir(tmp_path), "exact-id") == expected
 
 
 def test_session_dir_for_raises_file_not_found_error_for_missing_id(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
-        session_dir_for(tmp_path, "missing")
+        session_dir_for(workspace_sessions_dir(tmp_path), "missing")
 
 
 @pytest.mark.parametrize(
@@ -216,19 +225,19 @@ def test_session_dir_for_rejects_path_like_ids(
     session_id: str,
 ) -> None:
     with pytest.raises(ValueError, match="Invalid session ID"):
-        session_dir_for(tmp_path, session_id)
+        session_dir_for(workspace_sessions_dir(tmp_path), session_id)
 
 
 def test_session_dir_for_rejects_windows_absolute_path(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="Invalid session ID"):
-        session_dir_for(tmp_path, r"C:\outside\session")
+        session_dir_for(workspace_sessions_dir(tmp_path), r"C:\outside\session")
 
 
 def test_session_dir_for_rejects_symlink_that_resolves_outside_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = sessions_dir(tmp_path)
+    root = workspace_sessions_dir(tmp_path)
     root.mkdir(parents=True)
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -247,7 +256,7 @@ def test_session_dir_for_rejects_symlink_that_resolves_outside_root(
         monkeypatch.setattr(Path, "resolve", resolve_link_outside)
 
     with pytest.raises(ValueError, match="escapes sessions directory"):
-        session_dir_for(tmp_path, "linked-session")
+        session_dir_for(workspace_sessions_dir(tmp_path), "linked-session")
 
 
 def test_load_session_entries_returns_entries_in_order_and_skips_blank_lines(
@@ -268,4 +277,7 @@ def test_load_session_entries_returns_entries_in_order_and_skips_blank_lines(
         encoding="utf-8",
     )
 
-    assert load_session_entries(tmp_path, "session") == [first, second]
+    assert load_session_entries(workspace_sessions_dir(tmp_path), "session") == [
+        first,
+        second,
+    ]

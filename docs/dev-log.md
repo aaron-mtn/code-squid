@@ -1,3 +1,17 @@
+- 2026-09-02: Removed the remaining top-level `storage/` package by moving
+  traceback-only diagnostic logging and generic cross-location session
+  registration/discovery into `squid_core/storage/`. The Core APIs now receive
+  explicit log, registry, and sessions-directory paths; `core/app_paths.py`
+  remains the sole owner of Code Squid's `.code-squid` layout and
+  `CODE_SQUID_SESSION_INDEXES` override. Cross-workspace newest-first listing,
+  stale-root tolerance, malformed-line skipping, duplicate suppression, and
+  CLI latest/show/resume behavior are unchanged. No compatibility shims were
+  added. Focused storage/session-index/error-log/CLI session suite: 119 passed.
+  Full suite: 723 passed. Production compileall and a fresh 67-module import
+  walk passed; stale top-level storage imports and forbidden Core path,
+  environment, app-path, CLI, and UI dependencies are absent. Both diff checks
+  passed. No live model inference was run. Broader application-shell and CLI/UI
+  ownership cleanup remains intentionally deferred.
 - 2026-09-02: Completed Squid Core refactor Patch 6B by moving atomic JSON
   writes, per-session persistence, latest-only undo mechanics, and generic
   session-directory inspection into `squid_core/storage/` with no compatibility

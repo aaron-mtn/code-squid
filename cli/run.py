@@ -16,25 +16,29 @@ from core.runner import (
     resolve_skill_tools,
     startup_info,
 )
-from core.app_paths import workspace_undo_dir
+from core.app_paths import (
+    workspace_error_log_path,
+    workspace_sessions_dir,
+    workspace_undo_dir,
+)
 from squid_core.session import Session
-from storage.error_log import write_error_log
-from storage.session_index import latest_session_id, session_dir_for
-from squid_core.storage import SessionStore, UndoStore
+from squid_core.storage import SessionStore, UndoStore, write_error_log
+from squid_core.storage.session_index import latest_session_id, session_dir_for
 from ui.terminal import TerminalDisplay
 from squid_core.agent import Agent
 
 
 def _session_dir_for_resume(repo_root: Path, session_id: str) -> Path | None:
+    sessions_dir = workspace_sessions_dir(repo_root)
     if session_id == "latest":
-        resolved_id = latest_session_id(repo_root)
+        resolved_id = latest_session_id(sessions_dir)
         if resolved_id is None:
             print("No saved sessions.")
             return None
 
         session_id = resolved_id
 
-    return session_dir_for(repo_root, session_id)
+    return session_dir_for(sessions_dir, session_id)
 
 
 def _run_display(
@@ -68,7 +72,7 @@ def _run_loop(
         return 0
     except ModelRequestError as error:
         session_store.update_status("failed")
-        log_path = write_error_log(repo_root / ".code-squid", error)
+        log_path = write_error_log(workspace_error_log_path(repo_root), error)
         try:
             display_path = log_path.resolve().relative_to(repo_root.resolve())
         except ValueError:

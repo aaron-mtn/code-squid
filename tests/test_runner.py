@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from core.app_paths import session_indexes_path
 from squid_core.agent_loop import RunResult
 from core.runner import build_coding_task_run, run_coding_task
 from squid_core.platform_context import PlatformContext
@@ -162,8 +163,10 @@ def test_run_construction_explicitly_registers_new_session(
 ) -> None:
     registrations = []
     monkeypatch.setattr(
-        "core.runner.register_session_index",
-        lambda repo_root: registrations.append(repo_root),
+        "core.runner.register_session_root",
+        lambda index_path, sessions_dir: registrations.append(
+            (index_path, sessions_dir)
+        ),
     )
     monkeypatch.setattr(
         "squid_core.spawner.build_provider",
@@ -172,7 +175,12 @@ def test_run_construction_explicitly_registers_new_session(
 
     build_coding_task_run(tmp_path, "Register session", display=FakeDisplay())
 
-    assert registrations == [tmp_path.resolve()]
+    assert registrations == [
+        (
+            session_indexes_path(),
+            tmp_path.resolve() / ".code-squid" / "sessions",
+        )
+    ]
 
 
 def test_run_construction_uses_explicit_storage_factories(monkeypatch, tmp_path: Path) -> None:

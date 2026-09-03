@@ -85,14 +85,17 @@ application-owned modules awaiting the later application-package cleanup.
     built-in registry is available as `squid_core.tools.builtins.TOOLS`.
 
 - `squid_core/storage/`
-  - Generic durable persistence mechanics with no Code Squid path or discovery
-    policy.
+  - Generic durable persistence, discovery, and diagnostic mechanics with no
+    Code Squid path policy.
   - `session_store.py` owns one explicitly located session directory,
     `metadata.json`, append-only `session.jsonl`, replay loading, status updates,
     compaction/run-context events, and model-reply/rejection diagnostics.
   - `undo_store.py` owns the explicitly located latest-only undo buffer.
-  - `atomic_json.py` owns small same-directory atomic JSON replacement, and
-    `session_index.py` owns generic inspection of an explicit sessions directory.
+  - `atomic_json.py` owns small same-directory atomic JSON replacement.
+  - `session_index.py` owns generic inspection plus cross-location registration
+    and discovery using explicit index and session-root paths.
+  - `error_log.py` writes timestamped traceback-only diagnostics to an explicit
+    log path.
 
 - `squid_core/hooks/`
   - Hook lifecycle contexts and decisions, `HookRunner`, and Hook metadata,
@@ -155,23 +158,16 @@ application-owned modules awaiting the later application-package cleanup.
 - `core/`
   - Temporary location for Code Squid application-owned wiring/policy only.
   - `app_paths.py` owns Code Squid application-home policy, repository-local
-    session/undo locations, the global session-index location, and paths for
-    loose resources and Mods. Reusable Core machinery receives those paths
-    explicitly; Squid Core does not define a global home or `.code-squid` layout.
+    session/undo/error-log locations, the global session-index location, and
+    paths for loose resources and Mods. Reusable Core machinery receives those
+    paths explicitly; Squid Core does not define a global home or `.code-squid`
+    layout.
   - `runner.py` is the Code Squid application builder and compatibility layer.
     It owns Code Squid prompt defaults, invokes Core Mod resolution for an
     explicitly selected `mod_name`, records run context, constructs terminal
     presentation, and passes selected resources to `squid_core.spawner`.
   - Final relocation of these two files into a Code Squid application package,
     followed by removal of `core/`, is deferred to the next cleanup patch.
-
-- `storage/`
-  - Code Squid application-owned persistence policy only.
-  - `session_index.py` owns `CODE_SQUID_SESSION_INDEXES`, cross-workspace
-    registration/discovery, and adapts the Core directory-inspection helpers to
-    Code Squid's repository-local session layout.
-  - `error_log.py` owns narrow diagnostic traceback logging for model request
-    failures.
 
 - `ui/`
   - Small terminal display helpers.
@@ -425,13 +421,14 @@ the CLI follow-up path. It delegates generic collaborator wiring to
 `squid_core.spawner.build_agent_loop(...)`. Provider-specific construction and
 replay-mode decisions are delegated to `squid_core.providers`.
 
-`squid_core.storage.session_index` owns generic inspection of an explicit
-sessions directory. `storage/session_index.py` owns Code Squid's global
-cross-workspace registry and conventional workspace mapping. Session creation
-does not register itself globally; the Code Squid runner explicitly registers a
-workspace after it creates a session. Registry failure remains supplementary
-and does not invalidate usable local storage. App-specific UIs own their
-presentation projection while Core owns the persistence formats and mechanics.
+`squid_core.storage.session_index` owns generic inspection, registration, and
+cross-location discovery for explicit index and session-root paths. Session
+creation does not register itself globally; the Code Squid runner uses
+`core.app_paths` to select both paths and explicitly registers the workspace's
+sessions directory after creating a session. Registry failure remains
+supplementary and does not invalidate usable local storage. App-specific UIs
+own their presentation projection while Core owns the persistence formats and
+mechanics.
 
 This runner layer is not a plugin system, orchestration layer, daemon, or
 server mode. It gives external Python code a clean way to call Code Squid
@@ -1075,7 +1072,7 @@ Current session statuses are:
 Resume can load saved messages with `SessionStore.load_messages()`, append a
 follow-up user message, mark the session active, create a fresh undo buffer, and
 continue the same saved session. `latest` resolves through
-`storage/session_index.py`.
+the explicit workspace sessions path supplied by `core.app_paths`.
 
 The saved-session viewer can list sessions and show message transcripts.
 Compaction events are not printed as transcript messages by the viewer.
@@ -1225,11 +1222,12 @@ elsewhere.
 `squid_core/tools/executor.py` owns mechanical tool dispatch and side-effect tracking.
 Individual built-in tool behavior stays in `squid_core/tools/builtins/`.
 
-`squid_core/storage/` owns generic durable session, undo, atomic-write, and
-session-directory inspection mechanics. `core/app_paths.py` and the top-level
-`storage/session_index.py` own Code Squid locations and global discovery policy.
-In-memory session behavior stays in `squid_core/session.py`; live display stays
-in `ui/`.
+`squid_core/storage/` owns generic durable session and undo persistence, atomic
+writes, session indexing/discovery, and diagnostic error logging. Every
+filesystem location is explicit. `core/app_paths.py` owns Code Squid's concrete
+`.code-squid` session, undo, index, and error-log locations and passes them into
+those mechanisms. In-memory session behavior stays in `squid_core/session.py`;
+live display stays in `ui/`.
 
 `ui/` owns terminal presentation only. Tool-event display is the reliable UX
 layer for what happened, while model-native narration is encouraged by prompts.

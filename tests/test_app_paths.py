@@ -10,6 +10,7 @@ from core.app_paths import (
     user_mods_dir,
     user_skills_dir,
     user_tools_dir,
+    workspace_error_log_path,
     workspace_sessions_dir,
     workspace_state_dir,
     workspace_undo_dir,
@@ -56,6 +57,9 @@ def test_workspace_storage_paths_are_application_owned(tmp_path: Path) -> None:
     assert workspace_state_dir(tmp_path) == root / ".code-squid"
     assert workspace_sessions_dir(tmp_path) == root / ".code-squid" / "sessions"
     assert workspace_undo_dir(tmp_path) == root / ".code-squid" / "undo"
+    assert workspace_error_log_path(tmp_path) == (
+        root / ".code-squid" / "logs" / "latest.log"
+    )
 
 
 def test_session_index_path_uses_override(monkeypatch, tmp_path: Path) -> None:

@@ -1,9 +1,59 @@
-"""Inspect session directories without application discovery policy."""
+"""Inspect and discover explicitly located session directories."""
 
 import json
 import re
 from pathlib import Path
 from typing import Any
+
+
+def register_session_root(index_path: Path, sessions_dir: Path) -> None:
+    """Append one explicit sessions directory to an explicit registry file."""
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_root = sessions_dir.resolve()
+    if resolved_root in list_registered_session_roots(index_path):
+        return
+
+    with index_path.open("a", encoding="utf-8") as file:
+        file.write(json.dumps({"sessions_dir": str(resolved_root)}) + "\n")
+
+
+def list_registered_session_roots(index_path: Path) -> list[Path]:
+    """Return unique valid session roots from an explicit registry file."""
+    if not index_path.exists():
+        return []
+
+    roots = []
+    seen = set()
+    with index_path.open(encoding="utf-8") as file:
+        for line in file:
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            root = entry.get("sessions_dir") if isinstance(entry, dict) else None
+            if not isinstance(root, str) or not root:
+                continue
+            path = Path(root)
+            if path in seen:
+                continue
+            seen.add(path)
+            roots.append(path)
+    return roots
+
+
+def list_all_sessions(index_path: Path) -> list[dict]:
+    """Load sessions across registered roots, newest first."""
+    sessions = []
+    for sessions_dir in list_registered_session_roots(index_path):
+        try:
+            sessions.extend(list_sessions(sessions_dir))
+        except OSError:
+            # Stale or temporarily unreadable roots must not break discovery
+            # for every other registered location.
+            continue
+    return sorted(sessions, key=_updated_at, reverse=True)
 
 
 def list_sessions(sessions_dir: Path) -> list[dict]:

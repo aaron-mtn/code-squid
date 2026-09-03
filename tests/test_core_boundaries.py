@@ -49,12 +49,12 @@ def test_subsystem_packages_expose_useful_public_seams() -> None:
     from squid_core.safety import ActionPreflight, ApprovalPolicy
     from squid_core.tools import TOOLS, ToolExecutor, ToolResults
     from squid_core.tools.builtins import TOOLS as BUILTIN_TOOLS
-    from squid_core.storage import SessionStore, UndoStore
+    from squid_core.storage import SessionStore, UndoStore, write_error_log
 
     assert all((Mod, ResolvedMod, discover_mods, load_mod, resolve_mod, validate_mod))
     assert all((HookRunner, BeforeRunContext, ActionPreflight, ApprovalPolicy))
     assert all((ToolExecutor, ToolResults))
-    assert all((SessionStore, UndoStore))
+    assert all((SessionStore, UndoStore, write_error_log))
     assert TOOLS is BUILTIN_TOOLS
 
 
@@ -82,14 +82,10 @@ def test_old_provider_source_package_is_removed() -> None:
     assert not list(provider_root.glob("*.py"))
 
 
-def test_top_level_storage_contains_only_application_policy() -> None:
+def test_top_level_storage_package_is_removed() -> None:
     storage_root = Path(__file__).resolve().parents[1] / "storage"
 
-    assert sorted(path.name for path in storage_root.glob("*.py")) == [
-        "__init__.py",
-        "error_log.py",
-        "session_index.py",
-    ]
+    assert not storage_root.exists()
 
 
 def test_old_subsystem_import_paths_are_absent() -> None:

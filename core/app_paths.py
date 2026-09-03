@@ -60,6 +60,11 @@ def workspace_undo_dir(repo_root: Path | str) -> Path:
     return workspace_state_dir(repo_root) / "undo"
 
 
+def workspace_error_log_path(repo_root: Path | str) -> Path:
+    """Return Code Squid's latest diagnostic error-log location."""
+    return workspace_state_dir(repo_root) / "logs" / "latest.log"
+
+
 def session_indexes_path() -> Path:
     """Return Code Squid's configured cross-workspace registry path."""
     configured_path = os.environ.get(CODE_SQUID_SESSION_INDEXES_ENV, "").strip()

@@ -3,7 +3,8 @@
 import json
 from pathlib import Path
 
-from storage.session_index import (
+from core.app_paths import workspace_sessions_dir
+from squid_core.storage.session_index import (
     latest_session_id,
     list_sessions,
     load_session_entries,
@@ -23,7 +24,7 @@ def print_sessions(repo_root: Path) -> None:
     print("🦑 Code Squid Sessions")
     print()
 
-    sessions = list_sessions(repo_root)
+    sessions = list_sessions(workspace_sessions_dir(repo_root))
     if not sessions:
         print("No saved sessions.")
         return
@@ -38,17 +39,18 @@ def print_sessions(repo_root: Path) -> None:
 
 # Print metadata and message transcript for one saved session.
 def print_session(repo_root: Path, session_id: str) -> None:
+    sessions_dir = workspace_sessions_dir(repo_root)
     if session_id == "latest":
-        session_id = latest_session_id(repo_root)
+        session_id = latest_session_id(sessions_dir)
         if session_id is None:
             print("No saved sessions.")
             return
 
-    session_dir = session_dir_for(repo_root, session_id)
+    session_dir = session_dir_for(sessions_dir, session_id)
     metadata = session_dir.joinpath("metadata.json").read_text(encoding="utf-8")
 
     metadata_dict = json.loads(metadata)
-    entries = load_session_entries(repo_root, session_id)
+    entries = load_session_entries(sessions_dir, session_id)
 
     print(f"🦑 Session: {metadata_dict.get('session_id', session_id)}")
     print(f"status: {metadata_dict.get('status', '')}")

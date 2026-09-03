@@ -19,6 +19,7 @@ from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.events import EventCallback
 from core.app_paths import (
     code_squid_home,
+    session_indexes_path,
     workspace_sessions_dir,
     workspace_undo_dir,
 )
@@ -29,7 +30,7 @@ from squid_core.session import Session
 from squid_core.skills import Skill, discover_skills
 from squid_core.tools.user_tools import build_user_tool_registry
 from squid_core.storage import SessionStore, UndoStore
-from storage.session_index import register_session_index
+from squid_core.storage.session_index import register_session_root
 from squid_core.tools.builtins import TOOLS
 from ui.terminal import StartupInfo, TerminalDisplay
 from squid_core.agent import Agent
@@ -192,7 +193,7 @@ def build_coding_task_run(
         try:
             # Cross-workspace discovery is supplementary application policy;
             # failure must not invalidate the newly created local session.
-            register_session_index(repo_root)
+            register_session_root(session_indexes_path(), sessions_dir)
         except Exception:
             pass
     if undo_store is None and tool_executor is None:
