@@ -8,7 +8,7 @@ from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
 
 from squid_core.safety import USER_DENIED_TOOL_ACTION
 from squid_core.agent_loop import RunResult
-from ui.terminal import (
+from code_squid.console.ui.display import (
     APPROVAL_PANEL_WIDTH,
     BOLD_STYLE,
     CODE_SQUID_BANNER,
@@ -88,7 +88,7 @@ def test_approve_action_accepts_empty_input(
     monkeypatch: pytest.MonkeyPatch,
     response: str,
 ) -> None:
-    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: response)
+    monkeypatch.setattr("code_squid.console.ui.display.prompt_multiline_input", lambda prompt: response)
 
     decision = TerminalDisplay().approve_action({"tool": "read_file"})
 
@@ -101,7 +101,7 @@ def test_approve_action_rejects_non_empty_input_as_instruction(
     monkeypatch: pytest.MonkeyPatch,
     response: str,
 ) -> None:
-    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: response)
+    monkeypatch.setattr("code_squid.console.ui.display.prompt_multiline_input", lambda prompt: response)
 
     decision = TerminalDisplay().approve_action({"tool": "read_file"})
 
@@ -113,7 +113,7 @@ def test_approve_action_rejects_multiline_input_with_full_instruction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     response = "Use a narrower change.\nKeep the tests focused.\nDo not run npm."
-    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: response)
+    monkeypatch.setattr("code_squid.console.ui.display.prompt_multiline_input", lambda prompt: response)
 
     decision = TerminalDisplay().approve_action({"tool": "read_file"})
 
@@ -130,7 +130,7 @@ def test_multiline_rejection_summary_is_compacted_without_losing_instruction(
         "This second line should reach the model.\n"
         "This third line can stay out of the visible summary."
     )
-    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: response)
+    monkeypatch.setattr("code_squid.console.ui.display.prompt_multiline_input", lambda prompt: response)
 
     decision = TerminalDisplay().approve_action({"tool": "read_file"})
 
@@ -151,7 +151,7 @@ def test_approve_action_uses_multiline_prompt(
         prompts.append(prompt)
         return ""
 
-    monkeypatch.setattr("ui.terminal.prompt_multiline_input", fake_input)
+    monkeypatch.setattr("code_squid.console.ui.display.prompt_multiline_input", fake_input)
 
     assert (
         TerminalDisplay().approve_action(
@@ -203,7 +203,7 @@ def test_approve_action_uses_boxed_panel_for_common_tools(
     label: str,
     value: str,
 ) -> None:
-    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: "")
+    monkeypatch.setattr("code_squid.console.ui.display.prompt_multiline_input", lambda prompt: "")
 
     TerminalDisplay().approve_action(action)
 
@@ -244,7 +244,7 @@ def test_approval_panel_truncates_long_command_or_path(
         prompts.append(prompt)
         return ""
 
-    monkeypatch.setattr("ui.terminal.prompt_multiline_input", fake_input)
+    monkeypatch.setattr("code_squid.console.ui.display.prompt_multiline_input", fake_input)
 
     TerminalDisplay().approve_action(action)
 
@@ -273,7 +273,7 @@ def test_approval_panel_colors_only_structural_borders_in_tty(
         return ""
 
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr("ui.terminal.prompt_multiline_input", fake_input)
+    monkeypatch.setattr("code_squid.console.ui.display.prompt_multiline_input", fake_input)
 
     TerminalDisplay(show_transcript=True).approve_action(
         {"tool": "write_file", "args": {"path": "kanban_toy2/index.html"}}
@@ -300,7 +300,7 @@ def test_approve_action_compacts_approved_panel_in_interactive_tty(
     action = {"tool": "run_command", "args": {"command": "python -m pytest -q"}}
     display = TerminalDisplay()
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr("ui.terminal.prompt_multiline_input", fake_input)
+    monkeypatch.setattr("code_squid.console.ui.display.prompt_multiline_input", fake_input)
 
     assert display.approve_action(action).approved is True
 
@@ -336,7 +336,7 @@ def test_approve_action_compacts_denied_panel_with_short_path_in_interactive_tty
         },
     }
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr("ui.terminal.prompt_multiline_input", fake_input)
+    monkeypatch.setattr("code_squid.console.ui.display.prompt_multiline_input", fake_input)
 
     decision = TerminalDisplay().approve_action(action)
 
@@ -364,7 +364,7 @@ def test_compact_denial_suppresses_duplicate_denied_tool_result(
     action = {"tool": "write_file", "args": {"path": "kanban_toy2/index.html"}}
     display = TerminalDisplay()
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr("ui.terminal.prompt_multiline_input", fake_input)
+    monkeypatch.setattr("code_squid.console.ui.display.prompt_multiline_input", fake_input)
 
     assert display.approve_action(action).approved is False
     capsys.readouterr()
@@ -549,7 +549,7 @@ def test_default_spinner_uses_soft_cyan_style(monkeypatch: pytest.MonkeyPatch) -
             super().__init__()
             spinner_kwargs.append(kwargs)
 
-    monkeypatch.setattr("ui.terminal.TerminalSpinner", CapturingSpinner)
+    monkeypatch.setattr("code_squid.console.ui.display.TerminalSpinner", CapturingSpinner)
 
     TerminalDisplay()
 
@@ -710,7 +710,7 @@ def test_approve_action_still_prints_requested_action(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: "")
+    monkeypatch.setattr("code_squid.console.ui.display.prompt_multiline_input", lambda prompt: "")
 
     TerminalDisplay().approve_action(
         {"tool": "write_file", "args": {"path": "kanban_toy2/app.js"}}
@@ -790,7 +790,7 @@ def test_search_and_list_commands_use_compact_success_labels(
     command: str,
     success_label: str,
 ) -> None:
-    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: "")
+    monkeypatch.setattr("code_squid.console.ui.display.prompt_multiline_input", lambda prompt: "")
     action = {"tool": "run_command", "args": {"command": command}}
 
     TerminalDisplay().approve_action(action)
@@ -1150,7 +1150,7 @@ def test_assistant_message_wraps_to_terminal_width(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
-        "ui.terminal.shutil.get_terminal_size",
+        "code_squid.console.ui.display.shutil.get_terminal_size",
         lambda fallback: os.terminal_size((44, 24)),
     )
 
@@ -1189,7 +1189,7 @@ def test_approval_prompt_stops_spinner_before_asking(
 ) -> None:
     spinner = FakeSpinner()
     display = TerminalDisplay(_spinner=spinner)
-    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: "stop")
+    monkeypatch.setattr("code_squid.console.ui.display.prompt_multiline_input", lambda prompt: "stop")
 
     display.thinking()
     assert display.approve_action({"tool": "read_file"}).approved is False
@@ -1211,7 +1211,7 @@ def test_approval_prompt_shows_short_outside_workspace_reason(
         "(workspace root: /tmp/code-squid-workspace/projects). "
         "Approval is required unless approval_mode=never."
     )
-    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: "")
+    monkeypatch.setattr("code_squid.console.ui.display.prompt_multiline_input", lambda prompt: "")
 
     TerminalDisplay(
         startup_info=StartupInfo(
@@ -1245,7 +1245,7 @@ def test_approval_prompt_preserves_ctrl_c_interrupt(
     def interrupt(prompt: str) -> str:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("ui.terminal.prompt_multiline_input", interrupt)
+    monkeypatch.setattr("code_squid.console.ui.display.prompt_multiline_input", interrupt)
 
     with pytest.raises(KeyboardInterrupt):
         TerminalDisplay().approve_action({"tool": "read_file"})
@@ -1255,7 +1255,7 @@ def test_approval_prompt_follows_assistant_with_single_blank(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr("ui.terminal.prompt_multiline_input", lambda prompt: "")
+    monkeypatch.setattr("code_squid.console.ui.display.prompt_multiline_input", lambda prompt: "")
     display = TerminalDisplay()
 
     display.assistant_message("I'll inspect the file.")
@@ -1591,7 +1591,7 @@ def test_final_summary_long_unordered_bullet_does_not_orphan_marker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "ui.terminal.shutil.get_terminal_size",
+        "code_squid.console.ui.display.shutil.get_terminal_size",
         lambda fallback: os.terminal_size((20, 24)),
     )
 
@@ -1605,7 +1605,7 @@ def test_final_summary_unordered_bullet_continuation_aligns_under_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "ui.terminal.shutil.get_terminal_size",
+        "code_squid.console.ui.display.shutil.get_terminal_size",
         lambda fallback: os.terminal_size((18, 24)),
     )
 
@@ -1654,7 +1654,7 @@ def test_final_summary_wrapped_bullet_continuation_is_not_spaced(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "ui.terminal.shutil.get_terminal_size",
+        "code_squid.console.ui.display.shutil.get_terminal_size",
         lambda fallback: os.terminal_size((38, 24)),
     )
 
@@ -1737,7 +1737,7 @@ def test_final_message_wraps_body_lines(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
-        "ui.terminal.shutil.get_terminal_size",
+        "code_squid.console.ui.display.shutil.get_terminal_size",
         lambda fallback: os.terminal_size((44, 24)),
     )
 
@@ -1766,7 +1766,7 @@ def test_final_message_wraps_unordered_bullet_continuation_under_text(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
-        "ui.terminal.shutil.get_terminal_size",
+        "code_squid.console.ui.display.shutil.get_terminal_size",
         lambda fallback: os.terminal_size((38, 24)),
     )
 

@@ -105,7 +105,7 @@ def test_old_subsystem_import_paths_are_absent() -> None:
     )
 
     violations = []
-    for root_name in ("squid_core", "core", "cli", "providers", "storage", "ui", "tests"):
+    for root_name in ("squid_core", "code_squid", "providers", "storage", "tests"):
         for source_path in (repo_root / root_name).rglob("*.py"):
             if source_path == Path(__file__).resolve():
                 continue
@@ -119,11 +119,7 @@ def test_old_subsystem_import_paths_are_absent() -> None:
 def test_squid_core_has_no_code_squid_application_imports() -> None:
     package_root = Path(__file__).resolve().parents[1] / "squid_core"
     forbidden = (
-        re.compile(r"^\s*(?:from|import)\s+config(?:\.|\s|$)", re.MULTILINE),
-        re.compile(r"^\s*(?:from|import)\s+agent\.prompts\b", re.MULTILINE),
-        re.compile(r"^\s*(?:from|import)\s+ui\.terminal\b", re.MULTILINE),
-        re.compile(r"^\s*(?:from|import)\s+core\.(?:app_paths|runner)\b", re.MULTILINE),
-        re.compile(r"^\s*(?:from|import)\s+cli(?:\.|\s|$)", re.MULTILINE),
+        re.compile(r"^\s*(?:from|import)\s+code_squid(?:\.|\s|$)", re.MULTILINE),
     )
 
     violations = []
@@ -137,7 +133,7 @@ def test_squid_core_has_no_code_squid_application_imports() -> None:
 
 def test_squid_core_storage_has_no_application_path_or_environment_policy() -> None:
     storage_root = Path(__file__).resolve().parents[1] / "squid_core" / "storage"
-    forbidden = (".code-squid", "CODE_SQUID_", "core.app_paths", "cli.", "ui.")
+    forbidden = (".code-squid", "CODE_SQUID_", "code_squid.app_paths", "cli.", "ui.")
 
     violations = []
     for source_path in storage_root.rglob("*.py"):
@@ -148,10 +144,38 @@ def test_squid_core_storage_has_no_application_path_or_environment_policy() -> N
     assert violations == []
 
 
-def test_transitional_core_contains_only_application_owned_modules() -> None:
-    core_root = Path(__file__).resolve().parents[1] / "core"
+def test_old_application_packages_are_removed() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
 
-    assert sorted(path.name for path in core_root.glob("*.py")) == [
+    for package_name in ("agent", "cli", "config", "core", "ui"):
+        assert not (repo_root / package_name).exists()
+
+
+def test_code_squid_application_package_has_expected_layout() -> None:
+    package_root = Path(__file__).resolve().parents[1] / "code_squid"
+    relative_modules = sorted(
+        path.relative_to(package_root).as_posix()
+        for path in package_root.rglob("*.py")
+    )
+
+    assert relative_modules == [
+        "__init__.py",
+        "agent/__init__.py",
+        "agent/coding.py",
+        "agent/prompts.py",
+        "agent_setup.py",
         "app_paths.py",
-        "runner.py",
+        "console/__init__.py",
+        "console/cli/__init__.py",
+        "console/cli/cli_commands.py",
+        "console/cli/cli_options.py",
+        "console/cli/prompt_loop.py",
+        "console/cli/session_runner.py",
+        "console/cli/skill_commands.py",
+        "console/ui/__init__.py",
+        "console/ui/display.py",
+        "console/ui/prompt_input.py",
+        "console/ui/sessions.py",
+        "console/ui/spinner.py",
+        "settings.py",
     ]

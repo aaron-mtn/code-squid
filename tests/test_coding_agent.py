@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from agent.coding import CodingAgent
+from code_squid.agent.coding import CodingAgent
 from squid_core.platform_context import PlatformContext
-from agent.prompts import CODE_SQUID_PROMPT_DEFAULTS, SYSTEM_PROMPT, TOOL_USAGE_GUIDANCE, follow_up_prompt, system_prompt, task_prompt
+from code_squid.agent.prompts import CODE_SQUID_PROMPT_DEFAULTS, SYSTEM_PROMPT, TOOL_USAGE_GUIDANCE, follow_up_prompt, system_prompt, task_prompt
 from squid_core.session import Session
 from squid_core.skills import PromptSectionOverride, Skill, parse_skill_file
 

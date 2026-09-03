@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from core.app_paths import session_indexes_path
+from code_squid.app_paths import session_indexes_path
 from squid_core.agent_loop import RunResult
-from core.runner import build_coding_task_run, run_coding_task
+from code_squid.agent_setup import build_coding_task_run, run_coding_task
 from squid_core.platform_context import PlatformContext
 
 
@@ -83,7 +83,7 @@ def test_run_coding_task_returns_loop_run_result(monkeypatch, tmp_path: Path) ->
 def test_run_construction_supplies_detected_platform_and_resolved_workspace(
     monkeypatch, tmp_path: Path
 ) -> None:
-    from core.runner import build_coding_task_run
+    from code_squid.agent_setup import build_coding_task_run
 
     context = PlatformContext("Linux", "bash", "/bin/bash", "/", False)
     captured_agent = {}
@@ -97,8 +97,8 @@ def test_run_construction_supplies_detected_platform_and_resolved_workspace(
         def __init__(self, **kwargs) -> None:
             captured_executor.update(kwargs)
 
-    monkeypatch.setattr("core.runner.detect_platform_context", lambda: context)
-    monkeypatch.setattr("core.runner.Agent", FakeCodingAgent)
+    monkeypatch.setattr("code_squid.agent_setup.detect_platform_context", lambda: context)
+    monkeypatch.setattr("code_squid.agent_setup.Agent", FakeCodingAgent)
     monkeypatch.setattr("squid_core.spawner.ToolExecutor", FakeToolExecutor)
     monkeypatch.setattr("squid_core.spawner.build_provider", lambda *args, **kwargs: object())
 
@@ -135,8 +135,8 @@ def test_run_construction_uses_default_storage_factories(monkeypatch, tmp_path: 
             workspace_root=workspace_root,
         )
 
-    monkeypatch.setattr("core.runner.SessionStore.create", create_session)
-    monkeypatch.setattr("core.runner.UndoStore.create", create_undo)
+    monkeypatch.setattr("code_squid.agent_setup.SessionStore.create", create_session)
+    monkeypatch.setattr("code_squid.agent_setup.UndoStore.create", create_undo)
     monkeypatch.setattr("squid_core.spawner.build_provider", lambda *args, **kwargs: object())
 
     run = build_coding_task_run(tmp_path, "Store defaults", display=FakeDisplay())
@@ -163,7 +163,7 @@ def test_run_construction_explicitly_registers_new_session(
 ) -> None:
     registrations = []
     monkeypatch.setattr(
-        "core.runner.register_session_root",
+        "code_squid.agent_setup.register_session_root",
         lambda index_path, sessions_dir: registrations.append(
             (index_path, sessions_dir)
         ),
@@ -244,7 +244,7 @@ def test_storage_factories_can_be_overridden_independently(monkeypatch, tmp_path
         default_undo_calls.append((undo_dir, session_id, workspace_root))
         return original_undo_create(tmp_path / "default-undo", session_id)
 
-    monkeypatch.setattr("core.runner.UndoStore.create", create_default_undo)
+    monkeypatch.setattr("code_squid.agent_setup.UndoStore.create", create_default_undo)
     monkeypatch.setattr("squid_core.spawner.build_provider", lambda *args, **kwargs: object())
 
     session_run = build_coding_task_run(
@@ -286,7 +286,7 @@ def test_run_coding_task_forwards_storage_factories(monkeypatch, tmp_path: Path)
 
     session_factory = lambda repo_root, task: None
     undo_factory = lambda repo_root, session_id: None
-    monkeypatch.setattr("core.runner.build_coding_task_run", fake_build)
+    monkeypatch.setattr("code_squid.agent_setup.build_coding_task_run", fake_build)
 
     run_coding_task(
         tmp_path,

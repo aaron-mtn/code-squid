@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from agent.coding import CodingAgent
-from core.app_paths import CODE_SQUID_HOME_ENV
-from core.runner import build_coding_task_run, resolve_skill_tools
+from code_squid.agent.coding import CodingAgent
+from code_squid.app_paths import CODE_SQUID_HOME_ENV
+from code_squid.agent_setup import build_coding_task_run, resolve_skill_tools
 from squid_core.skills import Skill
 from squid_core.tools.builtins import TOOLS
 
@@ -37,7 +37,7 @@ def test_selecting_skill_filters_tool_definitions(monkeypatch, tmp_path: Path) -
         path=tmp_path / "SKILL.md",
     )
 
-    monkeypatch.setattr("core.runner.discover_skills", lambda **_kwargs: {"read-only": skill})
+    monkeypatch.setattr("code_squid.agent_setup.discover_skills", lambda **_kwargs: {"read-only": skill})
 
     selected_skill, tools = resolve_skill_tools("read-only")
     agent = CodingAgent("review this", skill=selected_skill, tools=tools)
@@ -58,7 +58,7 @@ def test_selecting_user_skill_uses_same_resolution_path(monkeypatch, tmp_path: P
         editable=True,
     )
 
-    monkeypatch.setattr("core.runner.discover_skills", lambda **_kwargs: {"user-review": skill})
+    monkeypatch.setattr("code_squid.agent_setup.discover_skills", lambda **_kwargs: {"user-review": skill})
 
     selected_skill, tools = resolve_skill_tools("user-review")
 
@@ -78,7 +78,7 @@ def test_skill_with_explicit_empty_tools_resolves_to_no_tools(monkeypatch, tmp_p
         path=tmp_path / "SKILL.md",
     )
 
-    monkeypatch.setattr("core.runner.discover_skills", lambda **_kwargs: {"chat-only": skill})
+    monkeypatch.setattr("code_squid.agent_setup.discover_skills", lambda **_kwargs: {"chat-only": skill})
 
     selected_skill, tools = resolve_skill_tools("chat-only")
     agent = CodingAgent("plan this", skill=selected_skill, tools=tools)
@@ -98,7 +98,7 @@ def test_skill_with_omitted_tools_keeps_full_tool_default(monkeypatch, tmp_path:
         path=tmp_path / "SKILL.md",
     )
 
-    monkeypatch.setattr("core.runner.discover_skills", lambda **_kwargs: {"legacy": skill})
+    monkeypatch.setattr("code_squid.agent_setup.discover_skills", lambda **_kwargs: {"legacy": skill})
 
     selected_skill, tools = resolve_skill_tools("legacy")
 
@@ -135,7 +135,7 @@ def test_skill_listing_user_tool_activates_it(monkeypatch, tmp_path: Path) -> No
         path=tmp_path / "SKILL.md",
     )
 
-    monkeypatch.setattr("core.runner.discover_skills", lambda **_kwargs: {"custom": skill})
+    monkeypatch.setattr("code_squid.agent_setup.discover_skills", lambda **_kwargs: {"custom": skill})
 
     selected_skill, tools = resolve_skill_tools("custom")
     agent = CodingAgent("use it", skill=selected_skill, tools=tools)
@@ -166,7 +166,7 @@ def test_builtin_tool_name_wins_over_user_tool_collision(
         path=tmp_path / "SKILL.md",
     )
 
-    monkeypatch.setattr("core.runner.discover_skills", lambda **_kwargs: {"read": skill})
+    monkeypatch.setattr("code_squid.agent_setup.discover_skills", lambda **_kwargs: {"read": skill})
 
     _selected_skill, tools = resolve_skill_tools("read")
 
@@ -183,7 +183,7 @@ def test_unknown_tool_in_allowed_tools_fails_clearly(monkeypatch, tmp_path: Path
         path=tmp_path / "SKILL.md",
     )
 
-    monkeypatch.setattr("core.runner.discover_skills", lambda **_kwargs: {"bad": skill})
+    monkeypatch.setattr("code_squid.agent_setup.discover_skills", lambda **_kwargs: {"bad": skill})
 
     try:
         resolve_skill_tools("bad")
@@ -212,7 +212,7 @@ def test_build_coding_task_run_passes_filtered_tools_to_executor(
             captured["tool_executor"] = kwargs["tool_executor"]
             self.display = kwargs["display"]
 
-    monkeypatch.setattr("core.runner.discover_skills", lambda **_kwargs: {"review": skill})
+    monkeypatch.setattr("code_squid.agent_setup.discover_skills", lambda **_kwargs: {"review": skill})
     monkeypatch.setattr("squid_core.spawner.build_provider", lambda *args, **kwargs: object())
     monkeypatch.setattr("squid_core.spawner.AgentLoop", FakeAgentLoop)
 
@@ -251,7 +251,7 @@ def test_build_coding_task_run_uses_explicit_resolved_components(
     def fail_resolution(*args, **kwargs):
         raise AssertionError("explicit components must bypass skill discovery")
 
-    monkeypatch.setattr("core.runner.resolve_skill_tools", fail_resolution)
+    monkeypatch.setattr("code_squid.agent_setup.resolve_skill_tools", fail_resolution)
     monkeypatch.setattr("squid_core.spawner.build_provider", lambda *args, **kwargs: object())
     monkeypatch.setattr("squid_core.spawner.AgentLoop", FakeAgentLoop)
 

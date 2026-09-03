@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from config.settings import (
+from code_squid.settings import (
     CompactionSettings,
     DisplaySettings,
     ModelSettings,
@@ -8,9 +8,9 @@ from config.settings import (
     Settings,
 )
 from squid_core.agent_loop import RunResult
-from core.app_paths import CODE_SQUID_HOME_ENV
+from code_squid.app_paths import CODE_SQUID_HOME_ENV
 from squid_core.hooks import BeforeRunContext, PromptContextBlock, RunHookDecision
-from core.runner import build_coding_task_run
+from code_squid.agent_setup import build_coding_task_run
 
 
 class FakeDisplay:

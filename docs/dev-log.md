@@ -1,3 +1,21 @@
+- 2026-09-02: Completed the final Code Squid application package cleanup by
+  moving the product-owned Agent/prompt policy, settings, application paths,
+  run setup, CLI workflow, and terminal UI into `code_squid/`. Renamed the CLI
+  and UI modules by their existing responsibilities, retained `CodingAgent` as
+  the intentional future specialization point, kept `main.py` as the thin
+  executable entry point, and removed the old root `agent/`, `cli/`, `config/`,
+  `core/`, and `ui/` packages without compatibility shims. Runtime behavior and
+  public function names are unchanged; `squid_core/` remains reusable and has
+  no import dependency on `code_squid/`. Updated architecture, generated file
+  tree, production/test imports, monkeypatch targets, and package-boundary
+  coverage. Focused application settings/paths/setup/CLI/session/Skill/UI suite:
+  271 passed. Full suite: 724 passed (the 723-test baseline plus one new final
+  layout boundary test). Production compileall and a fresh 69-module import
+  walk passed; stale root-package imports are absent, all five old package
+  directories are gone, the Core dependency check passed, and both diff checks
+  passed. No live model inference was run. Finalize behavior, CodingAgent
+  specialization, display decomposition, resource packaging, providers, and
+  dynamic loader branding remain intentionally deferred.
 - 2026-09-02: Removed the remaining top-level `storage/` package by moving
   traceback-only diagnostic logging and generic cross-location session
   registration/discovery into `squid_core/storage/`. The Core APIs now receive

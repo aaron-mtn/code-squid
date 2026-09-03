@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
 
-from cli.args import _resolve_workspace_root
-from cli.commands import _mode, run_cli
-from cli.interactive import (
+from code_squid.console.cli.cli_options import _resolve_workspace_root
+from code_squid.console.cli.cli_commands import _mode, run_cli
+from code_squid.console.cli.prompt_loop import (
     HELP_TEXT,
     INPUT_IDENTITY_LINE,
     PROMPT_PREFIX,
@@ -13,14 +13,14 @@ from cli.interactive import (
     _run_interactive,
     _run_new_session,
 )
-from cli.run import _run_follow_up_task, _run_loop
-from cli.skills import _format_skill_status
-from config.settings import load_settings
+from code_squid.console.cli.session_runner import _run_follow_up_task, _run_loop
+from code_squid.console.cli.skill_commands import _format_skill_status
+from code_squid.settings import load_settings
 from squid_core.agent_loop import RunResult
 from squid_core.model_adapter import ModelRequestError
 from main import main
 from squid_core.storage import SessionStore
-from ui.terminal import (
+from code_squid.console.ui.display import (
     CODE_SQUID_BANNER,
     RUN_STARTED_DIVIDER,
     SOFT_CYAN_HEX,
@@ -140,7 +140,7 @@ def test_main_passes_selected_cwd_to_existing_commands(
         calls.append((repo_root, args))
         return 0
 
-    monkeypatch.setattr("cli.commands._mode", fake_mode)
+    monkeypatch.setattr("code_squid.console.cli.cli_commands._mode", fake_mode)
 
     assert run_cli(["--cwd", str(tmp_path), "mode"]) == 0
     assert calls == [(tmp_path.resolve(), [])]
@@ -156,7 +156,7 @@ def test_main_passes_selected_skill_to_interactive(
         calls.append((repo_root, skill_name))
         return 0
 
-    monkeypatch.setattr("cli.commands._run_interactive", fake_interactive)
+    monkeypatch.setattr("code_squid.console.cli.cli_commands._run_interactive", fake_interactive)
 
     assert run_cli(["--cwd", str(tmp_path), "--skill", "architecture-review"]) == 0
     assert calls == [(tmp_path.resolve(), "architecture-review")]
@@ -424,7 +424,7 @@ def test_prompt_task_uses_agent_prompt_without_toolbar(monkeypatch) -> None:
         prompt_calls.append((prompt, preface))
         return "Do the thing"
 
-    monkeypatch.setattr("cli.interactive.prompt_multiline_input", fake_prompt)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop.prompt_multiline_input", fake_prompt)
 
     assert _prompt_task("Task") == "Do the thing"
 
@@ -444,9 +444,9 @@ def test_new_session_prints_banner_before_task_prompt(monkeypatch, tmp_path, cap
         displays.append(display)
         return display
 
-    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
-    monkeypatch.setattr("cli.interactive._prompt_task", _fake_prompt_task("Do the thing"))
-    monkeypatch.setattr("cli.run._run_loop", lambda *args: 0)
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", fake_display)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_task("Do the thing"))
+    monkeypatch.setattr("code_squid.console.cli.session_runner._run_loop", lambda *args: 0)
 
     assert _run_new_session(tmp_path) == 0
 
@@ -468,8 +468,8 @@ def test_new_session_empty_task_exits_without_run(monkeypatch, tmp_path, capsys)
         displays.append(display)
         return display
 
-    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
-    monkeypatch.setattr("cli.interactive._prompt_task", _fake_prompt_task("  \n\t"))
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", fake_display)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_task("  \n\t"))
 
     assert _run_new_session(tmp_path) == 0
 
@@ -488,8 +488,8 @@ def test_new_session_help_exits_without_session_or_run(monkeypatch, tmp_path, ca
         displays.append(display)
         return display
 
-    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
-    monkeypatch.setattr("cli.interactive._prompt_task", _fake_prompt_task(" /help \n"))
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", fake_display)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_task(" /help \n"))
 
     assert _run_new_session(tmp_path) == 0
 
@@ -508,8 +508,8 @@ def test_new_session_cancelled_task_exits_without_run(monkeypatch, tmp_path, cap
         displays.append(display)
         return display
 
-    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
-    monkeypatch.setattr("cli.interactive._prompt_task", _cancel_prompt_task)
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", fake_display)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _cancel_prompt_task)
 
     assert _run_new_session(tmp_path) == 0
 
@@ -537,14 +537,14 @@ def test_resume_session_prints_banner_before_follow_up_prompt(
         assert kwargs["display"] is displays[0]
         return NoopLoop()
 
-    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", fake_display)
     monkeypatch.setattr(
-        "cli.run._session_dir_for_resume",
+        "code_squid.console.cli.session_runner._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
-    monkeypatch.setattr("cli.interactive._prompt_task", _fake_prompt_task("Continue the thing"))
-    monkeypatch.setattr("cli.run.build_agent_loop", fake_build_agent_loop)
-    monkeypatch.setattr("cli.run._run_loop", lambda *args: 0)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_task("Continue the thing"))
+    monkeypatch.setattr("code_squid.console.cli.session_runner.build_agent_loop", fake_build_agent_loop)
+    monkeypatch.setattr("code_squid.console.cli.session_runner._run_loop", lambda *args: 0)
 
     assert _resume_session(tmp_path, session_store.session_id) == 0
 
@@ -570,11 +570,11 @@ def test_follow_up_records_current_skill_run_context(
     )
 
     monkeypatch.setattr(
-        "cli.run._session_dir_for_resume",
+        "code_squid.console.cli.session_runner._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
-    monkeypatch.setattr("cli.run.build_agent_loop", lambda **kwargs: NoopLoop())
-    monkeypatch.setattr("cli.run._run_loop", lambda *args: 0)
+    monkeypatch.setattr("code_squid.console.cli.session_runner.build_agent_loop", lambda **kwargs: NoopLoop())
+    monkeypatch.setattr("code_squid.console.cli.session_runner._run_loop", lambda *args: 0)
 
     status, session_id = _run_follow_up_task(
         tmp_path,
@@ -614,12 +614,12 @@ def test_resume_session_empty_task_exits_without_run(monkeypatch, tmp_path, caps
         displays.append(display)
         return display
 
-    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", fake_display)
     monkeypatch.setattr(
-        "cli.run._session_dir_for_resume",
+        "code_squid.console.cli.session_runner._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
-    monkeypatch.setattr("cli.interactive._prompt_task", _fake_prompt_task(""))
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_task(""))
 
     assert _resume_session(tmp_path, session_store.session_id) == 0
 
@@ -639,12 +639,12 @@ def test_resume_session_help_exits_without_follow_up_or_run(monkeypatch, tmp_pat
         displays.append(display)
         return display
 
-    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", fake_display)
     monkeypatch.setattr(
-        "cli.run._session_dir_for_resume",
+        "code_squid.console.cli.session_runner._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
-    monkeypatch.setattr("cli.interactive._prompt_task", _fake_prompt_task("/help"))
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_task("/help"))
 
     assert _resume_session(tmp_path, session_store.session_id) == 0
 
@@ -665,12 +665,12 @@ def test_resume_session_cancelled_task_exits_without_run(monkeypatch, tmp_path, 
         displays.append(display)
         return display
 
-    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", fake_display)
     monkeypatch.setattr(
-        "cli.run._session_dir_for_resume",
+        "code_squid.console.cli.session_runner._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
-    monkeypatch.setattr("cli.interactive._prompt_task", _cancel_prompt_task)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _cancel_prompt_task)
 
     assert _resume_session(tmp_path, session_store.session_id) == 0
 
@@ -693,9 +693,9 @@ def test_new_session_passes_trace_and_friendly_mode_to_terminal_display(
         return BannerDisplay(**kwargs)
 
     monkeypatch.setenv("CODE_SQUID_TRACE", "1")
-    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
-    monkeypatch.setattr("cli.interactive._prompt_task", _fake_prompt_task("Do the thing"))
-    monkeypatch.setattr("cli.run._run_loop", lambda *args: 0)
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", fake_display)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_task("Do the thing"))
+    monkeypatch.setattr("code_squid.console.cli.session_runner._run_loop", lambda *args: 0)
 
     assert _run_new_session(tmp_path) == 0
 
@@ -727,10 +727,10 @@ def test_new_session_trace_does_not_push_presentation_into_provider(
             provider_kwargs.append(kwargs)
 
     monkeypatch.setenv("CODE_SQUID_TRACE", "1")
-    monkeypatch.setattr("cli.run.TerminalDisplay", CapturingDisplay)
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", CapturingDisplay)
     monkeypatch.setattr("squid_core.providers.OpenAICompatibleProvider", CapturingProvider)
-    monkeypatch.setattr("cli.interactive._prompt_task", _fake_prompt_task("Do the thing"))
-    monkeypatch.setattr("cli.run._run_loop", lambda *args: 0)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_task("Do the thing"))
+    monkeypatch.setattr("code_squid.console.cli.session_runner._run_loop", lambda *args: 0)
 
     assert _run_new_session(tmp_path) == 0
 
@@ -741,10 +741,10 @@ def test_interactive_exit_command_exits_without_run(monkeypatch, tmp_path) -> No
     def fail_run(*args):
         raise AssertionError("interactive exit should not start a run")
 
-    monkeypatch.setattr("cli.run.TerminalDisplay", BannerDisplay)
-    monkeypatch.setattr("cli.interactive._prompt_task", _fake_prompt_tasks(["/exit"]))
-    monkeypatch.setattr("cli.interactive._run_new_session_task", fail_run)
-    monkeypatch.setattr("cli.interactive._run_follow_up_task", fail_run)
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_tasks(["/exit"]))
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_new_session_task", fail_run)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_follow_up_task", fail_run)
 
     assert _run_interactive(tmp_path) == 0
 
@@ -761,13 +761,13 @@ def test_interactive_new_command_clears_active_session(monkeypatch, tmp_path) ->
         follow_up_tasks.append((session_id, task))
         return 0, session_id
 
-    monkeypatch.setattr("cli.run.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", BannerDisplay)
     monkeypatch.setattr(
-        "cli.interactive._prompt_task",
+        "code_squid.console.cli.prompt_loop._prompt_task",
         _fake_prompt_tasks(["first task", "/new", "second task", "/exit"]),
     )
-    monkeypatch.setattr("cli.interactive._run_new_session_task", fake_new)
-    monkeypatch.setattr("cli.interactive._run_follow_up_task", fake_follow_up)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_new_session_task", fake_new)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_follow_up_task", fake_follow_up)
 
     assert _run_interactive(tmp_path) == 0
 
@@ -787,13 +787,13 @@ def test_interactive_second_input_uses_follow_up_path(monkeypatch, tmp_path) -> 
         follow_up_tasks.append((session_id, task))
         return 0, session_id
 
-    monkeypatch.setattr("cli.run.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", BannerDisplay)
     monkeypatch.setattr(
-        "cli.interactive._prompt_task",
+        "code_squid.console.cli.prompt_loop._prompt_task",
         _fake_prompt_tasks(["first task", "follow up", "/exit"]),
     )
-    monkeypatch.setattr("cli.interactive._run_new_session_task", fake_new)
-    monkeypatch.setattr("cli.interactive._run_follow_up_task", fake_follow_up)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_new_session_task", fake_new)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_follow_up_task", fake_follow_up)
 
     assert _run_interactive(tmp_path) == 0
 
@@ -809,10 +809,10 @@ def test_interactive_skill_command_lists_current_and_available_skills(
     def fail_run(*args):
         raise AssertionError("interactive /skill should not start a run")
 
-    monkeypatch.setattr("cli.run.TerminalDisplay", BannerDisplay)
-    monkeypatch.setattr("cli.interactive._prompt_task", _fake_prompt_tasks(["/skill", "/exit"]))
-    monkeypatch.setattr("cli.interactive._run_new_session_task", fail_run)
-    monkeypatch.setattr("cli.interactive._run_follow_up_task", fail_run)
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_tasks(["/skill", "/exit"]))
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_new_session_task", fail_run)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_follow_up_task", fail_run)
 
     assert _run_interactive(tmp_path) == 0
 
@@ -838,15 +838,15 @@ def test_interactive_skill_command_sets_active_skill_for_new_and_follow_up(
         follow_up_runs.append((session_id, task, skill_name))
         return 0, session_id
 
-    monkeypatch.setattr("cli.run.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", BannerDisplay)
     monkeypatch.setattr(
-        "cli.interactive._prompt_task",
+        "code_squid.console.cli.prompt_loop._prompt_task",
         _fake_prompt_tasks(
             ["/skill architecture-review", "first task", "follow up", "/exit"]
         ),
     )
-    monkeypatch.setattr("cli.interactive._run_new_session_task", fake_new)
-    monkeypatch.setattr("cli.interactive._run_follow_up_task", fake_follow_up)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_new_session_task", fake_new)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_follow_up_task", fake_follow_up)
 
     assert _run_interactive(tmp_path) == 0
 
@@ -869,13 +869,13 @@ def test_interactive_skill_none_clears_active_skill(monkeypatch, tmp_path, capsy
         follow_up_runs.append((session_id, task, skill_name))
         return 0, session_id
 
-    monkeypatch.setattr("cli.run.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", BannerDisplay)
     monkeypatch.setattr(
-        "cli.interactive._prompt_task",
+        "code_squid.console.cli.prompt_loop._prompt_task",
         _fake_prompt_tasks(["first task", "/skill none", "follow up", "/exit"]),
     )
-    monkeypatch.setattr("cli.interactive._run_new_session_task", fake_new)
-    monkeypatch.setattr("cli.interactive._run_follow_up_task", fake_follow_up)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_new_session_task", fake_new)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_follow_up_task", fake_follow_up)
 
     assert _run_interactive(tmp_path, "architecture-review") == 0
 
@@ -895,12 +895,12 @@ def test_interactive_unknown_skill_does_not_change_active_skill(
         new_runs.append((task, skill_name))
         return 0, "active-session"
 
-    monkeypatch.setattr("cli.run.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", BannerDisplay)
     monkeypatch.setattr(
-        "cli.interactive._prompt_task",
+        "code_squid.console.cli.prompt_loop._prompt_task",
         _fake_prompt_tasks(["/skill some-skill", "first task", "/exit"]),
     )
-    monkeypatch.setattr("cli.interactive._run_new_session_task", fake_new)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_new_session_task", fake_new)
 
     assert _run_interactive(tmp_path, "architecture-review") == 0
 
@@ -921,9 +921,9 @@ def test_new_session_passes_debug_without_trace_to_terminal_display(
         return BannerDisplay(**kwargs)
 
     monkeypatch.setenv("CODE_SQUID_DEBUG", "1")
-    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
-    monkeypatch.setattr("cli.interactive._prompt_task", _fake_prompt_task("Do the thing"))
-    monkeypatch.setattr("cli.run._run_loop", lambda *args: 0)
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", fake_display)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_task("Do the thing"))
+    monkeypatch.setattr("code_squid.console.cli.session_runner._run_loop", lambda *args: 0)
 
     assert _run_new_session(tmp_path) == 0
 
@@ -953,14 +953,14 @@ def test_resume_session_passes_trace_to_terminal_display(
         return BannerDisplay(**kwargs)
 
     monkeypatch.setenv("CODE_SQUID_TRACE", "1")
-    monkeypatch.setattr("cli.run.TerminalDisplay", fake_display)
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", fake_display)
     monkeypatch.setattr(
-        "cli.run._session_dir_for_resume",
+        "code_squid.console.cli.session_runner._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
-    monkeypatch.setattr("cli.interactive._prompt_task", _fake_prompt_task("Continue the thing"))
-    monkeypatch.setattr("cli.run.build_agent_loop", lambda **kwargs: NoopLoop())
-    monkeypatch.setattr("cli.run._run_loop", lambda *args: 0)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_task("Continue the thing"))
+    monkeypatch.setattr("code_squid.console.cli.session_runner.build_agent_loop", lambda **kwargs: NoopLoop())
+    monkeypatch.setattr("code_squid.console.cli.session_runner._run_loop", lambda *args: 0)
 
     assert _resume_session(tmp_path, session_store.session_id) == 0
 

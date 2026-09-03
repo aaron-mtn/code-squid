@@ -1,8 +1,6 @@
-# cli/skills.py
-
 """Skill command and status helpers for the Code Squid CLI."""
 
-from core.app_paths import code_squid_home
+from code_squid.app_paths import code_squid_home
 from squid_core.skills import discover_skills
 
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from core.app_paths import session_indexes_path, workspace_sessions_dir
+from code_squid.app_paths import session_indexes_path, workspace_sessions_dir
 from squid_core.storage.session_index import (
     latest_session_id,
     list_all_sessions,

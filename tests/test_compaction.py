@@ -189,7 +189,7 @@ def test_summary_request_uses_compaction_prompt_with_json_context() -> None:
 def test_compaction_does_not_import_code_squid_application_prompts() -> None:
     source = inspect.getsource(compaction_module)
 
-    assert "agent.prompts" not in source
+    assert "code_squid.agent.prompts" not in source
     assert "squid_core.compaction.prompts" in source
 
 

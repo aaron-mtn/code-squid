@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from config.settings import load_settings, write_approval_mode
+from code_squid.settings import load_settings, write_approval_mode
 
 
 ENV_VARS = [

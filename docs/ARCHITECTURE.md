@@ -29,29 +29,45 @@ machine-readable runtime facts.
 
 The dependency direction is one-way: Code Squid supplies application defaults
 and runtime wiring to reusable Squid Core components. Those reusable components
-do not import Code Squid prompt or policy modules. `squid_core/` is the reusable
-agent runtime. The two files remaining in `core/` are temporary Code Squid
-application-owned modules awaiting the later application-package cleanup.
+do not import Code Squid prompt or policy modules. `code_squid/` is the product
+and application layer; `squid_core/` is the reusable agent runtime.
 
 ## Component Layout
 
 - `main.py`
   - Thin standalone process entry point.
-  - Calls `cli.commands.run_cli(sys.argv[1:])` and exits with its status code.
+  - Calls `code_squid.console.cli.cli_commands.run_cli(sys.argv[1:])` and exits
+    with its status code.
 
-- `cli/`
-  - Terminal CLI behavior split out from the process entry point.
-  - `args.py` owns CLI argument parsing, `--cwd`, `--skill`, and workspace
-    resolution.
-  - `commands.py` owns top-level command dispatch, including `mode`, `undo`,
-    saved-session viewer routing, resume routing, and interactive startup.
-  - `interactive.py` owns the interactive prompt loop, `/help`, `/new`,
-    `/exit`, prompt input, and new-session/resume prompt flows.
-  - `run.py` owns CLI run/session orchestration, display setup, new-session
-    task runs, follow-up task runs, interruption handling, and model request
-    failure handling.
-  - `skills.py` owns CLI skill command/status helpers, `python main.py skills`,
-    and interactive `/skill` handling.
+- `code_squid/`
+  - Code Squid-specific product and application package. It owns coding-agent
+    prompt/behavior policy, application setup, paths/settings, and console
+    behavior and presentation.
+  - `agent/coding.py` keeps the explicit `CodingAgent` specialization point
+    around `squid_core.agent.Agent`; it intentionally adds no behavior today.
+    `agent/prompts.py` owns Code Squid identity, its non-replaceable baseline
+    coding policy, intentionally replaceable tool/final-report defaults, and
+    dead/non-live task/follow-up compatibility renderers.
+  - `agent_setup.py` owns Code Squid run preparation and wiring: settings,
+    prompt defaults, application/workspace paths, storage locations, resource
+    resolution, hooks, terminal display construction, platform context, Agent
+    configuration, and translation into the generic `squid_core.spawner` seam.
+  - `app_paths.py` owns Code Squid application-home policy, repository-local
+    session/undo/error-log locations, the global session-index location, and
+    paths for loose resources and Mods. Reusable Core machinery receives these
+    paths explicitly.
+  - `settings.py` reads `.code-squid/settings.json`, validates supported
+    application input, applies product defaults and optional `CODE_SQUID_*`
+    environment overrides, and translates the result to generic Core settings.
+  - `console/cli/` owns terminal workflow and control. `cli_options.py` handles
+    CLI options and workspace resolution; `cli_commands.py` handles launch-time
+    dispatch; `prompt_loop.py` handles interactive prompts and slash commands;
+    `session_runner.py` handles new/resumed session-backed runs; and
+    `skill_commands.py` handles Skill status, listing, and selection.
+  - `console/ui/` owns terminal presentation and input. `display.py` keeps the
+    current display, formatting, approvals, action/report rendering, and error
+    presentation together; `prompt_input.py`, `sessions.py`, and `spinner.py`
+    retain their focused input, saved-session, and animation responsibilities.
 
 - `squid_core/agent/`
   - Reusable Core Agent behavior and protected prompt protocol.
@@ -63,7 +79,7 @@ application-owned modules awaiting the later application-package cleanup.
     non-enforced narration guidance, generic response examples, active-Skill
     insertion, execution-environment insertion, and prompt assembly.
   - Core consumes application defaults through `PromptDefaults` and does not
-    import Code Squid's root `agent.prompts`.
+    import `code_squid.agent.prompts`.
 
 - `squid_core/compaction/`
   - Generic transcript compaction mechanics and prompt ownership.
@@ -141,41 +157,6 @@ application-owned modules awaiting the later application-package cleanup.
   - Resource modules accept explicit application homes or resource roots. They
     do not import Code Squid's application-home policy.
 
-- `agent/`
-  - Code Squid application prompt defaults and migration compatibility.
-  - `prompts.py` owns Code Squid identity, its non-replaceable baseline coding
-    policy, intentionally replaceable tool/final-report defaults, and
-    dead/non-live task/follow-up compatibility renderers.
-  - `coding.py` exposes `CodingAgent` as an alias of
-    `squid_core.agent.Agent`; it contains no agent implementation.
-
-- `config/`
-  - Code Squid application settings loading and persistence.
-  - `settings.py` reads `.code-squid/settings.json`, validates supported
-    application input, applies product defaults and optional `CODE_SQUID_*`
-    environment overrides, and translates the result to generic Core settings.
-
-- `core/`
-  - Temporary location for Code Squid application-owned wiring/policy only.
-  - `app_paths.py` owns Code Squid application-home policy, repository-local
-    session/undo/error-log locations, the global session-index location, and
-    paths for loose resources and Mods. Reusable Core machinery receives those
-    paths explicitly; Squid Core does not define a global home or `.code-squid`
-    layout.
-  - `runner.py` is the Code Squid application builder and compatibility layer.
-    It owns Code Squid prompt defaults, invokes Core Mod resolution for an
-    explicitly selected `mod_name`, records run context, constructs terminal
-    presentation, and passes selected resources to `squid_core.spawner`.
-  - Final relocation of these two files into a Code Squid application package,
-    followed by removal of `core/`, is deferred to the next cleanup patch.
-
-- `ui/`
-  - Small terminal display helpers.
-  - `terminal.py` owns display flow, formatting, approval prompts, debug output,
-    tool-event display, final-summary display, and friendly error messages.
-  - `sessions.py` owns saved-session viewer display.
-  - `spinner.py` owns only TTY spinner animation mechanics.
-
 - `scripts/`
   - Small repo-maintenance helpers.
   - `update_filetree.py` generates `docs/filetree.md` from the current
@@ -224,7 +205,7 @@ Callback delivery is best-effort. Observer failures must not crash the run.
 Hooks are minimal in-process extension seams for hosts that need to influence a
 run at specific lifecycle points. They are not a marketplace, plugin ecosystem,
 pack system, settings system, or user hook discovery mechanism. Current hooks
-are Python objects passed by callers through `core.runner` and `AgentLoop`
+are Python objects passed by callers through `code_squid.agent_setup` and `AgentLoop`
 wiring. Code Squid core calls supported hook methods directly as the loop runs.
 
 Hooks are deliberately narrower than passing whole runtime objects around. They
@@ -316,7 +297,7 @@ model request
 `squid_core/hooks/` owns the hook context and decision dataclasses, `HookRunner`,
 and Hook metadata/loading. `squid_core/agent_loop.py` owns where hook calls happen
 in the loop.
-`core/runner.py` wires optional `hooks`, optionally loads standalone hooks from
+`code_squid/agent_setup.py` wires optional `hooks`, optionally loads standalone hooks from
 the supplied application home's `hooks/`, or accepts an explicit `hook_runner`.
 Selected Mod Hooks arrive through `ResolvedMod`. `squid_core/events.py`
 remains observer-only.
@@ -336,7 +317,7 @@ Known limitations:
 
 Runtime construction has three explicit levels:
 
-1. Easy/default: `core.runner.run_coding_task(...)` and
+1. Easy/default: `code_squid.agent_setup.run_coding_task(...)` and
    `build_coding_task_run(...)` provide the batteries-included Code Squid path.
 2. Custom: `squid_core.spawner.build_agent_run(...)` or
    `build_agent_loop(...)` create omitted collaborators while using supplied
@@ -357,13 +338,13 @@ Squid Core construction to Core collaborators to `AgentLoop`; generic
 construction never calls back into Code Squid prompt, terminal, or discovery
 policy.
 
-`core.runner.run_coding_task(...)` is the transitional Code Squid application
+`code_squid.agent_setup.run_coding_task(...)` is the Code Squid application
 entry point for starting a new coding task. It accepts `repo_root`, `task`,
 optional `settings`, optional `display`, and optional `on_event`, and returns
 the existing `RunResult`.
 
-`core.runner.build_coding_task_run(...)` constructs the session, session store,
-undo store, generic Agent with `CODE_SQUID_PROMPT_DEFAULTS`, selected tools,
+`code_squid.agent_setup.build_coding_task_run(...)` constructs the session,
+session store, undo store, generic Agent with `CODE_SQUID_PROMPT_DEFAULTS`, selected tools,
 application hooks, terminal display, and generic loop wiring without starting
 the loop. The CLI uses this shape when it needs access to the session and
 session store for interactive follow-ups. Its Skill/tool resolution and
@@ -403,7 +384,7 @@ construction. Direct `AgentLoop(...)` construction remains unchanged.
 
 This seam lets a host persist outside the workspace without teaching Core its
 storage layout, indexes, or adapter types. Code Squid's application runner uses
-`core.app_paths` to supply `<repo>/.code-squid/sessions` and
+`code_squid.app_paths` to supply `<repo>/.code-squid/sessions` and
 `<repo>/.code-squid/undo`, while `repo_root` separately continues to define tool
 execution. Desktop is one possible host, not a special Core concern.
 
@@ -416,24 +397,25 @@ Passing neither path preserves standalone `skill_name` discovery. Generic
 `squid_core.spawner` receives only selected resources and remains unaware of
 Mod names, paths, discovery, or selection policy.
 
-`core.runner.build_agent_loop(...)` remains as a compatibility wrapper used by
-the CLI follow-up path. It delegates generic collaborator wiring to
+`code_squid.agent_setup.build_agent_loop(...)` is the application wrapper used
+by the CLI follow-up path. It delegates generic collaborator wiring to
 `squid_core.spawner.build_agent_loop(...)`. Provider-specific construction and
 replay-mode decisions are delegated to `squid_core.providers`.
 
 `squid_core.storage.session_index` owns generic inspection, registration, and
 cross-location discovery for explicit index and session-root paths. Session
-creation does not register itself globally; the Code Squid runner uses
-`core.app_paths` to select both paths and explicitly registers the workspace's
-sessions directory after creating a session. Registry failure remains
+creation does not register itself globally; Code Squid uses
+`code_squid.app_paths` to select both paths and explicitly registers the
+workspace's sessions directory after creating a session. Registry failure remains
 supplementary and does not invalidate usable local storage. App-specific UIs
 own their presentation projection while Core owns the persistence formats and
 mechanics.
 
 This runner layer is not a plugin system, orchestration layer, daemon, or
 server mode. It gives external Python code a clean way to call Code Squid
-without copying CLI wiring. Terminal CLI wrapper behavior lives under `cli/`;
-`main.py` only delegates to `cli.commands.run_cli()`.
+without copying CLI wiring. Terminal workflow and presentation live under
+`code_squid/console/`; `main.py` only delegates to
+`code_squid.console.cli.cli_commands.run_cli()`.
 
 ### Core Mod resolution
 
@@ -689,7 +671,7 @@ selection.
 
 ## Settings
 
-Settings have two explicit ownership layers. `config/settings.py` owns the
+Settings have two explicit ownership layers. `code_squid/settings.py` owns the
 human-facing Code Squid shape, `.code-squid/settings.json`, product defaults,
 saved selection, persistence, and optional environment overrides. It translates
 those values into `squid_core.settings.RuntimeSettings`. Core owns only the
@@ -835,9 +817,9 @@ shape, omits `parallel_tool_calls`, and adapts the response back to the
 OpenAI-like shape consumed by `ModelAdapter`.
 
 Provider request failures are wrapped at the model-adapter boundary as
-`ModelRequestError`. The CLI run orchestration in `cli/run.py` catches that
-error, marks the session failed, and writes diagnostic traceback details to
-`.code-squid/logs/latest.log`.
+`ModelRequestError`. The CLI run orchestration in
+`code_squid/console/cli/session_runner.py` catches that error, marks the session
+failed, and writes diagnostic traceback details to `.code-squid/logs/latest.log`.
 
 ## Runtime Contracts
 
@@ -965,7 +947,7 @@ current transcript size. The estimate serializes messages to JSON/text and uses
 simple length math; it is not an exact model tokenizer.
 
 The compaction request uses the generic Core-owned prompt in
-`squid_core/compaction/prompts.py`. It has no dependency on Code Squid's root
+`squid_core/compaction/prompts.py`. It has no dependency on Code Squid's
 application prompts.
 
 Compaction triggers when:
@@ -1072,7 +1054,7 @@ Current session statuses are:
 Resume can load saved messages with `SessionStore.load_messages()`, append a
 follow-up user message, mark the session active, create a fresh undo buffer, and
 continue the same saved session. `latest` resolves through
-the explicit workspace sessions path supplied by `core.app_paths`.
+the explicit workspace sessions path supplied by `code_squid.app_paths`.
 
 The saved-session viewer can list sessions and show message transcripts.
 Compaction events are not printed as transcript messages by the viewer.
@@ -1164,11 +1146,11 @@ behavior go through `run_command`.
 ## Ownership Boundaries
 
 `main.py` owns only process entrypoint behavior: passing command-line arguments
-to `cli.commands.run_cli()` and returning its exit status.
+to `code_squid.console.cli.cli_commands.run_cli()` and returning its exit status.
 
-`cli/` owns terminal CLI parsing, dispatch, interactive prompt flow, CLI
-run/resume wiring, mode/undo commands, saved-session command routing, and CLI
-skill commands. It should not grow agent policy, tool behavior,
+`code_squid/console/cli/` owns terminal CLI parsing, dispatch, interactive
+prompt flow, run/resume wiring, mode/undo commands, saved-session command
+routing, and Skill commands. It should not grow agent policy, tool behavior,
 provider-specific response parsing, session storage internals, approval logic,
 undo mechanics, compaction strategy, or terminal formatting.
 
@@ -1177,11 +1159,12 @@ It decides which supplied tools are exposed, which reply shapes are valid,
 when the loop should stop, and what correction/failure path is used. It does
 not own Code Squid identity or coding workflow policy.
 
-`agent/prompts.py` owns Code Squid's explicit application prompt defaults and
-baseline coding discipline. `agent/coding.py` is compatibility-only and must
-not regain a duplicate or empty subclass implementation.
+`code_squid/agent/prompts.py` owns Code Squid's explicit application prompt
+defaults and baseline coding discipline. `code_squid/agent/coding.py` is the
+intentional specialization point around the generic Core Agent and must not
+regain a duplicate or empty subclass implementation.
 
-`config/settings.py` owns local settings parsing, persistence, Code Squid
+`code_squid/settings.py` owns local settings parsing, persistence, Code Squid
 defaults and selection, and optional environment overrides. It produces
 `squid_core.settings.RuntimeSettings`; Core owns validation of generic runtime
 semantics and enforcement.
@@ -1192,7 +1175,7 @@ coding-task prompt text. Its tool path remains visibly hook, action preflight,
 approval, execution, and result handling; it does not own workspace or guarded
 shell policy.
 
-`core/runner.py` owns Code Squid application construction and shared CLI
+`code_squid/agent_setup.py` owns Code Squid application construction and shared CLI
 helpers. `squid_core/spawner.py` owns generic selective construction. Neither is
 a plugin system, event bus, daemon, server, or future orchestration layer.
 
@@ -1224,13 +1207,15 @@ Individual built-in tool behavior stays in `squid_core/tools/builtins/`.
 
 `squid_core/storage/` owns generic durable session and undo persistence, atomic
 writes, session indexing/discovery, and diagnostic error logging. Every
-filesystem location is explicit. `core/app_paths.py` owns Code Squid's concrete
+filesystem location is explicit. `code_squid/app_paths.py` owns Code Squid's concrete
 `.code-squid` session, undo, index, and error-log locations and passes them into
 those mechanisms. In-memory session behavior stays in `squid_core/session.py`;
-live display stays in `ui/`.
+live display stays in `code_squid/console/ui/`.
 
-`ui/` owns terminal presentation only. Tool-event display is the reliable UX
-layer for what happened, while model-native narration is encouraged by prompts.
+`code_squid/console/cli/` owns terminal workflow and control.
+`code_squid/console/ui/` owns terminal presentation and input. Tool-event
+display is the reliable UX layer for what happened, while model-native
+narration is encouraged by prompts.
 
 ## Known Limitations / Notes For Later
 
@@ -1248,7 +1233,7 @@ layer for what happened, while model-native narration is encouraged by prompts.
   may need explicit wrapper handling depending on the caller path.
 - The Code Squid application runner uses `TerminalDisplay`; generic Squid Core
   construction uses `NullDisplay` unless the host supplies presentation.
-- Resume support is CLI-owned under `cli/`.
+- Resume support is CLI-owned under `code_squid/console/cli/`.
 - JSONL/file event output is intentionally not implemented yet.
 - User skill discovery checks `<CODE_SQUID_HOME>/skills/*/SKILL.md`, defaulting
   to `~/.code-squid/skills/*/SKILL.md`.

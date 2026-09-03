@@ -1,22 +1,20 @@
-# cli/run.py
-
 """Run and session orchestration helpers for the Code Squid CLI."""
 
 import os
 from pathlib import Path
 
-from agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
-from config.settings import Settings
+from code_squid.agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
+from code_squid.settings import Settings
 from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.model_adapter import ModelRequestError
-from core.runner import (
+from code_squid.agent_setup import (
     append_run_context,
     build_agent_loop,
     build_coding_task_run,
     resolve_skill_tools,
     startup_info,
 )
-from core.app_paths import (
+from code_squid.app_paths import (
     workspace_error_log_path,
     workspace_sessions_dir,
     workspace_undo_dir,
@@ -24,7 +22,7 @@ from core.app_paths import (
 from squid_core.session import Session
 from squid_core.storage import SessionStore, UndoStore, write_error_log
 from squid_core.storage.session_index import latest_session_id, session_dir_for
-from ui.terminal import TerminalDisplay
+from code_squid.console.ui.display import TerminalDisplay
 from squid_core.agent import Agent
 
 

@@ -1,7 +1,7 @@
 from prompt_toolkit.input.ansi_escape_sequences import ANSI_SEQUENCES
 from prompt_toolkit.keys import Keys
 
-from ui.prompt_input import prompt_multiline_input
+from code_squid.console.ui.prompt_input import prompt_multiline_input
 
 
 def test_prompt_multiline_input_uses_shared_multiline_bindings(monkeypatch) -> None:
@@ -13,9 +13,9 @@ def test_prompt_multiline_input_uses_shared_multiline_bindings(monkeypatch) -> N
             prompt_calls.append((args, kwargs))
             return "line one\nline two"
 
-    monkeypatch.setattr("ui.prompt_input.PromptSession", FakePromptSession)
+    monkeypatch.setattr("code_squid.console.ui.prompt_input.PromptSession", FakePromptSession)
     monkeypatch.setattr(
-        "ui.prompt_input.print_formatted_text",
+        "code_squid.console.ui.prompt_input.print_formatted_text",
         lambda text: prefaces.append(text),
     )
 

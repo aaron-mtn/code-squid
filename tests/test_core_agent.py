@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from agent.coding import CodingAgent
-from agent.prompts import BASELINE_CODING_POLICY, CODE_SQUID_PROMPT_DEFAULTS
+from code_squid.agent.coding import CodingAgent
+from code_squid.agent.prompts import BASELINE_CODING_POLICY, CODE_SQUID_PROMPT_DEFAULTS
 from squid_core.skills import PromptSectionOverride, Skill
 from squid_core.agent import Agent
 

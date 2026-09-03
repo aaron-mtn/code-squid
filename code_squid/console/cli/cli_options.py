@@ -1,5 +1,3 @@
-# cli/args.py
-
 """Argument parsing and workspace resolution for the Code Squid CLI."""
 
 from dataclasses import dataclass

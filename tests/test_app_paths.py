@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from core.app_paths import (
+from code_squid.app_paths import (
     CODE_SQUID_HOME_ENV,
     CODE_SQUID_SESSION_INDEXES_ENV,
     code_squid_home,

@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from core.app_paths import workspace_sessions_dir
+from code_squid.app_paths import workspace_sessions_dir
 from squid_core.storage import SessionStore
-from ui.sessions import handle_session_viewer, print_session
+from code_squid.console.ui.sessions import handle_session_viewer, print_session
 
 
 def test_print_session_shows_run_context_events(

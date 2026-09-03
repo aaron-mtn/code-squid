@@ -2,7 +2,7 @@
 
 import sys
 
-from cli.commands import run_cli
+from code_squid.console.cli.cli_commands import run_cli
 
 
 def main() -> int:

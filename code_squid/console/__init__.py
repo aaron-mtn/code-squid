@@ -1,0 +1,1 @@
+"""Code Squid console application."""

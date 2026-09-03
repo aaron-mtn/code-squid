@@ -1,5 +1,3 @@
-# ui/spinner.py
-
 """Tiny terminal spinner used only for interactive display."""
 
 from __future__ import annotations

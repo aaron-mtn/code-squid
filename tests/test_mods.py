@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from config.settings import (
+from code_squid.settings import (
     CompactionSettings,
     DisplaySettings,
     ModelSettings,
@@ -11,7 +11,7 @@ from config.settings import (
 )
 from squid_core.hooks import list_user_hooks, load_user_hooks
 from squid_core.mods import ModResolutionError, discover_mods, load_mod, resolve_mod, validate_mod
-from core.runner import build_coding_task_run
+from code_squid.agent_setup import build_coding_task_run
 from squid_core.skills import discover_skills
 from squid_core.tools.user_tools import discover_user_tools
 from squid_core import spawner as generic_spawner

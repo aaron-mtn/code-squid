@@ -2,14 +2,14 @@
 
 from pathlib import Path
 
-from cli.args import parse_cli_args
-from cli.interactive import _resume_session, _run_interactive
-from cli.skills import handle_skills
-from config.settings import load_settings, write_approval_mode
-from core.app_paths import workspace_undo_dir
-from core.runner import FRIENDLY_MODES
+from code_squid.console.cli.cli_options import parse_cli_args
+from code_squid.console.cli.prompt_loop import _resume_session, _run_interactive
+from code_squid.console.cli.skill_commands import handle_skills
+from code_squid.settings import load_settings, write_approval_mode
+from code_squid.app_paths import workspace_undo_dir
+from code_squid.agent_setup import FRIENDLY_MODES
 from squid_core.storage import UndoStore
-from ui.sessions import USAGE, handle_session_viewer
+from code_squid.console.ui.sessions import USAGE, handle_session_viewer
 
 
 APPROVAL_MODES = {

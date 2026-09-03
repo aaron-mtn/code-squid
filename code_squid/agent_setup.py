@@ -1,5 +1,3 @@
-# core/runner.py
-
 """Code Squid application wiring for normal coding tasks.
 
 This layer owns Code Squid prompts, Skill/tool discovery, hooks, and terminal
@@ -13,11 +11,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
-from config.settings import Settings, load_settings
+from code_squid.agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
+from code_squid.settings import Settings, load_settings
 from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.events import EventCallback
-from core.app_paths import (
+from code_squid.app_paths import (
     code_squid_home,
     session_indexes_path,
     workspace_sessions_dir,
@@ -32,7 +30,7 @@ from squid_core.tools.user_tools import build_user_tool_registry
 from squid_core.storage import SessionStore, UndoStore
 from squid_core.storage.session_index import register_session_root
 from squid_core.tools.builtins import TOOLS
-from ui.terminal import StartupInfo, TerminalDisplay
+from code_squid.console.ui.display import StartupInfo, TerminalDisplay
 from squid_core.agent import Agent
 from squid_core.spawner import build_agent_loop as build_core_agent_loop
 

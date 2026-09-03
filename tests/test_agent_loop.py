@@ -2,7 +2,7 @@ import inspect
 import json
 
 import squid_core.agent_loop as agent_loop_module
-from agent.coding import CodingAgent
+from code_squid.agent.coding import CodingAgent
 from squid_core.safety import ActionPreflightDecision
 from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.safety import ApprovalDecision, ApprovalPolicy

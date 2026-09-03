@@ -1,5 +1,3 @@
-# config/settings.py
-
 """Load local Code Squid settings with environment variable overrides."""
 
 from __future__ import annotations

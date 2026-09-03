@@ -1,5 +1,3 @@
-# ui/prompt_input.py
-
 """Shared terminal input helpers."""
 
 from prompt_toolkit import PromptSession, print_formatted_text

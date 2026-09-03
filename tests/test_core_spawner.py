@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 import squid_core.spawner as core_spawner
-from agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
+from code_squid.agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
 from squid_core.settings import CompactionSettings, ProviderSettings, RuntimeSettings
 from squid_core.session import Session
 from squid_core.agent import Agent
@@ -39,9 +39,9 @@ def _storage_paths(tmp_path: Path) -> dict:
 def test_generic_module_has_no_coding_or_terminal_ui_dependency() -> None:
     source = Path(core_spawner.__file__).read_text(encoding="utf-8")
 
-    assert "agent.coding" not in source
-    assert "agent.prompts" not in source
-    assert "ui.terminal" not in source
+    assert "code_squid.agent.coding" not in source
+    assert "code_squid.agent.prompts" not in source
+    assert "code_squid.console.ui.display" not in source
     assert "TerminalDisplay" not in source
     assert "squid_core.mods" not in source
 
@@ -77,7 +77,7 @@ def test_generic_run_requires_explicit_storage_paths(tmp_path: Path) -> None:
 def test_code_squid_builder_supplies_application_prompt_defaults(
     monkeypatch, tmp_path: Path
 ) -> None:
-    from core.runner import build_coding_task_run
+    from code_squid.agent_setup import build_coding_task_run
 
     captured = {}
 
@@ -85,7 +85,7 @@ def test_code_squid_builder_supplies_application_prompt_defaults(
         def __init__(self, **kwargs) -> None:
             captured.update(kwargs)
 
-    monkeypatch.setattr("core.runner.Agent", CapturingAgent)
+    monkeypatch.setattr("code_squid.agent_setup.Agent", CapturingAgent)
 
     build_coding_task_run(
         tmp_path,
