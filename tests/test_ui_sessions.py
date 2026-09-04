@@ -38,7 +38,7 @@ def test_session_viewer_latest_selects_newest_session(tmp_path: Path, capsys) ->
         workspace_root=tmp_path,
     )
 
-    assert handle_session_viewer(tmp_path, ["show", "latest"]) is True
+    assert handle_session_viewer(tmp_path, ["show", "latest"]) == 0
 
     assert f"Session: {store.session_id}" in capsys.readouterr().out
 
@@ -47,6 +47,6 @@ def test_session_viewer_reports_invalid_session_id_without_escaping(
     tmp_path: Path,
     capsys,
 ) -> None:
-    assert handle_session_viewer(tmp_path, ["show", "../x"]) is True
+    assert handle_session_viewer(tmp_path, ["show", "../x"]) == 1
 
     assert "Invalid session ID" in capsys.readouterr().out

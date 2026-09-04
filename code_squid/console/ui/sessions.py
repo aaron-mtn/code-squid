@@ -11,14 +11,6 @@ from squid_core.storage.session_index import (
     session_dir_for,
 )
 
-USAGE = (
-    "Usage: python main.py "
-    "[--cwd <path>] "
-    "[sessions | show latest | show <session_id> | resume latest | resume <session_id> "
-    "| undo | mode | mode strict | mode balanced | mode yolo]"
-)
-
-
 # Print a compact index of saved sessions.
 def print_sessions(repo_root: Path) -> None:
     print("🦑 Code Squid Sessions")
@@ -38,13 +30,14 @@ def print_sessions(repo_root: Path) -> None:
 
 
 # Print metadata and message transcript for one saved session.
-def print_session(repo_root: Path, session_id: str) -> None:
+def print_session(repo_root: Path, session_id: str) -> bool:
+    """Print one session and return whether the requested session exists."""
     sessions_dir = workspace_sessions_dir(repo_root)
     if session_id == "latest":
         session_id = latest_session_id(sessions_dir)
         if session_id is None:
             print("No saved sessions.")
-            return
+            return False
 
     session_dir = session_dir_for(sessions_dir, session_id)
     metadata = session_dir.joinpath("metadata.json").read_text(encoding="utf-8")
@@ -79,22 +72,30 @@ def print_session(repo_root: Path, session_id: str) -> None:
         print(f"[{message.get('role', '')}]")
         print(message.get("content", ""))
 
+    return True
+
 
 # Handle tiny saved-session viewer subcommands and leave runs untouched.
-def handle_session_viewer(repo_root: Path, args: list[str]) -> bool:
-    if not args or args[0] == "resume":
-        return False
+def handle_session_viewer(repo_root: Path, args: list[str]) -> int | None:
+    """Handle shell session-view commands, or return ``None`` if unrelated."""
+
+    if not args or args[0] not in {"sessions", "show"}:
+        return None
 
     if args == ["sessions"]:
         print_sessions(repo_root)
-        return True
+        return 0
+
+    if args[0] == "sessions":
+        print("Usage: python main.py sessions")
+        return 1
 
     if len(args) == 2 and args[0] == "show":
         try:
-            print_session(repo_root, args[1])
+            return 0 if print_session(repo_root, args[1]) else 1
         except (FileNotFoundError, ValueError) as error:
             print(error)
-        return True
+            return 1
 
-    print(USAGE)
-    return True
+    print("Usage: python main.py show latest | python main.py show <session_id>")
+    return 1

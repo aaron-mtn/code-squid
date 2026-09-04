@@ -32,45 +32,39 @@ CANCELLED_BEFORE_RUN_MESSAGE = "⏹️ Cancelled before task started"
 HELP_COMMAND = "/help"
 NEW_COMMAND = "/new"
 SKILL_COMMAND = "/skill"
-EXIT_COMMANDS = {"/exit", "exit", "quit"}
+EXIT_COMMAND = "/exit"
 HELP_TEXT = """\
 Code Squid help
 
-At the task prompt:
+Core interaction:
   Normal input runs a coding task.
-  /mod shows the active Mod and available Mods.
-  /mod <name> selects a Mod for future tasks and follow-ups.
-  /mod none clears the active Mod.
-  /skill shows the active skill and available skills.
-  /skill <name> sets the active skill for future tasks and follow-ups.
-  /skill none clears the active skill.
-  /provider shows or changes the effective provider.
-  /model shows or changes the effective model.
-  /safety shows or changes the safety mode (strict, balanced, yolo).
-  /sessions lists saved sessions for this workspace.
-  /show [current|latest|<session_id>] shows a saved session.
-  /resume latest or /resume <session_id> switches the active session.
-  /undo restores the existing latest-run undo buffer.
-  /cwd shows the immutable workspace root.
   /new starts a new session boundary.
   /exit exits the interactive prompt.
   Enter sends.
   Alt+Enter inserts a newline.
   Ctrl+C cancels before a run or interrupts an active run.
 
-Shell commands:
-  python main.py --cwd /path/to/project
-  python main.py undo
-  python main.py mode
-  python main.py mode strict
-  python main.py mode balanced
-  python main.py mode yolo
-  python main.py skills
-  python main.py --skill <name>
-  python main.py sessions
-  python main.py show latest
-  python main.py resume latest
-  python main.py resume <session_id>"""
+Specialization:
+  /mod shows the active Mod and available Mods.
+  /mod <name> selects a Mod for future tasks and follow-ups.
+  /mod none clears the active Mod.
+  /skill shows the active standalone Skill and available Skills
+    (advanced/direct).
+  /skill <name> selects a standalone Skill for future tasks and follow-ups.
+  /skill none clears the active standalone Skill.
+
+Runtime:
+  /provider shows or changes the effective provider.
+  /model shows or changes the effective model.
+  /safety shows or changes the safety mode (strict, balanced, yolo).
+
+Sessions and workspace:
+  /sessions lists saved sessions for this workspace.
+  /show [current|latest|<session_id>] shows a saved session.
+  /resume latest or /resume <session_id> switches the active session.
+  /undo restores the existing latest-run undo buffer.
+  /cwd shows the immutable workspace root.
+"""
 
 
 def _is_help_input(task: str) -> bool:
@@ -82,7 +76,7 @@ def _is_new_input(task: str) -> bool:
 
 
 def _is_exit_input(task: str) -> bool:
-    return task.strip() in EXIT_COMMANDS
+    return task.strip() == EXIT_COMMAND
 
 
 def _print_help() -> None:
@@ -127,7 +121,7 @@ def _resume_session(repo_root: Path, session_id: str, skill_name: str | None = N
     # also the established seam that resolves ``latest`` to its concrete ID.
     session_dir = session_runner._session_dir_for_resume(repo_root, session_id)
     if session_dir is None:
-        return 0
+        return 1
     return _run_interactive(repo_root, skill_name, active_session_id=session_dir.name)
 
 

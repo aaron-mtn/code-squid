@@ -589,7 +589,7 @@ Mods are the primary interactive specialization control, while standalone
 Skills remain the direct/advanced path. The current controls are:
 
 ```bash
-python main.py skills
+python main.py skill
 python main.py --skill <name>
 ```
 
@@ -776,24 +776,28 @@ Current commands:
 ```bash
 python main.py
 python main.py --cwd /path/to/project
-python main.py skills
 python main.py --skill <name>
+python main.py safety
+python main.py safety strict
+python main.py safety balanced
+python main.py safety yolo
+python main.py skill
 python main.py sessions
 python main.py show latest
 python main.py show <session_id>
 python main.py resume latest
 python main.py resume <session_id>
 python main.py undo
-python main.py mode
-python main.py mode strict
-python main.py mode balanced
-python main.py mode yolo
+python main.py help
+python main.py --help
+python main.py -h
 ```
 
 Running with no arguments starts an interactive prompt. A first task starts a
 new session; later tasks in the same process continue the active session as
-follow-ups unless the user enters `/new`. `/help` prints prompt help, and
-`/exit`, `exit`, or `quit` exits the interactive prompt. Interactive
+follow-ups unless the user enters `/new`. `/help` prints prompt help, and only
+the slash-prefixed `/exit` exits the interactive prompt. Bare `exit` and `quit`
+remain ordinary task text. Interactive
 specialization, runtime, and control commands are listed above.
 
 `--cwd` selects the workspace/repo root. It defaults to the current directory
@@ -805,8 +809,8 @@ saved conversation, appends a user message, marks the session active, creates
 a fresh latest-only undo buffer, and continues that session. Slash commands
 remain available before and between follow-ups.
 
-`mode` prints or writes the configured approval mode. Friendly CLI mode names
-map to settings values this way:
+`safety` prints or writes the configured approval mode. Friendly CLI safety
+names map to settings values this way:
 
 - `strict` -> `runtime.approval_mode = "always"`
 - `balanced` -> `runtime.approval_mode = "guarded"`

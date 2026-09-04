@@ -8,18 +8,23 @@ from squid_core.storage import UndoStore
 from squid_core.storage.session_index import latest_session_id, session_dir_for
 
 
-def undo_latest_run(repo_root: Path) -> None:
-    """Restore the existing latest-run undo buffer and report its result."""
+def undo_latest_run(repo_root: Path) -> bool:
+    """Restore the latest-run undo buffer and report whether it was usable."""
 
     try:
         results = UndoStore.open(workspace_undo_dir(repo_root)).restore()
     except FileNotFoundError as error:
         print(error)
-        return
+        return False
+
+    if not results:
+        print("No changes are available to undo.")
+        return False
 
     restored = sum(1 for result in results if result["restored"])
     deleted = sum(1 for result in results if result["deleted"])
     print(f"↩️ Undo complete: restored {restored}, deleted {deleted}")
+    return True
 
 
 def handle_control_command(

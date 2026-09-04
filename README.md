@@ -12,7 +12,7 @@ run commands while working in a local repository. It works through model tool
 calls, shows a visible transcript of what is happening, and persists sessions so
 work can be shown, resumed, or reviewed later.
 
-It supports resume, latest-only undo, approval mode, transcript compaction, and
+It supports resume, latest-only undo, safety modes, transcript compaction, and
 a small set of local tools. The project is intended to stay small and
 inspectable.
 
@@ -21,7 +21,7 @@ inspectable.
 Code Squid is not a general agent framework, a hardened sandbox, a multi-agent
 system, or a polished TUI/GUI.
 
-Approval mode is not containment. Code Squid can run local shell commands and
+Safety modes are not containment. Code Squid can run local shell commands and
 can read or write real files as the current user.
 
 ## Current status
@@ -41,11 +41,11 @@ is sent. Code Squid rejects those replies and retries with a correction message.
 
 - Strict one-tool-at-a-time coding loop
 - Visible narration plus terminal tool-event display
-- Local tools: `read_file`, `write_file`, and `run_command`
+- Local tools: `apply_patch`, `read_file`, `write_file`, and `run_command`
 - Sessions saved under `.code-squid/sessions`
 - Session listing, transcript display, and resume
 - Latest-only undo for `write_file`
-- Approval mode: `never` or `always`
+- Safety levels: `strict`, `balanced`, or `yolo`
 - Settings file with environment variable overrides
 - Provider support: `openai_compatible`, `openrouter`, and `ollama`
 - Transcript compaction
@@ -202,15 +202,22 @@ models.
 
 ```bash
 python main.py
+python main.py --cwd <path>
+python main.py --skill <name>
+python main.py safety
+python main.py safety strict
+python main.py safety balanced
+python main.py safety yolo
+python main.py skill
 python main.py sessions
 python main.py show latest
 python main.py show <session_id>
 python main.py resume latest
 python main.py resume <session_id>
 python main.py undo
-python main.py mode
-python main.py mode safe
-python main.py mode yolo
+python main.py help
+python main.py --help
+python main.py -h
 ```
 
 `python main.py` starts a new interactive task.
@@ -229,28 +236,31 @@ for a follow-up task.
 
 `python main.py undo` restores the latest undo buffer.
 
-`python main.py mode` prints the current approval mode.
+`python main.py safety` prints the current safety mode.
 
-`python main.py mode safe` sets `runtime.approval_mode` to `always`. Safe mode
-asks before tool execution, but it is not a sandbox.
+`python main.py safety strict`, `safety balanced`, and `safety yolo` select the
+friendly safety level backed by `runtime.approval_mode`.
 
-`python main.py mode yolo` sets `runtime.approval_mode` to `never`. Tools run
-without approval prompts.
+Mods are the primary interactive specialization path: use `/mod`, `/mod
+<name>`, or `/mod none`. Standalone Skills remain the direct/advanced path:
+use `/skill`, `/skill <name>`, or `/skill none` interactively, `python main.py
+skill` to list them, and `--skill <name>` to start with one selected.
 
 At the task prompt, enter `/help` to print the current prompt keybindings and
 command summary.
 
 ## Tools and safety
 
-Code Squid exposes three local tools to the model:
+Code Squid exposes four local tools to the model:
 
+- `apply_patch(patch)`
 - `read_file(path, start_line=None, end_line=None)`
 - `write_file(path, content)`
 - `run_command(command)`
 
 `read_file` and `write_file` require absolute paths. Paths outside the selected
-workspace root require approval in safe mode and are allowed without prompts in
-yolo mode.
+workspace root require approval in strict mode and are allowed without prompts
+in yolo mode.
 
 `run_command` runs a shell command from the current/configured repo root by
 default. It uses the local shell, has a timeout, and can mutate files or perform
@@ -259,16 +269,19 @@ other local side effects.
 Code Squid is a trusted local tool, not a hardened sandbox. Review tasks and
 model/provider behavior with that in mind.
 
-## Approval mode
+## Safety modes
 
-Friendly mode names map to the underlying setting:
+The user-facing safety names map to the internal approval setting:
 
-- `safe` means `approval_mode=always`
+- `strict` means `approval_mode=always`
+- `balanced` means `approval_mode=guarded`
 - `yolo` means `approval_mode=never`
 
 `never` is trusted local mode. Tools run without prompting.
 
-`always` asks before every tool execution. Press Enter to approve the proposed
+`guarded` allows low-risk workspace actions without prompting and asks for
+approval when an action falls outside those rules. `always` asks before every
+tool execution. Press Enter to approve the proposed
 tool action. Type a comment to reject the action and steer the model; the
 denial is returned to the model as a normal failed tool result before your
 comment is added as the next user instruction.

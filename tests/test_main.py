@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from code_squid.console.cli.cli_options import _resolve_workspace_root
-from code_squid.console.cli.cli_commands import _mode, run_cli
+from code_squid.console.cli.cli_commands import SHELL_HELP, _safety, run_cli
 from code_squid.console.cli.prompt_loop import (
     HELP_TEXT,
     INPUT_IDENTITY_LINE,
@@ -164,14 +164,39 @@ def test_main_passes_selected_cwd_to_existing_commands(
 ) -> None:
     calls = []
 
-    def fake_mode(repo_root: Path, args: list[str]) -> int:
+    def fake_safety(repo_root: Path, args: list[str]) -> int:
         calls.append((repo_root, args))
         return 0
 
-    monkeypatch.setattr("code_squid.console.cli.cli_commands._mode", fake_mode)
+    monkeypatch.setattr("code_squid.console.cli.cli_commands._safety", fake_safety)
 
-    assert run_cli(["--cwd", str(tmp_path), "mode"]) == 0
+    assert run_cli(["--cwd", str(tmp_path), "safety"]) == 0
     assert calls == [(tmp_path.resolve(), [])]
+
+
+def test_shell_safety_forms_dispatch_all_supported_levels(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    calls = []
+
+    def fake_safety(repo_root: Path, args: list[str]) -> int:
+        calls.append((repo_root, args))
+        return 0
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("code_squid.console.cli.cli_commands._safety", fake_safety)
+
+    assert run_cli(["safety"]) == 0
+    assert run_cli(["safety", "strict"]) == 0
+    assert run_cli(["safety", "balanced"]) == 0
+    assert run_cli(["safety", "yolo"]) == 0
+    assert calls == [
+        (tmp_path.resolve(), []),
+        (tmp_path.resolve(), ["strict"]),
+        (tmp_path.resolve(), ["balanced"]),
+        (tmp_path.resolve(), ["yolo"]),
+    ]
 
 
 def test_main_passes_selected_skill_to_interactive(
@@ -197,31 +222,74 @@ def test_main_missing_cwd_value_fails_clearly(monkeypatch, capsys) -> None:
     assert capsys.readouterr().out == "--cwd requires a path\n"
 
 
-def test_mode_displays_strict_for_always(tmp_path, capsys) -> None:
+def test_shell_help_forms_print_help_and_succeed(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    for command in (["help"], ["--help"], ["-h"]):
+        assert run_cli(command) == 0
+        assert capsys.readouterr().out == SHELL_HELP
+
+
+def test_unknown_and_removed_shell_commands_fail(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    assert run_cli(["unknown"]) == 1
+    assert capsys.readouterr().out == SHELL_HELP
+    assert run_cli(["mode"]) == 1
+    assert capsys.readouterr().out == SHELL_HELP
+    assert run_cli(["skills"]) == 1
+    assert capsys.readouterr().out == SHELL_HELP
+
+
+def test_malformed_and_missing_session_commands_fail(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    assert run_cli(["show"]) == 1
+    assert "Usage: python main.py show" in capsys.readouterr().out
+    assert run_cli(["resume"]) == 1
+    assert "Usage: python main.py resume" in capsys.readouterr().out
+    assert run_cli(["show", "latest"]) == 1
+    assert capsys.readouterr().out == "No saved sessions.\n"
+    assert run_cli(["resume", "latest"]) == 1
+    assert capsys.readouterr().out == "No saved sessions.\n"
+
+
+def test_missing_undo_buffer_fails(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    assert run_cli(["undo"]) == 1
+    assert "Missing undo metadata" in capsys.readouterr().out
+
+
+def test_safety_displays_strict_for_always(tmp_path, capsys) -> None:
     _write_settings(tmp_path, {"runtime": {"approval_mode": "always"}})
 
-    assert _mode(tmp_path, []) == 0
+    assert _safety(tmp_path, []) == 0
 
-    assert capsys.readouterr().out == "Current mode: strict (approval_mode=always)\n"
+    assert capsys.readouterr().out == "Current safety mode: strict (approval_mode=always)\n"
 
 
-def test_mode_displays_yolo_for_never(tmp_path, capsys) -> None:
+def test_safety_displays_yolo_for_never(tmp_path, capsys) -> None:
     _write_settings(tmp_path, {"runtime": {"approval_mode": "never"}})
 
-    assert _mode(tmp_path, []) == 0
+    assert _safety(tmp_path, []) == 0
 
-    assert capsys.readouterr().out == "Current mode: yolo (approval_mode=never)\n"
+    assert capsys.readouterr().out == "Current safety mode: yolo (approval_mode=never)\n"
 
 
-def test_mode_displays_balanced_for_guarded(tmp_path, capsys) -> None:
+def test_safety_displays_balanced_for_guarded(tmp_path, capsys) -> None:
     _write_settings(tmp_path, {"runtime": {"approval_mode": "guarded"}})
 
-    assert _mode(tmp_path, []) == 0
+    assert _safety(tmp_path, []) == 0
 
-    assert capsys.readouterr().out == "Current mode: balanced (approval_mode=guarded)\n"
+    assert capsys.readouterr().out == "Current safety mode: balanced (approval_mode=guarded)\n"
 
 
-def test_mode_strict_writes_approval_always_and_preserves_settings(tmp_path, capsys) -> None:
+def test_safety_strict_writes_approval_always_and_preserves_settings(tmp_path, capsys) -> None:
     settings_path = _write_settings(
         tmp_path,
         {
@@ -230,7 +298,7 @@ def test_mode_strict_writes_approval_always_and_preserves_settings(tmp_path, cap
         },
     )
 
-    assert _mode(tmp_path, ["strict"]) == 0
+    assert _safety(tmp_path, ["strict"]) == 0
 
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
     assert settings == {
@@ -238,41 +306,41 @@ def test_mode_strict_writes_approval_always_and_preserves_settings(tmp_path, cap
         "runtime": {"approval_mode": "always", "max_tool_steps": 3},
     }
     assert capsys.readouterr().out == (
-        "Mode set to strict (approval_mode=always). "
+        "Safety mode set to strict (approval_mode=always). "
         "Code Squid will ask before every tool execution. This is not a sandbox.\n"
     )
 
 
-def test_mode_yolo_writes_approval_never(tmp_path, capsys) -> None:
+def test_safety_yolo_writes_approval_never(tmp_path, capsys) -> None:
     settings_path = _write_settings(tmp_path, {"runtime": {"approval_mode": "always"}})
 
-    assert _mode(tmp_path, ["yolo"]) == 0
+    assert _safety(tmp_path, ["yolo"]) == 0
 
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
     assert settings["runtime"]["approval_mode"] == "never"
     assert capsys.readouterr().out == (
-        "Mode set to yolo (approval_mode=never). "
+        "Safety mode set to yolo (approval_mode=never). "
         "Tools will run without approval prompts.\n"
     )
 
 
-def test_mode_balanced_writes_approval_guarded(tmp_path, capsys) -> None:
+def test_safety_balanced_writes_approval_guarded(tmp_path, capsys) -> None:
     settings_path = _write_settings(tmp_path, {"runtime": {"approval_mode": "always"}})
 
-    assert _mode(tmp_path, ["balanced"]) == 0
+    assert _safety(tmp_path, ["balanced"]) == 0
 
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
     assert settings["runtime"]["approval_mode"] == "guarded"
     assert capsys.readouterr().out == (
-        "Mode set to balanced (approval_mode=guarded). "
+        "Safety mode set to balanced (approval_mode=guarded). "
         "Low-risk workspace actions can run without approval prompts.\n"
     )
 
 
-def test_mode_strict_creates_minimal_settings_file(tmp_path, capsys) -> None:
+def test_safety_strict_creates_minimal_settings_file(tmp_path, capsys) -> None:
     settings_path = tmp_path / ".code-squid" / "settings.json"
 
-    assert _mode(tmp_path, ["strict"]) == 0
+    assert _safety(tmp_path, ["strict"]) == 0
 
     assert json.loads(settings_path.read_text(encoding="utf-8")) == {
         "runtime": {"approval_mode": "always"}
@@ -280,25 +348,44 @@ def test_mode_strict_creates_minimal_settings_file(tmp_path, capsys) -> None:
     capsys.readouterr()
 
 
-def test_mode_invalid_value_does_not_modify_settings(tmp_path, capsys) -> None:
+def test_safety_invalid_value_does_not_modify_settings(tmp_path, capsys) -> None:
     settings_path = _write_settings(tmp_path, {"runtime": {"approval_mode": "always"}})
     original = settings_path.read_text(encoding="utf-8")
 
-    assert _mode(tmp_path, ["banana"]) == 1
+    assert _safety(tmp_path, ["banana"]) == 1
 
     assert settings_path.read_text(encoding="utf-8") == original
-    assert capsys.readouterr().out == "Invalid mode. Valid options: strict, balanced, yolo\n"
+    assert capsys.readouterr().out == (
+        "Invalid safety command. Usage: "
+        "python main.py safety [strict|balanced|yolo]\n"
+    )
 
 
-def test_help_text_lists_new_friendly_modes() -> None:
-    assert "  python main.py mode strict\n" in HELP_TEXT
-    assert "  python main.py mode balanced\n" in HELP_TEXT
-    assert "  python main.py mode yolo\n" in HELP_TEXT
-    assert "  /skill shows the active skill and available skills.\n" in HELP_TEXT
-    assert "  /skill <name> sets the active skill for future tasks and follow-ups.\n" in HELP_TEXT
-    assert "  /skill none clears the active skill.\n" in HELP_TEXT
-    assert "  python main.py mode safe\n" not in HELP_TEXT
-    assert "  python main.py mode guarded\n" not in HELP_TEXT
+def test_help_text_lists_current_interactive_commands() -> None:
+    for command in (
+        "/new",
+        "/exit",
+        "/mod",
+        "/skill",
+        "/provider",
+        "/model",
+        "/safety",
+        "/sessions",
+        "/show",
+        "/resume",
+        "/undo",
+        "/cwd",
+    ):
+        assert command in HELP_TEXT
+    assert "advanced/direct" in HELP_TEXT
+    assert "python main.py" not in HELP_TEXT
+
+
+def test_shell_help_matches_current_command_names() -> None:
+    assert "python main.py safety [strict|balanced|yolo]" in SHELL_HELP
+    assert "python main.py skill" in SHELL_HELP
+    assert "python main.py mode" not in SHELL_HELP
+    assert "python main.py skills" not in SHELL_HELP
 
 
 def test_format_skill_status_lists_current_skill_and_available_skills(
@@ -1099,6 +1186,41 @@ def test_interactive_mod_selection_is_used_for_new_and_follow_up_runs(
     assert follow_up_runs == [
         ("active-session", "follow up", None, "review-pack")
     ]
+
+
+def test_bare_exit_and_quit_are_forwarded_as_task_text(monkeypatch, tmp_path) -> None:
+    new_tasks = []
+    follow_up_tasks = []
+
+    def fake_new(repo_root, task, settings, display, skill_name=None):
+        new_tasks.append(task)
+        return 0, "active-session"
+
+    def fake_follow_up(
+        repo_root,
+        session_id,
+        task,
+        settings,
+        display,
+        skill_name=None,
+    ):
+        follow_up_tasks.append(task)
+        return 0, session_id
+
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._prompt_task",
+        _fake_prompt_tasks(["exit", "quit", "/exit"]),
+    )
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_new_session_task", fake_new)
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._run_follow_up_task",
+        fake_follow_up,
+    )
+
+    assert _run_interactive(tmp_path) == 0
+    assert new_tasks == ["exit"]
+    assert follow_up_tasks == ["quit"]
 
 
 def test_new_session_passes_debug_without_trace_to_terminal_display(

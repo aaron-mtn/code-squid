@@ -1,3 +1,16 @@
+- 2026-09-03: Cleaned the CLI command surface around current product naming and
+  shell behavior. Shell `safety` replaces `mode`, singular `skill` replaces
+  `skills`, and `help`, `--help`, and `-h` now print complete shell usage.
+  Unknown commands, malformed command usage, missing sessions, and unusable
+  undo buffers return nonzero. Interactive exit handling now reserves only
+  `/exit`; bare `exit` and `quit` remain task text. Prompt help now separates
+  core interaction, Mod-first specialization, runtime settings, and
+  session/workspace controls. README command, safety, specialization, and
+  built-in Tool facts were brought current. Focused CLI/settings/session suite:
+  142 passed. Full suite: 753 passed. `main.py`, `code_squid`, and `squid_core`
+  compiled successfully; affected CLI imports loaded; and `git diff --check`
+  passed. No live model inference or network calls were run, and no follow-up
+  work is intentionally deferred.
 - 2026-09-03: Added the missing interactive CLI command surface for runtime
   settings and session control. `/provider`, `/model`, and `/safety` now report
   and persist workspace settings without losing unrelated fields; provider and

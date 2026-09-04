@@ -88,6 +88,8 @@ def _handle_skill_input(
     return skill.name, None
 
 
-def handle_skills() -> int:
+def handle_skill_listing() -> int:
+    """Print standalone Skills for the singular shell ``skill`` command."""
+
     print("\n".join(_format_available_skills()))
     return 0
