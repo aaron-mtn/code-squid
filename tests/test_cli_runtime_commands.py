@@ -29,7 +29,7 @@ def _write_settings(repo_root: Path, settings: dict) -> Path:
 def _prompt_sequence(responses: list[str]):
     pending = list(responses)
 
-    def prompt(label: str) -> str:
+    def prompt(label: str, animator=None) -> str:
         if not pending:
             raise AssertionError("No fake prompt responses left")
         return pending.pop(0)
@@ -40,7 +40,15 @@ def _prompt_sequence(responses: list[str]):
 class QuietDisplay:
     """Minimal display used to isolate command-loop behavior."""
 
+    header = None
+
     def start(self) -> None:
+        pass
+
+    def prepare_header_for_prompt(self) -> None:
+        pass
+
+    def stop_header(self) -> None:
         pass
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import random
+import threading
 
 import pytest
 
@@ -47,6 +48,20 @@ class FakeStream:
 
     def flush(self) -> None:
         self.flushes += 1
+
+
+class SignalingStream(FakeStream):
+    """Expose worker redraws without relying on timing sleeps."""
+
+    def __init__(self) -> None:
+        super().__init__(tty=True)
+        self.worker_write = threading.Event()
+
+    def write(self, value: str) -> int:
+        result = super().write(value)
+        if threading.current_thread().name == "code-squid-binary-rain":
+            self.worker_write.set()
+        return result
 
 
 def _empty_grid(width: int) -> tuple[list[list[int]], list[list[str]]]:
@@ -145,6 +160,60 @@ def test_non_tty_uses_static_fallback_without_ansi() -> None:
 
     assert header.show() is False
     assert stream.writes == [f"{TITLE.center(40)}\n"]
+
+
+def test_non_tty_start_never_creates_animator() -> None:
+    stream = FakeStream(tty=False)
+    header = BinaryRainHeader(
+        stream=stream,
+        terminal_size=lambda: os.terminal_size((40, 20)),
+    )
+
+    assert header.start() is False
+    assert header.has_animator is False
+    assert header.start() is False
+    assert stream.writes == [f"{TITLE.center(40)}\n"]
+
+
+def test_lifecycle_owns_one_worker_and_preserves_state_across_pause_resume() -> None:
+    stream = SignalingStream()
+    header = BinaryRainHeader(
+        stream=stream,
+        rng=random.Random(9),
+        frame_interval=10,
+        terminal_size=lambda: os.terminal_size((40, 20)),
+        ansi_supported=lambda stream: True,
+    )
+
+    assert header.start() is True
+    worker = header._thread
+    assert worker is not None
+    assert header.start() is True
+    assert header._thread is worker
+
+    drops = header._drops
+    stream.worker_write.clear()
+    header.resume()
+    assert stream.worker_write.wait(timeout=1)
+    header.pause()
+    writes_after_pause = len(stream.writes)
+    assert header._drops is drops
+
+    assert header.reanchor() is True
+    assert len(stream.writes) == writes_after_pause + 1
+    assert header._drops is drops
+
+    stream.worker_write.clear()
+    header.resume()
+    assert stream.worker_write.wait(timeout=1)
+    header.pause()
+    assert len(stream.writes) > writes_after_pause
+    assert header._drops is drops
+
+    header.stop()
+    assert not worker.is_alive()
+    assert header.has_animator is False
+    assert stream.writes[-1] == SHOW_CURSOR
 
 
 def test_narrow_tty_uses_clipped_static_fallback() -> None:

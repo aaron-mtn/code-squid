@@ -30,7 +30,9 @@ def _submit_terminal_input(monkeypatch, terminal_input: str) -> str:
         prompt_thread = threading.Thread(target=prompt)
         prompt_thread.start()
         pipe_input.send_text(terminal_input)
-        prompt_thread.join(timeout=5)
+        # Large paste processing can be slower under a loaded Windows test
+        # runner; this is a ceiling, not an intentional test delay.
+        prompt_thread.join(timeout=10)
 
         assert not prompt_thread.is_alive()
 
@@ -63,6 +65,66 @@ def test_prompt_multiline_input_uses_shared_multiline_bindings(monkeypatch) -> N
     assert kwargs["key_bindings"] is not None
     assert ANSI_SEQUENCES["\x1b[27;2;13~"] == Keys.ControlJ
     assert ANSI_SEQUENCES["\x1b[13;2u"] == Keys.ControlJ
+
+
+def test_prompt_resumes_animator_with_output_safe_redraw(monkeypatch) -> None:
+    events = []
+
+    class FakeAnimator:
+        has_animator = True
+
+        def resume(self, redraw) -> None:
+            events.append("resume")
+            redraw("frame")
+
+        def pause(self) -> None:
+            events.append("pause")
+
+        def write_live_frame(self, frame: str) -> None:
+            events.append(f"draw:{frame}")
+
+    class FakePromptSession:
+        def prompt(self, *args, **kwargs) -> str:
+            kwargs["pre_run"]()
+            events.append("prompt")
+            return "task"
+
+    monkeypatch.setattr("code_squid.console.ui.prompt_input.PromptSession", FakePromptSession)
+    monkeypatch.setattr(
+        "code_squid.console.ui.prompt_input.get_app",
+        lambda: type("FakeApp", (), {"loop": object()})(),
+    )
+
+    async def fake_run_in_terminal(callback):
+        events.append("safe-output")
+        callback()
+
+    class CompletedFuture:
+        def __init__(self, coroutine) -> None:
+            self.coroutine = coroutine
+
+        def result(self) -> None:
+            import asyncio
+
+            asyncio.run(self.coroutine)
+
+    monkeypatch.setattr(
+        "code_squid.console.ui.prompt_input.run_in_terminal",
+        fake_run_in_terminal,
+    )
+    monkeypatch.setattr(
+        "code_squid.console.ui.prompt_input.asyncio.run_coroutine_threadsafe",
+        lambda coroutine, loop: CompletedFuture(coroutine),
+    )
+
+    assert prompt_multiline_input("› ", animator=FakeAnimator()) == "task"
+    assert events == [
+        "resume",
+        "safe-output",
+        "draw:frame",
+        "prompt",
+        "pause",
+    ]
 
 
 def test_prompt_multiline_input_preserves_long_single_line_input(monkeypatch) -> None:

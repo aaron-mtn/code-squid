@@ -1,3 +1,31 @@
+- 2026-09-03: Extended the binary-rain header from a bounded startup animation
+  to a single lifecycle-owned idle animator. `TerminalDisplay` now starts,
+  pauses, and stops it at presentation boundaries; prompt input sends frames
+  through prompt_toolkit's `run_in_terminal` seam with synchronous
+  backpressure, and shutdown joins the worker and restores the cursor. Added
+  event-based coverage for idempotent start,
+  pause/resume state retention, non-TTY behavior, worker teardown, prompt-safe
+  resume/pause ordering, output transition pausing, prompt re-anchoring, and
+  exit cleanup. Re-anchoring the same preserved state before later prompts
+  prevents relative redraws from ever targeting intervening command output.
+  Focused header/prompt/terminal/CLI suite: 207 passed. Full suite: 775
+  passed. Production packages compiled, affected imports loaded, and
+  `git diff --check` passed. Normal and forced-ANSI PTY smokes covered static
+  fallback, live typing, `/help`, prompt return, `/exit`, and cursor cleanup;
+  no model inference was run.
+- 2026-09-03: Wired the bounded binary-rain header into normal interactive CLI
+  startup as the sole startup identity. Removed the old ASCII logo, subtitle,
+  bordered startup card, and startup controls reminder; retained provider,
+  model, safety, workspace, and active Skill details as plain lines beneath a
+  dim divider. The prompt identity is now `@code-squid`, and `/help` owns an
+  explicit Input section with Enter, Alt+Enter, and Ctrl+C guidance. Focused
+  console/startup/help suite: 185 passed. Full suite: 768 passed. Production
+  packages compiled, affected imports loaded, and `git diff --check` passed.
+  A manual PTY launch confirmed the fallback title, plain readable startup
+  details, dim divider, cleaned prompt identity, help guidance, usable prompt,
+  and cursor restoration; that PTY did not offer animation support, while the
+  forced-ANSI header tests cover the bounded animated path. No model inference
+  was run, and no follow-up work is intentionally deferred.
 - 2026-09-03: Added the reusable Code Squid binary-rain header component under
   console UI without replacing the existing startup presentation. The new
   9-row renderer keeps a fixed centered title over sparse, independently paced

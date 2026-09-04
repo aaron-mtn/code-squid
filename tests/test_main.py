@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from code_squid.console.cli.cli_options import _resolve_workspace_root
 from code_squid.console.cli.cli_commands import SHELL_HELP, _safety, run_cli
 from code_squid.console.cli.prompt_loop import (
@@ -23,7 +25,6 @@ from squid_core.model_adapter import ModelRequestError
 from main import main
 from squid_core.storage import SessionStore
 from code_squid.console.ui.display import (
-    CODE_SQUID_BANNER,
     RUN_STARTED_DIVIDER,
     SOFT_CYAN_HEX,
     StartupInfo,
@@ -54,6 +55,7 @@ class FakeDisplay:
         self.failure_path = None
         self.finished = False
         self.run_result = None
+        self.header = None
 
     def start(self) -> None:
         self.starts += 1
@@ -67,6 +69,12 @@ class FakeDisplay:
     def loop_finished(self, session, run_result=None) -> None:
         self.finished = True
         self.run_result = run_result
+
+    def prepare_header_for_prompt(self) -> None:
+        pass
+
+    def stop_header(self) -> None:
+        pass
 
 
 class FakeSessionStore:
@@ -381,6 +389,13 @@ def test_help_text_lists_current_interactive_commands() -> None:
     assert "python main.py" not in HELP_TEXT
 
 
+def test_help_text_owns_input_controls_guidance() -> None:
+    assert "Input:" in HELP_TEXT
+    assert "Enter       Send" in HELP_TEXT
+    assert "Alt+Enter   New line" in HELP_TEXT
+    assert "Ctrl+C      Cancel before a run or stop the current run" in HELP_TEXT
+
+
 def test_shell_help_matches_current_command_names() -> None:
     assert "python main.py safety [strict|balanced|yolo]" in SHELL_HELP
     assert "python main.py skill" in SHELL_HELP
@@ -532,7 +547,7 @@ def _expected_startup_output(repo_root: Path) -> str:
         model="qwen3.5-9b",
         approval_mode="yolo",
     )
-    return f"{CODE_SQUID_BANNER}\n\n{TerminalDisplay()._startup_info_panel(startup_info)}\n\n"
+    return f"<binary-header>\n{TerminalDisplay()._startup_info_panel(startup_info)}\n\n"
 
 
 class BannerDisplay(FakeDisplay):
@@ -549,9 +564,8 @@ class BannerDisplay(FakeDisplay):
 
     def start(self) -> None:
         super().start()
-        print(CODE_SQUID_BANNER)
+        print("<binary-header>")
         if self.startup_info is not None:
-            print()
             print(TerminalDisplay()._startup_info_panel(self.startup_info))
         print()
 
@@ -563,7 +577,7 @@ class BannerDisplay(FakeDisplay):
 
 
 def _fake_prompt_task(response: str):
-    def fake_prompt_task(label: str) -> str:
+    def fake_prompt_task(label: str, animator=None) -> str:
         print(INPUT_IDENTITY_LINE)
         print(PROMPT_PREFIX, end="")
         return response
@@ -574,7 +588,7 @@ def _fake_prompt_task(response: str):
 def _fake_prompt_tasks(responses: list[str]):
     pending = list(responses)
 
-    def fake_prompt_task(label: str) -> str:
+    def fake_prompt_task(label: str, animator=None) -> str:
         if not pending:
             raise AssertionError("No fake prompt responses left")
         print(INPUT_IDENTITY_LINE)
@@ -584,7 +598,7 @@ def _fake_prompt_tasks(responses: list[str]):
     return fake_prompt_task
 
 
-def _cancel_prompt_task(label: str) -> str:
+def _cancel_prompt_task(label: str, animator=None) -> str:
     print(INPUT_IDENTITY_LINE)
     print(PROMPT_PREFIX, end="")
     raise KeyboardInterrupt
@@ -593,7 +607,7 @@ def _cancel_prompt_task(label: str) -> str:
 def test_prompt_task_uses_agent_prompt_without_toolbar(monkeypatch) -> None:
     prompt_calls = []
 
-    def fake_prompt(prompt, *, preface=None) -> str:
+    def fake_prompt(prompt, *, preface=None, animator=None) -> str:
         prompt_calls.append((prompt, preface))
         return "Do the thing"
 
@@ -602,6 +616,8 @@ def test_prompt_task_uses_agent_prompt_without_toolbar(monkeypatch) -> None:
     assert _prompt_task("Task") == "Do the thing"
 
     prompt, preface = prompt_calls[0]
+    assert INPUT_IDENTITY_LINE == "@code-squid"
+    assert "🦑" not in INPUT_IDENTITY_LINE
     assert preface == [(PROMPT_STYLE, INPUT_IDENTITY_LINE)]
     assert prompt == [(PROMPT_STYLE, PROMPT_PREFIX)]
     assert prompt[0][0] == preface[0][0]
@@ -847,6 +863,52 @@ def test_resume_session_empty_task_exits_without_run(monkeypatch, tmp_path, caps
     assert displays[0].starts == 1
     assert displays[0].run_starts == 0
     assert session_store.load_messages() == []
+
+
+def test_interactive_exit_stops_header(monkeypatch, tmp_path) -> None:
+    class ExitDisplay(FakeDisplay):
+        def __init__(self) -> None:
+            super().__init__()
+            self.header = object()
+            self.header_stops = 0
+
+        def stop_header(self) -> None:
+            self.header_stops += 1
+
+    display = ExitDisplay()
+
+    def exit_prompt(label, animator=None) -> str:
+        assert animator is display.header
+        return "/exit"
+
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_display", lambda *args: display)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", exit_prompt)
+
+    assert _run_interactive(tmp_path) == 0
+    assert display.header_stops == 1
+
+
+def test_interactive_eof_stops_header(monkeypatch, tmp_path) -> None:
+    class EofDisplay(FakeDisplay):
+        def __init__(self) -> None:
+            super().__init__()
+            self.header = object()
+            self.header_stops = 0
+
+        def stop_header(self) -> None:
+            self.header_stops += 1
+
+    display = EofDisplay()
+
+    def eof_prompt(label, animator=None) -> str:
+        raise EOFError
+
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_display", lambda *args: display)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", eof_prompt)
+
+    with pytest.raises(EOFError):
+        _run_interactive(tmp_path)
+    assert display.header_stops == 1
 
 
 def test_resume_session_help_exits_without_follow_up_or_run(monkeypatch, tmp_path, capsys) -> None:

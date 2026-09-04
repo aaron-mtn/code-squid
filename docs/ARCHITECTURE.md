@@ -70,13 +70,20 @@ and application layer; `squid_core/` is the reusable agent runtime.
     `skill_commands.py` handles Skill status, listing, and selection.
   - `console/ui/` owns terminal presentation and input. `display.py` keeps
     `TerminalDisplay` as the lifecycle coordinator used by the Agent loop.
-    `banner.py` owns startup data, display labels, and rendering; `approval.py`
+    `banner.py` owns the plain startup details and dim structural divider;
+    `approval.py`
     owns approval panels, prompts, and compact results; `tool_display.py` owns
     tool/action labels, command recognition, and debug result projection; and
     `formatting.py` owns shared styles, links, path shortening, wrapping, and
     final-summary Markdown rendering. `binary_header.py` owns the reusable,
-    bounded binary-rain composition, semantic rendering, and safe terminal
-    lifecycle; it is intentionally not wired into startup presentation yet.
+    binary-rain composition, semantic rendering, and the single background
+    animator lifecycle. `TerminalDisplay` starts and owns that animator, pauses
+    it before run output, and stops it during CLI teardown. While input is
+    active, `prompt_input.py` sends each worker frame through prompt_toolkit's
+    `run_in_terminal` seam so header frames and composer redraws remain
+    serialized with backpressure and no queued output after pause.
+    After intervening output, the preserved rain state is re-anchored at the
+    current cursor before the next prompt; old frames remain frozen in history.
     `prompt_input.py`, `sessions.py`, and `spinner.py` retain their focused
     input, saved-session, and animation responsibilities. Presentation modules
     do not own approval policy, Tool execution, or Tool-result semantics.

@@ -23,7 +23,8 @@ from code_squid.console.ui.approval import (
     INPUT_PROMPT_PREFIX,
     INPUT_PROMPT_STYLE,
 )
-from code_squid.console.ui.display import INPUT_IDENTITY_LINE
+from code_squid.console.ui.display import INPUT_IDENTITY_LINE, TerminalDisplay
+from code_squid.console.ui.binary_header import BinaryRainHeader
 
 
 PROMPT_PREFIX = INPUT_PROMPT_PREFIX
@@ -40,9 +41,11 @@ Core interaction:
   Normal input runs a coding task.
   /new starts a new session boundary.
   /exit exits the interactive prompt.
-  Enter sends.
-  Alt+Enter inserts a newline.
-  Ctrl+C cancels before a run or interrupts an active run.
+
+Input:
+  Enter       Send
+  Alt+Enter   New line
+  Ctrl+C      Cancel before a run or stop the current run
 
 Specialization:
   /mod shows the active Mod and available Mods.
@@ -83,15 +86,22 @@ def _print_help() -> None:
     print(HELP_TEXT)
 
 
-def _prompt_task(label: str) -> str:
+def _prompt_task(label: str, animator: BinaryRainHeader | None = None) -> str:
     return prompt_multiline_input(
         FormattedText([(PROMPT_STYLE, PROMPT_PREFIX)]),
         preface=FormattedText([(PROMPT_STYLE, INPUT_IDENTITY_LINE)]),
+        animator=animator,
     )
 
 
-def _prompt_task_or_cancel(label: str) -> str | None:
+def _prompt_task_or_cancel(
+    label: str,
+    display: TerminalDisplay | None = None,
+) -> str | None:
     try:
+        if display is not None:
+            display.prepare_header_for_prompt()
+            return _prompt_task(label, display.header)
         return _prompt_task(label)
     except KeyboardInterrupt:
         print(CANCELLED_BEFORE_RUN_MESSAGE)
@@ -101,19 +111,22 @@ def _prompt_task_or_cancel(label: str) -> str | None:
 def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
     settings = load_settings(repo_root)
     display = _run_display(repo_root, settings, skill_name)
-    display.start()
-    task = _prompt_task_or_cancel("Task")
-    if task is None:
-        return 0
-    if _is_help_input(task):
-        _print_help()
-        return 0
-    if not task.strip():
-        print("No task entered; nothing to run.")
-        return 0
+    try:
+        display.start()
+        task = _prompt_task_or_cancel("Task", display)
+        if task is None:
+            return 0
+        if _is_help_input(task):
+            _print_help()
+            return 0
+        if not task.strip():
+            print("No task entered; nothing to run.")
+            return 0
 
-    status, _ = _run_new_session_task(repo_root, task, settings, display, skill_name)
-    return status
+        status, _ = _run_new_session_task(repo_root, task, settings, display, skill_name)
+        return status
+    finally:
+        display.stop_header()
 
 
 def _resume_session(repo_root: Path, session_id: str, skill_name: str | None = None) -> int:
@@ -133,65 +146,68 @@ def _run_interactive(
 ) -> int:
     settings = load_settings(repo_root)
     display = _run_display(repo_root, settings, skill_name)
-    display.start()
     mod_name: str | None = None
 
-    while True:
-        task = _prompt_task_or_cancel("Task")
-        if task is None:
-            return 0
-        if _is_exit_input(task):
-            return 0
-        if _is_new_input(task):
-            active_session_id = None
-            continue
-        if _is_help_input(task):
-            _print_help()
-            continue
-        handled, settings = handle_runtime_command(repo_root, task, settings)
-        if handled:
-            continue
-        handled, active_session_id = handle_control_command(
-            repo_root,
-            task,
-            active_session_id,
-        )
-        if handled:
-            continue
-        if _is_skill_input(task):
-            skill_name, mod_name = _handle_skill_input(task, skill_name, mod_name)
-            continue
-        if _is_mod_input(task):
-            mod_name, skill_name = _handle_mod_input(task, mod_name, skill_name)
-            continue
-        if not task.strip():
-            continue
+    try:
+        display.start()
+        while True:
+            task = _prompt_task_or_cancel("Task", display)
+            if task is None:
+                return 0
+            if _is_exit_input(task):
+                return 0
+            if _is_new_input(task):
+                active_session_id = None
+                continue
+            if _is_help_input(task):
+                _print_help()
+                continue
+            handled, settings = handle_runtime_command(repo_root, task, settings)
+            if handled:
+                continue
+            handled, active_session_id = handle_control_command(
+                repo_root,
+                task,
+                active_session_id,
+            )
+            if handled:
+                continue
+            if _is_skill_input(task):
+                skill_name, mod_name = _handle_skill_input(task, skill_name, mod_name)
+                continue
+            if _is_mod_input(task):
+                mod_name, skill_name = _handle_mod_input(task, mod_name, skill_name)
+                continue
+            if not task.strip():
+                continue
 
-        if active_session_id is None:
-            if mod_name is None:
-                status, session_id = _run_new_session_task(
-                    repo_root, task, settings, display, skill_name
-                )
+            if active_session_id is None:
+                if mod_name is None:
+                    status, session_id = _run_new_session_task(
+                        repo_root, task, settings, display, skill_name
+                    )
+                else:
+                    status, session_id = _run_new_session_task(
+                        repo_root, task, settings, display, mod_name=mod_name
+                    )
             else:
-                status, session_id = _run_new_session_task(
-                    repo_root, task, settings, display, mod_name=mod_name
-                )
-        else:
-            if mod_name is None:
-                status, session_id = _run_follow_up_task(
-                    repo_root, active_session_id, task, settings, display, skill_name
-                )
-            else:
-                status, session_id = _run_follow_up_task(
-                    repo_root,
-                    active_session_id,
-                    task,
-                    settings,
-                    display,
-                    mod_name=mod_name,
-                )
+                if mod_name is None:
+                    status, session_id = _run_follow_up_task(
+                        repo_root, active_session_id, task, settings, display, skill_name
+                    )
+                else:
+                    status, session_id = _run_follow_up_task(
+                        repo_root,
+                        active_session_id,
+                        task,
+                        settings,
+                        display,
+                        mod_name=mod_name,
+                    )
 
-        if session_id is not None:
-            active_session_id = session_id
-        if status != 0:
-            return status
+            if session_id is not None:
+                active_session_id = session_id
+            if status != 0:
+                return status
+    finally:
+        display.stop_header()

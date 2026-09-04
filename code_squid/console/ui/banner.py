@@ -1,37 +1,22 @@
-"""Startup banner data and rendering for the Code Squid console."""
+"""Startup information rendering for the Code Squid console."""
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from code_squid.console.ui.formatting import (
-    structural_bordered_line,
-    structural_text,
-    truncate_middle,
-)
+from code_squid.console.ui.formatting import DIM_STYLE, styled_text
 
 
-CODE_SQUID_BANNER = """\
-
- ██████╗ ██████╗ ██████╗ ███████╗    ███████╗ ██████╗ ██╗   ██╗██╗██████╗
-██╔════╝██╔═══██╗██╔══██╗██╔════╝    ██╔════╝██╔═══██╗██║   ██║██║██╔══██╗
-██║     ██║   ██║██║  ██║█████╗      ███████╗██║   ██║██║   ██║██║██║  ██║
-██║     ██║   ██║██║  ██║██╔══╝      ╚════██║██║▄▄ ██║██║   ██║██║██║  ██║
-╚██████╗╚██████╔╝██████╔╝███████╗    ███████║╚██████╔╝╚██████╔╝██║██████╔╝
- ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝    ╚══════╝ ╚══▀▀═╝  ╚═════╝ ╚═╝╚═════╝
-
-                 🦑 A small coding agent with tentacles."""
-STARTUP_PANEL_WIDTH = 76
+STARTUP_DIVIDER = "─" * 61
 FRIENDLY_APPROVAL_MODES = {
     "always": "strict",
     "guarded": "balanced",
     "never": "yolo",
 }
-STARTUP_CONTROLS = "Enter send • Alt+Enter newline • Ctrl+C stop"
 
 
 @dataclass(frozen=True)
 class StartupInfo:
-    """Values shown in the startup panel for an interactive run."""
+    """Values shown beneath the header for an interactive run."""
 
     directory: Path
     provider: str
@@ -41,32 +26,19 @@ class StartupInfo:
 
 
 def startup_info_panel(startup_info: StartupInfo) -> str:
-    """Render the fixed-width startup information panel."""
-    inner_width = STARTUP_PANEL_WIDTH - 2
-    title = " startup "
-    top = f"╭─{title}{'─' * max(inner_width - len(title) - 1, 0)}╮"
-    bottom = f"╰{'─' * inner_width}╯"
+    """Render restrained startup details without card or border chrome."""
     lines = [
-        ("Directory", str(startup_info.directory)),
-        ("Provider", startup_info.provider),
-        ("Model", startup_info.model),
-        ("Approval mode", startup_info.approval_mode),
+        styled_text(STARTUP_DIVIDER, DIM_STYLE),
+        _startup_info_line("Provider", startup_info.provider),
+        _startup_info_line("Model", startup_info.model),
+        _startup_info_line("Safety", startup_info.approval_mode),
     ]
     if startup_info.skill_name is not None:
-        lines.append(("Skill", startup_info.skill_name))
-    lines.append(("Controls", STARTUP_CONTROLS))
-    return "\n".join(
-        [
-            structural_text(top),
-            *(_startup_info_line(label, value, inner_width) for label, value in lines),
-            structural_text(bottom),
-        ]
-    )
+        lines.append(_startup_info_line("Skill", startup_info.skill_name))
+    lines.append(_startup_info_line("Workspace", str(startup_info.directory)))
+    return "\n".join(lines)
 
 
-def _startup_info_line(label: str, value: str, inner_width: int) -> str:
-    label_text = f"{label}:"
-    available = inner_width - 2 - 15
-    value = truncate_middle(str(value), max(available, 1))
-    content = f" {label_text:<14} {value}"
-    return structural_bordered_line("│", f"{content:<{inner_width}}", "│")
+def _startup_info_line(label: str, value: str) -> str:
+    """Align a startup label while leaving its value as normal content."""
+    return f"{label:<10}{value}"

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from concurrent.futures import CancelledError
 from dataclasses import dataclass
 import os
 import random
 import shutil
 import sys
+import threading
 import time
 from typing import Callable, Sequence, TextIO
 
@@ -19,10 +21,14 @@ MIN_HEIGHT = HEADER_HEIGHT + 1
 
 # This scales each drop's independently randomized movement per frame. Keeping
 # it in one obvious place makes presentation tuning possible without a CLI API.
-RAIN_SPEED = 0.2
+RAIN_SPEED = 0.7
 FRAME_INTERVAL = 0.05
 STARTUP_FRAME_COUNT = 24
 DROP_DENSITY = 0.24
+# Startup details, the separating blank line, and the prompt identity occupy
+# seven rows between the header and prompt_toolkit's input layout. Live redraws
+# return to that layout origin before prompt_toolkit repaints typed content.
+LIVE_ROWS_BELOW_HEADER = 7
 
 EMPTY = 0
 TRAIL_BIT = 1
@@ -157,7 +163,7 @@ def static_title(width: int) -> str:
 
 
 class BinaryRainHeader:
-    """Render a short animation and leave its final frame above later output."""
+    """Own the fixed header region and its single idle-time animation worker."""
 
     def __init__(
         self,
@@ -168,21 +174,184 @@ class BinaryRainHeader:
         sleeper: Callable[[float], None] = time.sleep,
         terminal_size: Callable[[], os.terminal_size] | None = None,
         ansi_supported: Callable[[TextIO], bool] | None = None,
+        frame_interval: float = FRAME_INTERVAL,
     ) -> None:
-        self.stream = stream if stream is not None else sys.stdout
+        # With no explicit stream, resolve stdout per frame so prompt_toolkit's
+        # output proxy can serialize worker writes with its input redraws.
+        self.stream = stream
         self.frame_count = max(frame_count, 0)
         self.rng = rng if rng is not None else random.Random()
         self.sleeper = sleeper
+        self.frame_interval = max(frame_interval, 0)
         self.terminal_size = terminal_size or (
             lambda: shutil.get_terminal_size(fallback=(80, 24))
         )
         self.ansi_supported = ansi_supported or _enable_ansi
+        self._condition = threading.Condition()
+        self._render_lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._started = False
+        self._paused = True
+        self._stopping = False
+        self._animation_available = False
+        self._size: os.terminal_size | None = None
+        self._draw_width_value = 0
+        self._drops: list[Drop] = []
+        self._live_redraw: Callable[[str], None] | None = None
+
+    def start(self) -> bool:
+        """Render the first frame and create at most one paused animator."""
+        with self._condition:
+            if self._started:
+                return self._animation_available
+            self._started = True
+
+            stream = self._output_stream()
+            size = self.terminal_size()
+            if not self._can_animate(size, stream):
+                self._write_static(size.columns, stream)
+                return False
+
+            self._size = size
+            self._draw_width_value = self._draw_width(size)
+            self._drops = create_drops(self._draw_width_value, self.rng)
+            self._animation_available = True
+            self._stopping = False
+            self._paused = True
+            try:
+                self._render_next_frame(anchored=False)
+            except (OSError, ValueError):
+                self._animation_available = False
+                return False
+            self._thread = threading.Thread(
+                target=self._animate,
+                name="code-squid-binary-rain",
+                daemon=True,
+            )
+            self._thread.start()
+            return True
+
+    def pause(self) -> None:
+        """Pause live redraws and wait for an in-flight frame to finish."""
+        with self._condition:
+            self._paused = True
+        # Output may begin as soon as this returns, so do not leave a worker
+        # frame racing ordinary console rendering.
+        with self._render_lock:
+            pass
+        with self._condition:
+            self._live_redraw = None
+
+    def resume(self, redraw: Callable[[str], None] | None = None) -> None:
+        """Resume the existing animator without creating another worker."""
+        with self._condition:
+            if self._thread is None or self._stopping:
+                return
+            self._live_redraw = redraw
+            self._paused = False
+            self._condition.notify_all()
+
+    def reanchor(self) -> bool:
+        """Render preserved state at the current cursor for the next prompt."""
+        self.pause()
+        with self._condition:
+            if self._thread is None or self._stopping:
+                return False
+        with self._render_lock:
+            try:
+                self._render_next_frame(anchored=False)
+            except (OSError, ValueError):
+                return False
+        return True
+
+    def stop(self) -> None:
+        """Terminate the animator and restore a visible cursor."""
+        with self._condition:
+            thread = self._thread
+            if thread is None:
+                return
+            self._stopping = True
+            self._paused = False
+            self._condition.notify_all()
+        if thread is not threading.current_thread():
+            thread.join()
+        with self._condition:
+            self._thread = None
+            self._animation_available = False
+            self._started = False
+        self._restore_cursor(self._output_stream())
+
+    @property
+    def has_animator(self) -> bool:
+        """Return whether this header owns a live animation worker."""
+        with self._condition:
+            return self._thread is not None and not self._stopping
+
+    def _animate(self) -> None:
+        """Advance frames only while prompt input has explicitly resumed us."""
+        while True:
+            with self._condition:
+                while self._paused and not self._stopping:
+                    self._condition.wait()
+                if self._stopping:
+                    return
+
+            with self._render_lock:
+                with self._condition:
+                    if self._paused or self._stopping:
+                        continue
+                try:
+                    self._render_next_frame(anchored=True)
+                except (CancelledError, OSError, RuntimeError, ValueError):
+                    # Decoration failure must never take down the prompt.
+                    with self._condition:
+                        self._paused = True
+
+            with self._condition:
+                if not self._paused and not self._stopping:
+                    self._condition.wait(timeout=self.frame_interval)
+
+    def _render_next_frame(self, *, anchored: bool) -> None:
+        current_size = self.terminal_size()
+        if not self._size_is_suitable(current_size):
+            return
+        if self._size is None or current_size.columns != self._size.columns:
+            self._size = current_size
+            self._draw_width_value = self._draw_width(current_size)
+            self._drops = create_drops(self._draw_width_value, self.rng)
+
+        for drop in self._drops:
+            drop.advance(self.rng)
+        cells, bits = compose_cells(self._draw_width_value, self._drops)
+        frame = render_cells(cells, bits)
+        if anchored:
+            redraw = self._live_redraw
+            if redraw is None:
+                self.write_live_frame(frame)
+            else:
+                redraw(frame)
+        else:
+            self._write_frame(frame, False, self._output_stream())
+
+    def write_live_frame(self, frame: str) -> None:
+        """Redraw above an erased prompt and return to its layout origin."""
+        stream = self._output_stream()
+        rows_up = HEADER_HEIGHT + LIVE_ROWS_BELOW_HEADER
+        rows_down = rows_up - HEADER_HEIGHT
+        rows = frame.splitlines()
+        body = "\r\n".join(f"{CLEAR_LINE}\r{row}" for row in rows)
+        stream.write(
+            f"{HIDE_CURSOR}\033[{rows_up}A{body}\r\n"
+            f"\033[{rows_down}B\r{SHOW_CURSOR}"
+        )
+        stream.flush()
 
     def show(self) -> bool:
         """Show the bounded header; return whether animation was available."""
+        stream = self._output_stream()
         size = self.terminal_size()
-        if self.frame_count == 0 or not self._can_animate(size):
-            self._write_static(size.columns)
+        if self.frame_count == 0 or not self._can_animate(size, stream):
+            self._write_static(size.columns, stream)
             return False
 
         draw_width = self._draw_width(size)
@@ -190,9 +359,9 @@ class BinaryRainHeader:
         rendered_frames = 0
         cursor_hidden = False
         try:
-            self.stream.write(HIDE_CURSOR)
+            stream.write(HIDE_CURSOR)
             cursor_hidden = True
-            self.stream.flush()
+            stream.flush()
 
             for frame_index in range(self.frame_count):
                 current_size = self.terminal_size()
@@ -206,7 +375,7 @@ class BinaryRainHeader:
                 for drop in drops:
                     drop.advance(self.rng)
                 cells, bits = compose_cells(draw_width, drops)
-                self._write_frame(render_cells(cells, bits), rendered_frames > 0)
+                self._write_frame(render_cells(cells, bits), rendered_frames > 0, stream)
                 rendered_frames += 1
                 if frame_index + 1 < self.frame_count:
                     self.sleeper(FRAME_INTERVAL)
@@ -219,16 +388,19 @@ class BinaryRainHeader:
             return False
         finally:
             if cursor_hidden:
-                self._restore_cursor()
+                self._restore_cursor(stream)
 
         return rendered_frames > 0
 
-    def _can_animate(self, size: os.terminal_size) -> bool:
+    def _output_stream(self) -> TextIO:
+        return self.stream if self.stream is not None else sys.stdout
+
+    def _can_animate(self, size: os.terminal_size, stream: TextIO) -> bool:
         try:
-            is_tty = self.stream.isatty()
+            is_tty = stream.isatty()
         except (AttributeError, OSError):
             is_tty = False
-        return is_tty and self._size_is_suitable(size) and self.ansi_supported(self.stream)
+        return is_tty and self._size_is_suitable(size) and self.ansi_supported(stream)
 
     @staticmethod
     def _size_is_suitable(size: os.terminal_size) -> bool:
@@ -240,26 +412,26 @@ class BinaryRainHeader:
         # terminal wrap and break the invariant that exactly nine rows are ours.
         return size.columns - 1
 
-    def _write_static(self, width: int) -> None:
+    def _write_static(self, width: int, stream: TextIO) -> None:
         try:
-            self.stream.write(f"{static_title(width)}\n")
-            self.stream.flush()
+            stream.write(f"{static_title(width)}\n")
+            stream.flush()
         except (OSError, ValueError):
             pass
 
-    def _write_frame(self, frame: str, redraw: bool) -> None:
+    def _write_frame(self, frame: str, redraw: bool, stream: TextIO) -> None:
         prefix = f"\033[{HEADER_HEIGHT}A" if redraw else ""
         # Clearing each owned row makes a width decrease safe without touching
         # output above the header or anything subsequently printed below it.
         rows = frame.splitlines()
         body = "\r\n".join(f"{CLEAR_LINE}\r{row}" for row in rows)
-        self.stream.write(f"{prefix}{body}\r\n")
-        self.stream.flush()
+        stream.write(f"{prefix}{body}\r\n")
+        stream.flush()
 
-    def _restore_cursor(self) -> None:
+    def _restore_cursor(self, stream: TextIO) -> None:
         try:
-            self.stream.write(SHOW_CURSOR)
-            self.stream.flush()
+            stream.write(SHOW_CURSOR)
+            stream.flush()
         except (OSError, ValueError):
             # A closed output stream cannot be repaired, but it also must not
             # make this decorative component prevent application startup.

@@ -11,7 +11,6 @@ from squid_core.agent_loop import RunResult
 from code_squid.console.ui.display import (
     APPROVAL_PANEL_WIDTH,
     BOLD_STYLE,
-    CODE_SQUID_BANNER,
     DIM_STYLE,
     FINAL_REPORT_DIVIDER,
     FINAL_SUMMARY_INDENT,
@@ -30,10 +29,10 @@ from code_squid.console.ui.display import (
     SOFT_YELLOW_HEX,
     SOFT_YELLOW_STYLE,
     RUN_STARTED_DIVIDER,
-    STARTUP_CONTROLS,
     StartupInfo,
     TerminalDisplay,
 )
+from code_squid.console.ui.banner import STARTUP_DIVIDER
 
 
 class FakeSpinner:
@@ -46,6 +45,28 @@ class FakeSpinner:
 
     def stop(self) -> None:
         self.stops += 1
+
+
+class FakeHeader:
+    def __init__(self) -> None:
+        self.starts = 0
+        self.pauses = 0
+        self.stops = 0
+        self.reanchors = 0
+
+    def start(self) -> bool:
+        self.starts += 1
+        return True
+
+    def pause(self) -> None:
+        self.pauses += 1
+
+    def stop(self) -> None:
+        self.stops += 1
+
+    def reanchor(self) -> bool:
+        self.reanchors += 1
+        return True
 
 
 def _approval_panel_output(tool: str, label: str, value: str) -> str:
@@ -419,13 +440,18 @@ def test_thinking_after_visible_tool_result_prints_one_leading_blank(
 
 
 def test_first_thinking_after_header_does_not_print_extra_blank(
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     spinner = FakeSpinner()
     display = TerminalDisplay(_spinner=spinner)
+    monkeypatch.setattr(
+        "code_squid.console.ui.display.BinaryRainHeader.start",
+        lambda self: print("<binary-header>"),
+    )
 
     display.start()
-    assert capsys.readouterr().out == f"{CODE_SQUID_BANNER}\n\n"
+    assert capsys.readouterr().out == "<binary-header>\n\n"
 
     display.thinking()
 
@@ -434,19 +460,56 @@ def test_first_thinking_after_header_does_not_print_extra_blank(
     assert capsys.readouterr().out == ""
 
 
-def test_banner_keeps_logo_and_tagline_without_outer_box() -> None:
-    lines = CODE_SQUID_BANNER.splitlines()
-    content_lines = [line for line in lines if line]
+def test_display_starts_pauses_and_stops_owned_header(capsys) -> None:
+    header = FakeHeader()
+    display = TerminalDisplay(_header=header)
 
-    assert content_lines[0] == (
-        " ██████╗ ██████╗ ██████╗ ███████╗    "
-        "███████╗ ██████╗ ██╗   ██╗██╗██████╗"
+    display.start()
+    display.run_started()
+    display.stop_header()
+
+    assert header.starts == 1
+    assert header.pauses == 1
+    assert header.stops == 1
+
+
+def test_display_reanchors_same_header_before_later_prompts(capsys) -> None:
+    header = FakeHeader()
+    display = TerminalDisplay(_header=header)
+
+    display.prepare_header_for_prompt()
+    display.prepare_header_for_prompt()
+
+    assert header.reanchors == 1
+    assert capsys.readouterr().out == "\n"
+
+
+def test_startup_uses_binary_header_once_without_legacy_branding(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    header_calls = []
+
+    def fake_start(self) -> bool:
+        header_calls.append(self)
+        print("<binary-header>")
+        return True
+
+    monkeypatch.setattr(
+        "code_squid.console.ui.display.BinaryRainHeader.start",
+        fake_start,
     )
-    assert content_lines[-1] == "                 🦑 A small coding agent with tentacles."
-    assert not any(line.startswith(("╭", "╰", "│")) for line in lines)
+
+    TerminalDisplay().start()
+
+    output = capsys.readouterr().out
+    assert len(header_calls) == 1
+    assert output == "<binary-header>\n\n"
+    assert "██████" not in output
+    assert "A small coding agent with tentacles." not in output
 
 
-def test_startup_panel_includes_controls() -> None:
+def test_startup_details_keep_runtime_information_without_controls_or_box() -> None:
     panel = TerminalDisplay()._startup_info_panel(
         StartupInfo(
             directory=Path("/tmp/project"),
@@ -456,8 +519,13 @@ def test_startup_panel_includes_controls() -> None:
         )
     )
 
-    assert "Approval mode: yolo" in panel
-    assert f"Controls:      {STARTUP_CONTROLS}" in panel
+    assert "Provider  openai_compatible" in panel
+    assert "Model     qwen3.5-9b" in panel
+    assert "Safety    yolo" in panel
+    assert f"Workspace {Path('/tmp/project')}" in panel
+    assert "Enter send" not in panel
+    assert "Controls" not in panel
+    assert not any(line.startswith(("╭", "╰", "│")) for line in panel.splitlines())
 
 
 def test_startup_panel_includes_active_skill_when_set() -> None:
@@ -471,10 +539,10 @@ def test_startup_panel_includes_active_skill_when_set() -> None:
         )
     )
 
-    assert "Skill:         user-review" in panel
+    assert "Skill     user-review" in panel
 
 
-def test_startup_panel_colors_only_structural_borders_in_tty(
+def test_startup_divider_is_dim_and_content_is_normal_in_tty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
@@ -489,13 +557,12 @@ def test_startup_panel_colors_only_structural_borders_in_tty(
     )
 
     lines = panel.splitlines()
-    assert lines[0].startswith(f"{SOFT_CYAN_STYLE}╭─ startup ")
-    assert lines[0].endswith(f"╮{RESET_STYLE}")
-    assert lines[1].startswith(f"{SOFT_CYAN_STYLE}│{RESET_STYLE} Directory:")
-    assert lines[1].endswith(f"{SOFT_CYAN_STYLE}│{RESET_STYLE}")
-    assert f"{SOFT_CYAN_STYLE}Directory" not in lines[1]
-    assert lines[-1].startswith(f"{SOFT_CYAN_STYLE}╰")
-    assert lines[-1].endswith(f"╯{RESET_STYLE}")
+    assert lines[0] == f"{DIM_STYLE}{STARTUP_DIVIDER}{RESET_STYLE}"
+    assert lines[1] == "Provider  openai_compatible"
+    assert lines[2] == "Model     qwen3.5-9b"
+    assert lines[3] == "Safety    yolo"
+    assert lines[4] == f"Workspace {Path('/tmp/project')}"
+    assert all(SOFT_CYAN_STYLE not in line for line in lines)
 
 
 def test_startup_panel_stays_plain_when_not_tty() -> None:
@@ -508,7 +575,9 @@ def test_startup_panel_stays_plain_when_not_tty() -> None:
         )
     )
 
+    assert panel.splitlines()[0] == STARTUP_DIVIDER
     assert SOFT_CYAN_STYLE not in panel
+    assert DIM_STYLE not in panel
     assert RESET_STYLE not in panel
 
 
@@ -913,9 +982,14 @@ def test_assistant_message_followed_by_tool_result_has_blank_line(
 
 
 def test_first_visible_output_after_header_has_no_extra_leading_blank(
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     display = TerminalDisplay()
+    monkeypatch.setattr(
+        "code_squid.console.ui.display.BinaryRainHeader.start",
+        lambda self: print("<binary-header>"),
+    )
 
     display.start()
     display.tool_result(
@@ -924,8 +998,7 @@ def test_first_visible_output_after_header_has_no_extra_leading_blank(
     )
 
     assert capsys.readouterr().out == (
-        f"{CODE_SQUID_BANNER}\n"
-        "\n"
+        "<binary-header>\n\n"
         f"{RUN_DETAIL_INDENT}🔎 Listed files\n"
     )
 

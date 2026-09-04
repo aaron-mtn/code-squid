@@ -15,11 +15,10 @@ from code_squid.console.ui.approval import (
     rejected_approval_result,
 )
 from code_squid.console.ui.banner import (
-    CODE_SQUID_BANNER,
-    STARTUP_CONTROLS,
     StartupInfo,
     startup_info_panel,
 )
+from code_squid.console.ui.binary_header import BinaryRainHeader
 from code_squid.console.ui.formatting import (
     BOLD_STYLE,
     DIM_STYLE,
@@ -58,7 +57,7 @@ RUN_STARTED_DIVIDER = f"{RUN_STARTED_LABEL}{'─' * (RAIL_WIDTH - len(RUN_STARTE
 FINAL_REPORT_DIVIDER = "─" * RAIL_WIDTH
 RUN_EVENT_INDENT = "  "
 RUN_DETAIL_INDENT = "    "
-INPUT_IDENTITY_LINE = "@code-squid 🦑"
+INPUT_IDENTITY_LINE = "@code-squid"
 
 
 class TerminalDisplay:
@@ -70,10 +69,12 @@ class TerminalDisplay:
         show_transcript: bool = False,
         startup_info: StartupInfo | None = None,
         _spinner: TerminalSpinner | None = None,
+        _header: BinaryRainHeader | None = None,
     ) -> None:
         self.debug = debug
         self.show_transcript = show_transcript
         self.startup_info = startup_info
+        self.header = _header if _header is not None else BinaryRainHeader()
         self._interrupted = False
         self._spinner = (
             _spinner
@@ -87,6 +88,7 @@ class TerminalDisplay:
         self._needs_leading_blank = False
         self._needs_detail_blank_after_assistant = False
         self._compacted_denied_action: dict | None = None
+        self._prompt_has_started = False
 
     def start(self) -> None:
         self._stop_spinner()
@@ -95,6 +97,7 @@ class TerminalDisplay:
         self._needs_detail_blank_after_assistant = False
 
     def run_started(self) -> None:
+        self.pause_header()
         self._stop_spinner()
         print()
         print(structural_text(RUN_STARTED_DIVIDER))
@@ -287,14 +290,34 @@ class TerminalDisplay:
         self._spinner.stop()
 
     def _print_startup_banner(self) -> None:
-        print(CODE_SQUID_BANNER)
+        # The header owns its bounded animation and all cursor restoration. Keep
+        # startup synchronous so later output can never race its final frame.
+        self.header.start()
         if self.startup_info is not None:
-            print()
+            print(startup_info_panel(self.startup_info))
+        print()
+
+    def pause_header(self) -> None:
+        """Freeze header redraws before ordinary console output begins."""
+        self.header.pause()
+
+    def stop_header(self) -> None:
+        """Stop the header worker and restore terminal cursor state."""
+        self.header.stop()
+
+    def prepare_header_for_prompt(self) -> None:
+        """Give each later prompt a fresh anchor below intervening output."""
+        if not self._prompt_has_started:
+            self._prompt_has_started = True
+            return
+        if not self.header.reanchor():
+            return
+        if self.startup_info is not None:
             print(startup_info_panel(self.startup_info))
         print()
 
     def _startup_info_panel(self, startup_info: StartupInfo) -> str:
-        """Return the startup panel through the existing display test seam."""
+        """Return startup details through the existing display test seam."""
         return startup_info_panel(startup_info)
 
     def _print_leading_blank_if_needed(self) -> None:
