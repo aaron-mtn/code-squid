@@ -624,7 +624,10 @@ def test_resume_session_prints_banner_before_follow_up_input(
         "code_squid.console.cli.session_runner._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
-    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_task("Continue the thing"))
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._prompt_task",
+        _fake_prompt_tasks(["Continue the thing", "/exit"]),
+    )
     monkeypatch.setattr("code_squid.console.cli.session_runner._run_loop", lambda *args: 0)
 
     assert _resume_session(tmp_path, session_store.session_id) == 0
@@ -633,6 +636,7 @@ def test_resume_session_prints_banner_before_follow_up_input(
         _expected_startup_output(tmp_path)
         + f"{INPUT_IDENTITY_LINE}\n{PROMPT_PREFIX}"
         + f"\n{RUN_STARTED_DIVIDER}\n\n"
+        + f"{INPUT_IDENTITY_LINE}\n{PROMPT_PREFIX}"
     )
     assert len(displays) == 1
     assert displays[0].starts == 1
@@ -724,10 +728,10 @@ def test_follow_up_delegates_mod_resolution_to_application_builder(
     assert captured["mod_name"] == "review-pack"
     assert captured["skill_name"] is None
     assert captured["session_store"].session_dir == session_store.session_dir
-    assert captured["session"].messages[-1] == {
-        "role": "user",
-        "content": "review this",
-    }
+    assert captured["session"].messages == [
+        {"role": "system", "content": "old"},
+        {"role": "user", "content": "review this"},
+    ]
 
 
 def test_resume_session_empty_task_exits_without_run(monkeypatch, tmp_path, capsys) -> None:
@@ -744,11 +748,14 @@ def test_resume_session_empty_task_exits_without_run(monkeypatch, tmp_path, caps
         "code_squid.console.cli.session_runner._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
-    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_task(""))
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._prompt_task",
+        _fake_prompt_tasks(["", "/exit"]),
+    )
 
     assert _resume_session(tmp_path, session_store.session_id) == 0
 
-    assert "No task entered; nothing to run." in capsys.readouterr().out
+    capsys.readouterr()
     assert len(displays) == 1
     assert displays[0].starts == 1
     assert displays[0].run_starts == 0
@@ -769,7 +776,10 @@ def test_resume_session_help_exits_without_follow_up_or_run(monkeypatch, tmp_pat
         "code_squid.console.cli.session_runner._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
-    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_task("/help"))
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._prompt_task",
+        _fake_prompt_tasks(["/help", "/exit"]),
+    )
 
     assert _resume_session(tmp_path, session_store.session_id) == 0
 
@@ -1139,7 +1149,10 @@ def test_resume_session_passes_trace_to_terminal_display(
         "code_squid.console.cli.session_runner._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
-    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_task("Continue the thing"))
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._prompt_task",
+        _fake_prompt_tasks(["Continue the thing", "/exit"]),
+    )
     monkeypatch.setattr("code_squid.console.cli.session_runner._run_loop", lambda *args: 0)
 
     assert _resume_session(tmp_path, session_store.session_id) == 0

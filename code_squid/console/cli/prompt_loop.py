@@ -4,12 +4,15 @@ from pathlib import Path
 
 from prompt_toolkit.formatted_text import FormattedText
 
+from code_squid.console.cli import session_runner
 from code_squid.console.cli.session_runner import (
     _run_display,
     _run_follow_up_task,
     _run_new_session_task,
 )
+from code_squid.console.cli.control_commands import handle_control_command
 from code_squid.console.cli.mod_commands import _handle_mod_input, _is_mod_input
+from code_squid.console.cli.runtime_commands import handle_runtime_command
 from code_squid.console.cli.skill_commands import (
     _handle_skill_input,
     _is_skill_input,
@@ -41,6 +44,16 @@ At the task prompt:
   /skill shows the active skill and available skills.
   /skill <name> sets the active skill for future tasks and follow-ups.
   /skill none clears the active skill.
+  /provider shows or changes the effective provider.
+  /model shows or changes the effective model.
+  /safety shows or changes the safety mode (strict, balanced, yolo).
+  /sessions lists saved sessions for this workspace.
+  /show [current|latest|<session_id>] shows a saved session.
+  /resume latest or /resume <session_id> switches the active session.
+  /undo restores the existing latest-run undo buffer.
+  /cwd shows the immutable workspace root.
+  /new starts a new session boundary.
+  /exit exits the interactive prompt.
   Enter sends.
   Alt+Enter inserts a newline.
   Ctrl+C cancels before a run or interrupts an active run.
@@ -110,35 +123,23 @@ def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
 
 
 def _resume_session(repo_root: Path, session_id: str, skill_name: str | None = None) -> int:
+    # Validate once before entering the shared interpreter. The path helper is
+    # also the established seam that resolves ``latest`` to its concrete ID.
+    session_dir = session_runner._session_dir_for_resume(repo_root, session_id)
+    if session_dir is None:
+        return 0
+    return _run_interactive(repo_root, skill_name, active_session_id=session_dir.name)
+
+
+def _run_interactive(
+    repo_root: Path,
+    skill_name: str | None = None,
+    *,
+    active_session_id: str | None = None,
+) -> int:
     settings = load_settings(repo_root)
     display = _run_display(repo_root, settings, skill_name)
     display.start()
-    follow_up_task = _prompt_task_or_cancel("Follow-up task")
-    if follow_up_task is None:
-        return 0
-    if _is_help_input(follow_up_task):
-        _print_help()
-        return 0
-    if not follow_up_task.strip():
-        print("No task entered; nothing to run.")
-        return 0
-
-    status, _ = _run_follow_up_task(
-        repo_root,
-        session_id,
-        follow_up_task,
-        settings,
-        display,
-        skill_name,
-    )
-    return status
-
-
-def _run_interactive(repo_root: Path, skill_name: str | None = None) -> int:
-    settings = load_settings(repo_root)
-    display = _run_display(repo_root, settings, skill_name)
-    display.start()
-    active_session_id: str | None = None
     mod_name: str | None = None
 
     while True:
@@ -152,6 +153,16 @@ def _run_interactive(repo_root: Path, skill_name: str | None = None) -> int:
             continue
         if _is_help_input(task):
             _print_help()
+            continue
+        handled, settings = handle_runtime_command(repo_root, task, settings)
+        if handled:
+            continue
+        handled, active_session_id = handle_control_command(
+            repo_root,
+            task,
+            active_session_id,
+        )
+        if handled:
             continue
         if _is_skill_input(task):
             skill_name, mod_name = _handle_skill_input(task, skill_name, mod_name)

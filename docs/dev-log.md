@@ -1,3 +1,18 @@
+- 2026-09-03: Added the missing interactive CLI command surface for runtime
+  settings and session control. `/provider`, `/model`, and `/safety` now report
+  and persist workspace settings without losing unrelated fields; provider and
+  model output distinguishes saved values from active environment overrides,
+  and the persistent loop reloads effective settings before later runs.
+  `/sessions`, `/show`, `/resume`, `/undo`, and `/cwd` reuse the existing
+  session rendering and undo behavior while keeping the workspace immutable.
+  Shell `resume` now selects the requested saved session and enters the same
+  multi-turn interpreter used by fresh sessions, preserving ordinary slash
+  commands, active-session tracking, specialization switching, and replayed
+  conversation history. Focused CLI/settings/session/undo suite: 166 passed.
+  Full suite: 746 passed. Production packages compiled, affected CLI/settings
+  imports loaded successfully, and `git diff --check` passed. No live model
+  inference or network calls were run, and no follow-up work is intentionally
+  deferred.
 - 2026-09-03: Fixed specialization semantics across runs in one session.
   `AgentLoop` now keeps new-session seeding simple while reconciling an existing
   transcript to the newly constructed Agent's single intended system message,

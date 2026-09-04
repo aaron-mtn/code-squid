@@ -3,11 +3,10 @@
 from pathlib import Path
 
 from code_squid.console.cli.cli_options import parse_cli_args
+from code_squid.console.cli.control_commands import undo_latest_run
 from code_squid.console.cli.prompt_loop import _resume_session, _run_interactive
 from code_squid.console.cli.skill_commands import handle_skills
 from code_squid.settings import load_settings, write_approval_mode
-from code_squid.app_paths import workspace_undo_dir
-from squid_core.storage import UndoStore
 from code_squid.console.ui.banner import FRIENDLY_APPROVAL_MODES
 from code_squid.console.ui.sessions import USAGE, handle_session_viewer
 
@@ -20,15 +19,7 @@ APPROVAL_MODES = {
 
 
 def _undo(repo_root: Path) -> None:
-    try:
-        results = UndoStore.open(workspace_undo_dir(repo_root)).restore()
-    except FileNotFoundError as error:
-        print(error)
-        return
-
-    restored = sum(1 for result in results if result["restored"])
-    deleted = sum(1 for result in results if result["deleted"])
-    print(f"↩️ Undo complete: restored {restored}, deleted {deleted}")
+    undo_latest_run(repo_root)
 
 
 def _mode(repo_root: Path, args: list[str]) -> int:

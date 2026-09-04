@@ -61,10 +61,12 @@ and application layer; `squid_core/` is the reusable agent runtime.
     environment overrides, and translates the result to generic Core settings.
   - `console/cli/` owns terminal workflow and control. `cli_options.py` handles
     CLI options and workspace resolution; `cli_commands.py` handles launch-time
-    dispatch; `prompt_loop.py` handles interactive prompts and slash commands;
-    `session_runner.py` constructs the terminal display, including startup
-    information and trace/debug settings, and handles new/resumed
-    session-backed runs; and
+    dispatch; `prompt_loop.py` owns the one persistent interpreter used by
+    fresh and resumed sessions; `runtime_commands.py` owns interactive
+    provider, model, and safety changes; `control_commands.py` owns interactive
+    session, undo, and workspace-status commands; `session_runner.py`
+    constructs the terminal display, including startup information and
+    trace/debug settings, and handles new/resumed session-backed runs; and
     `skill_commands.py` handles Skill status, listing, and selection.
   - `console/ui/` owns terminal presentation and input. `display.py` keeps
     `TerminalDisplay` as the lifecycle coordinator used by the Agent loop.
@@ -600,6 +602,18 @@ Inside the interactive CLI:
 - `/skill <name>` sets the active skill for future tasks and follow-ups in the
   current CLI process.
 - `/skill none` clears the active skill.
+- `/provider` shows the effective provider and supported names;
+  `/provider <name>` saves a supported provider.
+- `/model` shows the effective model; `/model <name>` saves a model name.
+- `/safety` shows the friendly safety mode; `/safety strict`,
+  `/safety balanced`, and `/safety yolo` persist the corresponding internal
+  approval mode.
+- `/sessions` lists workspace sessions, while `/show`, `/show current`,
+  `/show latest`, and `/show <session_id>` reuse the saved-session renderer.
+- `/resume latest` and `/resume <session_id>` switch the active session without
+  leaving the persistent prompt.
+- `/undo` invokes the workspace's existing latest-run restore behavior.
+- `/cwd` reports the immutable invocation-level workspace root.
 
 Selections are process-local CLI state. Selecting a Mod clears a standalone
 Skill selection, and selecting a standalone Skill clears a Mod selection, so
@@ -741,7 +755,14 @@ inputs—not the normal user configuration UX. Current overrides are:
 `CODE_SQUID_API_KEY` wins over `model.api_key_env`, which wins over
 `model.api_key`. `CODE_SQUID_STREAM_ASSISTANT_TEXT=1` enables assistant text
 streaming and `0` disables it. There are no compaction environment overrides in
-the current code.
+the current code. Interactive provider and model writes never mutate those
+environment variables: the saved value is reported separately when
+`CODE_SQUID_PROVIDER` or `CODE_SQUID_MODEL` remains the effective override.
+
+The interactive loop reloads settings after `/provider`, `/model`, and
+`/safety`, so the next new or follow-up run in the same process receives the
+new effective settings. The small field-specific writers preserve unrelated
+JSON settings.
 
 Invalid settings JSON, invalid section shapes, invalid provider names, unknown
 approval modes, missing configured API-key environment variables, invalid
@@ -773,15 +794,16 @@ Running with no arguments starts an interactive prompt. A first task starts a
 new session; later tasks in the same process continue the active session as
 follow-ups unless the user enters `/new`. `/help` prints prompt help, and
 `/exit`, `exit`, or `quit` exits the interactive prompt. Interactive
-specialization commands are `/mod`, `/mod <name>`, `/mod none`, `/skill`,
-`/skill <name>`, and `/skill none`.
+specialization, runtime, and control commands are listed above.
 
 `--cwd` selects the workspace/repo root. It defaults to the current directory
 and must point at an existing directory.
 
-Resume loads a saved session, appends a follow-up user message, marks the
-session active, creates a fresh latest-only undo buffer, and continues the same
-saved session.
+Shell `resume` selects the saved session and enters the same persistent
+interactive loop as a fresh invocation. Each authored follow-up loads the
+saved conversation, appends a user message, marks the session active, creates
+a fresh latest-only undo buffer, and continues that session. Slash commands
+remain available before and between follow-ups.
 
 `mode` prints or writes the configured approval mode. Friendly CLI mode names
 map to settings values this way:
@@ -1056,10 +1078,11 @@ Current session statuses are:
 - `abandoned`
 - `interrupted`
 
-Resume can load saved messages with `SessionStore.load_messages()`, append a
-follow-up user message, mark the session active, create a fresh undo buffer, and
-continue the same saved session. `latest` resolves through
-the explicit workspace sessions path supplied by `code_squid.app_paths`.
+Resume selects an active saved session inside the persistent CLI loop. A later
+authored task loads messages with `SessionStore.load_messages()`, appends a
+follow-up user message, marks the session active, creates a fresh undo buffer,
+and continues the same saved session. `latest` resolves through the explicit
+workspace sessions path supplied by `code_squid.app_paths`.
 
 The saved-session viewer can list sessions and show message transcripts.
 Compaction events are not printed as transcript messages by the viewer.
@@ -1163,9 +1186,10 @@ registry. An explicit `allowed-tools: []` produces an empty active registry.
 `main.py` owns only process entrypoint behavior: passing command-line arguments
 to `code_squid.console.cli.cli_commands.run_cli()` and returning its exit status.
 
-`code_squid/console/cli/` owns terminal CLI parsing, dispatch, interactive
-prompt flow, run/resume wiring, mode/undo commands, saved-session command
-routing, and Skill commands. It should not grow agent policy, tool behavior,
+`code_squid/console/cli/` owns terminal CLI parsing, dispatch, the shared
+fresh/resumed prompt loop, runtime setting commands, session/control command
+routing, run wiring, and Mod/Skill selection. It should not grow agent policy,
+tool behavior,
 provider-specific response parsing, session storage internals, approval logic,
 undo mechanics, compaction strategy, or terminal formatting.
 

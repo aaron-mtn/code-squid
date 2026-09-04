@@ -337,3 +337,35 @@ def write_approval_mode(repo_root: Path, approval_mode: str) -> None:
 
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_json(settings_path, raw_settings)
+
+
+def write_provider(repo_root: Path, provider: str) -> None:
+    """Persist one supported provider without replacing unrelated settings."""
+
+    if provider not in VALID_PROVIDERS:
+        valid_providers = ", ".join(sorted(VALID_PROVIDERS))
+        raise ValueError(f"provider must be one of {valid_providers}")
+
+    _write_model_value(repo_root, "provider", provider)
+
+
+def write_model_name(repo_root: Path, model_name: str) -> None:
+    """Persist a non-empty model name without replacing unrelated settings."""
+
+    if not model_name:
+        raise ValueError("model name must not be empty")
+
+    _write_model_value(repo_root, "name", model_name)
+
+
+def _write_model_value(repo_root: Path, name: str, value: str) -> None:
+    """Update one model field while preserving the user's complete settings file."""
+
+    settings_path = repo_root / ".code-squid" / "settings.json"
+    raw_settings = _read_settings_file(settings_path)
+    model_settings = _section(raw_settings, "model", settings_path)
+    model_settings[name] = value
+    raw_settings["model"] = model_settings
+
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(settings_path, raw_settings)
