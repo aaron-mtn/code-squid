@@ -41,7 +41,12 @@ from code_squid.console.ui.banner import (
     startup_info_panel,
     startup_panel_items,
 )
-from code_squid.console.ui.formatting import MOD_ACCENT_HEX, ansi_fg, mod_accent_hex
+from code_squid.console.ui.formatting import (
+    MOD_ACCENT_HEX,
+    SQUID_GLYPH,
+    ansi_fg,
+    mod_accent_hex,
+)
 
 
 class FakeSpinner:
@@ -697,6 +702,15 @@ def test_mod_accent_palette_uses_exact_product_colors() -> None:
     }
 
 
+@pytest.mark.parametrize(("name", "expected"), MOD_ACCENT_HEX.items())
+def test_supported_mod_accent_names_resolve(name: str, expected: str) -> None:
+    assert mod_accent_hex(name) == expected
+
+
+def test_accent_squid_uses_text_presentation_sequence() -> None:
+    assert SQUID_GLYPH == "\U0001f991\ufe0e"
+
+
 @pytest.mark.parametrize("accent", [None, "unknown", "#bd88ff"])
 def test_missing_unknown_or_hex_mod_accent_falls_back_to_cyan(accent) -> None:
     # Metadata remains semantic: arbitrary hex strings are not palette names.
@@ -750,13 +764,13 @@ def test_active_mod_change_updates_later_squid_glyphs_only(
     display.final_message("Finished.")
 
     output = capsys.readouterr().out
-    purple_squid = f"{ansi_fg('#bd88ff')}🦑{RESET_STYLE}"
-    red_squid = f"{ansi_fg('#ff6475')}🦑{RESET_STYLE}"
+    purple_squid = f"{ansi_fg('#bd88ff')}{SQUID_GLYPH}{RESET_STYLE}"
+    red_squid = f"{ansi_fg('#ff6475')}{SQUID_GLYPH}{RESET_STYLE}"
     assert f"{purple_squid} Thinking..." in output
     assert f"{purple_squid} First narration." in output
     assert f"{red_squid} Report:" in output
-    assert f"{ansi_fg('#bd88ff')}🦑 First" not in output
-    assert f"{ansi_fg('#ff6475')}🦑 Report" not in output
+    assert f"{ansi_fg('#bd88ff')}{SQUID_GLYPH} First" not in output
+    assert f"{ansi_fg('#ff6475')}{SQUID_GLYPH} Report" not in output
 
 
 def test_mod_accent_does_not_theme_tool_or_session_file_output(
@@ -803,15 +817,18 @@ def test_default_spinner_uses_default_mod_accent(monkeypatch: pytest.MonkeyPatch
     ]
 
 
-def test_run_started_prints_no_run_start_chrome(
+def test_run_started_prints_plain_dim_divider(
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     TerminalDisplay().run_started()
 
     output = capsys.readouterr().out
-    assert output == ""
+    assert output == f"\n{DIM_STYLE}{FINAL_REPORT_DIVIDER}{RESET_STYLE}\n\n"
     assert "starting run" not in output
-    assert "╰─" not in output
+    assert "╰" not in output
+    assert ansi_fg(DEFAULT_MOD_ACCENT_HEX) not in output
 
 
 def test_report_divider_matches_rail_width() -> None:
@@ -1120,7 +1137,7 @@ def test_tool_result_followed_by_assistant_message_has_one_blank_line(
     assert capsys.readouterr().out == (
         f"{RUN_DETAIL_INDENT}🔎 Listed files\n"
         "\n"
-        f"{RUN_EVENT_INDENT}🦑 The directory doesn't exist yet.\n"
+        f"{RUN_EVENT_INDENT}{SQUID_GLYPH} The directory doesn't exist yet.\n"
     )
 
 
@@ -1136,7 +1153,7 @@ def test_assistant_message_followed_by_tool_result_has_blank_line(
     )
 
     assert capsys.readouterr().out == (
-        f"{RUN_EVENT_INDENT}🦑 Directory created.\n"
+        f"{RUN_EVENT_INDENT}{SQUID_GLYPH} Directory created.\n"
         "\n"
         f"{RUN_DETAIL_INDENT}📝 Wrote: kanban_toy2/index.html\n"
     )
@@ -1328,7 +1345,7 @@ def test_debug_thinking_is_plain_and_does_not_animate(
 
     assert spinner.starts == 0
     assert spinner.stops == 0
-    assert capsys.readouterr().out == "🦑 Thinking...\n\n"
+    assert capsys.readouterr().out == f"{SQUID_GLYPH} Thinking...\n\n"
 
 
 def test_assistant_message_stops_spinner_before_printing_content(
@@ -1343,7 +1360,7 @@ def test_assistant_message_stops_spinner_before_printing_content(
     assert spinner.starts == 1
     assert spinner.stops == 1
     assert capsys.readouterr().out == (
-        f"{RUN_EVENT_INDENT}🦑 The directory doesn't exist yet.\n"
+        f"{RUN_EVENT_INDENT}{SQUID_GLYPH} The directory doesn't exist yet.\n"
     )
 
 
@@ -1353,7 +1370,7 @@ def test_normal_assistant_message_uses_squid_marker(
     TerminalDisplay().assistant_message("The directory doesn't exist yet.")
 
     assert capsys.readouterr().out == (
-        f"{RUN_EVENT_INDENT}🦑 The directory doesn't exist yet.\n"
+        f"{RUN_EVENT_INDENT}{SQUID_GLYPH} The directory doesn't exist yet.\n"
     )
 
 
@@ -1362,7 +1379,7 @@ def test_assistant_message_does_not_hide_fallback_like_narration(
 ) -> None:
     TerminalDisplay().assistant_message("Using read_file.")
 
-    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}🦑 Using read_file.\n"
+    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}{SQUID_GLYPH} Using read_file.\n"
 
 
 def test_multiline_assistant_message_indents_continuation_lines(
@@ -1374,7 +1391,7 @@ def test_multiline_assistant_message_indents_continuation_lines(
     )
 
     assert capsys.readouterr().out == (
-        f"{RUN_EVENT_INDENT}🦑 The directory doesn't exist yet.\n"
+        f"{RUN_EVENT_INDENT}{SQUID_GLYPH} The directory doesn't exist yet.\n"
         f"{RUN_EVENT_INDENT}   I need to create it and then build the Kanban board.\n"
     )
 
@@ -1393,7 +1410,7 @@ def test_assistant_message_wraps_to_terminal_width(
     )
 
     assert capsys.readouterr().out == (
-        f"{RUN_EVENT_INDENT}🦑 This assistant narration line should\n"
+        f"{RUN_EVENT_INDENT}{SQUID_GLYPH} This assistant narration line should\n"
         f"{RUN_EVENT_INDENT}   wrap cleanly under the squid marker.\n"
     )
 
@@ -1496,7 +1513,7 @@ def test_approval_prompt_follows_assistant_with_single_blank(
     display.approve_action({"tool": "read_file"})
 
     assert capsys.readouterr().out == (
-        f"{RUN_EVENT_INDENT}🦑 I'll inspect the file.\n"
+        f"{RUN_EVENT_INDENT}{SQUID_GLYPH} I'll inspect the file.\n"
         "\n"
         f"{_approval_panel_output('read_file', 'Path', '')}"
     )
@@ -1599,10 +1616,12 @@ def test_loop_finished_keeps_file_report_divider_neutral_and_dim_in_tty(
 
     TerminalDisplay().loop_finished(session)
 
-    assert capsys.readouterr().out.startswith(
+    output = capsys.readouterr().out
+    assert output.startswith(
         f"\n{DIM_STYLE}{FINAL_REPORT_DIVIDER}{RESET_STYLE}\n"
         "🗂️  Session files\n"
     )
+    assert ansi_fg(DEFAULT_MOD_ACCENT_HEX) not in output
 
 
 def test_loop_finished_prints_shortened_paths_in_final_file_report(
@@ -1683,7 +1702,7 @@ def test_final_message_renders_report_heading(
     )
 
     output = capsys.readouterr().out
-    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n🦑 Report:\n\n")
+    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n{SQUID_GLYPH} Report:\n\n")
     assert f"{FINAL_SUMMARY_INDENT}Files changed\n{FINAL_SUMMARY_INDENT}• `ui/terminal.py`" in output
     assert f"{FINAL_SUMMARY_INDENT}What changed\n{FINAL_SUMMARY_INDENT}• Polished display." in output
 
@@ -1697,7 +1716,7 @@ def test_final_message_displays_unlabeled_content_under_report_heading(
     )
 
     output = capsys.readouterr().out
-    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n🦑 Report:\n\n")
+    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n{SQUID_GLYPH} Report:\n\n")
     assert f"{FINAL_SUMMARY_INDENT}I ran `pwd`; the workspace is" in output
     assert f"{FINAL_SUMMARY_INDENT}`/tmp/code-squid-workspace/projects`." in output
 
@@ -1720,10 +1739,12 @@ def test_final_summary_keeps_divider_neutral_and_accents_only_squid_in_tty(
     )
 
     accent_style = ansi_fg(DEFAULT_MOD_ACCENT_HEX)
-    assert capsys.readouterr().out.startswith(
+    output = capsys.readouterr().out
+    assert output.startswith(
         f"{DIM_STYLE}{FINAL_REPORT_DIVIDER}{RESET_STYLE}\n"
-        f"{accent_style}🦑{RESET_STYLE} Report:\n\n"
+        f"{accent_style}{SQUID_GLYPH}{RESET_STYLE} Report:\n\n"
     )
+    assert f"{accent_style}{FINAL_REPORT_DIVIDER}" not in output
 
 
 def test_final_summary_headings_are_bold_in_tty(
@@ -2023,7 +2044,7 @@ def test_debug_assistant_message_preserves_raw_task_complete(
 ) -> None:
     TerminalDisplay(debug=True).assistant_message("TASK COMPLETE")
 
-    assert capsys.readouterr().out == "🦑 TASK COMPLETE\n\n"
+    assert capsys.readouterr().out == f"{SQUID_GLYPH} TASK COMPLETE\n\n"
 
 
 def test_debug_loop_finished_does_not_print_transcript_by_default(

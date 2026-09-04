@@ -120,8 +120,13 @@ and application layer; `squid_core/` is the reusable agent runtime.
     output to push the scene's own top out of view. Short terminals retain the
     sequential static fallback.
     `prompt_input.py`, `sessions.py`, and `spinner.py` retain their focused
-    input, saved-session, and animation responsibilities. Presentation modules
-    do not own approval policy, Tool execution, or Tool-result semantics.
+    input, saved-session, and animation responsibilities. Normal run output
+    uses one dim, terminal-default divider for run starts, final reports, and
+    Session files. Thinking, narration, and report markers share a
+    text-presentation squid glyph so the current semantic Mod accent can be
+    rendered by ANSI foreground color without coloring adjacent text.
+    Presentation modules do not own approval policy, Tool execution, or
+    Tool-result semantics.
 
 - `squid_core/agent/`
   - Reusable Core Agent behavior and protected prompt protocol.

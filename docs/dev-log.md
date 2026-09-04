@@ -1,3 +1,18 @@
+- 2026-09-04: Completed the small normal-CLI presentation cleanup. Thinking,
+  narration, report, and spinner markers now use the squid's text-presentation
+  sequence (`U+1F991 U+FE0E`), allowing the existing semantic Mod accent ANSI
+  foreground to remain visible instead of being overridden by a color-emoji
+  font; the reset still occurs immediately after the glyph. Restored the plain
+  61-character run-start divider with normal vertical spacing and routed it,
+  the report divider, and the Session files divider through one dim/default
+  styling helper. No label, curve, success line, composer change, or terminal
+  lifecycle change was added. Focused terminal/spinner tests: 144 passed; full
+  suite: 832 passed. Production compilation/import checks and
+  `git diff --check` passed. A real PTY smoke covered startup rendering, menu
+  focus entry/Escape, clean `/exit`, the exact run/thinking/narration/report
+  and Session files output paths, and a live purple-to-red accent change
+  without model inference.
+
 - 2026-09-04: Applied a focused normal-CLI visual polish without changing
   terminal ownership. The existing single `BinaryRainHeader` scene now owns
   five rain rows below its menu panel while still ending before the ordinary

@@ -28,6 +28,7 @@ from code_squid.console.ui.formatting import (
     FINAL_SUMMARY_INDENT,
     DEFAULT_MOD_ACCENT_HEX,
     RESET_STYLE,
+    SQUID_GLYPH,
     SOFT_CYAN_HEX,
     SOFT_CYAN_STYLE,
     SOFT_GREEN_HEX,
@@ -113,6 +114,9 @@ class TerminalDisplay:
     def run_started(self) -> None:
         self.retire_session_scene()
         self._stop_spinner()
+        print()
+        self._print_divider()
+        print()
         self._needs_leading_blank = False
         self._needs_detail_blank_after_assistant = False
 
@@ -255,7 +259,7 @@ class TerminalDisplay:
             self._print_leading_blank_if_needed()
         else:
             print()
-        print(styled_text(FINAL_REPORT_DIVIDER, DIM_STYLE))
+        self._print_divider()
         print("🗂️  Session files")
         print()
         self._print_file_list("Read", session.files_read)
@@ -403,7 +407,7 @@ class TerminalDisplay:
             return
         for output_line in wrapped_display_lines(
             lines[0],
-            initial_indent=f"{RUN_EVENT_INDENT}🦑 ",
+            initial_indent=f"{RUN_EVENT_INDENT}{SQUID_GLYPH} ",
             subsequent_indent=f"{RUN_EVENT_INDENT}   ",
         ):
             print(self._accent_first_squid(output_line))
@@ -442,7 +446,7 @@ class TerminalDisplay:
         if not formatted:
             return
         self._print_leading_blank_if_needed()
-        print(styled_text(FINAL_REPORT_DIVIDER, DIM_STYLE))
+        self._print_divider()
         print(self._squid_line(" Report:"))
         print()
         print(formatted)
@@ -460,18 +464,22 @@ class TerminalDisplay:
 
     def _squid_line(self, suffix: str) -> str:
         """Accent only the squid glyph and immediately restore terminal color."""
-        return f"{styled_text('🦑', ansi_fg(self._accent_hex()))}{suffix}"
+        return f"{styled_text(SQUID_GLYPH, ansi_fg(self._accent_hex()))}{suffix}"
 
     def _accent_first_squid(self, line: str) -> str:
         """Accent an existing leading narration marker without adding one."""
-        squid_index = line.find("🦑")
+        squid_index = line.find(SQUID_GLYPH)
         if squid_index < 0:
             return line
         return (
             f"{line[:squid_index]}"
-            f"{styled_text('🦑', ansi_fg(self._accent_hex()))}"
-            f"{line[squid_index + 1:]}"
+            f"{styled_text(SQUID_GLYPH, ansi_fg(self._accent_hex()))}"
+            f"{line[squid_index + len(SQUID_GLYPH):]}"
         )
+
+    def _print_divider(self) -> None:
+        """Print the shared low-emphasis divider used by normal run output."""
+        print(styled_text(FINAL_REPORT_DIVIDER, DIM_STYLE))
 
     def _format_final_summary(self, content: str) -> str:
         """Return final report text through the existing display test seam."""

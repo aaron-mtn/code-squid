@@ -7,6 +7,8 @@ import threading
 import time
 from typing import TextIO
 
+from code_squid.console.ui.formatting import SQUID_GLYPH
+
 
 SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 RESET_STYLE = "\033[0m"
@@ -78,7 +80,7 @@ class TerminalSpinner:
             frame_index = (frame_index + 1) % len(SPINNER_FRAMES)
 
     def _write_frame(self, frame_index: int) -> None:
-        squid = "🦑"
+        squid = SQUID_GLYPH
         if self.style and self.stream.isatty():
             # The squid is the only branded accent surface. Reset immediately
             # so the spinner frame and surrounding terminal text stay native.
