@@ -101,6 +101,19 @@ and application layer; `squid_core/` is the reusable agent runtime.
   - `token_estimate.py` owns the rough transcript token estimation used by
     compaction and status reporting.
 
+- `squid_core/agent_loop/`
+  - Reusable agent-runtime sequencing, exposed through
+    `squid_core.agent_loop.AgentLoop` and `RunResult`.
+  - `loop.py` owns the complete state machine and all decisions about when
+    hooks, model turns, validation, events, transcript writes, approval, Tool
+    execution, finalization, failure, and cancellation occur.
+  - `event_emitter.py` owns compact event payload mechanics, session-ID
+    attachment, safe Tool-action projection, bounded event text, and forwarding
+    to `squid_core.events.emit_event`.
+  - `transcript_recording.py` owns accepted-message writes to the in-memory
+    Session and optional SessionStore, runtime user/context message construction,
+    and mechanical repair of a pending Tool call/result transcript pair.
+
 - `squid_core/mods/`
   - Mod metadata, validation, discovery, and runtime composition.
   - Exposes `Mod`, `ResolvedMod`, `discover_mods`, `load_mod`, `validate_mod`,
@@ -157,8 +170,8 @@ and application layer; `squid_core/` is the reusable agent runtime.
     spawner, or construct `AgentLoop` directly.
 
 - Flat `squid_core/*.py` runtime concepts
-  - `agent_loop.py` owns orchestration; `events.py` owns observation;
-    `generation.py` owns one-shot generation; `model_adapter.py` owns provider
+  - `events.py` owns observation; `generation.py` owns one-shot generation;
+    `model_adapter.py` owns provider
     normalization; `settings.py` owns generic provider/runtime/compaction
     semantics; `platform_context.py` describes the environment;
     `spawner.py` owns generic construction; `session.py` owns in-memory
@@ -306,8 +319,8 @@ model request
 ```
 
 `squid_core/hooks/` owns the hook context and decision dataclasses, `HookRunner`,
-and Hook metadata/loading. `squid_core/agent_loop.py` owns where hook calls happen
-in the loop.
+and Hook metadata/loading. `squid_core/agent_loop/loop.py` owns where hook calls
+happen in the loop.
 `code_squid/agent_setup.py` wires optional `hooks`, optionally loads standalone hooks from
 the supplied application home's `hooks/`, or accepts an explicit `hook_runner`.
 Selected Mod Hooks arrive through `ResolvedMod`. `squid_core/events.py`
@@ -1152,11 +1165,13 @@ defaults and selection, and optional environment overrides. It produces
 `squid_core.settings.RuntimeSettings`; Core owns validation of generic runtime
 semantics and enforcement.
 
-`squid_core/agent_loop.py` owns generic turn flow. It is the sequencing layer, not the
-place for provider transport, terminal rendering, tool implementation, or
-coding-task prompt text. Its tool path remains visibly hook, action preflight,
-approval, execution, and result handling; it does not own workspace or guarded
-shell policy.
+`squid_core/agent_loop/loop.py` owns generic turn flow. It is the sequencing
+layer, not the place for provider transport, terminal rendering, tool
+implementation, or coding-task prompt text. Its tool path remains visibly hook,
+action preflight, approval, execution, and result handling; it does not own
+workspace or guarded shell policy. Its sibling event and transcript modules own
+only mechanical payload construction, forwarding, recording, and pending-pair
+repair; they do not decide when those actions happen.
 
 `code_squid/agent_setup.py` owns presentation-neutral Code Squid application
 construction. `code_squid/console/cli/session_runner.py` owns terminal display

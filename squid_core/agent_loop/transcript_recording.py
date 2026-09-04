@@ -1,0 +1,76 @@
+"""Transcript message construction, recording, and cancellation repair."""
+
+from typing import Any, Iterable
+
+
+def record_message(
+    session,
+    session_store,
+    message: dict[str, Any],
+    usage: dict | None = None,
+) -> None:
+    """Record one accepted message in memory and optional durable storage."""
+    # Rejected assistant replies intentionally bypass this central write path
+    # so normal transcript history contains accepted messages only.
+    session.add_message(message)
+    if session_store is not None:
+        session_store.append_message(message, usage=usage)
+
+
+def record_messages(session, session_store, *messages: dict[str, Any]) -> None:
+    """Record accepted transcript messages in their supplied order."""
+    for message in messages:
+        record_message(session, session_store, message)
+
+
+def user_instruction_message(instruction: str) -> dict[str, str]:
+    """Build a user-role instruction inserted by the runtime."""
+    return {"role": "user", "content": instruction}
+
+
+def turn_context_message(blocks: Iterable) -> dict[str, str] | None:
+    """Build the temporary user message containing hook context blocks."""
+    blocks = list(blocks)
+    if not blocks:
+        return None
+
+    parts = ["# Additional Context For This Turn"]
+    for block in blocks:
+        title = block.title.strip() or "Context"
+        source = f" ({block.source})" if block.source else ""
+        body = block.body.strip()
+        if body:
+            parts.append(f"\n## {title}{source}\n{body}")
+
+    content = "\n".join(parts).strip()
+    if content == "# Additional Context For This Turn":
+        return None
+    return {"role": "user", "content": content}
+
+
+def record_pending_tool_result(
+    session,
+    session_store,
+    tool_results,
+    pending_tool_action: dict | None,
+    pending_tool_result: dict | None,
+) -> None:
+    """Close a committed tool-call pair after cancellation or interruption."""
+    if pending_tool_action is None:
+        return
+
+    result = pending_tool_result if pending_tool_result is not None else {
+        "ok": False,
+        "tool": pending_tool_action.get("tool", ""),
+        "error": "tool action interrupted",
+        "reason": "interrupted before a tool result was available",
+        "interrupted": True,
+    }
+    record_messages(
+        session,
+        session_store,
+        *tool_results.messages_from_action_results(
+            [pending_tool_action],
+            [result],
+        ),
+    )

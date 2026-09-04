@@ -1,3 +1,5 @@
+"""Architecture boundary checks for reusable and application-owned modules."""
+
 import importlib
 from pathlib import Path
 import re
@@ -31,9 +33,12 @@ def test_reusable_runtime_modules_import_from_squid_core() -> None:
         module = importlib.import_module(f"squid_core.{module_name}")
         assert "squid_core" in Path(module.__file__).parts
 
+    from squid_core.agent_loop import AgentLoop, RunResult
     from squid_core.compaction import Compactor
 
     assert Compactor.__module__ == "squid_core.compaction.compactor"
+    assert AgentLoop.__module__ == "squid_core.agent_loop.loop"
+    assert RunResult.__module__ == "squid_core.agent_loop.loop"
 
 
 def test_subsystem_packages_expose_useful_public_seams() -> None:

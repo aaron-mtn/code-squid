@@ -7,6 +7,7 @@
 - Use plentiful comments where they improve readability or preserve important intent.
 - When modifying code, actively notice places where a short comment would make ownership, control flow, invariants, lifecycle order, safety behavior, or non-obvious decisions easier to understand, and add one when useful.
 - Comments should explain **why**, constraints, or architectural intent, not merely restate obvious code.
+- Write comments with future coding agents in mind as well as human maintainers. When code has an important invariant, ownership boundary, lifecycle constraint, or tempting-but-wrong simplification, make that intent explicit near the relevant implementation.
 - Preserve useful existing comments unless they are stale or incorrect.
 - Prefer simple, explicit code over abstraction for its own sake.
 - Keep architecture stupid simple and easy to inspect.
@@ -79,5 +80,6 @@ When working in an area of the repository:
 
 - Leave it at least as understandable as you found it.
 - If nearby code has a missing module docstring, misleading comment, stale ownership description, or an obvious non-obvious invariant that deserves explanation, clean it up when doing so is small and safe.
+- Prefer small local comments that preserve architectural reasoning at the point where a future maintainer or coding agent would need it, rather than relying on distant documentation alone.
 - Do not perform unrelated large-scale comment or documentation rewrites.
 - Favor comments that help the next person understand why the code is shaped this way.

@@ -1,3 +1,19 @@
+- 2026-09-03: Refactored the flat `squid_core/agent_loop.py` into the small
+  `squid_core/agent_loop/` package without changing its public imports or
+  runtime behavior. `loop.py` retains the complete state machine, including all
+  validation, hook, preflight, approval, execution, finalization, failure, and
+  cancellation decision points. `event_emitter.py` now owns only compact event
+  payload construction and forwarding, while `transcript_recording.py` owns
+  only accepted-message recording, runtime message construction, and the
+  mechanical pending Tool-result repair used at interruption boundaries.
+  Existing callers still import `AgentLoop` and `RunResult` from
+  `squid_core.agent_loop`; no compatibility layer was added. Focused Agent-loop,
+  event, transcript/session, cancellation, Hook, workspace-boundary, Core Agent,
+  and Core-boundary suite: 148 passed. Full suite: 717 passed. Affected
+  production modules compiled and imported successfully; the public-import
+  smoke test, stale-path search, old-file absence check, and `git diff --check`
+  passed. No live model inference was run. No behavior differences or deferred
+  follow-ups are known.
 - 2026-09-03: Made `code_squid.agent_setup` presentation-neutral by removing
   its console UI imports, startup-info helper, terminal display construction,
   and CLI approval-mode labels. The existing console session runner now owns

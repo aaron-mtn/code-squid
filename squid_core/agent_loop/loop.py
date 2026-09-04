@@ -1,8 +1,22 @@
-from dataclasses import dataclass
-from typing import Any, Callable, Literal
+"""Generic AgentLoop state machine and public run result."""
 
-from squid_core.safety import ActionPreflight, ApprovalPolicy, denied_result
-from squid_core.events import EventCallback, emit_event
+from dataclasses import dataclass
+from typing import Callable, Literal
+
+from squid_core.agent_loop.event_emitter import (
+    action_event_fields,
+    compact_event_text,
+    emit_agent_event,
+    tool_preparing_event,
+)
+from squid_core.agent_loop.transcript_recording import (
+    record_message,
+    record_messages,
+    record_pending_tool_result,
+    turn_context_message,
+    user_instruction_message,
+)
+from squid_core.events import EventCallback
 from squid_core.hooks import (
     BeforeAcceptFinalContext,
     BeforeModelTurnContext,
@@ -15,6 +29,8 @@ from squid_core.hooks import (
     RunFinishedDecision,
     ToolResultContext,
 )
+from squid_core.safety import ActionPreflight, ApprovalPolicy, denied_result
+
 MAX_CONSECUTIVE_INVALID_REPLIES = 3
 REJECTION_REASON_EVENT_MAX_CHARS = 500
 
@@ -32,7 +48,7 @@ class RunResult:
 
 
 class AgentLoop:
-    """Owns the generic agent loop and transcript turn flow; must not own coding-specific policy, prompts, or tool definitions."""
+    """Own the generic loop without coding policy, prompts, or Tool definitions."""
 
     # Store the parts needed to run the loop.
     # The loop depends on the session, model adapter, tool executor,
@@ -83,45 +99,6 @@ class AgentLoop:
         if self.should_cancel():
             raise _CancellationRequested
 
-    # Add one accepted transcript message to memory and optional disk storage.
-    #
-    # This is the central write path for transcript messages. Rejected invalid
-    # assistant replies should not use this helper because they are intentionally
-    # excluded from normal transcript history.
-    def _add_message(self, message: dict[str, Any], usage: dict | None = None) -> None:
-        self.session.add_message(message)
-
-        if self.session_store is not None:
-            self.session_store.append_message(message, usage=usage)
-
-    # Add accepted transcript messages in order.
-    def _add_messages(self, *messages: dict[str, Any]) -> None:
-        for message in messages:
-            self._add_message(message)
-
-    def _user_instruction_message(self, instruction: str) -> dict[str, str]:
-        return {"role": "user", "content": instruction}
-
-    def _context_message(self, blocks) -> dict[str, str] | None:
-        if not blocks:
-            return None
-
-        parts = ["# Additional Context For This Turn"]
-
-        for block in blocks:
-            title = block.title.strip() or "Context"
-            source = f" ({block.source})" if block.source else ""
-            body = block.body.strip()
-            if body:
-                parts.append(f"\n## {title}{source}\n{body}")
-
-        content = "\n".join(parts).strip()
-
-        if content == "# Additional Context For This Turn":
-            return None
-
-        return {"role": "user", "content": content}
-
     # Update durable session status when persistence is wired in.
     def _update_status(self, status: str) -> None:
         if self.session_store is not None:
@@ -165,39 +142,8 @@ class AgentLoop:
             if isinstance(note, str) and note.strip()
         )
 
-    def _emit_event(self, event: dict[str, Any]) -> None:
-        # AgentLoop events are small machine-readable facts for wrappers and
-        # observers. Keep payloads compact: no raw file contents, full command
-        # output, provider payloads, prompts, API keys, headers, or secrets.
-        emit_event(
-            self.on_event,
-            {
-                "session_id": self._session_id(),
-                **event,
-            },
-        )
-
-    def _action_event_fields(self, action: dict) -> dict[str, Any]:
-        event = {
-            "tool": action.get("tool", ""),
-        }
-        if "tool_call_id" in action:
-            event["tool_call_id"] = action["tool_call_id"]
-        args = action.get("args", {})
-        if isinstance(args, dict):
-            if "path" in args:
-                event["path"] = args["path"]
-            if "command" in args:
-                event["command"] = args["command"]
-        return event
-
-    def _compact_event_text(self, text: object, max_chars: int) -> str:
-        value = str(text).strip()
-        if len(value) <= max_chars:
-            return value
-
-        suffix = "... [truncated]"
-        return f"{value[: max_chars - len(suffix)]}{suffix}"
+    def _emit_event(self, event: dict) -> None:
+        emit_agent_event(self.on_event, self._session_id(), event)
 
     def _should_stream_assistant_text(self) -> bool:
         if not self.stream_assistant_text:
@@ -227,16 +173,8 @@ class AgentLoop:
                 }
             )
 
-        def on_tool_preparing(tool_call: dict[str, Any]) -> None:
-            event = {
-                "type": "tool_preparing",
-                "tool": tool_call.get("tool", ""),
-            }
-            if "tool_call_index" in tool_call:
-                event["tool_call_index"] = tool_call["tool_call_index"]
-            if "tool_call_id" in tool_call:
-                event["tool_call_id"] = tool_call["tool_call_id"]
-            self._emit_event(event)
+        def on_tool_preparing(tool_call: dict) -> None:
+            self._emit_event(tool_preparing_event(tool_call))
 
         return self.model_adapter.respond_streaming(
             messages=messages,
@@ -254,7 +192,11 @@ class AgentLoop:
         if self.session.messages:
             return
 
-        self._add_messages(*self.agent.initial_messages())
+        record_messages(
+            self.session,
+            self.session_store,
+            *self.agent.initial_messages(),
+        )
 
     def _allowed_tools_from_definitions(self, tool_definitions: list[dict]) -> tuple[str, ...]:
         names = []
@@ -288,24 +230,6 @@ class AgentLoop:
         # over the synthetic interrupted result.
         pending_tool_action = None
         pending_tool_result = None
-
-        def persist_pending_tool_result() -> None:
-            if pending_tool_action is None:
-                return
-
-            result = pending_tool_result if pending_tool_result is not None else {
-                "ok": False,
-                "tool": pending_tool_action.get("tool", ""),
-                "error": "tool action interrupted",
-                "reason": "interrupted before a tool result was available",
-                "interrupted": True,
-            }
-            self._add_messages(
-                *self.tool_results.messages_from_action_results(
-                    [pending_tool_action],
-                    [result],
-                )
-            )
 
         try:
             self._check_cancelled()
@@ -397,7 +321,7 @@ class AgentLoop:
                         tool_steps_used=tool_steps_used,
                     )
                 )
-                context_message = self._context_message(
+                context_message = turn_context_message(
                     [
                         *self._run_context_blocks,
                         *turn_context_blocks,
@@ -436,7 +360,7 @@ class AgentLoop:
                     if getattr(self.display, "debug", False):
                         self.display.assistant_message(reply["message"]["content"])
                     self.display.reply_rejected(validation["reason"])
-                    rejection_reason = self._compact_event_text(
+                    rejection_reason = compact_event_text(
                         validation["reason"],
                         REJECTION_REASON_EVENT_MAX_CHARS,
                     )
@@ -452,7 +376,9 @@ class AgentLoop:
                             validation["reason"],
                             consecutive_invalid_replies,
                         )
-                        self._add_message(
+                        record_message(
+                            self.session,
+                            self.session_store,
                             self.agent.failure_message_for_invalid_replies(
                                 validation["reason"],
                                 consecutive_invalid_replies,
@@ -501,14 +427,14 @@ class AgentLoop:
                             {
                                 "type": "reply_rejected",
                                 "reason": "final_blocked_by_hook",
-                                "detail": self._compact_event_text(
+                                "detail": compact_event_text(
                                     guidance,
                                     REJECTION_REASON_EVENT_MAX_CHARS,
                                 ),
                             }
                         )
                         pending_runtime_messages.append(
-                            self._user_instruction_message(guidance)
+                            user_instruction_message(guidance)
                         )
                         continue
                     if final_decision.report_note:
@@ -543,7 +469,12 @@ class AgentLoop:
                     )
                     final_message = assistant_content
                 self._check_cancelled()
-                self._add_message(reply["message"], usage=reply.get("usage"))
+                record_message(
+                    self.session,
+                    self.session_store,
+                    reply["message"],
+                    usage=reply.get("usage"),
+                )
                 if reply["actions"]:
                     pending_tool_action = reply["actions"][0]
                     pending_tool_result = None
@@ -595,7 +526,7 @@ class AgentLoop:
                             self._emit_event(
                                 {
                                     "type": "tool_started",
-                                    **self._action_event_fields(action),
+                                    **action_event_fields(action),
                                 }
                             )
                             self._check_cancelled()
@@ -624,7 +555,7 @@ class AgentLoop:
                         {
                             "type": "tool_finished",
                             "ok": bool(result.get("ok", False)),
-                            **self._action_event_fields(action),
+                            **action_event_fields(action),
                         }
                     )
                     executed_actions.append(action)
@@ -636,12 +567,14 @@ class AgentLoop:
                     results,
                 )
                 self._check_cancelled()
-                self._add_messages(*result_messages)
+                record_messages(self.session, self.session_store, *result_messages)
                 pending_tool_action = None
                 pending_tool_result = None
-                self._add_messages(
+                record_messages(
+                    self.session,
+                    self.session_store,
                     *[
-                        self._user_instruction_message(instruction)
+                        user_instruction_message(instruction)
                         for instruction in approval_instructions
                     ]
                 )
@@ -698,7 +631,13 @@ class AgentLoop:
                 hook_notes=self._hook_notes_from_decision(run_finished),
             )
         except _CancellationRequested:
-            persist_pending_tool_result()
+            record_pending_tool_result(
+                self.session,
+                self.session_store,
+                self.tool_results,
+                pending_tool_action,
+                pending_tool_result,
+            )
             self._update_status("interrupted")
             self._emit_event(
                 {
@@ -721,5 +660,11 @@ class AgentLoop:
         except KeyboardInterrupt:
             # The CLI owns KeyboardInterrupt presentation and status handling.
             # Repair any committed tool-call pair before preserving that flow.
-            persist_pending_tool_result()
+            record_pending_tool_result(
+                self.session,
+                self.session_store,
+                self.tool_results,
+                pending_tool_action,
+                pending_tool_result,
+            )
             raise
