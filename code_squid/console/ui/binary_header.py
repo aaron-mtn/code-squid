@@ -13,7 +13,7 @@ import shutil
 import sys
 import threading
 import time
-from typing import Callable, Sequence, TextIO
+from typing import TYPE_CHECKING, Callable, Sequence, TextIO
 
 from code_squid.console.ui.banner import StartupInfo, startup_panel_lines
 from code_squid.console.ui.header_layout import (
@@ -25,6 +25,9 @@ from code_squid.console.ui.header_layout import (
     startup_scene_layout,
     terminal_draw_width,
 )
+
+if TYPE_CHECKING:
+    from code_squid.console.startup_menu import StartupMenu
 
 # Kept as the default-scene height for callers that build deterministic frames.
 HEADER_HEIGHT = startup_scene_layout(80).height
@@ -279,11 +282,17 @@ class BinaryRainHeader:
         self._live_rows_below_header = DEFAULT_LIVE_ROWS_BELOW_HEADER
         self._drops: list[Drop] = []
         self._live_redraw: Callable[[str], None] | None = None
+        self.startup_menu: StartupMenu | None = None
 
     def set_startup_info(self, startup_info: StartupInfo | None) -> None:
         """Set the application-owned values used by subsequent scene frames."""
         with self._condition:
             self.startup_info = startup_info
+
+    def set_startup_menu(self, startup_menu: StartupMenu | None) -> None:
+        """Attach application menu state read by the existing frame worker."""
+        with self._condition:
+            self.startup_menu = startup_menu
 
     def start(self) -> bool:
         """Render the first frame and create at most one paused animator."""
@@ -662,7 +671,8 @@ class BinaryRainHeader:
     def _layout_for(self, size: os.terminal_size) -> StartupSceneLayout:
         """Return geometry matching the current optional Skill row."""
         show_skill = (
-            self.startup_info is not None
+            self.startup_menu is None
+            and self.startup_info is not None
             and self.startup_info.skill_name is not None
             and self.startup_info.mod_name is None
         )
@@ -670,6 +680,8 @@ class BinaryRainHeader:
 
     def _panel_lines(self, layout: StartupSceneLayout) -> list[str]:
         """Return panel text without giving the rain layer content ownership."""
+        if self.startup_menu is not None:
+            return self.startup_menu.panel_lines(layout)
         if self.startup_info is None:
             empty_info = StartupInfo(Path("."), "none", "none", "none")
             return startup_panel_lines(empty_info, layout)

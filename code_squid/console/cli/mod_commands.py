@@ -7,6 +7,21 @@ from squid_core.mods import discover_mods
 MOD_COMMAND = "/mod"
 
 
+def apply_mod_selection(
+    requested_mod: str,
+    skill_name: str | None,
+) -> tuple[str | None, str | None]:
+    """Apply the canonical Mod/standalone-Skill mutual-exclusion rules."""
+    if requested_mod == "none":
+        return None, skill_name
+    mod = discover_mods(code_squid_home()).get(requested_mod)
+    if mod is None:
+        raise ValueError(f"Unknown Mod: {requested_mod}")
+    if not mod.valid:
+        raise ValueError(f"Invalid Mod: {requested_mod}")
+    return mod.name, None
+
+
 def _is_mod_input(task: str) -> bool:
     stripped = task.strip()
     return stripped == MOD_COMMAND or stripped.startswith(f"{MOD_COMMAND} ")
@@ -41,7 +56,7 @@ def _handle_mod_input(
     requested_mod = parts[1]
     if requested_mod == "none":
         print("Active Mod cleared.")
-        return None, skill_name
+        return apply_mod_selection(requested_mod, skill_name)
 
     mod = discover_mods(code_squid_home()).get(requested_mod)
     if mod is None:
@@ -57,4 +72,4 @@ def _handle_mod_input(
     if skill_name is not None:
         print(f"Standalone skill {skill_name} cleared by Mod selection.")
     print(f"Active Mod set to: {mod.name}")
-    return mod.name, None
+    return apply_mod_selection(requested_mod, skill_name)

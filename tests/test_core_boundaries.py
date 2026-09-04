@@ -231,6 +231,7 @@ def test_code_squid_application_package_has_expected_layout() -> None:
         "console/cli/runtime_commands.py",
         "console/cli/session_runner.py",
         "console/cli/skill_commands.py",
+        "console/startup_menu.py",
         "console/ui/__init__.py",
         "console/ui/approval.py",
         "console/ui/banner.py",

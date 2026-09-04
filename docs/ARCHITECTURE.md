@@ -68,6 +68,11 @@ and application layer; `squid_core/` is the reusable agent runtime.
     constructs the terminal display, including startup information and
     trace/debug settings, and handles new/resumed session-backed runs; and
     `skill_commands.py` handles Skill status, listing, and selection.
+    `console/startup_menu.py` owns the startup panel's small keyboard focus,
+    view, and selection state. It reuses the CLI's runtime-setting and Mod
+    selection operations; provider adapters remain the source of any optional
+    model enumeration, with `/model <name>` shown as the non-destructive
+    fallback while an adapter has no such capability.
   - `console/ui/` owns terminal presentation and input. `display.py` keeps
     `TerminalDisplay` as the lifecycle coordinator used by the Agent loop.
     `header_layout.py` owns the explicit startup-scene geometry: safe draw
@@ -90,6 +95,14 @@ and application layer; `squid_core/` is the reusable agent runtime.
     serialized with backpressure and no queued output after pause.
     After intervening output, the preserved rain state is re-anchored at the
     current cursor before the next prompt; old frames remain frozen in history.
+    The composer and startup menu share prompt-toolkit key bindings rather than
+    a raw input reader: Up from an empty buffer focuses the remembered main
+    row, arrows navigate, Enter replaces the same panel with a submenu or
+    applies a selection, and Esc backs out. Main-menu edge navigation returns
+    to the composer symmetrically. Ordinary text is ignored while menu-focused,
+    and arrows retain normal multiline behavior whenever the composer contains
+    text. Panel changes are read by the existing rain worker, so navigation
+    neither creates a second worker nor performs discovery during frame render.
     The live anchor is valid only while both terminal dimensions remain
     unchanged. A width or height change freezes the animator before another
     relative redraw, and the next prompt boundary rebuilds the header at the

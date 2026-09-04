@@ -1,3 +1,21 @@
+- 2026-09-04: Made the composed startup panel keyboard-interactive without
+  turning the CLI into a fullscreen TUI. Up from an empty prompt focuses a
+  remembered main-menu row; arrows navigate, Enter replaces the same fixed
+  panel rectangle with Provider, Model, Safety, Mod, or read-only Workspace
+  content, and Esc backs out. Prompt text keeps normal multiline arrow
+  behavior. Provider/model/safety persistence and Mod/Skill exclusion now have
+  small shared operations used by slash commands and the menu. Provider and
+  Mod options use their canonical discovery sources. Model discovery consults
+  only the selected provider adapter's optional capability and otherwise shows
+  the `/model <name>` fallback; it runs on submenu entry, never during rain
+  rendering. The existing header worker renders all menu states, pauses around
+  activation/discovery, and resumes without creating another worker. Added
+  focused deterministic menu/input/rendering/persistence coverage and updated
+  `/help`. No mouse handling, workspace mutation, composer redesign, or model
+  inference was added. Focused console/menu tests: 91 passed. Full suite: 807
+  passed. Production compilation/import checks and `git diff --check` passed.
+  A real PTY launch preserved the initial scene and completed an Up, Down,
+  Enter, Esc, Esc, `/exit` keyboard sequence with clean process teardown.
 - 2026-09-04: Polished the composed startup scene without compacting its menu.
   The title/panel gap is now an explicit two-row layout constant, while the
   five-item panel retains all six intentional blank interior rows. Initial rain

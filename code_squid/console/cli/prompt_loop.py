@@ -25,6 +25,7 @@ from code_squid.console.ui.approval import (
 )
 from code_squid.console.ui.display import INPUT_IDENTITY_LINE, TerminalDisplay
 from code_squid.console.ui.binary_header import BinaryRainHeader
+from code_squid.console.startup_menu import StartupMenu
 
 
 PROMPT_PREFIX = INPUT_PROMPT_PREFIX
@@ -46,6 +47,12 @@ Input:
   Enter       Send
   Alt+Enter   New line
   Ctrl+C      Cancel before a run or stop the current run
+
+Startup menu:
+  Up from empty prompt   Focus menu
+  Up/Down                Move selection
+  Enter                  Open/select
+  Esc                    Back / return to prompt
 
 Specialization:
   /mod shows the active Mod and available Mods.
@@ -111,9 +118,13 @@ def _prompt_task_or_cancel(
 def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
     settings = load_settings(repo_root)
     display = _run_display(repo_root, settings, skill_name)
+    menu = StartupMenu(repo_root, settings, skill_name=skill_name)
+    if hasattr(display, "set_startup_menu"):
+        display.set_startup_menu(menu)
     try:
         display.start()
         task = _prompt_task_or_cancel("Task", display)
+        settings = menu.settings
         if task is None:
             return 0
         if _is_help_input(task):
@@ -123,7 +134,22 @@ def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
             print("No task entered; nothing to run.")
             return 0
 
-        status, _ = _run_new_session_task(repo_root, task, settings, display, skill_name)
+        if menu.mod_name is None:
+            status, _ = _run_new_session_task(
+                repo_root,
+                task,
+                settings,
+                display,
+                menu.skill_name,
+            )
+        else:
+            status, _ = _run_new_session_task(
+                repo_root,
+                task,
+                settings,
+                display,
+                mod_name=menu.mod_name,
+            )
         return status
     finally:
         display.stop_header()
@@ -147,11 +173,17 @@ def _run_interactive(
     settings = load_settings(repo_root)
     display = _run_display(repo_root, settings, skill_name)
     mod_name: str | None = None
+    menu = StartupMenu(repo_root, settings, mod_name=mod_name, skill_name=skill_name)
+    if hasattr(display, "set_startup_menu"):
+        display.set_startup_menu(menu)
 
     try:
         display.start()
         while True:
             task = _prompt_task_or_cancel("Task", display)
+            settings = menu.settings
+            mod_name = menu.mod_name
+            skill_name = menu.skill_name
             if task is None:
                 return 0
             if _is_exit_input(task):
@@ -164,6 +196,7 @@ def _run_interactive(
                 continue
             handled, settings = handle_runtime_command(repo_root, task, settings)
             if handled:
+                menu.sync(settings, mod_name=mod_name, skill_name=skill_name)
                 continue
             handled, active_session_id = handle_control_command(
                 repo_root,
@@ -175,10 +208,12 @@ def _run_interactive(
             if _is_skill_input(task):
                 skill_name, mod_name = _handle_skill_input(task, skill_name, mod_name)
                 display.set_specialization(mod_name=mod_name, skill_name=skill_name)
+                menu.sync(settings, mod_name=mod_name, skill_name=skill_name)
                 continue
             if _is_mod_input(task):
                 mod_name, skill_name = _handle_mod_input(task, mod_name, skill_name)
                 display.set_specialization(mod_name=mod_name, skill_name=skill_name)
+                menu.sync(settings, mod_name=mod_name, skill_name=skill_name)
                 continue
             if not task.strip():
                 continue

@@ -331,6 +331,10 @@ class TerminalDisplay:
         )
         self.header.set_startup_info(self.startup_info)
 
+    def set_startup_menu(self, startup_menu) -> None:
+        """Connect keyboard menu state to the existing header renderer."""
+        self.header.set_startup_menu(startup_menu)
+
     def _startup_info_panel(self, startup_info: StartupInfo) -> str:
         """Return startup details through the existing display test seam."""
         return startup_info_panel(startup_info)

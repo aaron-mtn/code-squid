@@ -21,6 +21,24 @@ SAFETY_MODES = {
 }
 
 
+def apply_provider(repo_root: Path, provider: str) -> Settings:
+    """Persist a provider and return the effective same-process settings."""
+    write_provider(repo_root, provider)
+    return load_settings(repo_root)
+
+
+def apply_model(repo_root: Path, model_name: str) -> Settings:
+    """Persist a model and return the effective same-process settings."""
+    write_model_name(repo_root, model_name)
+    return load_settings(repo_root)
+
+
+def apply_safety(repo_root: Path, friendly_mode: str) -> Settings:
+    """Persist a friendly safety mode through the canonical approval mapping."""
+    write_approval_mode(repo_root, SAFETY_MODES[friendly_mode])
+    return load_settings(repo_root)
+
+
 def handle_runtime_command(
     repo_root: Path,
     command: str,
@@ -57,8 +75,7 @@ def _handle_provider(repo_root: Path, args: list[str]) -> None:
         return
 
     provider = args[0]
-    write_provider(repo_root, provider)
-    effective_provider = load_settings(repo_root).model.provider
+    effective_provider = apply_provider(repo_root, provider).model.provider
     if os.getenv("CODE_SQUID_PROVIDER") is not None:
         print(f"Saved provider: {provider}")
         print(
@@ -81,8 +98,7 @@ def _handle_model(repo_root: Path, args: list[str]) -> None:
         return
 
     model_name = args[0]
-    write_model_name(repo_root, model_name)
-    effective_model = load_settings(repo_root).model.name
+    effective_model = apply_model(repo_root, model_name).model.name
     if os.getenv("CODE_SQUID_MODEL") is not None:
         print(f"Saved model: {model_name}")
         print(
@@ -104,8 +120,8 @@ def _handle_safety(repo_root: Path, args: list[str]) -> None:
         return
 
     friendly_mode = args[0]
-    approval_mode = SAFETY_MODES[friendly_mode]
-    write_approval_mode(repo_root, approval_mode)
+    settings = apply_safety(repo_root, friendly_mode)
+    approval_mode = settings.runtime.approval_mode
     print(f"Safety mode set to: {friendly_mode} (approval_mode={approval_mode})")
 
 
