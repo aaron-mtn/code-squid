@@ -74,10 +74,12 @@ and application layer; `squid_core/` is the reusable agent runtime.
     owns approval panels, prompts, and compact results; `tool_display.py` owns
     tool/action labels, command recognition, and debug result projection; and
     `formatting.py` owns shared styles, links, path shortening, wrapping, and
-    final-summary Markdown rendering. `prompt_input.py`, `sessions.py`, and
-    `spinner.py` retain their focused input, saved-session, and animation
-    responsibilities. Presentation modules do not own approval policy, Tool
-    execution, or Tool-result semantics.
+    final-summary Markdown rendering. `binary_header.py` owns the reusable,
+    bounded binary-rain composition, semantic rendering, and safe terminal
+    lifecycle; it is intentionally not wired into startup presentation yet.
+    `prompt_input.py`, `sessions.py`, and `spinner.py` retain their focused
+    input, saved-session, and animation responsibilities. Presentation modules
+    do not own approval policy, Tool execution, or Tool-result semantics.
 
 - `squid_core/agent/`
   - Reusable Core Agent behavior and protected prompt protocol.

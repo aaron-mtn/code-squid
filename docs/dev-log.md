@@ -1,3 +1,16 @@
+- 2026-09-03: Added the reusable Code Squid binary-rain header component under
+  console UI without replacing the existing startup presentation. The new
+  9-row renderer keeps a fixed centered title over sparse, independently paced
+  binary drops; separates semantic composition from ANSI styling; uses injected
+  randomness for deterministic tests; and provides a bounded synchronous
+  lifecycle with terminal-size rechecks, static fallbacks, safe Windows ANSI
+  enablement, and guaranteed cursor restoration. Focused console suite: 133
+  passed. Full suite: 767 passed. Production packages compiled successfully,
+  the new public module imported, the generated file tree remained current,
+  and `git diff --check` passed. A PTY smoke confirmed the sparse motion, fixed
+  title, varied column pacing, cursor restoration, and intact output below the
+  header. No model inference was run. Startup integration remains intentionally
+  deferred to Patch 1B.
 - 2026-09-03: Cleaned the CLI command surface around current product naming and
   shell behavior. Shell `safety` replaces `mode`, singular `skill` replaces
   `skills`, and `help`, `--help`, and `-h` now print complete shell usage.
