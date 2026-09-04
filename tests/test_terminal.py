@@ -15,6 +15,7 @@ from code_squid.console.ui.display import (
     APPROVAL_PANEL_WIDTH,
     BOLD_STYLE,
     DIM_STYLE,
+    DEFAULT_MOD_ACCENT_HEX,
     FINAL_REPORT_DIVIDER,
     FINAL_SUMMARY_INDENT,
     INPUT_PROMPT_PREFIX,
@@ -31,7 +32,7 @@ from code_squid.console.ui.display import (
     SOFT_RED_STYLE,
     SOFT_YELLOW_HEX,
     SOFT_YELLOW_STYLE,
-    RUN_STARTED_DIVIDER,
+    _accent_for_mod,
     StartupInfo,
     TerminalDisplay,
 )
@@ -40,6 +41,7 @@ from code_squid.console.ui.banner import (
     startup_info_panel,
     startup_panel_items,
 )
+from code_squid.console.ui.formatting import MOD_ACCENT_HEX, ansi_fg, mod_accent_hex
 
 
 class FakeSpinner:
@@ -680,7 +682,107 @@ def test_soft_color_constants_derive_expected_ansi_styles() -> None:
     assert SOFT_RED_STYLE == "\033[38;2;247;121;152m"
 
 
-def test_default_spinner_uses_soft_cyan_style(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mod_accent_palette_uses_exact_product_colors() -> None:
+    assert MOD_ACCENT_HEX == {
+        "cyan": "#3edcff",
+        "blue": "#5d9cff",
+        "green": "#55e6a5",
+        "yellow": "#ffe06a",
+        "orange": "#ff9b55",
+        "red": "#ff6475",
+        "pink": "#ff75c8",
+        "purple": "#bd88ff",
+        "white": "#f4fbff",
+        "gray": "#a8b7c5",
+    }
+
+
+@pytest.mark.parametrize("accent", [None, "unknown", "#bd88ff"])
+def test_missing_unknown_or_hex_mod_accent_falls_back_to_cyan(accent) -> None:
+    # Metadata remains semantic: arbitrary hex strings are not palette names.
+    assert mod_accent_hex(accent) == "#3edcff"
+
+
+def test_no_active_or_unknown_mod_uses_default_accent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("code_squid.console.ui.display.discover_mods", lambda home: {})
+
+    assert _accent_for_mod(None) == "#3edcff"
+    assert _accent_for_mod("missing") == "#3edcff"
+
+
+def test_missing_or_invalid_active_mod_accent_uses_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "code_squid.console.ui.display.discover_mods",
+        lambda home: {
+            "missing": SimpleNamespace(),
+            "invalid": SimpleNamespace(accent="ultraviolet"),
+        },
+    )
+
+    assert _accent_for_mod("missing") == "#3edcff"
+    assert _accent_for_mod("invalid") == "#3edcff"
+
+
+def test_active_mod_change_updates_later_squid_glyphs_only(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(
+        "code_squid.console.ui.display.discover_mods",
+        lambda home: {
+            "violet": SimpleNamespace(accent="purple"),
+            "warm": SimpleNamespace(accent="red"),
+        },
+    )
+    menu = SimpleNamespace(mod_name="violet")
+    header = FakeHeader()
+    header.startup_menu = menu
+    display = TerminalDisplay(debug=True, _header=header)
+
+    display.thinking()
+    display.assistant_message("First narration.")
+    menu.mod_name = "warm"
+    display.final_message("Finished.")
+
+    output = capsys.readouterr().out
+    purple_squid = f"{ansi_fg('#bd88ff')}🦑{RESET_STYLE}"
+    red_squid = f"{ansi_fg('#ff6475')}🦑{RESET_STYLE}"
+    assert f"{purple_squid} Thinking..." in output
+    assert f"{purple_squid} First narration." in output
+    assert f"{red_squid} Report:" in output
+    assert f"{ansi_fg('#bd88ff')}🦑 First" not in output
+    assert f"{ansi_fg('#ff6475')}🦑 Report" not in output
+
+
+def test_mod_accent_does_not_theme_tool_or_session_file_output(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(
+        "code_squid.console.ui.display.discover_mods",
+        lambda home: {"violet": SimpleNamespace(accent="purple")},
+    )
+    header = FakeHeader()
+    header.startup_menu = SimpleNamespace(mod_name="violet")
+    display = TerminalDisplay(_header=header)
+
+    display.tool_result({"tool": "read_file", "args": {"path": "app.py"}}, {"ok": True})
+    display.loop_finished(
+        SimpleNamespace(files_read={"app.py"}, files_written=set(), messages=[])
+    )
+
+    output = capsys.readouterr().out
+    assert "🗂️  Session files" in output
+    assert ansi_fg("#bd88ff") not in output
+
+
+def test_default_spinner_uses_default_mod_accent(monkeypatch: pytest.MonkeyPatch) -> None:
     spinner_kwargs = []
 
     class CapturingSpinner(FakeSpinner):
@@ -696,35 +798,24 @@ def test_default_spinner_uses_soft_cyan_style(monkeypatch: pytest.MonkeyPatch) -
         {
             "enabled": True,
             "prefix": RUN_EVENT_INDENT,
-            "style": SOFT_CYAN_STYLE,
+            "style": ansi_fg(DEFAULT_MOD_ACCENT_HEX),
         }
     ]
 
 
-def test_run_started_prints_starting_run_divider(
+def test_run_started_prints_no_run_start_chrome(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     TerminalDisplay().run_started()
 
-    assert capsys.readouterr().out == f"\n{RUN_STARTED_DIVIDER}\n\n"
+    output = capsys.readouterr().out
+    assert output == ""
+    assert "starting run" not in output
+    assert "╰─" not in output
 
 
-def test_report_divider_matches_starting_run_rail_width() -> None:
-    assert len(RUN_STARTED_DIVIDER) == RAIL_WIDTH
+def test_report_divider_matches_rail_width() -> None:
     assert len(FINAL_REPORT_DIVIDER) == RAIL_WIDTH
-
-
-def test_run_started_colors_starting_run_divider_cyan_in_tty(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-
-    TerminalDisplay().run_started()
-
-    assert capsys.readouterr().out == (
-        f"\n{SOFT_CYAN_STYLE}{RUN_STARTED_DIVIDER}{RESET_STYLE}\n\n"
-    )
 
 
 def test_model_request_failed_prints_short_message_with_log_path(
@@ -1439,20 +1530,22 @@ def test_generic_long_command_gets_middle_truncated(
     assert len(output.removesuffix("\n")) <= len(RUN_DETAIL_INDENT) + len("💿 Ran: ") + 80
 
 
-def test_normal_completion_prints_finished(
+def test_normal_completion_omits_redundant_success_line(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     session = SimpleNamespace(files_read=set(), files_written=set(), messages=[])
 
     TerminalDisplay().loop_finished(session)
 
-    assert capsys.readouterr().out.endswith("✅ Done!\n\n")
+    output = capsys.readouterr().out
+    assert "✅ Done!" not in output
+    assert "🗂️  Session files" in output
 
 
 @pytest.mark.parametrize(
     ("run_result", "expected"),
     [
-        (RunResult(status="complete"), "✅ Done!"),
+        (RunResult(status="complete"), None),
         (RunResult(status="failed", reason="invalid reply"), "❌ Session failed"),
         (RunResult(status="interrupted", reason="user interrupted"), "⚠️ Session interrupted"),
     ],
@@ -1460,15 +1553,16 @@ def test_normal_completion_prints_finished(
 def test_loop_Done_prints_status_label(
     capsys: pytest.CaptureFixture[str],
     run_result: RunResult,
-    expected: str,
+    expected: str | None,
 ) -> None:
     session = SimpleNamespace(files_read=set(), files_written=set(), messages=[])
 
     TerminalDisplay().loop_finished(session, run_result)
 
     output = capsys.readouterr().out
-    assert expected in output
-    assert output.count("✅ Done!") == (1 if run_result.status == "complete" else 0)
+    if expected is not None:
+        assert expected in output
+    assert "✅ Done!" not in output
 
 
 def test_loop_finished_prints_divider_before_file_report(
@@ -1493,12 +1587,10 @@ def test_loop_finished_prints_divider_before_file_report(
         "  Written\n"
         "    app.py\n"
         "\n"
-        "✅ Done!\n"
-        "\n"
     )
 
 
-def test_loop_finished_colors_file_report_divider_cyan_in_tty(
+def test_loop_finished_keeps_file_report_divider_neutral_and_dim_in_tty(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1508,7 +1600,7 @@ def test_loop_finished_colors_file_report_divider_cyan_in_tty(
     TerminalDisplay().loop_finished(session)
 
     assert capsys.readouterr().out.startswith(
-        f"\n{SOFT_CYAN_STYLE}{FINAL_REPORT_DIVIDER}{RESET_STYLE}\n"
+        f"\n{DIM_STYLE}{FINAL_REPORT_DIVIDER}{RESET_STYLE}\n"
         "🗂️  Session files\n"
     )
 
@@ -1610,7 +1702,7 @@ def test_final_message_displays_unlabeled_content_under_report_heading(
     assert f"{FINAL_SUMMARY_INDENT}`/tmp/code-squid-workspace/projects`." in output
 
 
-def test_final_summary_colors_report_divider_cyan_in_tty(
+def test_final_summary_keeps_divider_neutral_and_accents_only_squid_in_tty(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1627,9 +1719,10 @@ def test_final_summary_colors_report_divider_cyan_in_tty(
         "- none"
     )
 
+    accent_style = ansi_fg(DEFAULT_MOD_ACCENT_HEX)
     assert capsys.readouterr().out.startswith(
-        f"{SOFT_CYAN_STYLE}{FINAL_REPORT_DIVIDER}{RESET_STYLE}\n"
-        "🦑 Report:\n\n"
+        f"{DIM_STYLE}{FINAL_REPORT_DIVIDER}{RESET_STYLE}\n"
+        f"{accent_style}🦑{RESET_STYLE} Report:\n\n"
     )
 
 
@@ -1945,7 +2038,8 @@ def test_debug_loop_finished_does_not_print_transcript_by_default(
     TerminalDisplay(debug=True).loop_finished(session)
 
     output = capsys.readouterr().out
-    assert "✅ Done" in output
+    assert "✅ Done" not in output
+    assert "🗂️  Session files" in output
     assert "Full transcript:" not in output
     assert "secret task" not in output
 

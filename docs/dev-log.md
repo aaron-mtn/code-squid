@@ -1,3 +1,20 @@
+- 2026-09-04: Applied a focused normal-CLI visual polish without changing
+  terminal ownership. The existing single `BinaryRainHeader` scene now owns
+  five rain rows below its menu panel while still ending before the ordinary
+  prompt rows. The composer and startup menu remain terminal-native; a live
+  prompt fragment hides `›` whenever the main menu or a submenu owns focus and
+  restores it on return. Code Squid presentation now maps semantic Mod accent
+  names through the exact product palette and applies the current selection
+  only to visible squid glyphs in thinking, narration, and report lines, with
+  an immediate ANSI reset. Run-start chrome and the successful `Done!` line
+  were removed; failed/interrupted statuses, neutral report dividers, reports,
+  and session files remain. No persistent composer, managed viewport, stdout
+  interception, or second animation worker was introduced. Focused console
+  tests: 245 passed. Full suite: 821 passed. Production compilation/import
+  checks and `git diff --check` passed. A real PTY startup plus Up, Esc, and
+  `/exit` smoke completed with the taller scene and clean terminal teardown;
+  no model inference was run.
+
 - 2026-09-04: Polished the keyboard startup surface after manual testing while
   preserving the existing main-menu panel. Composer Up now always enters on
   Workspace after either menu boundary; submenu titles, marker-aware option

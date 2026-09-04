@@ -18,6 +18,22 @@ SOFT_GREEN_HEX = "#86efac"
 SOFT_YELLOW_HEX = "#ffea80"
 SOFT_RED_HEX = "#f77998"
 
+# Mods own only a semantic accent name. The exact product palette stays here
+# in Code Squid's presentation layer rather than leaking into reusable Core.
+MOD_ACCENT_HEX = {
+    "cyan": "#3edcff",
+    "blue": "#5d9cff",
+    "green": "#55e6a5",
+    "yellow": "#ffe06a",
+    "orange": "#ff9b55",
+    "red": "#ff6475",
+    "pink": "#ff75c8",
+    "purple": "#bd88ff",
+    "white": "#f4fbff",
+    "gray": "#a8b7c5",
+}
+DEFAULT_MOD_ACCENT_HEX = MOD_ACCENT_HEX["cyan"]
+
 
 def ansi_fg(hex_color: str) -> str:
     """Return a true-color ANSI foreground escape for a hex color."""
@@ -26,6 +42,11 @@ def ansi_fg(hex_color: str) -> str:
     g = int(value[2:4], 16)
     b = int(value[4:6], 16)
     return f"\033[38;2;{r};{g};{b}m"
+
+
+def mod_accent_hex(accent_name: str | None) -> str:
+    """Resolve a Mod's semantic accent name through the product palette."""
+    return MOD_ACCENT_HEX.get(accent_name or "", DEFAULT_MOD_ACCENT_HEX)
 
 
 SOFT_CYAN_STYLE = ansi_fg(SOFT_CYAN_HEX)

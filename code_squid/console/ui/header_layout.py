@@ -12,7 +12,10 @@ TITLE_PANEL_GAP = 2
 PANEL_TOP = TITLE_ROW + TITLE_PANEL_GAP + 1
 PANEL_MAX_WIDTH = 40
 PANEL_MIN_WIDTH = len(TITLE) + 4
-RAIN_ROWS_BELOW_PANEL = 3
+# This is the last region the startup renderer owns before the ordinary
+# composer begins. Five rows bring the rain close to that boundary without
+# ever writing into prompt_toolkit's identity or input rows.
+RAIN_ROWS_BELOW_PANEL = 5
 BASE_PANEL_HEIGHT = 13
 SKILL_PANEL_HEIGHT = 15
 STARTUP_SEPARATOR_ROWS = 1

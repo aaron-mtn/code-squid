@@ -29,7 +29,7 @@ from code_squid.console.startup_menu import StartupMenu
 
 
 PROMPT_PREFIX = INPUT_PROMPT_PREFIX
-PROMPT_STYLE = INPUT_PROMPT_STYLE
+PROMPT_STYLE = ""
 CANCELLED_BEFORE_RUN_MESSAGE = "⏹️ Cancelled before task started"
 HELP_COMMAND = "/help"
 NEW_COMMAND = "/new"
@@ -93,10 +93,20 @@ def _print_help() -> None:
     print(HELP_TEXT)
 
 
+def _composer_prompt(animator: BinaryRainHeader | None = None):
+    """Return a live prompt marker that follows composer/menu focus."""
+    def fragments() -> FormattedText:
+        menu = getattr(animator, "startup_menu", None)
+        marker = "" if menu is not None and menu.focused else PROMPT_PREFIX
+        return FormattedText([(PROMPT_STYLE, marker)])
+
+    return fragments
+
+
 def _prompt_task(label: str, animator: BinaryRainHeader | None = None) -> str:
     return prompt_multiline_input(
-        FormattedText([(PROMPT_STYLE, PROMPT_PREFIX)]),
-        preface=FormattedText([(PROMPT_STYLE, INPUT_IDENTITY_LINE)]),
+        _composer_prompt(animator),
+        preface=FormattedText([("", INPUT_IDENTITY_LINE)]),
         animator=animator,
     )
 

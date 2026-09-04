@@ -78,9 +78,12 @@ class TerminalSpinner:
             frame_index = (frame_index + 1) % len(SPINNER_FRAMES)
 
     def _write_frame(self, frame_index: int) -> None:
-        text = f"{self.prefix}🦑 {SPINNER_FRAMES[frame_index]}"
+        squid = "🦑"
         if self.style and self.stream.isatty():
-            text = f"{self.style}{text}{RESET_STYLE}"
+            # The squid is the only branded accent surface. Reset immediately
+            # so the spinner frame and surrounding terminal text stay native.
+            squid = f"{self.style}{squid}{RESET_STYLE}"
+        text = f"{self.prefix}{squid} {SPINNER_FRAMES[frame_index]}"
         self.stream.write(f"\r{text}")
         self.stream.flush()
 

@@ -275,6 +275,7 @@ def test_roomy_scene_geometry_keeps_two_rows_between_title_and_panel() -> None:
     assert layout.panel.height == BASE_PANEL_HEIGHT
     assert layout.panel.top - layout.title_row - 1 == TITLE_PANEL_GAP
     assert layout.rain_bottom_row - layout.panel.bottom == RAIN_ROWS_BELOW_PANEL
+    assert RAIN_ROWS_BELOW_PANEL == 5
 
 
 def test_initial_viewport_reservation_matches_scene_and_prompt_height() -> None:

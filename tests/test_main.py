@@ -11,6 +11,7 @@ from code_squid.console.cli.prompt_loop import (
     INPUT_IDENTITY_LINE,
     PROMPT_PREFIX,
     PROMPT_STYLE,
+    _composer_prompt,
     _prompt_task,
     _resume_session,
     _run_interactive,
@@ -24,12 +25,7 @@ from squid_core.agent_loop import RunResult
 from squid_core.model_adapter import ModelRequestError
 from main import main
 from squid_core.storage import SessionStore
-from code_squid.console.ui.display import (
-    RUN_STARTED_DIVIDER,
-    SOFT_CYAN_HEX,
-    StartupInfo,
-    TerminalDisplay,
-)
+from code_squid.console.ui.display import StartupInfo, TerminalDisplay
 
 
 class ModelFailingLoop:
@@ -580,9 +576,6 @@ class BannerDisplay(FakeDisplay):
 
     def run_started(self) -> None:
         super().run_started()
-        print()
-        print(RUN_STARTED_DIVIDER)
-        print()
 
 
 class SessionSceneDisplay(FakeDisplay):
@@ -653,11 +646,23 @@ def test_prompt_task_uses_agent_prompt_without_toolbar(monkeypatch) -> None:
     prompt, preface = prompt_calls[0]
     assert INPUT_IDENTITY_LINE == "@code-squid"
     assert "🦑" not in INPUT_IDENTITY_LINE
-    assert preface == [(PROMPT_STYLE, INPUT_IDENTITY_LINE)]
-    assert prompt == [(PROMPT_STYLE, PROMPT_PREFIX)]
-    assert prompt[0][0] == preface[0][0]
-    assert PROMPT_STYLE == f"{SOFT_CYAN_HEX} bold"
-    assert PROMPT_STYLE != "ansicyan bold"
+    assert preface == [("", INPUT_IDENTITY_LINE)]
+    assert prompt() == [(PROMPT_STYLE, PROMPT_PREFIX)]
+    assert PROMPT_STYLE == ""
+
+
+def test_composer_marker_tracks_menu_and_submenu_focus() -> None:
+    menu = SimpleNamespace(focused=False, mode="main")
+    animator = SimpleNamespace(startup_menu=menu)
+    prompt = _composer_prompt(animator)
+
+    assert prompt() == [("", PROMPT_PREFIX)]
+    menu.focused = True
+    assert prompt() == [("", "")]
+    menu.mode = "mod"
+    assert prompt() == [("", "")]
+    menu.focused = False
+    assert prompt() == [("", PROMPT_PREFIX)]
 
 
 def test_new_session_prints_banner_before_task_input(monkeypatch, tmp_path, capsys) -> None:
@@ -677,7 +682,6 @@ def test_new_session_prints_banner_before_task_input(monkeypatch, tmp_path, caps
     assert capsys.readouterr().out == (
         _expected_startup_output(tmp_path)
         + f"{INPUT_IDENTITY_LINE}\n{PROMPT_PREFIX}"
-        + f"\n{RUN_STARTED_DIVIDER}\n\n"
     )
     assert len(displays) == 1
     assert displays[0].starts == 1
@@ -773,7 +777,6 @@ def test_resume_session_prints_banner_before_follow_up_input(
     assert capsys.readouterr().out == (
         _expected_startup_output(tmp_path)
         + f"{INPUT_IDENTITY_LINE}\n{PROMPT_PREFIX}"
-        + f"\n{RUN_STARTED_DIVIDER}\n\n"
         + f"{INPUT_IDENTITY_LINE}\n{PROMPT_PREFIX}"
     )
     assert len(displays) == 1

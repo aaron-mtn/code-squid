@@ -4,7 +4,9 @@ from dataclasses import replace
 from pathlib import Path
 
 from squid_core.safety import ApprovalDecision, USER_DENIED_TOOL_ACTION
+from squid_core.mods import discover_mods
 
+from code_squid.app_paths import code_squid_home
 from code_squid.console.ui.approval import (
     APPROVAL_PANEL_WIDTH,
     INPUT_PROMPT_PREFIX,
@@ -24,6 +26,7 @@ from code_squid.console.ui.formatting import (
     BOLD_STYLE,
     DIM_STYLE,
     FINAL_SUMMARY_INDENT,
+    DEFAULT_MOD_ACCENT_HEX,
     RESET_STYLE,
     SOFT_CYAN_HEX,
     SOFT_CYAN_STYLE,
@@ -33,8 +36,10 @@ from code_squid.console.ui.formatting import (
     SOFT_RED_STYLE,
     SOFT_YELLOW_HEX,
     SOFT_YELLOW_STYLE,
+    ansi_fg,
     file_link,
     format_final_summary,
+    mod_accent_hex,
     short_path,
     structural_prefix,
     structural_text,
@@ -53,12 +58,20 @@ from code_squid.console.ui.tool_display import (
 
 
 RAIL_WIDTH = 61
-RUN_STARTED_LABEL = "╰─ starting run "
-RUN_STARTED_DIVIDER = f"{RUN_STARTED_LABEL}{'─' * (RAIL_WIDTH - len(RUN_STARTED_LABEL))}"
 FINAL_REPORT_DIVIDER = "─" * RAIL_WIDTH
 RUN_EVENT_INDENT = "  "
 RUN_DETAIL_INDENT = "    "
 INPUT_IDENTITY_LINE = "@code-squid"
+
+
+def _accent_for_mod(mod_name: str | None) -> str:
+    """Resolve the current Mod accent without retaining stale selection state."""
+    if mod_name is None:
+        return DEFAULT_MOD_ACCENT_HEX
+    mod = discover_mods(code_squid_home()).get(mod_name)
+    if mod is None:
+        return DEFAULT_MOD_ACCENT_HEX
+    return mod_accent_hex(getattr(mod, "accent", None))
 
 
 class TerminalDisplay:
@@ -83,7 +96,7 @@ class TerminalDisplay:
             else TerminalSpinner(
                 enabled=not debug,
                 prefix=RUN_EVENT_INDENT,
-                style=SOFT_CYAN_STYLE,
+                style=ansi_fg(DEFAULT_MOD_ACCENT_HEX),
             )
         )
         self._needs_leading_blank = False
@@ -100,18 +113,16 @@ class TerminalDisplay:
     def run_started(self) -> None:
         self.retire_session_scene()
         self._stop_spinner()
-        print()
-        print(structural_text(RUN_STARTED_DIVIDER))
-        print()
         self._needs_leading_blank = False
         self._needs_detail_blank_after_assistant = False
 
     def thinking(self) -> None:
         if self.debug:
-            print("🦑 Thinking...")
+            print(self._squid_line(" Thinking..."))
             print()
             return
         self._print_leading_blank_if_needed()
+        self._spinner.style = ansi_fg(self._accent_hex())
         self._spinner.start()
 
     def assistant_message(self, content: str) -> None:
@@ -244,7 +255,7 @@ class TerminalDisplay:
             self._print_leading_blank_if_needed()
         else:
             print()
-        print(structural_text(FINAL_REPORT_DIVIDER))
+        print(styled_text(FINAL_REPORT_DIVIDER, DIM_STYLE))
         print("🗂️  Session files")
         print()
         self._print_file_list("Read", session.files_read)
@@ -259,11 +270,7 @@ class TerminalDisplay:
             print(styled_text("❌ Session failed", SOFT_RED_STYLE))
         elif status == "interrupted":
             print(styled_text("⚠️ Session interrupted", SOFT_YELLOW_STYLE))
-        else:
-            print(styled_text("✅ Done!", SOFT_GREEN_STYLE))
         if not self.show_transcript:
-            if status == "complete":
-                print()
             return
 
         print()
@@ -388,7 +395,7 @@ class TerminalDisplay:
     def _print_assistant_narration(self, content: str, trailing_blank: bool = True) -> None:
         lines = content.splitlines() or [""]
         if self.debug:
-            print(f"🦑 {lines[0]}")
+            print(self._squid_line(f" {lines[0]}"))
             for line in lines[1:]:
                 print(f"   {line}" if line else "")
             if trailing_blank:
@@ -399,7 +406,7 @@ class TerminalDisplay:
             initial_indent=f"{RUN_EVENT_INDENT}🦑 ",
             subsequent_indent=f"{RUN_EVENT_INDENT}   ",
         ):
-            print(output_line)
+            print(self._accent_first_squid(output_line))
         for line in lines[1:]:
             if not line:
                 print()
@@ -435,11 +442,36 @@ class TerminalDisplay:
         if not formatted:
             return
         self._print_leading_blank_if_needed()
-        print(structural_text(FINAL_REPORT_DIVIDER))
-        print("🦑 Report:")
+        print(styled_text(FINAL_REPORT_DIVIDER, DIM_STYLE))
+        print(self._squid_line(" Report:"))
         print()
         print(formatted)
         self._needs_leading_blank = False
+
+    def _active_mod_name(self) -> str | None:
+        """Read menu state first so a just-selected Mod affects the next line."""
+        menu = getattr(self.header, "startup_menu", None)
+        if menu is not None:
+            return menu.mod_name
+        return self.startup_info.mod_name if self.startup_info is not None else None
+
+    def _accent_hex(self) -> str:
+        return _accent_for_mod(self._active_mod_name())
+
+    def _squid_line(self, suffix: str) -> str:
+        """Accent only the squid glyph and immediately restore terminal color."""
+        return f"{styled_text('🦑', ansi_fg(self._accent_hex()))}{suffix}"
+
+    def _accent_first_squid(self, line: str) -> str:
+        """Accent an existing leading narration marker without adding one."""
+        squid_index = line.find("🦑")
+        if squid_index < 0:
+            return line
+        return (
+            f"{line[:squid_index]}"
+            f"{styled_text('🦑', ansi_fg(self._accent_hex()))}"
+            f"{line[squid_index + 1:]}"
+        )
 
     def _format_final_summary(self, content: str) -> str:
         """Return final report text through the existing display test seam."""

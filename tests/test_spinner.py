@@ -52,7 +52,7 @@ def test_spinner_styles_tty_frame_and_resets() -> None:
     spinner.stop()
 
     assert stream.writes == [
-        f"\r{SOFT_CYAN_STYLE}🦑 ⠋{RESET_STYLE}",
+        f"\r{SOFT_CYAN_STYLE}🦑{RESET_STYLE} ⠋",
         "\r\033[K",
     ]
 
