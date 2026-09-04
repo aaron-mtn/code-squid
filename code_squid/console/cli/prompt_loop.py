@@ -107,8 +107,10 @@ def _prompt_task_or_cancel(
 ) -> str | None:
     try:
         if display is not None:
-            display.prepare_header_for_prompt()
-            return _prompt_task(label, display.header)
+            animator = display.header if display.session_scene_active else None
+            task = _prompt_task(label, animator)
+            display.retire_session_scene()
+            return task
         return _prompt_task(label)
     except KeyboardInterrupt:
         print(CANCELLED_BEFORE_RUN_MESSAGE)
@@ -190,6 +192,7 @@ def _run_interactive(
                 return 0
             if _is_new_input(task):
                 active_session_id = None
+                display.start_session_scene()
                 continue
             if _is_help_input(task):
                 _print_help()

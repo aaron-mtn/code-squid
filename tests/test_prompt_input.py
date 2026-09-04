@@ -6,7 +6,10 @@ from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.output import DummyOutput
 
-from code_squid.console.ui.prompt_input import prompt_multiline_input
+from code_squid.console.ui.prompt_input import (
+    multiline_key_bindings,
+    prompt_multiline_input,
+)
 
 
 def _submit_terminal_input(monkeypatch, terminal_input: str) -> str:
@@ -65,6 +68,22 @@ def test_prompt_multiline_input_uses_shared_multiline_bindings(monkeypatch) -> N
     assert kwargs["key_bindings"] is not None
     assert ANSI_SEQUENCES["\x1b[27;2;13~"] == Keys.ControlJ
     assert ANSI_SEQUENCES["\x1b[13;2u"] == Keys.ControlJ
+
+
+def test_menu_escape_binding_is_eager() -> None:
+    class Menu:
+        focused = True
+
+    animator = type("Animator", (), {"startup_menu": Menu()})()
+    bindings = multiline_key_bindings(animator)
+    escape_bindings = [
+        binding
+        for binding in bindings.bindings
+        if binding.keys == (Keys.Escape,)
+    ]
+
+    assert len(escape_bindings) == 1
+    assert escape_bindings[0].eager() is True
 
 
 def test_prompt_resumes_animator_with_output_safe_redraw(monkeypatch) -> None:

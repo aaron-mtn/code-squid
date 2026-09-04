@@ -41,12 +41,16 @@ class QuietDisplay:
     """Minimal display used to isolate command-loop behavior."""
 
     header = None
+    session_scene_active = False
 
     def start(self) -> None:
-        pass
+        self.start_session_scene()
 
-    def prepare_header_for_prompt(self) -> None:
-        pass
+    def start_session_scene(self) -> None:
+        self.session_scene_active = True
+
+    def retire_session_scene(self) -> None:
+        self.session_scene_active = False
 
     def stop_header(self) -> None:
         pass

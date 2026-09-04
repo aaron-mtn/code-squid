@@ -56,9 +56,17 @@ class FakeDisplay:
         self.finished = False
         self.run_result = None
         self.header = None
+        self.session_scene_active = False
 
     def start(self) -> None:
         self.starts += 1
+        self.start_session_scene()
+
+    def start_session_scene(self) -> None:
+        self.session_scene_active = True
+
+    def retire_session_scene(self) -> None:
+        self.session_scene_active = False
 
     def run_started(self) -> None:
         self.run_starts += 1
@@ -69,9 +77,6 @@ class FakeDisplay:
     def loop_finished(self, session, run_result=None) -> None:
         self.finished = True
         self.run_result = run_result
-
-    def prepare_header_for_prompt(self) -> None:
-        pass
 
     def set_specialization(self, *, mod_name, skill_name) -> None:
         self.mod_name = mod_name
@@ -580,6 +585,32 @@ class BannerDisplay(FakeDisplay):
         print()
 
 
+class SessionSceneDisplay(FakeDisplay):
+    """Track session-scene ownership without rendering terminal frames."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.header = object()
+        self.session_scene_active = False
+        self.scene_starts = 0
+        self.scene_retires = 0
+
+    def start(self) -> None:
+        super().start()
+
+    def start_session_scene(self) -> None:
+        if self.session_scene_active:
+            return
+        self.session_scene_active = True
+        self.scene_starts += 1
+
+    def retire_session_scene(self) -> None:
+        if not self.session_scene_active:
+            return
+        self.session_scene_active = False
+        self.scene_retires += 1
+
+
 def _fake_prompt_task(response: str):
     def fake_prompt_task(label: str, animator=None) -> str:
         print(INPUT_IDENTITY_LINE)
@@ -1061,6 +1092,34 @@ def test_interactive_new_command_clears_active_session(monkeypatch, tmp_path) ->
 
     assert new_tasks == ["first task", "second task"]
     assert follow_up_tasks == []
+
+
+def test_interactive_scene_is_initial_only_until_new_session(monkeypatch, tmp_path) -> None:
+    display = SessionSceneDisplay()
+    prompt_animators = []
+    responses = iter(["first task", "/help", "/new", "second task", "/exit"])
+
+    def prompt(label, animator=None):
+        prompt_animators.append(animator)
+        return next(responses)
+
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._run_display", lambda *args: display
+    )
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", prompt)
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._run_new_session_task",
+        lambda *args, **kwargs: (0, "session"),
+    )
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._run_follow_up_task",
+        lambda *args, **kwargs: (0, "session"),
+    )
+
+    assert _run_interactive(tmp_path) == 0
+    assert prompt_animators == [display.header, None, None, display.header, None]
+    assert display.scene_starts == 2
+    assert display.scene_retires == 2
 
 
 def test_interactive_second_input_uses_follow_up_path(monkeypatch, tmp_path) -> None:

@@ -51,7 +51,7 @@ class StartupSceneLayout:
     title_row: int
     title_column: int
     panel: Rectangle
-    divider_row: int
+    rain_bottom_row: int
 
     def cell_is_inside_panel(self, row: int, column: int) -> bool:
         """Return whether the panel, rather than rain, owns a cell."""
@@ -60,7 +60,7 @@ class StartupSceneLayout:
     def cell_allows_rain(self, row: int, column: int) -> bool:
         """Return whether rain may occupy a scene cell."""
         return (
-            0 <= row < self.divider_row
+            0 <= row <= self.rain_bottom_row
             and 0 <= column < self.width
             and not self.cell_is_inside_panel(row, column)
         )
@@ -94,16 +94,16 @@ def startup_scene_layout(
     panel_left = max((width - panel_width) // 2, 0)
     panel_height = SKILL_PANEL_HEIGHT if show_skill else BASE_PANEL_HEIGHT
     panel = Rectangle(PANEL_TOP, panel_left, panel_width, panel_height)
-    divider_row = panel.bottom + RAIN_ROWS_BELOW_PANEL + 1
+    rain_bottom_row = panel.bottom + RAIN_ROWS_BELOW_PANEL
     if width < len(TITLE):
         title_column = -((len(TITLE) - width) // 2)
     else:
         title_column = (width - len(TITLE)) // 2
     return StartupSceneLayout(
         width=width,
-        height=divider_row + 1,
+        height=rain_bottom_row + 1,
         title_row=TITLE_ROW,
         title_column=title_column,
         panel=panel,
-        divider_row=divider_row,
+        rain_bottom_row=rain_bottom_row,
     )

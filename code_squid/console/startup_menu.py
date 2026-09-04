@@ -93,10 +93,13 @@ class StartupMenu:
         self.skill_name = skill_name
 
     def focus_from_composer(self) -> None:
-        """Focus the remembered main-menu row without submitting input."""
+        """Focus the bottom main-menu row without submitting input."""
         self.focused = True
         self.mode = "main"
-        self.selected_index = self._main_selected_index
+        # Composer entry is deliberately stable even when the prior menu visit
+        # ended through the top edge or from a different remembered row.
+        self.selected_index = len(MAIN_ROWS) - 1
+        self._main_selected_index = self.selected_index
 
     def return_to_composer(self) -> None:
         """Leave menu input focused while retaining the main row selection."""
@@ -234,6 +237,10 @@ class StartupMenu:
             path_rows = textwrap.wrap(str(self.repo_root), width=path_width) or [
                 str(self.repo_root)
             ]
+            # Keep the footer visible in the fixed-height panel even when a
+            # deeply nested workspace path needs more wrapped rows than fit.
+            available_path_rows = max(layout.panel.height - 8, 1)
+            path_rows = path_rows[:available_path_rows]
             content = [
                 "Workspace",
                 "",
@@ -257,11 +264,26 @@ class StartupMenu:
             max(len(self._options) - visible_count, 0),
         )
         visible = self._options[start : start + visible_count]
-        option_rows = [
-            f"{'> ' if start + index == self.selected_index else '  '}{option}"
-            for index, option in enumerate(visible)
+        inner_width = max(layout.panel.width - 2, 0)
+        widest_option = max((len(option) for option in visible), default=0)
+        option_width = min(widest_option + 2, inner_width)
+        option_left = max((inner_width - option_width) // 2, 0)
+        option_rows = []
+        for index, option in enumerate(visible):
+            marker = "> " if start + index == self.selected_index else "  "
+            option_text = f"{marker}{option}"[:option_width].ljust(option_width)
+            option_rows.append(
+                f"{' ' * option_left}{option_text}".ljust(inner_width)
+            )
+        # Titles and footers center on the panel, while every option shares one
+        # marker-aware text anchor based on the widest visible option.
+        content = [
+            title.center(inner_width),
+            "",
+            *option_rows,
+            "",
+            "Esc  back".center(inner_width),
         ]
-        content = [title, "", *option_rows, "", "Esc  back"]
         return _framed_rows(content, layout)
 
 

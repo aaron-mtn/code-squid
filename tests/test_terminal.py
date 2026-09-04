@@ -484,21 +484,26 @@ def test_display_starts_pauses_and_stops_owned_header(capsys) -> None:
     display.stop_header()
 
     assert header.starts == 1
-    assert header.pauses == 1
-    assert header.stops == 1
+    assert header.pauses == 0
+    assert header.stops == 2
     assert header.startup_infos == [None]
     assert header.live_content == [("", 2)]
 
 
-def test_display_reanchors_same_header_before_later_prompts(capsys) -> None:
+def test_display_retires_and_restarts_one_session_scene(capsys) -> None:
     header = FakeHeader()
     display = TerminalDisplay(_header=header)
 
-    display.prepare_header_for_prompt()
-    display.prepare_header_for_prompt()
+    display.start()
+    display.retire_session_scene()
+    display.retire_session_scene()
+    display.start_session_scene()
+    display.start_session_scene()
 
-    assert header.reanchors == 1
-    assert capsys.readouterr().out == "\n"
+    assert header.starts == 2
+    assert header.stops == 1
+    assert display.session_scene_active is True
+    assert capsys.readouterr().out == "\n\n"
 
 
 def test_display_updates_specialization_used_by_later_scene_frames() -> None:

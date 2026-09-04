@@ -63,7 +63,7 @@ def _run_prompt(monkeypatch, menu: StartupMenu, terminal_input: str) -> str:
 def test_empty_composer_up_enters_menu_and_boundary_returns(monkeypatch, tmp_path) -> None:
     menu = StartupMenu(tmp_path, load_settings(tmp_path))
 
-    result = _run_prompt(monkeypatch, menu, "\x1b[A\x1b[Atext\r")
+    result = _run_prompt(monkeypatch, menu, ("\x1b[A" * 6) + "text\r")
 
     assert result == "text"
     assert menu.focused is False
@@ -78,23 +78,21 @@ def test_composer_text_keeps_normal_up_behavior(monkeypatch, tmp_path) -> None:
     assert menu.focused is False
 
 
-def test_main_navigation_boundaries_and_last_selection_are_consistent(tmp_path) -> None:
+def test_composer_entry_always_selects_bottom_row_after_either_boundary(tmp_path) -> None:
     menu = StartupMenu(tmp_path, load_settings(tmp_path))
     menu.focus_from_composer()
-    menu.move(1)
-    menu.move(1)
-    assert menu.selected_index == 2
+    assert menu.selected_index == len(MAIN_ROWS) - 1
 
-    menu.back()
-    menu.focus_from_composer()
-    assert menu.selected_index == 2
-
-    menu.move(-1)
-    menu.move(-1)
+    menu.selected_index = 0
     menu.move(-1)
     assert menu.focused is False
     menu.focus_from_composer()
-    assert menu.selected_index == 0
+    assert menu.selected_index == len(MAIN_ROWS) - 1
+
+    menu.move(1)
+    assert menu.focused is False
+    menu.focus_from_composer()
+    assert menu.selected_index == len(MAIN_ROWS) - 1
 
 
 def test_each_main_row_replaces_panel_and_escape_restores_main(tmp_path) -> None:
@@ -118,6 +116,21 @@ def test_each_main_row_replaces_panel_and_escape_restores_main(tmp_path) -> None
         assert all(row in restored for row in MAIN_ROWS)
 
 
+def test_back_returns_submenu_to_main_and_main_to_composer(tmp_path) -> None:
+    menu = StartupMenu(tmp_path, load_settings(tmp_path))
+    menu.focus_from_composer()
+    menu.selected_index = 0
+    menu.activate()
+
+    menu.back()
+    assert menu.mode == "main"
+    assert menu.focused is True
+
+    menu.back()
+    assert menu.mode == "main"
+    assert menu.focused is False
+
+
 def test_unfocused_main_panel_preserves_existing_composition(tmp_path) -> None:
     menu = StartupMenu(tmp_path, load_settings(tmp_path))
     layout = startup_scene_layout(80)
@@ -130,6 +143,7 @@ def test_provider_options_are_canonical_and_selection_updates_persisted_panel(
 ) -> None:
     menu = StartupMenu(tmp_path, load_settings(tmp_path))
     menu.focus_from_composer()
+    menu.selected_index = 0
     menu.activate()
     assert set(menu._options) == VALID_PROVIDERS
 
@@ -227,3 +241,37 @@ def test_workspace_view_is_read_only_and_shows_full_path(tmp_path) -> None:
     assert str(original_root) in visible_content
     menu.activate()
     assert menu.repo_root == original_root
+
+
+def test_workspace_view_keeps_centered_footer_for_long_paths(tmp_path) -> None:
+    long_root = tmp_path.joinpath(*(["nested-workspace-segment"] * 12))
+    menu = StartupMenu(long_root, load_settings(tmp_path))
+    menu.focus_from_composer()
+    menu.selected_index = 4
+    menu.activate()
+
+    inner = [line[1:-1] for line in menu.panel_lines(startup_scene_layout(80))]
+    footer = next(line for line in inner if line.strip() == "Esc  back")
+
+    assert footer == "Esc  back".center(len(footer))
+
+
+def test_submenu_centers_title_options_as_one_column_and_footer(tmp_path) -> None:
+    menu = StartupMenu(tmp_path, load_settings(tmp_path))
+    menu.focus_from_composer()
+    menu.selected_index = 0
+    menu.activate()
+    menu._options = ("a", "long-option")
+    menu.selected_index = 0
+
+    lines = menu.panel_lines(startup_scene_layout(80))
+    inner = [line[1:-1] for line in lines]
+    title = next(line for line in inner if line.strip() == "Provider")
+    selected = next(line for line in inner if "> a" in line)
+    unselected = next(line for line in inner if "long-option" in line)
+    footer = next(line for line in inner if line.strip() == "Esc  back")
+
+    assert title == "Provider".center(len(title))
+    assert footer == "Esc  back".center(len(footer))
+    assert selected.index("a") == unselected.index("long-option")
+    assert selected.index(">") == unselected.index("long-option") - 2

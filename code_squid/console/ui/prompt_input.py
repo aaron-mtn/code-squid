@@ -57,8 +57,10 @@ def multiline_key_bindings(
             resume_animator()
         event.app.invalidate()
 
-    @bindings.add("escape", filter=menu_focused)
+    @bindings.add("escape", filter=menu_focused, eager=True)
     def _(event) -> None:
+        # Escape prefixes Alt/meta sequences, so eager matching avoids
+        # prompt_toolkit's standalone-Escape disambiguation delay in the menu.
         menu.back()
         event.app.invalidate()
 

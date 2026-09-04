@@ -77,7 +77,7 @@ and application layer; `squid_core/` is the reusable agent runtime.
     `TerminalDisplay` as the lifecycle coordinator used by the Agent loop.
     `header_layout.py` owns the explicit startup-scene geometry: safe draw
     width, fixed title position, two-row title/panel gap, centered compact panel
-    rectangle, three rain rows beneath the panel, final divider row, and total
+    rectangle, three rain rows beneath the panel, and total
     initial scene-plus-composer viewport height. `banner.py` owns the panel's
     Provider, Model, Safety, Mod, optional standalone Skill, and concise
     Workspace content. `approval.py`
@@ -87,29 +87,30 @@ and application layer; `squid_core/` is the reusable agent runtime.
     final-summary Markdown rendering. `binary_header.py` owns rain state,
     semantic scene composition, and the single background animator lifecycle.
     It excludes the panel rectangle while placing rain, then overlays the
-    title, panel, and DIM full-width divider into one frame. `TerminalDisplay`
-    supplies application state, starts and owns that animator, pauses it before
-    run output, and stops it during CLI teardown. While input is
+    title and panel into one frame. `TerminalDisplay` supplies application
+    state, starts one scene at a session boundary, and retires its animator
+    after the first submitted prompt while leaving the rendered scene in
+    scrollback. Ordinary later prompts are composer-only; `/new` explicitly
+    starts one fresh scene and worker at the current terminal position. While
+    startup input is
     active, `prompt_input.py` sends each worker frame through prompt_toolkit's
     `run_in_terminal` seam so header frames and composer redraws remain
     serialized with backpressure and no queued output after pause.
-    After intervening output, the preserved rain state is re-anchored at the
-    current cursor before the next prompt; old frames remain frozen in history.
     The composer and startup menu share prompt-toolkit key bindings rather than
-    a raw input reader: Up from an empty buffer focuses the remembered main
+    a raw input reader: Up from an empty buffer always focuses the bottom main
     row, arrows navigate, Enter replaces the same panel with a submenu or
-    applies a selection, and Esc backs out. Main-menu edge navigation returns
+    applies a selection, and eager Esc backs out without Escape-prefix
+    disambiguation delay. Main-menu edge navigation returns
     to the composer symmetrically. Ordinary text is ignored while menu-focused,
     and arrows retain normal multiline behavior whenever the composer contains
     text. Panel changes are read by the existing rain worker, so navigation
     neither creates a second worker nor performs discovery during frame render.
     The live anchor is valid only while both terminal dimensions remain
     unchanged. A width or height change freezes the animator before another
-    relative redraw, and the next prompt boundary rebuilds the header at the
-    current size before animation resumes; terminals too small for the header
-    stay safely paused. The relative offset at a valid anchor uses the composed
+    relative redraw; terminals too small for the header stay safely paused.
+    The relative offset at a valid anchor uses the composed
     scene height plus the unchanged composer preface/input rows. Mod/Skill
-    selection updates the presentation copy before the next scene re-anchor;
+    selection updates the presentation copy used by the active scene;
     selection semantics remain owned by the CLI command handlers. Initial drop
     heads are staggered through the full rain height so the first frame is
     populated above, beside, and below the panel; later resets continue to

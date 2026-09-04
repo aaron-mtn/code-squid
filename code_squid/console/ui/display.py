@@ -89,16 +89,16 @@ class TerminalDisplay:
         self._needs_leading_blank = False
         self._needs_detail_blank_after_assistant = False
         self._compacted_denied_action: dict | None = None
-        self._prompt_has_started = False
+        self._session_scene_active = False
 
     def start(self) -> None:
         self._stop_spinner()
-        self._print_startup_banner()
+        self.start_session_scene()
         self._needs_leading_blank = False
         self._needs_detail_blank_after_assistant = False
 
     def run_started(self) -> None:
-        self.pause_header()
+        self.retire_session_scene()
         self._stop_spinner()
         print()
         print(structural_text(RUN_STARTED_DIVIDER))
@@ -305,15 +305,26 @@ class TerminalDisplay:
     def stop_header(self) -> None:
         """Stop the header worker and restore terminal cursor state."""
         self.header.stop()
+        self._session_scene_active = False
 
-    def prepare_header_for_prompt(self) -> None:
-        """Give each later prompt a fresh anchor below intervening output."""
-        if not self._prompt_has_started:
-            self._prompt_has_started = True
+    @property
+    def session_scene_active(self) -> bool:
+        """Return whether prompts may still interact with the startup scene."""
+        return self._session_scene_active
+
+    def start_session_scene(self) -> None:
+        """Render one fresh interactive scene for a new session boundary."""
+        if self._session_scene_active:
             return
-        if not self.header.reanchor():
+        self._print_startup_banner()
+        self._session_scene_active = True
+
+    def retire_session_scene(self) -> None:
+        """Freeze the rendered scene in scrollback and stop its worker."""
+        if not self._session_scene_active:
             return
-        print()
+        self.header.stop()
+        self._session_scene_active = False
 
     def set_specialization(
         self,

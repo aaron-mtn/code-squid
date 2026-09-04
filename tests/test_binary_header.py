@@ -20,7 +20,6 @@ from code_squid.console.ui.binary_header import (
     RAIN_SPEED,
     RESET_STYLE,
     SHOW_CURSOR,
-    DIVIDER_TEXT,
     PANEL_TEXT,
     TITLE,
     TITLE_ROW,
@@ -173,8 +172,8 @@ def test_scene_layout_centers_panel_and_keeps_all_geometry_in_bounds(
     assert layout.panel.left + layout.panel.width <= layout.width
     assert layout.title_column == (layout.width - len(TITLE)) // 2
     assert layout.title_row < layout.panel.top
-    assert layout.divider_row == layout.height - 1
-    assert layout.divider_row - layout.panel.bottom - 1 == RAIN_ROWS_BELOW_PANEL
+    assert layout.rain_bottom_row == layout.height - 1
+    assert layout.rain_bottom_row - layout.panel.bottom == RAIN_ROWS_BELOW_PANEL
 
 
 def test_composition_reserves_panel_and_allows_rain_around_and_below_it() -> None:
@@ -186,7 +185,12 @@ def test_composition_reserves_panel_and_allows_rain_around_and_below_it() -> Non
         layout.panel.left + layout.panel.width,
     ]
     drops = [
-        Drop(column=column, head=float(layout.divider_row), speed=0.1, bits=["1"] * 30)
+        Drop(
+            column=column,
+            head=float(layout.rain_bottom_row),
+            speed=0.1,
+            bits=["1"] * 30,
+        )
         for column in columns
     ]
 
@@ -199,10 +203,10 @@ def test_composition_reserves_panel_and_allows_rain_around_and_below_it() -> Non
         )
     assert cells[layout.panel.top][layout.panel.left - 1] in (HEAD_BIT, TRAIL_BIT)
     assert cells[layout.panel.bottom + 1][layout.panel.left] in (HEAD_BIT, TRAIL_BIT)
-    assert all(cell == DIVIDER_TEXT for cell in cells[layout.divider_row])
+    assert cells[layout.rain_bottom_row][layout.panel.left] in (HEAD_BIT, TRAIL_BIT)
 
 
-def test_scene_render_height_title_and_dim_divider_are_deterministic() -> None:
+def test_scene_render_height_and_title_are_deterministic_without_divider() -> None:
     layout = startup_scene_layout(80)
     cells, bits = compose_cells(layout, [], startup_panel_lines(_startup_info(), layout))
 
@@ -211,7 +215,7 @@ def test_scene_render_height_title_and_dim_divider_are_deterministic() -> None:
 
     assert len(lines) == layout.height
     assert TITLE in lines[layout.title_row]
-    assert lines[layout.divider_row] == f"{DIM_STYLE}{'─' * layout.width}{RESET_STYLE}"
+    assert all("─" * layout.width not in line for line in lines)
 
 
 def test_initial_drop_generation_populates_rain_above_beside_and_below_panel() -> None:
@@ -220,10 +224,10 @@ def test_initial_drop_generation_populates_rain_above_beside_and_below_panel() -
     drops = create_drops(
         layout.width,
         rng,
-        scene_height=layout.divider_row,
+        scene_height=layout.height,
     )
     for drop in drops:
-        drop.advance(rng, scene_height=layout.divider_row)
+        drop.advance(rng, scene_height=layout.height)
 
     cells, _ = compose_cells(
         layout,
@@ -241,7 +245,7 @@ def test_initial_drop_generation_populates_rain_above_beside_and_below_panel() -
     )
     assert any(
         cell in rain
-        for row in cells[layout.panel.bottom + 1 : layout.divider_row]
+        for row in cells[layout.panel.bottom + 1 :]
         for cell in row
     )
     assert all(
@@ -257,12 +261,12 @@ def test_initial_drop_heads_are_distributed_across_composed_scene_height() -> No
         layout.width,
         random.Random(7),
         density=1.0,
-        scene_height=layout.divider_row,
+        scene_height=layout.height,
     )
 
     assert min(drop.head for drop in drops) <= layout.title_row
     assert max(drop.head for drop in drops) > layout.panel.bottom
-    assert len({int(drop.head) for drop in drops}) > layout.divider_row // 2
+    assert len({int(drop.head) for drop in drops}) > layout.height // 2
 
 
 def test_roomy_scene_geometry_keeps_two_rows_between_title_and_panel() -> None:
@@ -270,7 +274,7 @@ def test_roomy_scene_geometry_keeps_two_rows_between_title_and_panel() -> None:
 
     assert layout.panel.height == BASE_PANEL_HEIGHT
     assert layout.panel.top - layout.title_row - 1 == TITLE_PANEL_GAP
-    assert layout.divider_row - layout.panel.bottom - 1 == RAIN_ROWS_BELOW_PANEL
+    assert layout.rain_bottom_row - layout.panel.bottom == RAIN_ROWS_BELOW_PANEL
 
 
 def test_initial_viewport_reservation_matches_scene_and_prompt_height() -> None:
@@ -358,7 +362,8 @@ def test_non_tty_uses_static_fallback_without_ansi() -> None:
     rendered = stream.writes[0]
     assert TITLE in rendered
     assert "Provider  none" in rendered
-    assert rendered.splitlines()[-1] == "─" * 39
+    assert len(rendered.splitlines()) == startup_scene_layout(40).height
+    assert "─" * 39 not in rendered
     assert "\033[" not in rendered
 
 
@@ -374,6 +379,28 @@ def test_non_tty_start_never_creates_animator() -> None:
     assert header.start() is False
     assert len(stream.writes) == 1
     assert TITLE in stream.writes[0]
+
+
+def test_stopped_header_can_start_one_fresh_worker() -> None:
+    stream = FakeStream(tty=True)
+    header = BinaryRainHeader(
+        stream=stream,
+        frame_interval=10,
+        terminal_size=lambda: os.terminal_size((40, 30)),
+        ansi_supported=lambda stream: True,
+    )
+
+    assert header.start() is True
+    first_worker = header._thread
+    header.stop()
+    assert first_worker is not None and not first_worker.is_alive()
+
+    assert header.start() is True
+    second_worker = header._thread
+    assert second_worker is not None and second_worker is not first_worker
+    assert header.start() is True
+    assert header._thread is second_worker
+    header.stop()
 
 
 def test_lifecycle_owns_one_worker_and_preserves_state_across_pause_resume() -> None:

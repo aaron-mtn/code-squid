@@ -1,3 +1,17 @@
+- 2026-09-04: Polished the keyboard startup surface after manual testing while
+  preserving the existing main-menu panel. Composer Up now always enters on
+  Workspace after either menu boundary; submenu titles, marker-aware option
+  columns, and footers center as coherent blocks; and the menu Escape binding
+  is eager so prompt-toolkit does not wait on a possible Alt sequence. Removed
+  the visible divider and its physical geometry row, leaving three rain rows
+  beneath the panel. Made the startup scene explicitly session-scoped:
+  submitting the first prompt retires its sole worker and later prompts are
+  composer-only, while `/new` starts one fresh scene with current runtime and
+  specialization state. Focused startup/menu/input/display/CLI tests: 245
+  passed. Full suite: 813 passed. Production compilation/import checks and
+  `git diff --check` passed. Interactive visual smoke was intentionally left
+  for a human-controlled terminal.
+
 - 2026-09-04: Made the composed startup panel keyboard-interactive without
   turning the CLI into a fullscreen TUI. Up from an empty prompt focuses a
   remembered main-menu row; arrows navigate, Enter replaces the same fixed

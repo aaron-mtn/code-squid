@@ -51,7 +51,6 @@ TRAIL_BIT = 1
 HEAD_BIT = 2
 TITLE_TEXT = 3
 PANEL_TEXT = 4
-DIVIDER_TEXT = 5
 
 HIDE_CURSOR = "\033[?25l"
 SHOW_CURSOR = "\033[?25h"
@@ -146,7 +145,7 @@ def compose_cells(
     for drop in drops:
         if not 0 <= drop.column < layout.width:
             continue
-        for row in range(layout.divider_row):
+        for row in range(layout.height):
             # The panel owns its complete rectangle. Excluding cells here keeps
             # rain state from ever existing behind its border or content.
             if not layout.cell_allows_rain(row, drop.column):
@@ -165,9 +164,6 @@ def compose_cells(
 
     overlay_title(cells, bits, layout)
     overlay_panel(cells, bits, layout, panel_lines)
-    for column in range(layout.width):
-        cells[layout.divider_row][column] = DIVIDER_TEXT
-        bits[layout.divider_row][column] = "─"
     return cells, bits
 
 
@@ -208,9 +204,6 @@ def render_cells(
     """Render semantic cells with bright heads, dim trails, and a plain title."""
     lines: list[str] = []
     for row_cells, row_bits in zip(cells, bits):
-        if ansi and row_cells and all(cell == DIVIDER_TEXT for cell in row_cells):
-            lines.append(f"{DIM_STYLE}{''.join(row_bits)}{RESET_STYLE}")
-            continue
         line: list[str] = []
         for cell, bit in zip(row_cells, row_bits):
             # Equality is intentional: callers may use equivalent semantic cell
@@ -219,11 +212,9 @@ def render_cells(
                 line.append(f"{BRIGHT_STYLE}{bit}{RESET_STYLE}")
             elif cell == TRAIL_BIT and ansi:
                 line.append(f"{DIM_STYLE}{bit}{RESET_STYLE}")
-            elif cell == DIVIDER_TEXT and ansi:
-                line.append(f"{DIM_STYLE}{bit}{RESET_STYLE}")
             elif cell == TITLE_TEXT:
                 line.append(bit)
-            elif cell in (HEAD_BIT, TRAIL_BIT, PANEL_TEXT, DIVIDER_TEXT):
+            elif cell in (HEAD_BIT, TRAIL_BIT, PANEL_TEXT):
                 line.append(bit)
             else:
                 line.append(" ")
@@ -313,7 +304,7 @@ class BinaryRainHeader:
             self._drops = create_drops(
                 self._draw_width_value,
                 self.rng,
-                scene_height=layout.divider_row,
+                scene_height=layout.height,
             )
             self._animation_available = True
             self._stopping = False
@@ -409,19 +400,20 @@ class BinaryRainHeader:
         """Terminate the animator and restore a visible cursor."""
         with self._condition:
             thread = self._thread
-            if thread is None:
+            if thread is None and not self._started:
                 return
             self._stopping = True
             self._paused = False
             self._condition.notify_all()
-        if thread is not threading.current_thread():
+        if thread is not None and thread is not threading.current_thread():
             thread.join()
         with self._condition:
             self._thread = None
             self._animation_available = False
             self._started = False
             self._anchor_valid = False
-        self._restore_cursor(self._output_stream())
+        if thread is not None:
+            self._restore_cursor(self._output_stream())
 
     @property
     def has_animator(self) -> bool:
@@ -483,11 +475,11 @@ class BinaryRainHeader:
                 self._drops = create_drops(
                     self._draw_width_value,
                     self.rng,
-                    scene_height=layout.divider_row,
+                    scene_height=layout.height,
                 )
 
         for drop in self._drops:
-            drop.advance(self.rng, scene_height=layout.divider_row)
+            drop.advance(self.rng, scene_height=layout.height)
         panel = self._panel_lines(layout)
         cells, bits = compose_cells(layout, self._drops, panel)
         frame = render_cells(cells, bits)
@@ -550,7 +542,7 @@ class BinaryRainHeader:
         drops = create_drops(
             draw_width,
             self.rng,
-            scene_height=layout.divider_row,
+            scene_height=layout.height,
         )
         rendered_frames = 0
         cursor_hidden = False
@@ -570,12 +562,12 @@ class BinaryRainHeader:
                     drops = create_drops(
                         draw_width,
                         self.rng,
-                        scene_height=layout.divider_row,
+                        scene_height=layout.height,
                     )
 
                 layout = self._layout_for(current_size)
                 for drop in drops:
-                    drop.advance(self.rng, scene_height=layout.divider_row)
+                    drop.advance(self.rng, scene_height=layout.height)
                 cells, bits = compose_cells(layout, drops, self._panel_lines(layout))
                 self._write_frame(render_cells(cells, bits), rendered_frames > 0, stream)
                 rendered_frames += 1
