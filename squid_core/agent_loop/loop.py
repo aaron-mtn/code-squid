@@ -13,6 +13,7 @@ from squid_core.agent_loop.transcript_recording import (
     record_message,
     record_messages,
     record_pending_tool_result,
+    reconcile_system_message,
     turn_context_message,
     user_instruction_message,
 )
@@ -183,19 +184,30 @@ class AgentLoop:
             on_tool_preparing=on_tool_preparing,
         )
 
-    # Ensure a brand-new in-memory session has the initial agent messages.
-    #
-    # Future resume support can load saved messages before run() is called.
-    # In that case, this method leaves the existing transcript alone instead
-    # of adding a second system/user kickoff.
+    # Seed a new transcript, or reconcile the one run-scoped message in an
+    # existing transcript. A session may change specialization between runs,
+    # while prompt, Tools, Hooks, and metadata stay fixed within each run.
     def _ensure_initial_messages(self) -> None:
-        if self.session.messages:
+        initial_messages = self.agent.initial_messages()
+        if not self.session.messages:
+            record_messages(
+                self.session,
+                self.session_store,
+                *initial_messages,
+            )
             return
 
-        record_messages(
+        intended_system_messages = [
+            message for message in initial_messages if message.get("role") == "system"
+        ]
+        if len(intended_system_messages) != 1:
+            raise ValueError(
+                "Agent.initial_messages() must contain exactly one system message"
+            )
+        reconcile_system_message(
             self.session,
             self.session_store,
-            *self.agent.initial_messages(),
+            intended_system_messages[0],
         )
 
     def _allowed_tools_from_definitions(self, tool_definitions: list[dict]) -> tuple[str, ...]:
@@ -233,9 +245,10 @@ class AgentLoop:
 
         try:
             self._check_cancelled()
-            # New sessions start with the agent's initial system/user messages.
-            # Resumed sessions can already contain transcript history, so do not
-            # blindly append another kickoff.
+            # Existing sessions keep their conversation but adopt this run's
+            # system prompt. This decision stays here beside run startup so a
+            # future lifecycle change cannot separate prompt reconciliation
+            # from the current run's Tool and Hook configuration.
             self._ensure_initial_messages()
             self._emit_event(
                 {

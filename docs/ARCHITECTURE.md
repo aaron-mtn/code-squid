@@ -424,10 +424,11 @@ Passing neither path preserves standalone `skill_name` discovery. Generic
 `squid_core.spawner` receives only selected resources and remains unaware of
 Mod names, paths, discovery, or selection policy.
 
-The CLI follow-up path calls `squid_core.spawner.build_agent_loop(...)`
-directly after Code Squid has selected application settings, prompts, Skills,
-tools, storage, and terminal presentation. Provider-specific construction and
-replay-mode decisions are delegated to `squid_core.providers`.
+The CLI follow-up path reuses `build_coding_task_run(...)` with the existing
+`Session` and `SessionStore`. Code Squid therefore resolves a selected Mod into
+its Skill, Tools, Hooks, Agent, and AgentLoop through the same application seam
+used for a new run. Provider-specific construction remains delegated to
+`squid_core.providers`.
 
 `squid_core.storage.session_index` owns generic inspection, registration, and
 cross-location discovery for explicit index and session-root paths. Session
@@ -582,7 +583,8 @@ New sessions persist one assembled system message followed by the raw authored
 task as `role=user`; resumed runs append the raw authored follow-up in the same
 form. There are no runtime task or follow-up wrappers.
 
-The active skill can be selected from the CLI. Current support is:
+Mods are the primary interactive specialization control, while standalone
+Skills remain the direct/advanced path. The current controls are:
 
 ```bash
 python main.py skills
@@ -591,16 +593,29 @@ python main.py --skill <name>
 
 Inside the interactive CLI:
 
+- `/mod` shows the active Mod and available Mods.
+- `/mod <name>` selects that Mod for later tasks and follow-ups.
+- `/mod none` clears the Mod selection.
 - `/skill` shows the current active skill and available skills.
 - `/skill <name>` sets the active skill for future tasks and follow-ups in the
   current CLI process.
 - `/skill none` clears the active skill.
-- `/skill default` is an alias for clearing the active skill.
 
-The active skill is process-local CLI state. Changing it does not rewrite older
-persisted transcript messages. New tasks and follow-ups use the currently
-active skill when they are submitted. The startup panel shows `Skill: <name>`
-when the CLI is launched with an active skill.
+Selections are process-local CLI state. Selecting a Mod clears a standalone
+Skill selection, and selecting a standalone Skill clears a Mod selection, so
+there is never an ambiguous simultaneous override. Each command's `none` form
+clears only that kind of selection. The startup panel shows `Skill: <name>`
+when the CLI is launched with an active standalone Skill.
+
+Specialization may change between runs in one session. Each run must use a
+coherent current prompt, Skill, Tools, and Hooks while preserving prior
+conversation history. At the start of an existing non-empty session,
+`AgentLoop` replaces all replayed system messages with the newly constructed
+Agent's one intended system message; it never inserts the Agent's original
+initial user task again. The replacement is persisted as an append-only
+`system_message_reconciliation` event. `SessionStore.load_messages()` applies
+the latest such event during replay, so old specialization instructions do not
+return after restart and exactly one current system message is exposed.
 
 Each new run and follow-up appends a non-transcript `run_context` event to
 `session.jsonl`. This records the active `skill_name`, the actual filtered
@@ -616,7 +631,8 @@ Each new run and follow-up appends a non-transcript `run_context` event to
 ```
 
 `run_context` is debug metadata, not model memory. It is not replayed to the
-model, and `SessionStore.load_messages()` ignores non-message events.
+model. `SessionStore.load_messages()` ignores it while applying system-message
+reconciliation events to the replayed transcript.
 `python main.py show <session_id>` displays compact `[run context]` blocks so
 tool exposure and prompt overrides can be inspected after a run.
 
@@ -756,8 +772,9 @@ python main.py mode yolo
 Running with no arguments starts an interactive prompt. A first task starts a
 new session; later tasks in the same process continue the active session as
 follow-ups unless the user enters `/new`. `/help` prints prompt help, and
-`/exit`, `exit`, or `quit` exits the interactive prompt. Interactive skill
-commands are `/skill`, `/skill <name>`, `/skill none`, and `/skill default`.
+`/exit`, `exit`, or `quit` exits the interactive prompt. Interactive
+specialization commands are `/mod`, `/mod <name>`, `/mod none`, `/skill`,
+`/skill <name>`, and `/skill none`.
 
 `--cwd` selects the workspace/repo root. It defaults to the current directory
 and must point at an existing directory.
@@ -1027,8 +1044,9 @@ A rejected reply adds a linked diagnostic-only `reply_rejection` entry:
 
 Recoverable tool fields are omitted when unavailable. Rejection diagnostics
 cover normal agent reply validation failures; hook-blocked finals are outside
-this path. `SessionStore.load_messages()` reads only `type: "message"`, so
-neither diagnostic type enters canonical history or is replayed to the model.
+this path. `SessionStore.load_messages()` replays `type: "message"` entries and
+applies `system_message_reconciliation` entries; model-reply and rejection
+diagnostics never enter canonical history or reach the model.
 
 Current session statuses are:
 

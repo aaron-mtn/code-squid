@@ -1,3 +1,17 @@
+- 2026-09-03: Fixed specialization semantics across runs in one session.
+  `AgentLoop` now keeps new-session seeding simple while reconciling an existing
+  transcript to the newly constructed Agent's single intended system message,
+  preserving all non-system conversation history and never repeating the
+  original task. `SessionStore` persists that replacement as an append-only
+  `system_message_reconciliation` event and applies it on reload. CLI
+  follow-ups now reuse `build_coding_task_run(...)`, keeping Mod Skill, Tool,
+  Hook, Agent, run-context, and loop construction coherent without widening
+  omitted Skill policy. Added `/mod`, `/mod <name>`, and `/mod none`; Mod and
+  standalone Skill selection now clear one another, and `/skill default` was
+  removed. Focused AgentLoop/session/Mod/Skill/Hook/CLI/boundary suite: 184
+  passed. Full suite: 731 passed. Production packages compiled, affected public
+  imports loaded successfully, and `git diff --check` passed. No live model
+  inference was run and no follow-up work is intentionally deferred.
 - 2026-09-03: Refactored the flat `squid_core/agent_loop.py` into the small
   `squid_core/agent_loop/` package without changing its public imports or
   runtime behavior. `loop.py` retains the complete state machine, including all

@@ -118,7 +118,7 @@ class SessionStore:
     # Append a provider-derived assistant reply snapshot. This is diagnostic
     # only: load_messages() deliberately ignores it, so it is never replayed.
     def append_model_reply(self, reply: dict) -> dict:
-        return self._append_diagnostic_entry("model_reply", {"reply": reply})
+        return self._append_non_message_entry("model_reply", {"reply": reply})
 
     # Append validation/rejection details linked to the model_reply snapshot.
     def append_reply_rejection(
@@ -138,7 +138,7 @@ class SessionStore:
         for name in ("recoverable_tool_name", "recoverable_raw_arguments"):
             if name in reply:
                 fields[name] = reply[name]
-        return self._append_diagnostic_entry("reply_rejection", fields)
+        return self._append_non_message_entry("reply_rejection", fields)
 
     # Append one compaction event as a JSONL entry.
     def append_compaction(self, metadata: dict) -> dict:
@@ -200,10 +200,17 @@ class SessionStore:
 
         return entry
 
-    # Load transcript messages from session.jsonl in order.
+    def append_system_message_reconciliation(self, message: dict) -> dict:
+        """Persist the system message that supersedes earlier run specializations."""
+        return self._append_non_message_entry(
+            "system_message_reconciliation",
+            {"message": message},
+        )
+
+    # Load the effective transcript messages from session.jsonl in order.
     #
-    # This returns only the message dicts because core/session.py expects an
-    # in-memory list of provider-style transcript messages.
+    # Reconciliation events replace only the active system message; other
+    # non-message events remain outside the provider-style transcript.
     def load_messages(self) -> list[dict]:
         messages = []
 
@@ -217,6 +224,17 @@ class SessionStore:
                 entry = json.loads(line)
                 if entry.get("type") == "message":
                     messages.append(entry["message"])
+                elif entry.get("type") == "system_message_reconciliation":
+                    # Keep storage append-only while making the newest run's
+                    # specialization prompt durable across process restarts.
+                    messages = [
+                        entry["message"],
+                        *(
+                            message
+                            for message in messages
+                            if message.get("role") != "system"
+                        ),
+                    ]
 
         return messages
 
@@ -250,7 +268,8 @@ class SessionStore:
 
         return count + 1
 
-    def _append_diagnostic_entry(self, entry_type: str, fields: dict) -> dict:
+    def _append_non_message_entry(self, entry_type: str, fields: dict) -> dict:
+        """Append a linked event that is not itself a transcript message."""
         metadata = self._read_metadata()
         entry_id = f"e_{self._next_entry_number():06d}"
         entry = {

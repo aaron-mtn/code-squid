@@ -9,6 +9,7 @@ from code_squid.console.cli.session_runner import (
     _run_follow_up_task,
     _run_new_session_task,
 )
+from code_squid.console.cli.mod_commands import _handle_mod_input, _is_mod_input
 from code_squid.console.cli.skill_commands import (
     _handle_skill_input,
     _is_skill_input,
@@ -34,6 +35,9 @@ Code Squid help
 
 At the task prompt:
   Normal input runs a coding task.
+  /mod shows the active Mod and available Mods.
+  /mod <name> selects a Mod for future tasks and follow-ups.
+  /mod none clears the active Mod.
   /skill shows the active skill and available skills.
   /skill <name> sets the active skill for future tasks and follow-ups.
   /skill none clears the active skill.
@@ -135,6 +139,7 @@ def _run_interactive(repo_root: Path, skill_name: str | None = None) -> int:
     display = _run_display(repo_root, settings, skill_name)
     display.start()
     active_session_id: str | None = None
+    mod_name: str | None = None
 
     while True:
         task = _prompt_task_or_cancel("Task")
@@ -149,28 +154,37 @@ def _run_interactive(repo_root: Path, skill_name: str | None = None) -> int:
             _print_help()
             continue
         if _is_skill_input(task):
-            skill_name = _handle_skill_input(task, skill_name)
+            skill_name, mod_name = _handle_skill_input(task, skill_name, mod_name)
+            continue
+        if _is_mod_input(task):
+            mod_name, skill_name = _handle_mod_input(task, mod_name, skill_name)
             continue
         if not task.strip():
             continue
 
         if active_session_id is None:
-            status, session_id = _run_new_session_task(
-                repo_root,
-                task,
-                settings,
-                display,
-                skill_name,
-            )
+            if mod_name is None:
+                status, session_id = _run_new_session_task(
+                    repo_root, task, settings, display, skill_name
+                )
+            else:
+                status, session_id = _run_new_session_task(
+                    repo_root, task, settings, display, mod_name=mod_name
+                )
         else:
-            status, session_id = _run_follow_up_task(
-                repo_root,
-                active_session_id,
-                task,
-                settings,
-                display,
-                skill_name,
-            )
+            if mod_name is None:
+                status, session_id = _run_follow_up_task(
+                    repo_root, active_session_id, task, settings, display, skill_name
+                )
+            else:
+                status, session_id = _run_follow_up_task(
+                    repo_root,
+                    active_session_id,
+                    task,
+                    settings,
+                    display,
+                    mod_name=mod_name,
+                )
 
         if session_id is not None:
             active_session_id = session_id

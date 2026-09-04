@@ -23,6 +23,32 @@ def record_messages(session, session_store, *messages: dict[str, Any]) -> None:
         record_message(session, session_store, message)
 
 
+def reconcile_system_message(
+    session,
+    session_store,
+    intended_message: dict[str, Any],
+) -> None:
+    """Make one current system message active without disturbing conversation history."""
+    system_messages = [
+        message for message in session.messages if message.get("role") == "system"
+    ]
+    if (
+        system_messages == [intended_message]
+        and session.messages[0] == intended_message
+    ):
+        return
+
+    # Specialization is allowed to change between runs, but the old system
+    # prompt must never remain authoritative beside the new Tool and Hook set.
+    # Keep every non-system message object, and its relative order, untouched.
+    session.messages[:] = [
+        intended_message,
+        *(message for message in session.messages if message.get("role") != "system"),
+    ]
+    if session_store is not None:
+        session_store.append_system_message_reconciliation(intended_message)
+
+
 def user_instruction_message(instruction: str) -> dict[str, str]:
     """Build a user-role instruction inserted by the runtime."""
     return {"role": "user", "content": instruction}

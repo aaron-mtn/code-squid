@@ -53,32 +53,39 @@ def _print_skill_status(skill_name: str | None) -> None:
     print(_format_skill_status(skill_name))
 
 
-def _handle_skill_input(task: str, skill_name: str | None) -> str | None:
+def _handle_skill_input(
+    task: str,
+    skill_name: str | None,
+    mod_name: str | None = None,
+) -> tuple[str | None, str | None]:
+    """Handle one Skill command and return unambiguous Skill/Mod selections."""
     parts = task.strip().split()
     if len(parts) == 1:
         _print_skill_status(skill_name)
-        return skill_name
+        return skill_name, mod_name
 
     if len(parts) != 2:
         print("Usage: /skill [name|none]")
-        return skill_name
+        return skill_name, mod_name
 
     requested_skill = parts[1]
-    if requested_skill in {"none", "default"}:
+    if requested_skill == "none":
         print("Active skill cleared.")
-        return None
+        return None, mod_name
 
     skills = discover_skills(app_home=code_squid_home())
     skill = skills.get(requested_skill)
     if skill is None:
         print(f"Unknown skill: {requested_skill}")
         print("Run /skill to see available skills.")
-        return skill_name
+        return skill_name, mod_name
 
+    if mod_name is not None:
+        print(f"Active Mod {mod_name} cleared by standalone skill selection.")
     print(f"Active skill set to: {skill.name}")
     if skill.allowed_tools:
         print(f"Tools: {', '.join(skill.allowed_tools)}")
-    return skill.name
+    return skill.name, None
 
 
 def handle_skills() -> int:

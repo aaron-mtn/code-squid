@@ -94,6 +94,31 @@ def _settings() -> Settings:
 class _Display:
     debug = False
 
+    def thinking(self) -> None:
+        pass
+
+    def debug_reply(self, reply: dict) -> None:
+        pass
+
+    def final_message(self, content: str) -> None:
+        pass
+
+
+class _CompletingAdapter:
+    def __init__(self) -> None:
+        self.requests = []
+
+    def respond(self, messages: list[dict], tool_definitions: list[dict]) -> dict:
+        self.requests.append((list(messages), list(tool_definitions)))
+        return {
+            "message": {"role": "assistant", "content": "complete"},
+            "actions": [],
+            "raw_reply": {},
+        }
+
+    def supports_streaming(self) -> bool:
+        return False
+
 
 def test_canonical_discovery_uses_supplied_home_and_ignores_legacy_layout(tmp_path: Path) -> None:
     selected_home = tmp_path / "selected"
@@ -246,6 +271,80 @@ def test_code_squid_builder_resolves_selected_mod_into_agent_tools_hooks_and_con
     context = run.session_store.jsonl_path.read_text(encoding="utf-8")
     assert '"mod_id": "review-pack"' in context
     assert '"skill_name": "review-pack"' in context
+
+
+def test_one_session_switches_default_mods_and_back_as_coherent_runs(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    for name, tool, hook in (
+        ("mod-a", "read_file", "hook-a"),
+        ("mod-b", "run_command", "hook-b"),
+    ):
+        mod_dir = _write_mod(home, name, tools=(tool,), hooks=(hook,))
+        _write_hook(mod_dir / "hooks", hook, source=hook)
+
+    first_adapter = _CompletingAdapter()
+    current = build_coding_task_run(
+        tmp_path,
+        "default task",
+        settings=_settings(),
+        display=_Display(),
+        app_home=home,
+        model_adapter=first_adapter,
+    )
+    current.loop.run()
+    original_non_system = list(current.session.messages[1:])
+
+    observed = []
+    for mod_name in ("mod-a", "mod-b", None):
+        adapter = _CompletingAdapter()
+        current = build_coding_task_run(
+            tmp_path,
+            f"task for {mod_name or 'default'}",
+            settings=_settings(),
+            display=_Display(),
+            app_home=home,
+            mod_name=mod_name,
+            session=current.session,
+            session_store=current.session_store,
+            model_adapter=adapter,
+        )
+        follow_up = current.loop.agent.follow_up_message(current.loop.agent.task)
+        current.session.add_message(follow_up)
+        current.session_store.append_message(follow_up)
+        current.loop.run()
+        request_messages, tool_definitions = adapter.requests[0]
+        observed.append(
+            (
+                current.loop.agent.skill_name,
+                tuple(
+                    definition.get("name", definition.get("function", {}).get("name"))
+                    for definition in tool_definitions
+                ),
+                tuple(hook.source for hook in current.loop.hook_runner.hooks),
+                request_messages,
+            )
+        )
+
+    assert observed[0][:3] == ("mod-a", ("read_file",), ("hook-a",))
+    assert observed[1][:3] == ("mod-b", ("run_command",), ("hook-b",))
+    assert observed[2][0] is None
+    assert set(observed[2][1]) == set(TOOLS)
+    assert observed[2][2] == ()
+    for _, _, _, messages in observed:
+        assert sum(message["role"] == "system" for message in messages) == 1
+        assert messages[1 : 1 + len(original_non_system)] == original_non_system
+
+    contexts = [
+        line
+        for line in current.session_store.jsonl_path.read_text(encoding="utf-8").splitlines()
+        if '"type": "run_context"' in line
+    ]
+    assert len(contexts) == 4
+    assert '"mod_id": "mod-a"' in contexts[1]
+    assert '"mod_id": "mod-b"' in contexts[2]
+    assert '"mod_id"' not in contexts[3]
 
 
 def test_generic_spawner_remains_mod_agnostic() -> None:

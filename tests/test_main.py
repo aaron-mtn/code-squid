@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from code_squid.console.cli.cli_options import _resolve_workspace_root
 from code_squid.console.cli.cli_commands import _mode, run_cli
@@ -14,7 +15,8 @@ from code_squid.console.cli.prompt_loop import (
     _run_new_session,
 )
 from code_squid.console.cli.session_runner import _run_follow_up_task, _run_loop
-from code_squid.console.cli.skill_commands import _format_skill_status
+from code_squid.console.cli.skill_commands import _format_skill_status, _handle_skill_input
+from code_squid.console.cli.mod_commands import _format_mod_status, _handle_mod_input
 from code_squid.settings import load_settings
 from squid_core.agent_loop import RunResult
 from squid_core.model_adapter import ModelRequestError
@@ -324,6 +326,64 @@ def test_format_skill_status_includes_active_skill_details(monkeypatch, tmp_path
     )
 
 
+def test_format_mod_status_lists_active_and_available_mods(monkeypatch) -> None:
+    mods = {
+        "review-pack": SimpleNamespace(
+            name="review-pack",
+            description="Review changes",
+            valid=True,
+        )
+    }
+    monkeypatch.setattr(
+        "code_squid.console.cli.mod_commands.discover_mods",
+        lambda app_home: mods,
+    )
+
+    status = _format_mod_status("review-pack")
+
+    assert "Current Mod: review-pack" in status
+    assert "Available Mods:" in status
+    assert "- review-pack: Review changes" in status
+
+
+def test_mod_selection_and_clear_are_explicit(monkeypatch, capsys) -> None:
+    mod = SimpleNamespace(name="review-pack", description="Review", valid=True)
+    monkeypatch.setattr(
+        "code_squid.console.cli.mod_commands.discover_mods",
+        lambda app_home: {"review-pack": mod},
+    )
+
+    selected = _handle_mod_input("/mod review-pack", None, "direct-skill")
+    cleared = _handle_mod_input("/mod none", selected[0], selected[1])
+
+    assert selected == ("review-pack", None)
+    assert cleared == (None, None)
+    output = capsys.readouterr().out
+    assert "Standalone skill direct-skill cleared by Mod selection." in output
+    assert "Active Mod set to: review-pack" in output
+    assert "Active Mod cleared." in output
+
+
+def test_standalone_skill_selection_clears_mod_and_default_is_not_an_alias(
+    monkeypatch,
+    capsys,
+) -> None:
+    skill = SimpleNamespace(name="direct-skill", allowed_tools=("read_file",))
+    monkeypatch.setattr(
+        "code_squid.console.cli.skill_commands.discover_skills",
+        lambda app_home: {"direct-skill": skill},
+    )
+
+    selected = _handle_skill_input("/skill direct-skill", None, "review-pack")
+    unchanged = _handle_skill_input("/skill default", selected[0], selected[1])
+
+    assert selected == ("direct-skill", None)
+    assert unchanged == selected
+    output = capsys.readouterr().out
+    assert "Active Mod review-pack cleared by standalone skill selection." in output
+    assert "Unknown skill: default" in output
+
+
 def test_run_loop_handles_model_request_error_with_log_and_status(tmp_path) -> None:
     display = FakeDisplay()
     session_store = FakeSessionStore()
@@ -413,11 +473,6 @@ class BannerDisplay(FakeDisplay):
         print()
         print(RUN_STARTED_DIVIDER)
         print()
-
-
-class NoopLoop:
-    def run(self) -> RunResult:
-        return RunResult(status="complete")
 
 
 def _fake_prompt_task(response: str):
@@ -564,17 +619,12 @@ def test_resume_session_prints_banner_before_follow_up_input(
         displays.append(display)
         return display
 
-    def fake_build_agent_loop(**kwargs):
-        assert kwargs["display"] is displays[0]
-        return NoopLoop()
-
     monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", fake_display)
     monkeypatch.setattr(
         "code_squid.console.cli.session_runner._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_task("Continue the thing"))
-    monkeypatch.setattr("code_squid.console.cli.session_runner.build_agent_loop", fake_build_agent_loop)
     monkeypatch.setattr("code_squid.console.cli.session_runner._run_loop", lambda *args: 0)
 
     assert _resume_session(tmp_path, session_store.session_id) == 0
@@ -605,7 +655,6 @@ def test_follow_up_records_current_skill_run_context(
         "code_squid.console.cli.session_runner._session_dir_for_resume",
         lambda repo_root, session_id: session_store.session_dir,
     )
-    monkeypatch.setattr("code_squid.console.cli.session_runner.build_agent_loop", lambda **kwargs: NoopLoop())
     monkeypatch.setattr("code_squid.console.cli.session_runner._run_loop", lambda *args: 0)
 
     status, session_id = _run_follow_up_task(
@@ -634,6 +683,51 @@ def test_follow_up_records_current_skill_run_context(
         "FINAL_SUMMARY_REQUIREMENTS",
         "TOOL_USAGE_GUIDANCE",
     ]
+
+
+def test_follow_up_delegates_mod_resolution_to_application_builder(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    session_store = SessionStore.create(tmp_path, "original task")
+    session_store.append_message({"role": "system", "content": "old"})
+    captured = {}
+
+    class FollowUpAgent:
+        def follow_up_message(self, task: str) -> dict:
+            return {"role": "user", "content": task}
+
+    def fake_build(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(loop=SimpleNamespace(agent=FollowUpAgent()))
+
+    monkeypatch.setattr(
+        "code_squid.console.cli.session_runner._session_dir_for_resume",
+        lambda repo_root, session_id: session_store.session_dir,
+    )
+    monkeypatch.setattr(
+        "code_squid.console.cli.session_runner.build_coding_task_run",
+        fake_build,
+    )
+    monkeypatch.setattr("code_squid.console.cli.session_runner._run_loop", lambda *args: 0)
+
+    status, _ = _run_follow_up_task(
+        tmp_path,
+        session_store.session_id,
+        "review this",
+        load_settings(tmp_path),
+        FakeDisplay(),
+        mod_name="review-pack",
+    )
+
+    assert status == 0
+    assert captured["mod_name"] == "review-pack"
+    assert captured["skill_name"] is None
+    assert captured["session_store"].session_dir == session_store.session_dir
+    assert captured["session"].messages[-1] == {
+        "role": "user",
+        "content": "review this",
+    }
 
 
 def test_resume_session_empty_task_exits_without_run(monkeypatch, tmp_path, capsys) -> None:
@@ -944,6 +1038,59 @@ def test_interactive_unknown_skill_does_not_change_active_skill(
     assert new_runs == [("first task", "user-review")]
 
 
+def test_interactive_mod_selection_is_used_for_new_and_follow_up_runs(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    mod = SimpleNamespace(name="review-pack", description="Review", valid=True)
+    new_runs = []
+    follow_up_runs = []
+
+    def fake_new(
+        repo_root,
+        task,
+        settings,
+        display,
+        skill_name=None,
+        mod_name=None,
+    ):
+        new_runs.append((task, skill_name, mod_name))
+        return 0, "active-session"
+
+    def fake_follow_up(
+        repo_root,
+        session_id,
+        task,
+        settings,
+        display,
+        skill_name=None,
+        mod_name=None,
+    ):
+        follow_up_runs.append((session_id, task, skill_name, mod_name))
+        return 0, session_id
+
+    monkeypatch.setattr(
+        "code_squid.console.cli.mod_commands.discover_mods",
+        lambda app_home: {"review-pack": mod},
+    )
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", BannerDisplay)
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._prompt_task",
+        _fake_prompt_tasks(["/mod review-pack", "first", "follow up", "/exit"]),
+    )
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_new_session_task", fake_new)
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._run_follow_up_task",
+        fake_follow_up,
+    )
+
+    assert _run_interactive(tmp_path) == 0
+    assert new_runs == [("first", None, "review-pack")]
+    assert follow_up_runs == [
+        ("active-session", "follow up", None, "review-pack")
+    ]
+
+
 def test_new_session_passes_debug_without_trace_to_terminal_display(
     monkeypatch,
     tmp_path,
@@ -993,7 +1140,6 @@ def test_resume_session_passes_trace_to_terminal_display(
         lambda repo_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_task("Continue the thing"))
-    monkeypatch.setattr("code_squid.console.cli.session_runner.build_agent_loop", lambda **kwargs: NoopLoop())
     monkeypatch.setattr("code_squid.console.cli.session_runner._run_loop", lambda *args: 0)
 
     assert _resume_session(tmp_path, session_store.session_id) == 0

@@ -1,6 +1,8 @@
 import inspect
 import json
 
+import pytest
+
 import squid_core.agent_loop as agent_loop_module
 from code_squid.agent.coding import CodingAgent
 from squid_core.safety import ActionPreflightDecision
@@ -131,6 +133,7 @@ class FakeSessionStore:
         self.model_replies = []
         self.reply_rejections = []
         self.statuses = []
+        self.system_reconciliations = []
         self.events = events
 
     def append_message(self, message: dict, usage: dict | None = None) -> None:
@@ -140,6 +143,9 @@ class FakeSessionStore:
 
     def append_compaction(self, metadata: dict) -> None:
         self.compactions.append(metadata)
+
+    def append_system_message_reconciliation(self, message: dict) -> None:
+        self.system_reconciliations.append(message)
 
     def append_model_reply(self, raw_reply: dict) -> dict:
         entry = {"id": f"raw_{len(self.model_replies) + 1}", "reply": raw_reply}
@@ -733,8 +739,10 @@ def test_resumed_coding_session_sends_prior_context_and_raw_follow_up_without_wr
 
     loop.run()
 
-    assert model_adapter.message_requests[0] == canonical_messages
-    assert session.messages[: len(canonical_messages)] == canonical_messages
+    expected_messages = [agent.initial_messages()[0], *canonical_messages[1:]]
+    assert model_adapter.message_requests[0] == expected_messages
+    assert session.messages[: len(expected_messages)] == expected_messages
+    assert session_store.system_reconciliations == [agent.initial_messages()[0]]
     assert session_store.messages[0]["message"] == {
         "role": "user",
         "content": "add search",
@@ -761,12 +769,71 @@ def test_preloaded_session_does_not_get_duplicate_initial_messages() -> None:
     loop.run()
 
     assert session.messages == [
-        {"role": "system", "content": "saved system"},
+        {"role": "system", "content": "system"},
         {"role": "user", "content": "saved follow-up"},
         {"role": "assistant", "content": "TASK COMPLETE"},
     ]
+    assert session_store.system_reconciliations == [
+        {"role": "system", "content": "system"}
+    ]
     assert [entry["message"] for entry in session_store.messages] == [
         {"role": "assistant", "content": "TASK COMPLETE"},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("previous_specialization", "current_specialization"),
+    [
+        ("default", "Mod A"),
+        ("Mod A", "Mod B"),
+        ("Mod A", "default"),
+        ("Skill A", "Skill B"),
+    ],
+)
+def test_existing_session_adopts_current_specialization_between_runs(
+    previous_specialization: str,
+    current_specialization: str,
+) -> None:
+    class SpecializedAgent(FakeAgent):
+        def initial_messages(self) -> list[dict]:
+            return [
+                {
+                    "role": "system",
+                    "content": f"instructions for {current_specialization}",
+                }
+            ]
+
+    prior_history = [
+        {"role": "user", "content": "original task"},
+        {"role": "assistant", "content": "original result"},
+        {"role": "user", "content": "follow up"},
+    ]
+    session = Session(repo_root=None)
+    session.add_messages(
+        {
+            "role": "system",
+            "content": f"instructions for {previous_specialization}",
+        },
+        *prior_history,
+    )
+    model_adapter = FakeModelAdapter([reply("TASK COMPLETE")])
+    loop = AgentLoop(
+        session=session,
+        model_adapter=model_adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=SpecializedAgent(),
+        display=NullDisplay(),
+    )
+
+    loop.run()
+
+    assert model_adapter.message_requests[0] == [
+        {
+            "role": "system",
+            "content": f"instructions for {current_specialization}",
+        },
+        *prior_history,
     ]
 
 

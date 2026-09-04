@@ -3,27 +3,19 @@
 import os
 from pathlib import Path
 
-from code_squid.agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
 from code_squid.settings import Settings
 from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.model_adapter import ModelRequestError
-from code_squid.agent_setup import (
-    append_run_context,
-    build_coding_task_run,
-    resolve_skill_tools,
-)
+from code_squid.agent_setup import build_coding_task_run
 from code_squid.app_paths import (
     workspace_error_log_path,
     workspace_sessions_dir,
-    workspace_undo_dir,
 )
 from squid_core.session import Session
-from squid_core.spawner import build_agent_loop
-from squid_core.storage import SessionStore, UndoStore, write_error_log
+from squid_core.storage import SessionStore, write_error_log
 from squid_core.storage.session_index import latest_session_id, session_dir_for
 from code_squid.console.ui.banner import FRIENDLY_APPROVAL_MODES, StartupInfo
 from code_squid.console.ui.display import TerminalDisplay
-from squid_core.agent import Agent
 
 
 def _session_dir_for_resume(repo_root: Path, session_id: str) -> Path | None:
@@ -94,6 +86,7 @@ def _run_new_session_task(
     settings: Settings,
     display: TerminalDisplay,
     skill_name: str | None = None,
+    mod_name: str | None = None,
 ) -> tuple[int, str | None]:
     display.run_started()
 
@@ -103,6 +96,7 @@ def _run_new_session_task(
         settings=settings,
         display=display,
         skill_name=skill_name,
+        mod_name=mod_name,
     )
 
     status = _run_loop(repo_root, run.loop, display, run.session, run.session_store)
@@ -116,6 +110,7 @@ def _run_follow_up_task(
     settings: Settings,
     display: TerminalDisplay,
     skill_name: str | None = None,
+    mod_name: str | None = None,
 ) -> tuple[int, str | None]:
     session_dir = _session_dir_for_resume(repo_root, session_id)
     if session_dir is None:
@@ -126,33 +121,22 @@ def _run_follow_up_task(
     session.add_messages(*session_store.load_messages())
 
     display.run_started()
-    skill, active_tools = resolve_skill_tools(skill_name)
-    append_run_context(session_store, skill, active_tools)
-    agent = Agent(
+    # Follow-ups use the application-owned path used by new runs, so a Mod
+    # cannot lose its Skill, restricted Tools, or Hooks when a session resumes.
+    run = build_coding_task_run(
+        repo_root=repo_root,
         task=follow_up_task,
-        skill=skill,
-        tools=active_tools,
-        prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS,
+        settings=settings,
+        display=display,
+        skill_name=skill_name,
+        mod_name=mod_name,
+        session=session,
+        session_store=session_store,
     )
-    follow_up_message = agent.follow_up_message(follow_up_task)
+    follow_up_message = run.loop.agent.follow_up_message(follow_up_task)
     session.add_message(follow_up_message)
     session_store.append_message(follow_up_message)
     session_store.update_status("active")
 
-    undo_store = UndoStore.create(
-        workspace_undo_dir(repo_root),
-        session_id=session_store.session_id,
-        workspace_root=repo_root,
-    )
-    loop = build_agent_loop(
-        repo_root=repo_root,
-        session=session,
-        session_store=session_store,
-        agent=agent,
-        undo_store=undo_store,
-        settings=settings.to_runtime_settings(),
-        display=display,
-        tools=active_tools,
-    )
-    status = _run_loop(repo_root, loop, display, session, session_store)
+    status = _run_loop(repo_root, run.loop, display, session, session_store)
     return status, session_store.session_id

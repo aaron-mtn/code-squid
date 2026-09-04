@@ -162,6 +162,33 @@ def test_load_messages_ignores_run_context_entries(tmp_path: Path) -> None:
     assert store.load_messages() == messages
 
 
+def test_system_reconciliation_survives_reload_and_preserves_non_system_history(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore.create(tmp_path, "switch specialization")
+    history = [
+        {"role": "system", "content": "Skill A instructions"},
+        {"role": "user", "content": "original task"},
+        {"role": "assistant", "content": "original result"},
+        {"role": "user", "content": "follow up"},
+    ]
+    for message in history:
+        store.append_message(message)
+
+    replacement = {"role": "system", "content": "Skill B instructions"}
+    event = store.append_system_message_reconciliation(replacement)
+
+    assert event["type"] == "system_message_reconciliation"
+    assert SessionStore.open(store.session_dir).load_messages() == [
+        replacement,
+        *history[1:],
+    ]
+    assert sum(
+        message["role"] == "system"
+        for message in SessionStore.open(store.session_dir).load_messages()
+    ) == 1
+
+
 def test_append_run_context_persists_optional_mod_id(tmp_path: Path) -> None:
     store = SessionStore.create(tmp_path, "mod context")
 
