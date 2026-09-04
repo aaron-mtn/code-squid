@@ -174,9 +174,11 @@ def _run_interactive(
                 continue
             if _is_skill_input(task):
                 skill_name, mod_name = _handle_skill_input(task, skill_name, mod_name)
+                display.set_specialization(mod_name=mod_name, skill_name=skill_name)
                 continue
             if _is_mod_input(task):
                 mod_name, skill_name = _handle_mod_input(task, mod_name, skill_name)
+                display.set_specialization(mod_name=mod_name, skill_name=skill_name)
                 continue
             if not task.strip():
                 continue

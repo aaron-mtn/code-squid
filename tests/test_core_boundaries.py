@@ -237,6 +237,7 @@ def test_code_squid_application_package_has_expected_layout() -> None:
         "console/ui/binary_header.py",
         "console/ui/display.py",
         "console/ui/formatting.py",
+        "console/ui/header_layout.py",
         "console/ui/prompt_input.py",
         "console/ui/sessions.py",
         "console/ui/spinner.py",

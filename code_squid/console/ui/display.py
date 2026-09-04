@@ -1,5 +1,6 @@
 """TerminalDisplay lifecycle coordinator for the Code Squid console."""
 
+from dataclasses import replace
 from pathlib import Path
 
 from squid_core.safety import ApprovalDecision, USER_DENIED_TOOL_ACTION
@@ -290,11 +291,11 @@ class TerminalDisplay:
         self._spinner.stop()
 
     def _print_startup_banner(self) -> None:
-        # The header owns its bounded animation and all cursor restoration. Keep
-        # startup synchronous so later output can never race its final frame.
+        # The header owns the complete scene so rain and fixed UI share one
+        # geometry and one redraw lifecycle.
+        self.header.set_startup_info(self.startup_info)
+        self.header.set_live_content_below_header("", extra_rows=2)
         self.header.start()
-        if self.startup_info is not None:
-            print(startup_info_panel(self.startup_info))
         print()
 
     def pause_header(self) -> None:
@@ -312,9 +313,23 @@ class TerminalDisplay:
             return
         if not self.header.reanchor():
             return
-        if self.startup_info is not None:
-            print(startup_info_panel(self.startup_info))
         print()
+
+    def set_specialization(
+        self,
+        *,
+        mod_name: str | None,
+        skill_name: str | None,
+    ) -> None:
+        """Keep the presentation copy of active specialization state current."""
+        if self.startup_info is None:
+            return
+        self.startup_info = replace(
+            self.startup_info,
+            mod_name=mod_name,
+            skill_name=skill_name,
+        )
+        self.header.set_startup_info(self.startup_info)
 
     def _startup_info_panel(self, startup_info: StartupInfo) -> str:
         """Return startup details through the existing display test seam."""

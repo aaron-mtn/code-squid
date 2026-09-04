@@ -1,5 +1,8 @@
+"""Tests for Code Squid terminal presentation and interaction helpers."""
+
 import os
 from pathlib import Path
+import shutil
 import sys
 from types import SimpleNamespace
 
@@ -32,7 +35,11 @@ from code_squid.console.ui.display import (
     StartupInfo,
     TerminalDisplay,
 )
-from code_squid.console.ui.banner import STARTUP_DIVIDER
+from code_squid.console.ui.banner import (
+    concise_workspace_name,
+    startup_info_panel,
+    startup_panel_items,
+)
 
 
 class FakeSpinner:
@@ -53,6 +60,11 @@ class FakeHeader:
         self.pauses = 0
         self.stops = 0
         self.reanchors = 0
+        self.live_content: list[tuple[str, int]] = []
+        self.startup_infos: list[StartupInfo | None] = []
+
+    def set_startup_info(self, startup_info: StartupInfo | None) -> None:
+        self.startup_infos.append(startup_info)
 
     def start(self) -> bool:
         self.starts += 1
@@ -67,6 +79,9 @@ class FakeHeader:
     def reanchor(self) -> bool:
         self.reanchors += 1
         return True
+
+    def set_live_content_below_header(self, content: str, *, extra_rows: int) -> None:
+        self.live_content.append((content, extra_rows))
 
 
 def _approval_panel_output(tool: str, label: str, value: str) -> str:
@@ -471,6 +486,8 @@ def test_display_starts_pauses_and_stops_owned_header(capsys) -> None:
     assert header.starts == 1
     assert header.pauses == 1
     assert header.stops == 1
+    assert header.startup_infos == [None]
+    assert header.live_content == [("", 2)]
 
 
 def test_display_reanchors_same_header_before_later_prompts(capsys) -> None:
@@ -482,6 +499,20 @@ def test_display_reanchors_same_header_before_later_prompts(capsys) -> None:
 
     assert header.reanchors == 1
     assert capsys.readouterr().out == "\n"
+
+
+def test_display_updates_specialization_used_by_later_scene_frames() -> None:
+    header = FakeHeader()
+    display = TerminalDisplay(
+        startup_info=StartupInfo(Path("workspace"), "provider", "model", "yolo"),
+        _header=header,
+    )
+
+    display.set_specialization(mod_name="review-pack", skill_name=None)
+
+    assert display.startup_info is not None
+    assert display.startup_info.mod_name == "review-pack"
+    assert header.startup_infos[-1] == display.startup_info
 
 
 def test_startup_uses_binary_header_once_without_legacy_branding(
@@ -509,23 +540,38 @@ def test_startup_uses_binary_header_once_without_legacy_branding(
     assert "A small coding agent with tentacles." not in output
 
 
-def test_startup_details_keep_runtime_information_without_controls_or_box() -> None:
+def test_startup_panel_contains_five_default_rows_and_concise_workspace() -> None:
+    info = StartupInfo(
+        directory=Path("/tmp/project"),
+        provider="openai_compatible",
+        model="qwen3.5-9b",
+        approval_mode="yolo",
+    )
     panel = TerminalDisplay()._startup_info_panel(
-        StartupInfo(
-            directory=Path("/tmp/project"),
-            provider="openai_compatible",
-            model="qwen3.5-9b",
-            approval_mode="yolo",
-        )
+        info
     )
 
     assert "Provider  openai_compatible" in panel
     assert "Model     qwen3.5-9b" in panel
     assert "Safety    yolo" in panel
-    assert f"Workspace {Path('/tmp/project')}" in panel
+    assert "Mod       none" in panel
+    assert "Workspace project" in panel
+    assert str(info.directory) not in panel
     assert "Enter send" not in panel
     assert "Controls" not in panel
-    assert not any(line.startswith(("╭", "╰", "│")) for line in panel.splitlines())
+    assert any(line.lstrip().startswith("╭") for line in panel.splitlines())
+    assert any(line.lstrip().startswith("╰") for line in panel.splitlines())
+
+
+def test_startup_panel_preserves_blank_rows_between_every_menu_item() -> None:
+    panel = startup_info_panel(
+        StartupInfo(Path("code-squid"), "provider", "model", "balanced"),
+        terminal_columns=80,
+    )
+    owned_lines = [line.lstrip() for line in panel.splitlines()]
+
+    assert len(owned_lines) == 13
+    assert all(line == f"│{' ' * 38}│" for line in owned_lines[1:-1:2])
 
 
 def test_startup_panel_includes_active_skill_when_set() -> None:
@@ -540,45 +586,64 @@ def test_startup_panel_includes_active_skill_when_set() -> None:
     )
 
     assert "Skill     user-review" in panel
+    assert "Mod       none" in panel
+    assert len(panel.splitlines()) == 15
 
 
-def test_startup_divider_is_dim_and_content_is_normal_in_tty(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-
-    panel = TerminalDisplay()._startup_info_panel(
+def test_startup_panel_uses_actual_mod_without_duplicate_skill_row() -> None:
+    panel = startup_info_panel(
         StartupInfo(
             directory=Path("/tmp/project"),
             provider="openai_compatible",
             model="qwen3.5-9b",
             approval_mode="yolo",
-        )
+            skill_name="review-skill",
+            mod_name="review-pack",
+        ),
+    )
+
+    assert "Mod       review-pack" in panel
+    assert "Skill" not in panel
+
+
+def test_startup_panel_is_centered_and_adapts_to_supported_narrow_width() -> None:
+    panel = startup_info_panel(
+        StartupInfo(
+            directory=Path("/tmp/project"),
+            provider="openai_compatible",
+            model="qwen3.5-9b",
+            approval_mode="yolo",
+        ),
+        terminal_columns=24,
     )
 
     lines = panel.splitlines()
-    assert lines[0] == f"{DIM_STYLE}{STARTUP_DIVIDER}{RESET_STYLE}"
-    assert lines[1] == "Provider  openai_compatible"
-    assert lines[2] == "Model     qwen3.5-9b"
-    assert lines[3] == "Safety    yolo"
-    assert lines[4] == f"Workspace {Path('/tmp/project')}"
-    assert all(SOFT_CYAN_STYLE not in line for line in lines)
+    assert all(len(line) <= 23 for line in lines)
+    assert lines[0] == f"╭{'─' * 21}╮"
+    assert lines[-1] == f"╰{'─' * 21}╯"
 
 
-def test_startup_panel_stays_plain_when_not_tty() -> None:
-    panel = TerminalDisplay()._startup_info_panel(
-        StartupInfo(
-            directory=Path("/tmp/project"),
-            provider="openai_compatible",
-            model="qwen3.5-9b",
-            approval_mode="yolo",
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [(Path("/tmp/project"), "project"), (Path("/"), "\\")],
+)
+def test_concise_workspace_name_handles_normal_and_root_paths(
+    path: Path,
+    expected: str,
+) -> None:
+    # pathlib uses the host platform, so the root spelling here is Windows.
+    assert concise_workspace_name(path) == expected
+
+
+def test_startup_panel_items_have_stable_menu_order() -> None:
+    labels = [
+        label
+        for label, _ in startup_panel_items(
+            StartupInfo(Path("workspace"), "provider", "model", "balanced")
         )
-    )
+    ]
 
-    assert panel.splitlines()[0] == STARTUP_DIVIDER
-    assert SOFT_CYAN_STYLE not in panel
-    assert DIM_STYLE not in panel
-    assert RESET_STYLE not in panel
+    assert labels == ["Provider", "Model", "Safety", "Mod", "Workspace"]
 
 
 def test_short_path_prefers_startup_workspace_root(tmp_path: Path) -> None:

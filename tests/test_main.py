@@ -73,6 +73,10 @@ class FakeDisplay:
     def prepare_header_for_prompt(self) -> None:
         pass
 
+    def set_specialization(self, *, mod_name, skill_name) -> None:
+        self.mod_name = mod_name
+        self.skill_name = skill_name
+
     def stop_header(self) -> None:
         pass
 

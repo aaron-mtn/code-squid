@@ -1,3 +1,51 @@
+- 2026-09-04: Polished the composed startup scene without compacting its menu.
+  The title/panel gap is now an explicit two-row layout constant, while the
+  five-item panel retains all six intentional blank interior rows. Initial rain
+  heads are distributed through the composed rain height so the first frame is
+  visibly populated above, beside, and below the panel; later drops still reset
+  above the scene with independently varied speeds and sparse trails. When the
+  complete scene, separator, prompt identity, and input row fit, startup first
+  reserves that exact draw region and returns the cursor to its top, preserving
+  ordinary scrollback while preventing the scene from scrolling itself out of
+  view. Too-short terminals keep the safe sequential static fallback. Focused
+  header/banner/terminal tests: 151 passed. Full suite: 796 passed. Production
+  compilation and import checks plus `git diff --check` passed. An 80x30
+  interactive PTY launch confirmed that the title, complete panel, lower rain
+  region, divider, identity, and composer remain in the initial viewport and
+  that `/exit` is clean. Deterministic first-frame rendering confirmed populated
+  rain in every allowed region. No model inference was run.
+- 2026-09-04: Replaced the separate binary header and loose startup metadata
+  with one composed startup scene. A small `header_layout.py` module now owns
+  the title, centered compact panel, rain exclusion rectangle, three rows of
+  rain below the panel, safe width, and final divider geometry. The animator
+  renders rain only in layout-approved cells, then composes the fixed title,
+  panel, and DIM divider as one frame. The panel contains Provider, Model,
+  Safety, Mod, and concise Workspace state; a directly selected standalone
+  Skill adds one optional row, and interactive Mod/Skill changes update later
+  re-anchored scenes. Composer behavior and startup-row interaction remain
+  unchanged. Focused console/header/banner/main/runtime-command tests: 217
+  passed. Full suite: 790 passed. Production compilation and import checks plus
+  `git diff --check` passed. An interactive PTY launch confirmed the centered
+  title and panel, concise workspace, divider/prompt ordering, stable-size
+  redraw, and clean `/exit`; deterministic composition also confirmed rain on
+  both sides of and below the fully reserved panel rectangle. No model
+  inference was run.
+- 2026-09-04: Made live binary-header redraws resize-safe. The animator now
+  invalidates and freezes its relative prompt anchor when either terminal
+  dimension changes, rechecks size immediately before cursor movement, and
+  waits for the next clean prompt boundary to rebuild and resume. Too-small
+  terminals remain paused, recovery reuses the existing worker, and teardown
+  remains idempotent. Live offsets now use the startup panel's rendered
+  physical height so blank spacing and wrapped workspace paths are accounted
+  for. The dim startup divider follows the header's safe current-width-minus-one
+  rule, and blank lines separate Provider, Model, Safety, optional Skill, and
+  Workspace details. Focused header/terminal/main/runtime-command suite: 209
+  passed. Full suite: 782 passed. Production compilation/import checks and
+  `git diff --check` passed. An interactive launch confirmed the full-width
+  dim divider, spaced startup fields, usable `/help`, prompt return, and clean
+  `/exit`; physical resize smoke remains deferred because this execution
+  channel does not provide a user-driven resizable terminal. No model
+  inference was run.
 - 2026-09-03: Extended the binary-rain header from a bounded startup animation
   to a single lifecycle-owned idle animator. `TerminalDisplay` now starts,
   pauses, and stops it at presentation boundaries; prompt input sends frames

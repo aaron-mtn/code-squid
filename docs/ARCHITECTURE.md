@@ -70,20 +70,41 @@ and application layer; `squid_core/` is the reusable agent runtime.
     `skill_commands.py` handles Skill status, listing, and selection.
   - `console/ui/` owns terminal presentation and input. `display.py` keeps
     `TerminalDisplay` as the lifecycle coordinator used by the Agent loop.
-    `banner.py` owns the plain startup details and dim structural divider;
-    `approval.py`
+    `header_layout.py` owns the explicit startup-scene geometry: safe draw
+    width, fixed title position, two-row title/panel gap, centered compact panel
+    rectangle, three rain rows beneath the panel, final divider row, and total
+    initial scene-plus-composer viewport height. `banner.py` owns the panel's
+    Provider, Model, Safety, Mod, optional standalone Skill, and concise
+    Workspace content. `approval.py`
     owns approval panels, prompts, and compact results; `tool_display.py` owns
     tool/action labels, command recognition, and debug result projection; and
     `formatting.py` owns shared styles, links, path shortening, wrapping, and
-    final-summary Markdown rendering. `binary_header.py` owns the reusable,
-    binary-rain composition, semantic rendering, and the single background
-    animator lifecycle. `TerminalDisplay` starts and owns that animator, pauses
-    it before run output, and stops it during CLI teardown. While input is
+    final-summary Markdown rendering. `binary_header.py` owns rain state,
+    semantic scene composition, and the single background animator lifecycle.
+    It excludes the panel rectangle while placing rain, then overlays the
+    title, panel, and DIM full-width divider into one frame. `TerminalDisplay`
+    supplies application state, starts and owns that animator, pauses it before
+    run output, and stops it during CLI teardown. While input is
     active, `prompt_input.py` sends each worker frame through prompt_toolkit's
     `run_in_terminal` seam so header frames and composer redraws remain
     serialized with backpressure and no queued output after pause.
     After intervening output, the preserved rain state is re-anchored at the
     current cursor before the next prompt; old frames remain frozen in history.
+    The live anchor is valid only while both terminal dimensions remain
+    unchanged. A width or height change freezes the animator before another
+    relative redraw, and the next prompt boundary rebuilds the header at the
+    current size before animation resumes; terminals too small for the header
+    stay safely paused. The relative offset at a valid anchor uses the composed
+    scene height plus the unchanged composer preface/input rows. Mod/Skill
+    selection updates the presentation copy before the next scene re-anchor;
+    selection semantics remain owned by the CLI command handlers. Initial drop
+    heads are staggered through the full rain height so the first frame is
+    populated above, beside, and below the panel; later resets continue to
+    enter naturally from above. When the entire initial scene and composer fit,
+    the header reserves that many terminal rows before its first forward draw,
+    scrolling older content into normal history rather than allowing startup
+    output to push the scene's own top out of view. Short terminals retain the
+    sequential static fallback.
     `prompt_input.py`, `sessions.py`, and `spinner.py` retain their focused
     input, saved-session, and animation responsibilities. Presentation modules
     do not own approval policy, Tool execution, or Tool-result semantics.
