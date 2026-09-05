@@ -1,3 +1,29 @@
+- 2026-09-04: Replaced the startup's competing prompt_toolkit/ANSI-renderer
+  architecture with one temporary nonfullscreen `StartupApplication`. The old
+  split ownership let `BinaryRainHeader` move the physical cursor while
+  PromptSession retained a different logical screen, which caused wrapping and
+  shrink instability, frozen rain, stale borders, and `Window too small...`
+  replacing large input. StartupApplication now owns rain, title, menu panel,
+  and one multiline BufferControl until Enter or Ctrl+C exits it completely;
+  ordinary run output and follow-up prompts remain print/scrollback based.
+  BinaryRainHeader is now an I/O-free rain state/composition model. Removed its
+  animator thread, anchored cursor writes, reanchor and live-size logic, prompt
+  row/height/column state, redraw callback, and the production dependency on
+  `renderer._last_screen`; removed the corresponding geometry publication from
+  `prompt_input.py`. The Application refresh interval advances rain through the
+  same renderer during typing, wrapping, scrolling, paste, and menu navigation.
+  Its bounded input Window scrolls while retaining the complete Buffer, and
+  constrained layouts contract rather than invoking prompt_toolkit's fallback.
+  `/new` constructs a fresh Application and resets drop state. Focused startup,
+  input, menu, display, CLI, and boundary tests: 261 passed; full suite: 828
+  passed. Python compilation, a 67-module production import smoke, and
+  `git diff --check` passed. A real 80x40 ConPTY smoke sampled 12 distinct rain
+  frames, exercised menu navigation, slow typing, natural wrapping, a large
+  bracketed paste, heavy deletion, CSI-u Shift+Enter/Alt+Enter, clean Ctrl+C,
+  post-submit print output via `/help`, and a fresh `/new` scene. It never showed
+  `Window too small...`. The ConPTY harness was temporary and no model inference
+  ran. A visible Windows Terminal remains the final manual visual authority.
+
 - 2026-09-04: Fixed the startup rain/boxed-composer rendering seam. Confirmed
   that prompt_toolkit's `run_in_terminal` contract erased, reset, and fully
   repainted the framed prompt for every rain frame, causing idle flashing; live

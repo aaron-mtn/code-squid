@@ -1,9 +1,14 @@
+"""Rendered-screen and input tests for follow-up and startup composers."""
+
 import asyncio
-import os
+from pathlib import Path
+import random
 import threading
 
+import pytest
 from prompt_toolkit import PromptSession
 from prompt_toolkit.application.current import set_app
+from prompt_toolkit.data_structures import Size
 from prompt_toolkit.input import DummyInput
 from prompt_toolkit.input.ansi_escape_sequences import ANSI_SEQUENCES
 from prompt_toolkit.input.defaults import create_pipe_input
@@ -11,564 +16,274 @@ from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout.controls import BufferControl
 from prompt_toolkit.output import DummyOutput
 
+from code_squid.console.startup_menu import StartupMenu
+from code_squid.console.ui.banner import StartupInfo
+from code_squid.console.ui.binary_header import BinaryRainHeader, TITLE
+from code_squid.console.ui.formatting import RUN_PANEL_WIDTH
 from code_squid.console.ui.prompt_input import (
     COMPOSER_STYLE,
     _configure_composer_frame,
-    _sync_live_composer_geometry,
     multiline_key_bindings,
     prompt_multiline_input,
 )
-from code_squid.console.ui.binary_header import BinaryRainHeader, HIDE_CURSOR
-from code_squid.console.ui.formatting import RUN_PANEL_WIDTH
+from code_squid.console.ui.startup_application import StartupApplication
+from code_squid.settings import load_settings
 
 
-def _render_boxed_composer(text: str) -> list[list[str]]:
-    """Render the real composer layout into prompt_toolkit's cell screen."""
+class SizedOutput(DummyOutput):
+    """Dummy output with controllable physical dimensions."""
 
-    async def render() -> list[list[str]]:
-        session = PromptSession(input=DummyInput(), output=DummyOutput())
-        session.show_frame = True
-        session.style = COMPOSER_STYLE
-        session.reserve_space_for_menu = 0
-        _configure_composer_frame(session)
-        session.message = [("", "  @code-squid\n  › ")]
-        session.multiline = True
-        session.wrap_lines = True
-        with set_app(session.app):
-            session.default_buffer.text = text
-            session.default_buffer.cursor_position = len(text)
-            session.app.renderer.render(session.app, session.layout)
-        screen = session.app.renderer._last_screen
-        assert screen is not None
-        return [
-            [screen.data_buffer[row][column].char for column in range(RUN_PANEL_WIDTH)]
-            for row in range(screen.height)
-        ]
+    def __init__(self, columns: int = 80, rows: int = 32) -> None:
+        self.size = Size(rows=rows, columns=columns)
 
-    return asyncio.run(render())
+    def get_size(self) -> Size:
+        return self.size
 
 
-def _render_boxed_composer_geometry(text: str) -> tuple[int, int]:
-    """Return prompt_toolkit's physical height and absolute cursor row."""
-
-    async def render() -> tuple[int, int]:
-        session = PromptSession(input=DummyInput(), output=DummyOutput())
-        session.show_frame = True
-        session.style = COMPOSER_STYLE
-        session.reserve_space_for_menu = 0
-        composer_bottom = _configure_composer_frame(session)
-        session.message = [("", "  @code-squid\n  > ")]
-        session.multiline = True
-        session.wrap_lines = True
-        with set_app(session.app):
-            session.default_buffer.text = text
-            session.default_buffer.cursor_position = len(text)
-            session.app.renderer.render(session.app, session.layout)
-        screen = session.app.renderer._last_screen
-        assert screen is not None
-        cursor = screen.get_cursor_position(session.layout.current_window)
-        bottom = screen.visible_windows_to_write_positions[
-            composer_bottom
-        ]
-        return bottom.ypos + bottom.height, cursor.y
-
-    return asyncio.run(render())
+def _startup(*, columns: int = 80, rows: int = 32, menu=None, input=None):
+    rain = BinaryRainHeader(
+        rng=random.Random(7),
+        startup_info=StartupInfo(
+            directory=Path("/tmp/project"),
+            provider="openai_compatible",
+            model="model",
+            approval_mode="balanced",
+        ),
+    )
+    rain.set_startup_menu(menu)
+    prompt = lambda: [("", "  @code-squid\n  "), ("", "  " if menu and menu.focused else "› ")]
+    startup = StartupApplication(
+        prompt,
+        rain,
+        multiline_key_bindings(rain),
+        input=input or DummyInput(),
+        output=SizedOutput(columns, rows),
+    )
+    return startup
 
 
-def _assert_fixed_composer_edges(rows: list[list[str]]) -> None:
-    assert rows[0][0] == "╭"
-    assert rows[0][-1] == "╮"
-    assert rows[-1][0] == "╰"
-    assert rows[-1][-1] == "╯"
-    assert all(len(row) == RUN_PANEL_WIDTH for row in rows)
-    assert all(row[0] == row[-1] == "│" for row in rows[1:-1])
+def _render_startup(startup: StartupApplication, text: str = ""):
+    async def render():
+        startup.buffer.text = text
+        startup.buffer.cursor_position = len(text)
+        with set_app(startup.application):
+            startup.rain.advance(startup.application.output.get_size().columns)
+            # Manual renderer calls do not run Application.invalidate(), so
+            # advance its render key just as the real redraw lifecycle does.
+            startup.application.render_counter += 1
+            startup.application.renderer.render(
+                startup.application, startup.application.layout
+            )
+        return startup.application.renderer._last_screen
+
+    screen = asyncio.run(render())
+    assert screen is not None
+    return screen
 
 
-def test_boxed_composer_empty_and_short_geometry_is_fixed() -> None:
-    empty_rows = _render_boxed_composer("")
-    short_rows = _render_boxed_composer("hello")
-
-    _assert_fixed_composer_edges(empty_rows)
-    _assert_fixed_composer_edges(short_rows)
-    assert len(empty_rows) == len(short_rows) == 4
-    assert "".join(empty_rows[1]).startswith("│  @code-squid")
-    assert "".join(empty_rows[2]).startswith("│  › ")
+def _screen_rows(screen, columns: int = 80) -> list[str]:
+    return [
+        "".join(screen.data_buffer[y][x].char for x in range(columns))
+        for y in range(screen.height)
+    ]
 
 
-def test_boxed_composer_wraps_and_indents_continuations() -> None:
-    rows = _render_boxed_composer("word " * 40)
-
-    _assert_fixed_composer_edges(rows)
-    assert len(rows) > 4
-    assert "".join(rows[2]).startswith("│  › ")
-    assert all("".join(row).startswith("│    ") for row in rows[3:-1])
+def _composer_rows(screen) -> list[str]:
+    rows = _screen_rows(screen, RUN_PANEL_WIDTH)
+    top = next(index for index, row in enumerate(rows) if row.startswith("╭"))
+    bottom = next(index for index, row in enumerate(rows[top:], top) if row.startswith("╰"))
+    return rows[top : bottom + 1]
 
 
-def test_boxed_composer_explicit_newlines_grow_downward() -> None:
-    rows = _render_boxed_composer("first\nsecond\nthird")
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "abcdefghij",
+        "x" * 53,
+        "word " * 40,
+        "first\nsecond\nthird",
+        "漢🙂" * 40,
+    ],
+)
+def test_startup_composer_renders_one_buffer_inside_fixed_frame(text: str) -> None:
+    startup = _startup()
+    screen = _render_startup(startup, text)
+    composer = _composer_rows(screen)
+    buffers = [
+        window
+        for window in screen.visible_windows_to_write_positions
+        if isinstance(getattr(window, "content", None), BufferControl)
+    ]
+    cursor = screen.get_cursor_position(startup.input_window)
 
-    _assert_fixed_composer_edges(rows)
-    assert len(rows) == 6
-    assert all("".join(row).startswith("│    ") for row in rows[3:-1])
-
-
-def test_boxed_composer_wide_unicode_keeps_stationary_edges() -> None:
-    rows = _render_boxed_composer("漢🙂" * 40)
-
-    _assert_fixed_composer_edges(rows)
-    assert len(rows) > 4
-
-
-def test_active_buffer_window_stays_inside_box_at_full_interior_width() -> None:
-    async def render_sequence():
-        session = PromptSession(input=DummyInput(), output=DummyOutput())
-        session.show_frame = True
-        session.style = COMPOSER_STYLE
-        session.reserve_space_for_menu = 0
-        bottom_border = _configure_composer_frame(session)
-        session.message = [("", "  @code-squid\n  > ")]
-        session.multiline = True
-        session.wrap_lines = True
-        states = []
-
-        with set_app(session.app):
-            for text in (
-                "x",
-                "abcdefghij",
-                "n" * 53,
-                "first-part " * 10,
-                "many rows " * 30,
-                "short",
-            ):
-                session.default_buffer.text = text
-                session.default_buffer.cursor_position = len(text)
-                session.app.renderer.render(session.app, session.layout)
-                screen = session.app.renderer._last_screen
-                assert screen is not None
-                buffers = [
-                    (window, position)
-                    for window, position in screen.visible_windows_to_write_positions.items()
-                    if isinstance(getattr(window, "content", None), BufferControl)
-                ]
-                bottom = screen.visible_windows_to_write_positions[bottom_border].ypos
-                cursor = screen.get_cursor_position(session.layout.current_window)
-                rows = [
-                    "".join(screen.data_buffer[y][x].char for x in range(RUN_PANEL_WIDTH))
-                    for y in range(bottom + 1)
-                ]
-                states.append((text, buffers, bottom, cursor, rows))
-        return states
-
-    states = asyncio.run(render_sequence())
-
-    for text, buffers, bottom, cursor, rows in states:
-        assert len(buffers) == 1
-        _, position = buffers[0]
-        assert (position.xpos, position.width) == (1, 58)
-        assert 0 < cursor.x < RUN_PANEL_WIDTH - 1
-        assert 0 < cursor.y < bottom
-        assert rows[0][0] == "╭" and rows[0][-1] == "╮"
-        assert rows[bottom][0] == "╰" and rows[bottom][-1] == "╯"
-        assert all(row[0] == row[-1] == "│" for row in rows[1:bottom])
-        if text == "abcdefghij":
-                assert "> abcdefghij" in rows[2]
-
-    wrapped_rows = states[3][4]
-    assert "first-part" in wrapped_rows[2]
-    assert any("first-part" in row for row in wrapped_rows[3:-1])
-    assert states[4][2] > states[3][2]
-    assert states[-1][2] == 3
+    assert len(buffers) == 1
+    assert len(composer[0]) == RUN_PANEL_WIDTH
+    assert composer[0] == f"╭{'─' * (RUN_PANEL_WIDTH - 2)}╮"
+    assert composer[-1] == f"╰{'─' * (RUN_PANEL_WIDTH - 2)}╯"
+    assert all(row[0] == row[-1] == "│" for row in composer[1:-1])
+    assert 0 < cursor.x < RUN_PANEL_WIDTH - 1
+    assert composer[0].startswith("╭") and composer[-1].endswith("╯")
+    assert "@code-squid" in "\n".join(composer)
 
 
-def _submit_terminal_input(monkeypatch, terminal_input: str) -> str:
-    """Run the real prompt against deterministic terminal input."""
+def test_ten_slowly_typed_characters_are_all_visible() -> None:
+    startup = _startup()
+    for index, character in enumerate("abcdefghij", 1):
+        startup.buffer.insert_text(character)
+        rows = _composer_rows(_render_startup(startup, startup.buffer.text))
+        assert "abcdefghij"[:index] in "\n".join(rows)
 
+
+def test_wrapping_grows_then_deletion_shrinks_without_duplicate_border() -> None:
+    startup = _startup()
+    tall = _composer_rows(_render_startup(startup, "many rows " * 40))
+    short = _composer_rows(_render_startup(startup, "short"))
+
+    assert len(tall) > 6
+    assert len(short) == 4
+    assert sum(row.startswith("╭") for row in short) == 1
+    assert sum(row.startswith("╰") for row in short) == 1
+
+
+def test_large_input_scrolls_in_short_viewport_without_fallback() -> None:
+    startup = _startup(rows=30)
+    task = "first line\n" + ("large-paste " * 300) + "\nlast line"
+    screen = _render_startup(startup, task)
+    rows = _screen_rows(screen)
+    cursor = screen.get_cursor_position(startup.input_window)
+    position = screen.visible_windows_to_write_positions[startup.input_window]
+
+    assert startup.buffer.text == task
+    assert "Window too small" not in "\n".join(rows)
+    assert position.ypos <= cursor.y < position.ypos + position.height
+    assert _composer_rows(screen)[-1].startswith("╰")
+
+
+def test_rain_changes_while_panel_and_composer_stay_stable() -> None:
+    startup = _startup()
+    first = _screen_rows(_render_startup(startup, "typing while rain moves"))
+    later = first
+    for _ in range(40):
+        later = _screen_rows(_render_startup(startup, startup.buffer.text))
+    assert first != later
+    assert TITLE in "\n".join(first) and TITLE in "\n".join(later)
+    assert _composer_rows(_render_startup(startup, startup.buffer.text))
+
+
+def test_menu_focus_marker_and_composer_marker_update_on_render(tmp_path) -> None:
+    menu = StartupMenu(tmp_path, load_settings(tmp_path))
+    startup = _startup(menu=menu)
+    unfocused = _screen_rows(_render_startup(startup))
+
+    menu.focus_from_composer()
+    focused = _screen_rows(_render_startup(startup))
+    menu.move(-1)
+    moved = _screen_rows(_render_startup(startup))
+
+    assert "›" in "\n".join(unfocused)
+    assert "›" not in "\n".join(focused)
+    assert "Workspace" in next(row for row in focused if ">" in row)
+    assert "Mod" in next(row for row in moved if ">" in row)
+    assert startup.buffer.text == ""
+
+
+@pytest.mark.parametrize("columns,rows", [(40, 32), (80, 12), (80, 50)])
+def test_resize_degrades_without_fallback_and_recovers(columns: int, rows: int) -> None:
+    startup = _startup(columns=columns, rows=rows)
+    first = _screen_rows(_render_startup(startup, "resizable input"), columns)
+    assert "Window too small" not in "\n".join(first)
+
+    startup.application.output.size = Size(rows=32, columns=80)
+    recovered = _screen_rows(_render_startup(startup, startup.buffer.text))
+    assert TITLE in "\n".join(recovered)
+    assert "resizable input" in "\n".join(recovered)
+
+
+def _run_input(terminal_input: str, *, startup: bool = False) -> str:
     result: list[str] = []
     errors: list[BaseException] = []
-
     with create_pipe_input() as pipe_input:
-        monkeypatch.setattr(
-            "code_squid.console.ui.prompt_input.PromptSession",
-            lambda: PromptSession(input=pipe_input, output=DummyOutput()),
-        )
+        if startup:
+            app = _startup(input=pipe_input)
+            target = app.run
+        else:
+            session = PromptSession(input=pipe_input, output=DummyOutput())
+            target = lambda: session.prompt(
+                "› ", multiline=True, key_bindings=multiline_key_bindings()
+            )
 
-        def prompt() -> None:
+        def run() -> None:
             try:
-                result.append(prompt_multiline_input("› "))
-            except BaseException as error:  # Preserve thread failures for the test.
+                result.append(target())
+            except BaseException as error:
                 errors.append(error)
 
-        prompt_thread = threading.Thread(target=prompt)
-        prompt_thread.start()
+        thread = threading.Thread(target=run)
+        thread.start()
         pipe_input.send_text(terminal_input)
-        # Large paste processing can be slower under a loaded Windows test
-        # runner; this is a ceiling, not an intentional test delay.
-        prompt_thread.join(timeout=10)
-
-        assert not prompt_thread.is_alive()
-
+        thread.join(timeout=10)
+        assert not thread.is_alive()
     assert not errors
     return result[0]
 
 
-def test_prompt_multiline_input_uses_shared_multiline_bindings(monkeypatch) -> None:
-    prompt_calls = []
-    prefaces = []
-
-    class FakePromptSession:
-        def prompt(self, *args, **kwargs) -> str:
-            prompt_calls.append((args, kwargs))
-            return "line one\nline two"
-
-    monkeypatch.setattr("code_squid.console.ui.prompt_input.PromptSession", FakePromptSession)
-    monkeypatch.setattr(
-        "code_squid.console.ui.prompt_input.print_formatted_text",
-        lambda text: prefaces.append(text),
-    )
-
-    result = prompt_multiline_input("› ", preface="@code-squid")
-
-    assert result == "line one\nline two"
-    assert prefaces == ["@code-squid"]
-    args, kwargs = prompt_calls[0]
-    assert args == ("› ",)
-    assert kwargs["multiline"] is True
-    assert kwargs["key_bindings"] is not None
-    assert ANSI_SEQUENCES["\x1b[27;2;13~"] == Keys.ControlJ
+def test_plain_enter_submits_and_modified_enter_inserts_newlines() -> None:
+    assert _run_input("task\r") == "task"
+    for sequence in (
+        "\x1b[27;2;13~",
+        "\x1b[13;2u",
+        "\x1b[27;3;13~",
+        "\x1b[13;3u",
+        "\x1b\r",
+    ):
+        assert _run_input(sequence + "next\r") == "\nnext"
     assert ANSI_SEQUENCES["\x1b[13;2u"] == Keys.ControlJ
 
 
-def test_menu_escape_binding_is_eager() -> None:
-    class Menu:
-        focused = True
-
-    animator = type("Animator", (), {"startup_menu": Menu()})()
-    bindings = multiline_key_bindings(animator)
-    escape_bindings = [
-        binding
-        for binding in bindings.bindings
-        if binding.keys == (Keys.Escape,)
-    ]
-
-    assert len(escape_bindings) == 1
-    assert escape_bindings[0].eager() is True
+def test_startup_large_bracketed_paste_and_deletion_preserve_buffer() -> None:
+    task = "first\n" + ("x" * 20_000) + "\nlast"
+    pasted = f"\x1b[200~{task}\x1b[201~"
+    assert _run_input(pasted + ("\x7f" * 4) + "\r", startup=True) == task[:-4]
 
 
-def test_prompt_redraws_header_without_erasing_stable_composer(monkeypatch) -> None:
-    events = []
+def test_startup_ctrl_c_raises_shutdown_interrupt() -> None:
+    with create_pipe_input() as pipe_input:
+        startup = _startup(input=pipe_input)
+        errors: list[BaseException] = []
+        thread = threading.Thread(
+            target=lambda: _capture_error(startup.run, errors)
+        )
+        thread.start()
+        pipe_input.send_bytes(b"\x03")
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+    assert len(errors) == 1 and isinstance(errors[0], KeyboardInterrupt)
+    assert startup.application.is_running is False
+    assert all(thread.name != "code-squid-binary-rain" for thread in threading.enumerate())
 
-    class EventHook:
-        def __init__(self) -> None:
-            self.handler = None
 
-        def __iadd__(self, handler):
-            self.handler = handler
-            return self
+def _capture_error(callback, errors: list[BaseException]) -> None:
+    try:
+        callback()
+    except BaseException as error:
+        errors.append(error)
 
-        def fire(self, app) -> None:
-            assert self.handler is not None
-            self.handler(app)
 
-    screen = type(
-        "Screen",
-        (),
-        {
-            "height": 4,
-            "get_cursor_position": lambda self, window: type(
-                "Point", (), {"y": 2}
-            )(),
-        },
-    )()
-    app = type(
-        "FakeApp",
-        (),
-        {
-            "loop": object(),
-            "after_render": EventHook(),
-            "renderer": type("Renderer", (), {"_last_screen": screen})(),
-            "layout": type("Layout", (), {"current_window": object()})(),
-        },
-    )()
-
-    class FakeAnimator:
-        has_animator = True
-
-        def resume(self, redraw) -> None:
-            events.append("resume")
-            redraw("frame-1")
-            redraw("frame-2")
-
-        def pause(self) -> None:
-            events.append("pause")
-
-        def write_live_frame(self, frame: str) -> None:
-            events.append(f"draw:{frame}")
-
-        def set_live_prompt_geometry(self, **geometry) -> None:
-            events.append(("geometry", geometry))
+def test_followup_boxed_prompt_keeps_existing_prompt_session_path(monkeypatch) -> None:
+    calls = []
 
     class FakePromptSession:
         def __init__(self) -> None:
-            self.app = app
+            self.show_frame = False
+            self.style = None
+            self.reserve_space_for_menu = 0
+            self.layout = type("Layout", (), {"container": type("Root", (), {"children": []})()})()
 
-        def prompt(self, *args, **kwargs) -> str:
-            assert "pre_run" not in kwargs
-            app.after_render.fire(app)
-            events.append("prompt")
-            return "task"
+        def prompt(self, *args, **kwargs):
+            calls.append((args, kwargs))
+            return "follow-up"
 
     monkeypatch.setattr("code_squid.console.ui.prompt_input.PromptSession", FakePromptSession)
-    monkeypatch.setattr(
-        "code_squid.console.ui.prompt_input.get_app",
-        lambda: type("FakeApp", (), {"loop": object()})(),
-    )
-
-    class CompletedFuture:
-        def __init__(self, coroutine) -> None:
-            self.coroutine = coroutine
-
-        def result(self) -> None:
-            import asyncio
-
-            asyncio.run(self.coroutine)
-
-    monkeypatch.setattr(
-        "code_squid.console.ui.prompt_input.asyncio.run_coroutine_threadsafe",
-        lambda coroutine, loop: CompletedFuture(coroutine),
-    )
-
-    assert prompt_multiline_input("› ", animator=FakeAnimator()) == "task"
-    assert events == [
-        (
-            "geometry",
-            {"prompt_height": 4, "cursor_row": 2, "separator_rows": 1},
-        ),
-        "resume",
-        "draw:frame-1",
-        "draw:frame-2",
-        "prompt",
-        "pause",
-    ]
-
-
-def test_real_prompt_session_emits_multiple_live_frames_when_constrained(
-    monkeypatch,
-) -> None:
-    class RecordingStream:
-        def __init__(self) -> None:
-            self.writes: list[str] = []
-            self.live_frame = threading.Event()
-
-        def isatty(self) -> bool:
-            return True
-
-        def write(self, value: str) -> None:
-            self.writes.append(value)
-            if value.startswith(HIDE_CURSOR):
-                self.live_frame.set()
-
-        def flush(self) -> None:
-            pass
-
-    stream = RecordingStream()
-    animator = BinaryRainHeader(
-        stream=stream,
-        terminal_size=lambda: os.terminal_size((80, 27)),
-        ansi_supported=lambda output: True,
-        frame_interval=10,
-    )
-    assert animator.start() is True
-    result: list[str] = []
-
-    with create_pipe_input() as pipe_input:
-        monkeypatch.setattr(
-            "code_squid.console.ui.prompt_input.PromptSession",
-            lambda: PromptSession(input=pipe_input, output=DummyOutput()),
-        )
-        thread = threading.Thread(
-            target=lambda: result.append(
-                prompt_multiline_input("> ", animator=animator, boxed=True)
-            )
-        )
-        thread.start()
-        assert stream.live_frame.wait(timeout=1)
-
-        for _ in range(10):
-            live_writes = [value for value in stream.writes if value.startswith(HIDE_CURSOR)]
-            if len(set(live_writes)) >= 2:
-                break
-            stream.live_frame.clear()
-            animator.request_redraw()
-            assert stream.live_frame.wait(timeout=1)
-
-        pipe_input.send_text("task\r")
-        thread.join(timeout=5)
-        assert not thread.is_alive()
-
-    live_writes = [value for value in stream.writes if value.startswith(HIDE_CURSOR)]
-    assert result == ["task"]
-    assert len(live_writes) >= 2
-    assert len(set(live_writes)) >= 2
-    animator.stop()
-
-
-def test_live_composer_geometry_uses_real_rendered_growth_and_shrink() -> None:
-    class Animator:
-        geometry = None
-
-        def set_live_prompt_geometry(self, **geometry) -> None:
-            self.geometry = geometry
-
-    heights = []
-    states = ("", "word " * 40, "first\nsecond\nthird", "short", "")
-    for text in states:
-        height, cursor_row = _render_boxed_composer_geometry(text)
-        heights.append(height)
-        animator = Animator()
-        screen = type(
-            "Screen",
-            (),
-            {
-                "height": height,
-                "get_cursor_position": lambda self, window, row=cursor_row: type(
-                    "Point", (), {"y": row}
-                )(),
-            },
-        )()
-        app = type(
-            "App",
-            (),
-            {
-                "renderer": type("Renderer", (), {"_last_screen": screen})(),
-                "layout": type("Layout", (), {"current_window": object()})(),
-            },
-        )()
-
-        assert _sync_live_composer_geometry(app, animator) is True
-        assert animator.geometry == {
-            "prompt_height": height,
-            "cursor_row": cursor_row,
-            "separator_rows": 1,
-        }
-
-    assert heights[0] == heights[-1] == 4
-    assert heights[1] > heights[0]
-    assert heights[2] == 6
-    assert heights[3] == 4
-
-
-def test_live_geometry_follows_visible_border_not_retained_cleanup_screen() -> None:
-    async def render_sequence() -> tuple[list[int], list[int]]:
-        session = PromptSession(input=DummyInput(), output=DummyOutput())
-        session.show_frame = True
-        session.style = COMPOSER_STYLE
-        session.reserve_space_for_menu = 0
-        composer_bottom = _configure_composer_frame(session)
-        session.message = [("", "  @code-squid\n  > ")]
-        session.multiline = True
-        session.wrap_lines = True
-        published_heights = []
-        backing_heights = []
-
-        class Animator:
-            def set_live_prompt_geometry(self, **geometry) -> None:
-                published_heights.append(geometry["prompt_height"])
-
-        with set_app(session.app):
-            for text in ("", "word " * 40, "first\nsecond\nthird", "short", ""):
-                session.default_buffer.text = text
-                session.default_buffer.cursor_position = len(text)
-                session.app.renderer.render(session.app, session.layout)
-                assert (
-                    _sync_live_composer_geometry(
-                        session.app,
-                        Animator(),
-                        composer_bottom=composer_bottom,
-                    )
-                    is True
-                )
-                backing_heights.append(session.app.renderer._last_screen.height)
-
-        return published_heights, backing_heights
-
-    published, backing = asyncio.run(render_sequence())
-
-    assert published[0] == published[-1] == 4
-    assert published[1] > published[0]
-    assert published[2:] == [6, 4, 4]
-    # prompt_toolkit retains the largest backing screen for row cleanup, while
-    # the visible bottom border and animator geometry shrink immediately.
-    assert backing[1:] == [published[1]] * 4
-
-
-def test_prompt_multiline_input_preserves_long_single_line_input(monkeypatch) -> None:
-    task = "x" * 20_000
-
-    assert _submit_terminal_input(monkeypatch, task + "\r") == task
-
-
-def test_shift_and_alt_enter_sequences_insert_newlines(monkeypatch) -> None:
-    modified_enters = (
-        "\x1b[27;2;13~",  # Shift+Enter, legacy modifyOtherKeys.
-        "\x1b[13;2u",  # Shift+Enter, CSI-u.
-        "\x1b[27;3;13~",  # Alt+Enter, legacy modifyOtherKeys.
-        "\x1b[13;3u",  # Alt+Enter, CSI-u.
-        "\x1b\r",  # Alt+Enter without enhanced keyboard reporting.
-    )
-
-    for sequence in modified_enters:
-        assert _submit_terminal_input(monkeypatch, sequence + "next\r") == "\nnext"
-
-
-def test_plain_enter_still_submits(monkeypatch) -> None:
-    assert _submit_terminal_input(monkeypatch, "task\r") == "task"
-
-
-def test_prompt_multiline_input_preserves_long_bracketed_paste(monkeypatch) -> None:
-    task = "first line\n" + ("x" * 20_000) + "\nlast line"
-    bracketed_paste = f"\x1b[200~{task}\x1b[201~"
-
-    assert _submit_terminal_input(monkeypatch, bracketed_paste + "\r") == task
-
-
-def test_prompt_multiline_input_buffers_long_paste_before_submission(
-    monkeypatch,
-) -> None:
-    task = "first line\n" + ("x" * 20_000) + "\nlast line"
-    buffer_updated = threading.Event()
-    errors: list[BaseException] = []
-
-    with create_pipe_input() as pipe_input:
-        session = PromptSession(input=pipe_input, output=DummyOutput())
-        session.default_buffer.on_text_changed += (
-            lambda buffer: buffer_updated.set() if buffer.text == task else None
-        )
-        monkeypatch.setattr(
-            "code_squid.console.ui.prompt_input.PromptSession",
-            lambda: session,
-        )
-
-        def prompt() -> None:
-            try:
-                prompt_multiline_input("› ")
-            except KeyboardInterrupt:
-                pass
-            except BaseException as error:  # Preserve thread failures for the test.
-                errors.append(error)
-
-        prompt_thread = threading.Thread(target=prompt)
-        prompt_thread.start()
-        try:
-            pipe_input.send_text(f"\x1b[200~{task}\x1b[201~")
-
-            assert buffer_updated.wait(timeout=5)
-            assert prompt_thread.is_alive()
-            assert session.default_buffer.text == task
-            assert session.default_buffer.cursor_position == len(task)
-        finally:
-            pipe_input.send_bytes(b"\x03")
-            prompt_thread.join(timeout=5)
-
-        assert not prompt_thread.is_alive()
-
-    assert not errors
+    assert prompt_multiline_input("› ") == "follow-up"
+    assert calls[0][1]["multiline"] is True

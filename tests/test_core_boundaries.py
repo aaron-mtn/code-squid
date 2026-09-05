@@ -242,6 +242,7 @@ def test_code_squid_application_package_has_expected_layout() -> None:
         "console/ui/prompt_input.py",
         "console/ui/sessions.py",
         "console/ui/spinner.py",
+        "console/ui/startup_application.py",
         "console/ui/tool_display.py",
         "settings.py",
     ]

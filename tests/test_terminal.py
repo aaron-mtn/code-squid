@@ -76,33 +76,10 @@ def finish_display(display: TerminalDisplay, content: str = "") -> None:
 
 class FakeHeader:
     def __init__(self) -> None:
-        self.starts = 0
-        self.pauses = 0
-        self.stops = 0
-        self.reanchors = 0
-        self.live_content: list[tuple[str, int]] = []
         self.startup_infos: list[StartupInfo | None] = []
 
     def set_startup_info(self, startup_info: StartupInfo | None) -> None:
         self.startup_infos.append(startup_info)
-
-    def start(self) -> bool:
-        self.starts += 1
-        return True
-
-    def pause(self) -> None:
-        self.pauses += 1
-
-    def stop(self) -> None:
-        self.stops += 1
-
-    def reanchor(self) -> bool:
-        self.reanchors += 1
-        return True
-
-    def set_live_content_below_header(self, content: str, *, extra_rows: int) -> None:
-        self.live_content.append((content, extra_rows))
-
 
 def _approval_panel_output(tool: str, label: str, value: str) -> str:
     inner_width = APPROVAL_PANEL_WIDTH - 2
@@ -474,19 +451,14 @@ def test_thinking_after_visible_tool_result_prints_one_leading_blank(
     assert capsys.readouterr().out == "\n"
 
 
-def test_first_thinking_after_header_does_not_print_extra_blank(
-    monkeypatch: pytest.MonkeyPatch,
+def test_first_thinking_after_startup_scene_does_not_print_extra_blank(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     spinner = FakeSpinner()
     display = TerminalDisplay(_spinner=spinner)
-    monkeypatch.setattr(
-        "code_squid.console.ui.display.BinaryRainHeader.start",
-        lambda self: print("<binary-header>"),
-    )
 
     display.start()
-    assert capsys.readouterr().out == "<binary-header>\n\n"
+    assert capsys.readouterr().out == ""
 
     display.thinking()
 
@@ -495,7 +467,7 @@ def test_first_thinking_after_header_does_not_print_extra_blank(
     assert capsys.readouterr().out == ""
 
 
-def test_display_starts_pauses_and_stops_owned_header(capsys) -> None:
+def test_display_marks_temporary_scene_ownership_without_rendering(capsys) -> None:
     header = FakeHeader()
     display = TerminalDisplay(_header=header)
 
@@ -503,11 +475,9 @@ def test_display_starts_pauses_and_stops_owned_header(capsys) -> None:
     display.run_started()
     display.stop_header()
 
-    assert header.starts == 1
-    assert header.pauses == 0
-    assert header.stops == 2
     assert header.startup_infos == [None]
-    assert header.live_content == [("", 1)]
+    assert display.session_scene_active is False
+    assert capsys.readouterr().out == "\n"
 
 
 def test_display_retires_and_restarts_one_session_scene(capsys) -> None:
@@ -520,10 +490,9 @@ def test_display_retires_and_restarts_one_session_scene(capsys) -> None:
     display.start_session_scene()
     display.start_session_scene()
 
-    assert header.starts == 2
-    assert header.stops == 1
+    assert header.startup_infos == [None, None]
     assert display.session_scene_active is True
-    assert capsys.readouterr().out == "\n\n"
+    assert capsys.readouterr().out == ""
 
 
 def test_display_updates_specialization_used_by_later_scene_frames() -> None:
@@ -540,27 +509,13 @@ def test_display_updates_specialization_used_by_later_scene_frames() -> None:
     assert header.startup_infos[-1] == display.startup_info
 
 
-def test_startup_uses_binary_header_once_without_legacy_branding(
-    monkeypatch: pytest.MonkeyPatch,
+def test_startup_prepares_rain_model_without_printing_legacy_branding(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    header_calls = []
-
-    def fake_start(self) -> bool:
-        header_calls.append(self)
-        print("<binary-header>")
-        return True
-
-    monkeypatch.setattr(
-        "code_squid.console.ui.display.BinaryRainHeader.start",
-        fake_start,
-    )
-
     TerminalDisplay().start()
 
     output = capsys.readouterr().out
-    assert len(header_calls) == 1
-    assert output == "<binary-header>\n\n"
+    assert output == ""
     assert "██████" not in output
     assert "A small coding agent with tentacles." not in output
 
@@ -1173,15 +1128,10 @@ def test_assistant_message_followed_by_tool_result_has_blank_line(
     assert output.endswith(f"\n\n{RUN_DETAIL_INDENT}📝 Wrote: kanban_toy2/index.html\n")
 
 
-def test_first_visible_output_after_header_has_no_extra_leading_blank(
-    monkeypatch: pytest.MonkeyPatch,
+def test_first_visible_output_after_startup_has_no_extra_leading_blank(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     display = TerminalDisplay()
-    monkeypatch.setattr(
-        "code_squid.console.ui.display.BinaryRainHeader.start",
-        lambda self: print("<binary-header>"),
-    )
 
     display.start()
     display.tool_result(
@@ -1190,7 +1140,6 @@ def test_first_visible_output_after_header_has_no_extra_leading_blank(
     )
 
     assert capsys.readouterr().out == (
-        "<binary-header>\n\n"
         f"{RUN_DETAIL_INDENT}🔎 Listed files\n"
     )
 

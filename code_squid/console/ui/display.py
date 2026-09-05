@@ -313,22 +313,12 @@ class TerminalDisplay:
         self._spinner.stop()
 
     def _print_startup_banner(self) -> None:
-        # The header owns the complete scene so rain and fixed UI share one
-        # geometry and one redraw lifecycle.
+        # Scene state is prepared here, but the temporary StartupApplication
+        # performs every terminal write when the prompt begins.
         self.header.set_startup_info(self.startup_info)
-        # This is only the initial separator reservation. Once PromptSession
-        # renders, it publishes its authoritative live physical geometry.
-        self.header.set_live_content_below_header("", extra_rows=1)
-        self.header.start()
-        print()
-
-    def pause_header(self) -> None:
-        """Freeze header redraws before ordinary console output begins."""
-        self.header.pause()
 
     def stop_header(self) -> None:
-        """Stop the header worker and restore terminal cursor state."""
-        self.header.stop()
+        """Mark startup inactive; its temporary Application already exited."""
         self._session_scene_active = False
 
     @property
@@ -344,10 +334,9 @@ class TerminalDisplay:
         self._session_scene_active = True
 
     def retire_session_scene(self) -> None:
-        """Freeze the rendered scene in scrollback and stop its worker."""
+        """End startup ownership before ordinary print output resumes."""
         if not self._session_scene_active:
             return
-        self.header.stop()
         self._session_scene_active = False
 
     def set_specialization(

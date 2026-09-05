@@ -7,7 +7,6 @@ from pathlib import Path
 import threading
 from types import SimpleNamespace
 
-from prompt_toolkit import PromptSession
 from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
@@ -18,43 +17,43 @@ from code_squid.console.startup_menu import (
     discover_provider_models,
 )
 from code_squid.console.ui.banner import startup_panel_lines
+from code_squid.console.ui.binary_header import BinaryRainHeader
 from code_squid.console.ui.header_layout import startup_scene_layout
-from code_squid.console.ui.prompt_input import prompt_multiline_input
+from code_squid.console.ui.prompt_input import (
+    multiline_key_bindings,
+    prompt_multiline_input,
+)
+from code_squid.console.ui.startup_application import StartupApplication
 from code_squid.settings import VALID_PROVIDERS, load_settings
 
 
-class MenuAnimator:
-    """Non-animated header stub exposing the menu seam used by prompt input."""
-
-    has_animator = False
+class MenuAnimator(BinaryRainHeader):
+    """Rain model connected to the real startup menu state seam."""
 
     def __init__(self, menu: StartupMenu) -> None:
+        super().__init__(startup_info=menu.startup_info)
         self.startup_menu = menu
-        self.pause_calls = 0
-        self.redraws: list[str] = []
-
-    def pause(self) -> None:
-        self.pause_calls += 1
-
-    def request_redraw(self) -> None:
-        """Capture the panel the single header renderer would repaint."""
-        self.redraws.append(
-            "\n".join(self.startup_menu.panel_lines(startup_scene_layout(80)))
-        )
 
 
 def _run_prompt(monkeypatch, menu: StartupMenu, terminal_input: str) -> str:
     result: list[str] = []
     errors: list[BaseException] = []
     with create_pipe_input() as pipe_input:
+        animator = MenuAnimator(menu)
         monkeypatch.setattr(
-            "code_squid.console.ui.prompt_input.PromptSession",
-            lambda: PromptSession(input=pipe_input, output=DummyOutput()),
+            "code_squid.console.ui.prompt_input.StartupApplication",
+            lambda prompt, rain, bindings: StartupApplication(
+                prompt,
+                rain,
+                bindings,
+                input=pipe_input,
+                output=DummyOutput(),
+            ),
         )
 
         def prompt() -> None:
             try:
-                result.append(prompt_multiline_input("> ", animator=MenuAnimator(menu)))
+                result.append(prompt_multiline_input("> ", animator=animator))
             except BaseException as error:
                 errors.append(error)
 
@@ -76,15 +75,21 @@ def test_empty_composer_up_enters_menu_and_boundary_returns(monkeypatch, tmp_pat
     assert menu.focused is False
 
 
-def test_menu_keys_request_visible_header_frames(monkeypatch, tmp_path) -> None:
+def test_menu_keys_update_visible_panel_state(monkeypatch, tmp_path) -> None:
     menu = StartupMenu(tmp_path, load_settings(tmp_path))
     animator = MenuAnimator(menu)
     result: list[str] = []
 
     with create_pipe_input() as pipe_input:
         monkeypatch.setattr(
-            "code_squid.console.ui.prompt_input.PromptSession",
-            lambda: PromptSession(input=pipe_input, output=DummyOutput()),
+            "code_squid.console.ui.prompt_input.StartupApplication",
+            lambda prompt, rain, bindings: StartupApplication(
+                prompt,
+                rain,
+                bindings,
+                input=pipe_input,
+                output=DummyOutput(),
+            ),
         )
 
         thread = threading.Thread(
@@ -97,11 +102,6 @@ def test_menu_keys_request_visible_header_frames(monkeypatch, tmp_path) -> None:
         assert not thread.is_alive()
 
     assert result == ["text"]
-    assert len(animator.redraws) == 4
-    assert all(frame.count(">") == 1 for frame in animator.redraws[:3])
-    assert animator.redraws[0] != animator.redraws[1]
-    assert animator.redraws[1] != animator.redraws[2]
-    assert ">" not in animator.redraws[3]
     assert menu.focused is False
 
 

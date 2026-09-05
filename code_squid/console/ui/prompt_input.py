@@ -1,4 +1,4 @@
-"""Shared terminal input helpers, including the transient boxed composer."""
+"""Shared terminal input helpers and startup-application dispatch."""
 
 import asyncio
 
@@ -15,46 +15,12 @@ from prompt_toolkit.styles import Style
 
 from code_squid.console.ui.binary_header import BinaryRainHeader
 from code_squid.console.ui.formatting import RUN_PANEL_WIDTH
-from code_squid.console.ui.header_layout import STARTUP_SEPARATOR_ROWS
+from code_squid.console.ui.startup_application import StartupApplication
 
 
 COMPOSER_RIGHT_PADDING = 1
 COMPOSER_INPUT_WIDTH = RUN_PANEL_WIDTH - 2 - COMPOSER_RIGHT_PADDING
 COMPOSER_STYLE = Style.from_dict({"frame.border": "dim"})
-
-
-def _sync_live_composer_geometry(
-    app,
-    animator: BinaryRainHeader,
-    *,
-    composer_bottom: Window | None = None,
-) -> bool:
-    """Publish prompt_toolkit's last physical composer geometry to the header.
-
-    The screen and cursor position are render results, so they account for
-    wrapping, explicit newlines, wide characters, and later shrinkage.  Reading
-    them after a render avoids duplicating prompt_toolkit's width calculations.
-    """
-    screen = app.renderer._last_screen
-    if screen is None:
-        return False
-    cursor = screen.get_cursor_position(app.layout.current_window)
-    write_positions = getattr(screen, "visible_windows_to_write_positions", {})
-    bottom_position = write_positions.get(composer_bottom)
-    # prompt_toolkit keeps a prior maximum Screen height so it can erase rows
-    # after shrinkage. The bottom border, however, marks the visible composer.
-    prompt_height = (
-        bottom_position.ypos + bottom_position.height
-        if bottom_position is not None
-        else screen.height
-    )
-    animator.set_live_prompt_geometry(
-        prompt_height=prompt_height,
-        cursor_row=cursor.y,
-        cursor_column=cursor.x,
-        separator_rows=STARTUP_SEPARATOR_ROWS,
-    )
-    return True
 
 
 def _configure_composer_frame(session: PromptSession) -> Window:
@@ -85,15 +51,6 @@ def _configure_composer_frame(session: PromptSession) -> Window:
             border("│", width=1),
         ],
         padding=0,
-        # Cap only the middle row using the normal PromptSession content's
-        # natural height. This is not self-referential, and it leaves the
-        # BufferControl's horizontal allocation entirely untouched.
-        height=lambda: Dimension.exact(
-            main_input.preferred_height(
-                COMPOSER_INPUT_WIDTH,
-                session.app.output.get_size().rows,
-            ).preferred
-        ),
     )
     composer = HSplit(
         [
@@ -138,8 +95,6 @@ def _install_modified_enter_ansi_sequences() -> None:
 
 def multiline_key_bindings(
     animator: BinaryRainHeader | None = None,
-    *,
-    resume_animator=None,
 ) -> KeyBindings:
     _install_modified_enter_ansi_sequences()
 
@@ -158,25 +113,19 @@ def multiline_key_bindings(
             menu.move(-1)
         else:
             menu.focus_from_composer()
-        animator.request_redraw()
         event.app.invalidate()
 
     @bindings.add("down", filter=menu_focused)
     def _(event) -> None:
         menu.move(1)
-        animator.request_redraw()
         event.app.invalidate()
 
     @bindings.add("enter", filter=menu_focused)
     async def _(event) -> None:
         # Model discovery is intentionally entered from a key action, never a
-        # frame render. Pause from another thread so the application event loop
-        # remains available to finish any in-flight output-safe redraw.
-        await asyncio.to_thread(animator.pause)
+        # frame render. The Application refresh timer can keep invalidating the
+        # rain while blocking provider discovery runs outside its event loop.
         await asyncio.to_thread(menu.activate)
-        if resume_animator is not None:
-            resume_animator()
-        animator.request_redraw()
         event.app.invalidate()
 
     @bindings.add("escape", filter=menu_focused, eager=True)
@@ -184,7 +133,6 @@ def multiline_key_bindings(
         # Escape prefixes Alt/meta sequences, so eager matching avoids
         # prompt_toolkit's standalone-Escape disambiguation delay in the menu.
         menu.back()
-        animator.request_redraw()
         event.app.invalidate()
 
     @bindings.add(Keys.Any, filter=menu_focused)
@@ -199,6 +147,12 @@ def multiline_key_bindings(
     @bindings.add("enter", filter=~menu_focused)
     def _(event) -> None:
         event.app.exit(result=event.current_buffer.text)
+
+    @bindings.add("c-c", eager=True)
+    def _(event) -> None:
+        # Ctrl+C is Code Squid shutdown, including while the startup menu owns
+        # ordinary keys. Application cleanup restores terminal cursor state.
+        event.app.exit(exception=KeyboardInterrupt)
 
     @bindings.add("c-j", filter=~menu_focused)
     def _(event) -> None:
@@ -218,15 +172,13 @@ def prompt_multiline_input(
     animator: BinaryRainHeader | None = None,
     boxed: bool = False,
 ) -> str:
-    session = PromptSession()
-    composer_bottom = None
-    if boxed:
-        session.show_frame = True
-        session.style = COMPOSER_STYLE
-        session.reserve_space_for_menu = 0
-        composer_bottom = _configure_composer_frame(session)
-
-    if animator is None or not animator.has_animator:
+    if animator is None:
+        session = PromptSession()
+        if boxed:
+            session.show_frame = True
+            session.style = COMPOSER_STYLE
+            session.reserve_space_for_menu = 0
+            _configure_composer_frame(session)
         if preface is not None:
             print_formatted_text(preface)
         return session.prompt(
@@ -235,52 +187,11 @@ def prompt_multiline_input(
             key_bindings=multiline_key_bindings(animator),
         )
 
-    if preface is not None:
-        print_formatted_text(preface)
-
-    animation_started = False
-
-    def start_animator() -> None:
-        app = get_app()
-
-        def redraw(frame: str) -> None:
-            async def draw() -> None:
-                # This coroutine runs on the PromptSession loop, serialized
-                # with input redraws. The header writer restores the exact
-                # prompt cursor position, so prompt_toolkit's renderer remains
-                # authoritative and does not need to erase/repaint the box.
-                animator.write_live_frame(frame)
-
-            # Waiting here provides backpressure: pause/stop cannot return
-            # while prompt_toolkit still has an animation redraw queued.
-            asyncio.run_coroutine_threadsafe(draw(), app.loop).result()
-
-        animator.resume(redraw)
-
-    def after_render(app) -> None:
-        nonlocal animation_started
-        if not _sync_live_composer_geometry(
-            app,
-            animator,
-            composer_bottom=composer_bottom,
-        ):
-            return
-        if not animation_started:
-            # Wait for the first real render: before it, neither composer
-            # height nor its cursor row exists as authoritative geometry.
-            animation_started = True
-            start_animator()
-
-    session.app.after_render += after_render
-
-    try:
-        return session.prompt(
-            prompt,
-            multiline=True,
-            key_bindings=multiline_key_bindings(
-                animator,
-                resume_animator=start_animator,
-            ),
-        )
-    finally:
-        animator.pause()
+    # Startup is the only composite live UI. It exits completely before the
+    # caller can print run output; follow-up prompts keep using PromptSession.
+    startup = StartupApplication(
+        prompt,
+        animator,
+        multiline_key_bindings(animator),
+    )
+    return startup.run()

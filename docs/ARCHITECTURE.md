@@ -77,30 +77,40 @@ and application layer; `squid_core/` is the reusable agent runtime.
     `TerminalDisplay` as the lifecycle coordinator used by the Agent loop.
     `header_layout.py` owns the explicit startup-scene geometry: safe draw
     width, fixed title position, two-row title/panel gap, centered compact panel
-    rectangle, three rain rows beneath the panel, and total
-    initial scene-plus-composer viewport height. The viewport reservation
-    includes the transient composer's complete minimum four-row box. During
-    live input, prompt_toolkit publishes the visible box height and current
-    cursor row after every completed render; header redraws use that live
-    geometry without erasing the active prompt. `banner.py` owns the panel's
+    rectangle, and rain rows beneath the panel. `banner.py` owns the panel's
     Provider, Model, Safety, Mod, optional standalone Skill, and concise
     Workspace content. `approval.py`
     owns approval panels, prompts, and compact results; `tool_display.py` owns
     tool/action labels, command recognition, and debug result projection; and
     `formatting.py` owns shared styles, links, path shortening, wrapping, and
-    final-summary Markdown rendering. `binary_header.py` owns rain state,
-    semantic scene composition, and the single background animator lifecycle.
-    It excludes the panel rectangle while placing rain, then overlays the
-    title and panel into one frame. `TerminalDisplay` supplies application
-    state, starts one scene at a session boundary, and retires its animator
-    after the first submitted prompt while leaving the rendered scene in
-    scrollback. Ordinary later prompts are composer-only; `/new` explicitly
-    starts one fresh scene and worker at the current terminal position. While
-    startup input is
-    active, `prompt_input.py` schedules each worker frame on prompt_toolkit's
-    event loop. Header-only output and prompt redraws are therefore serialized
-    with backpressure, without `run_in_terminal` erasing and repainting the
-    complete composer for every rain frame.
+    final-summary Markdown rendering. `binary_header.py` is a terminal-I/O-free
+    rain model and semantic compositor. It excludes the panel rectangle while
+    placing rain, then overlays the title and panel into prompt_toolkit styled
+    fragments.
+
+    `startup_application.py` owns the complete live startup surface: rain,
+    title, menu panel, and boxed multiline `BufferControl`. It creates one
+    temporary, nonfullscreen prompt_toolkit `Application`; that Application's
+    refresh timer advances rain and invalidates the same renderer. There is no
+    rain thread or independent ANSI writer, and production startup code reads
+    no completed-screen or cursor geometry. Growing input receives the physical
+    rows left by the scene and scrolls through prompt_toolkit's normal Window
+    behavior when its complete Buffer exceeds the viewport. Constrained
+    terminals contract the scene and composer width instead of displaying
+    prompt_toolkit's `Window too small...` fallback; restoring space restores
+    the complete scene and the normal 61-cell composer.
+
+    `TerminalDisplay` marks startup active at a session boundary but performs
+    no startup terminal writes. `prompt_input.py` selects StartupApplication
+    only for that active scene. Submission or Ctrl+C exits the Application and
+    its refresh lifecycle completely before the scene is retired and any agent
+    output can print. Ordinary later prompts remain composer-only
+    `PromptSession` instances; `/new` creates a fresh temporary Application and
+    resets rain at the current terminal position. This strict boundary is not
+    the rejected PinnedComposer design: there is no stdout interception,
+    managed transcript, persistent composer, alternate-screen transcript, or
+    live renderer during normal run output. The completed startup remains in
+    ordinary terminal history and print-based output continues below it.
     The composer and startup menu share prompt-toolkit key bindings rather than
     a raw input reader: Up from an empty buffer always focuses the bottom main
     row, arrows navigate, Enter replaces the same panel with a submenu or
@@ -108,34 +118,20 @@ and application layer; `squid_core/` is the reusable agent runtime.
     disambiguation delay. Main-menu edge navigation returns
     to the composer symmetrically. Ordinary text is ignored while menu-focused,
     and arrows retain normal multiline behavior whenever the composer contains
-    text. Every focus, movement, activation, and back action explicitly wakes
-    the existing rain worker, so the shared startup frame repaints immediately;
-    navigation creates neither a second renderer nor a second worker.
-    The live anchor is valid only while both terminal dimensions remain
-    unchanged. A width or height change freezes the animator before another
-    relative redraw; terminals too small for the header stay safely paused.
-    At a valid anchor, both relative movement and its vertical-fit check use the
-    composed scene height plus the current rendered cursor row beneath it. Rows
-    below that cursor and the complete visible composer height are not traversed
-    by the live writer and therefore do not falsely disable animation. Mod/Skill
+    text. Every focus, movement, activation, and back action invalidates the
+    owning Application, so the shared scene repaints immediately without a
+    second renderer or animation lifecycle. Mod/Skill
     selection updates the presentation copy used by the active scene;
     selection semantics remain owned by the CLI command handlers. Initial drop
     heads are staggered through the full rain height so the first frame is
     populated above, beside, and below the panel; later resets continue to
-    enter naturally from above. When the entire initial scene and composer fit,
-    the header reserves that many terminal rows before its first forward draw,
-    scrolling older content into normal history rather than allowing startup
-    output to push the scene's own top out of view. Short terminals retain the
-    sequential static fallback.
+    enter naturally from above.
     `prompt_input.py`, `sessions.py`, and `spinner.py` retain their focused
     input, saved-session, and animation responsibilities. The ordinary task
     composer remains a non-fullscreen `PromptSession`, but its active prompt is
     rendered in a dynamically tall 61-cell rounded frame with two cells of
     left padding and one right gutter. The normal PromptSession input container
-    retains its full 58-cell allocation inside the borders. Only its enclosing
-    middle row is capped to that input container's natural rendered height, so
-    prompt_toolkit's retained cleanup rows remain below the visible frame and
-    the frame can shrink without constraining the BufferControl. The
+    retains its full 58-cell allocation inside the borders. The
     frame disappears from active control on submission and remains only as
     normal terminal scrollback;
     approval prompts continue to use the shared unboxed input helper. Shift+Enter
