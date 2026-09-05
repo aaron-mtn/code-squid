@@ -535,6 +535,122 @@ def test_next_prompt_boundary_reanchors_and_reuses_the_only_worker() -> None:
     header.stop()
 
 
+def test_live_prompt_geometry_tracks_cursor_and_total_height_both_directions() -> None:
+    stream = FakeStream(tty=True)
+    header = BinaryRainHeader(
+        stream=stream,
+        terminal_size=lambda: os.terminal_size((80, 60)),
+        ansi_supported=lambda stream: True,
+    )
+    assert header.start() is True
+    frame = "\n".join(["0"] * HEADER_HEIGHT)
+
+    for prompt_height, cursor_row in ((4, 2), (7, 5), (6, 4), (4, 2)):
+        header.set_live_prompt_geometry(
+            prompt_height=prompt_height,
+            cursor_row=cursor_row,
+            separator_rows=1,
+        )
+        assert header.write_live_frame(frame) is True
+        cursor_offset = cursor_row + 1
+        assert stream.writes[-1].startswith(
+            f"{HIDE_CURSOR}\033[{HEADER_HEIGHT + cursor_offset}A"
+        )
+        assert stream.writes[-1].endswith(
+            f"\033[{cursor_offset}B\r{SHOW_CURSOR}"
+        )
+        assert header._live_prompt_height == prompt_height
+
+    header.stop()
+
+
+def test_cursor_relative_fit_keeps_rain_active_in_constrained_terminal() -> None:
+    stream = FakeStream(tty=True)
+    frames: list[str] = []
+    rendered = threading.Event()
+    # The 23-row normal scene plus cursor-relative prompt offset fits in this
+    # representative 27-row viewport; the full four-row box is not the bound.
+    header = BinaryRainHeader(
+        stream=stream,
+        terminal_size=lambda: os.terminal_size((80, HEADER_HEIGHT + 4)),
+        ansi_supported=lambda stream: True,
+        frame_interval=10,
+    )
+    assert header.start() is True
+    header.set_live_prompt_geometry(
+        prompt_height=4,
+        cursor_row=2,
+        separator_rows=1,
+    )
+
+    def redraw(frame: str) -> None:
+        frames.append(frame)
+        rendered.set()
+
+    header.resume(redraw)
+    assert rendered.wait(timeout=1)
+    header.pause()
+
+    assert frames
+    assert header.needs_reanchor is False
+    header.stop()
+
+
+def test_impossible_cursor_relative_fit_still_freezes_without_output() -> None:
+    stream = FakeStream(tty=True)
+    header = BinaryRainHeader(
+        stream=stream,
+        terminal_size=lambda: os.terminal_size((80, HEADER_HEIGHT + 3)),
+        ansi_supported=lambda stream: True,
+    )
+    assert header.start() is True
+    header.set_live_prompt_geometry(
+        prompt_height=4,
+        cursor_row=2,
+        separator_rows=1,
+    )
+    writes_before_resume = len(stream.writes)
+
+    header.resume(lambda frame: pytest.fail("unsafe frame was scheduled"))
+
+    assert header.needs_reanchor is True
+    assert header._paused is True
+    assert len(stream.writes) == writes_before_resume
+    header.stop()
+
+
+def test_requested_redraw_wakes_the_existing_animator_immediately() -> None:
+    stream = FakeStream(tty=True)
+    frames: list[str] = []
+    rendered = threading.Event()
+    header = BinaryRainHeader(
+        stream=stream,
+        rng=random.Random(2),
+        terminal_size=lambda: os.terminal_size((80, 40)),
+        ansi_supported=lambda stream: True,
+        frame_interval=10,
+    )
+    assert header.start() is True
+
+    def redraw(frame: str) -> None:
+        frames.append(frame)
+        rendered.set()
+
+    header.resume(redraw)
+    assert rendered.wait(timeout=1)
+    for _ in range(10):
+        rendered.clear()
+        header.request_redraw()
+        assert rendered.wait(timeout=1)
+        if frames[-1] != frames[0]:
+            break
+    header.pause()
+
+    assert len(frames) >= 2
+    assert len(set(frames)) >= 2
+    header.stop()
+
+
 def test_too_small_resize_stays_paused_until_a_safe_prompt_boundary() -> None:
     stream = FakeStream(tty=True)
     terminal_size = MutableTerminalSize()

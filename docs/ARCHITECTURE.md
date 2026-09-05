@@ -79,9 +79,10 @@ and application layer; `squid_core/` is the reusable agent runtime.
     width, fixed title position, two-row title/panel gap, centered compact panel
     rectangle, three rain rows beneath the panel, and total
     initial scene-plus-composer viewport height. The viewport reservation
-    includes the transient composer's complete minimum four-row box, while
-    live header redraws target the box's top after prompt_toolkit temporarily
-    erases the active prompt. `banner.py` owns the panel's
+    includes the transient composer's complete minimum four-row box. During
+    live input, prompt_toolkit publishes the visible box height and current
+    cursor row after every completed render; header redraws use that live
+    geometry without erasing the active prompt. `banner.py` owns the panel's
     Provider, Model, Safety, Mod, optional standalone Skill, and concise
     Workspace content. `approval.py`
     owns approval panels, prompts, and compact results; `tool_display.py` owns
@@ -96,9 +97,10 @@ and application layer; `squid_core/` is the reusable agent runtime.
     scrollback. Ordinary later prompts are composer-only; `/new` explicitly
     starts one fresh scene and worker at the current terminal position. While
     startup input is
-    active, `prompt_input.py` sends each worker frame through prompt_toolkit's
-    `run_in_terminal` seam so header frames and composer redraws remain
-    serialized with backpressure and no queued output after pause.
+    active, `prompt_input.py` schedules each worker frame on prompt_toolkit's
+    event loop. Header-only output and prompt redraws are therefore serialized
+    with backpressure, without `run_in_terminal` erasing and repainting the
+    complete composer for every rain frame.
     The composer and startup menu share prompt-toolkit key bindings rather than
     a raw input reader: Up from an empty buffer always focuses the bottom main
     row, arrows navigate, Enter replaces the same panel with a submenu or
@@ -106,13 +108,16 @@ and application layer; `squid_core/` is the reusable agent runtime.
     disambiguation delay. Main-menu edge navigation returns
     to the composer symmetrically. Ordinary text is ignored while menu-focused,
     and arrows retain normal multiline behavior whenever the composer contains
-    text. Panel changes are read by the existing rain worker, so navigation
-    neither creates a second worker nor performs discovery during frame render.
+    text. Every focus, movement, activation, and back action explicitly wakes
+    the existing rain worker, so the shared startup frame repaints immediately;
+    navigation creates neither a second renderer nor a second worker.
     The live anchor is valid only while both terminal dimensions remain
     unchanged. A width or height change freezes the animator before another
     relative redraw; terminals too small for the header stay safely paused.
-    The relative offset at a valid anchor uses the composed
-    scene height plus the unchanged composer preface/input rows. Mod/Skill
+    At a valid anchor, both relative movement and its vertical-fit check use the
+    composed scene height plus the current rendered cursor row beneath it. Rows
+    below that cursor and the complete visible composer height are not traversed
+    by the live writer and therefore do not falsely disable animation. Mod/Skill
     selection updates the presentation copy used by the active scene;
     selection semantics remain owned by the CLI command handlers. Initial drop
     heads are staggered through the full rain height so the first frame is
@@ -126,9 +131,16 @@ and application layer; `squid_core/` is the reusable agent runtime.
     input, saved-session, and animation responsibilities. The ordinary task
     composer remains a non-fullscreen `PromptSession`, but its active prompt is
     rendered in a dynamically tall 61-cell rounded frame with two cells of
-    left padding and one right gutter. The frame disappears from active
-    control on submission and remains only as normal terminal scrollback;
-    approval prompts continue to use the shared unboxed input helper. Its
+    left padding and one right gutter. The normal PromptSession input container
+    retains its full 58-cell allocation inside the borders. Only its enclosing
+    middle row is capped to that input container's natural rendered height, so
+    prompt_toolkit's retained cleanup rows remain below the visible frame and
+    the frame can shrink without constraining the BufferControl. The
+    frame disappears from active control on submission and remains only as
+    normal terminal scrollback;
+    approval prompts continue to use the shared unboxed input helper. Shift+Enter
+    and Alt+Enter normalize to the multiline Ctrl+J action, while ordinary Enter
+    submits. Its
     marker is hidden without changing input alignment while the startup menu
     owns focus. Normal run output
     uses ordinary scrollback and static 61-column printed panels: each visible

@@ -316,8 +316,8 @@ class TerminalDisplay:
         # The header owns the complete scene so rain and fixed UI share one
         # geometry and one redraw lifecycle.
         self.header.set_startup_info(self.startup_info)
-        # run_in_terminal erases the whole composer and returns to its top
-        # border, leaving only the ordinary separator below the startup scene.
+        # This is only the initial separator reservation. Once PromptSession
+        # renders, it publishes its authoritative live physical geometry.
         self.header.set_live_content_below_header("", extra_rows=1)
         self.header.start()
         print()

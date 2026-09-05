@@ -396,9 +396,10 @@ def test_help_text_lists_current_interactive_commands() -> None:
 
 def test_help_text_owns_input_controls_guidance() -> None:
     assert "Input:" in HELP_TEXT
-    assert "Enter       Send" in HELP_TEXT
-    assert "Alt+Enter   New line" in HELP_TEXT
-    assert "Ctrl+C      Cancel before a run or stop the current run" in HELP_TEXT
+    assert "Enter         Send" in HELP_TEXT
+    assert "Shift+Enter   New line" in HELP_TEXT
+    assert "Alt+Enter     New line" in HELP_TEXT
+    assert "Ctrl+C        Cancel before a run or stop the current run" in HELP_TEXT
 
 
 def test_shell_help_matches_current_command_names() -> None:

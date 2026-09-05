@@ -44,9 +44,10 @@ Core interaction:
   /exit exits the interactive prompt.
 
 Input:
-  Enter       Send
-  Alt+Enter   New line
-  Ctrl+C      Cancel before a run or stop the current run
+  Enter         Send
+  Shift+Enter   New line
+  Alt+Enter     New line
+  Ctrl+C        Cancel before a run or stop the current run
 
 Startup menu:
   Up from empty prompt   Focus menu

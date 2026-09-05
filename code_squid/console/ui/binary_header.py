@@ -271,8 +271,13 @@ class BinaryRainHeader:
         self._anchor_valid = False
         self._draw_width_value = 0
         self._live_rows_below_header = DEFAULT_LIVE_ROWS_BELOW_HEADER
+        self._live_prompt_height = 0
+        self._live_separator_rows = DEFAULT_LIVE_ROWS_BELOW_HEADER
+        # test addition
+        self._live_cursor_column = 0
         self._drops: list[Drop] = []
         self._live_redraw: Callable[[str], None] | None = None
+        self._redraw_requested = False
         self.startup_menu: StartupMenu | None = None
 
     def set_startup_info(self, startup_info: StartupInfo | None) -> None:
@@ -337,6 +342,7 @@ class BinaryRainHeader:
             pass
         with self._condition:
             self._live_redraw = None
+            self._redraw_requested = False
 
     def resume(self, redraw: Callable[[str], None] | None = None) -> None:
         """Resume the existing animator without creating another worker."""
@@ -358,6 +364,14 @@ class BinaryRainHeader:
                 return
             self._live_redraw = redraw
             self._paused = False
+            self._condition.notify_all()
+
+    def request_redraw(self) -> None:
+        """Wake the one animator so changed menu state is painted promptly."""
+        with self._condition:
+            if self._thread is None or self._paused or self._stopping:
+                return
+            self._redraw_requested = True
             self._condition.notify_all()
 
     def reanchor(self) -> bool:
@@ -395,6 +409,32 @@ class BinaryRainHeader:
         )
         with self._condition:
             self._live_rows_below_header = content_rows + max(extra_rows, 0)
+            self._live_prompt_height = 0
+            self._live_separator_rows = self._live_rows_below_header
+
+    def set_live_prompt_geometry(
+        self,
+        *,
+        prompt_height: int,
+        cursor_row: int,
+        cursor_column: int,
+        separator_rows: int,
+    ) -> None:
+        """Record the active prompt's rendered height and cursor anchor.
+
+        The frame writer starts at prompt_toolkit's current cursor, not at the
+        composer bottom. Keep that cursor-relative offset separate from the
+        total height used to decide whether the whole live layout still fits.
+        """
+        prompt_height = max(prompt_height, 1)
+        cursor_row = min(max(cursor_row, 0), prompt_height - 1)
+        cursor_column = max(cursor_column, 0)
+        separator_rows = max(separator_rows, 0)
+        with self._condition:
+            self._live_rows_below_header = separator_rows + cursor_row
+            self._live_prompt_height = prompt_height
+            self._live_separator_rows = separator_rows
+            self._live_cursor_column = cursor_column
 
     def stop(self) -> None:
         """Terminate the animator and restore a visible cursor."""
@@ -435,6 +475,9 @@ class BinaryRainHeader:
                     self._condition.wait()
                 if self._stopping:
                     return
+                # A request already pending at this boundary is satisfied by
+                # the frame this iteration is about to compose.
+                self._redraw_requested = False
 
             with self._render_lock:
                 with self._condition:
@@ -449,7 +492,8 @@ class BinaryRainHeader:
 
             with self._condition:
                 if not self._paused and not self._stopping:
-                    self._condition.wait(timeout=self.frame_interval)
+                    if not self._redraw_requested:
+                        self._condition.wait(timeout=self.frame_interval)
 
     def _render_next_frame(self, *, anchored: bool) -> bool:
         current_size = self.terminal_size()
@@ -494,11 +538,12 @@ class BinaryRainHeader:
         return True
 
     def write_live_frame(self, frame: str) -> bool:
-        """Redraw above an erased prompt and return to its layout origin."""
+        """Redraw header-owned rows and restore prompt_toolkit's exact cursor."""
         try:
             current_size = self.terminal_size()
         except (OSError, ValueError):
             current_size = None
+
         with self._condition:
             if (
                 current_size is None
@@ -509,16 +554,37 @@ class BinaryRainHeader:
             ):
                 self._invalidate_anchor_locked()
                 return False
+
             rows_below_header = self._live_rows_below_header
             scene_height = self._layout_for(current_size).height
+
+            # prompt_toolkit owns the logical input cursor. The rain renderer
+            # temporarily moves the physical terminal cursor to repaint the header,
+            # so restore both axes before returning control to prompt_toolkit.
+            cursor_column = min(
+                self._live_cursor_column,
+                max(current_size.columns - 1, 0),
+            )
+
         stream = self._output_stream()
         rows_up = scene_height + rows_below_header
         rows_down = rows_below_header
+
         rows = frame.splitlines()
         body = "\r\n".join(f"{CLEAR_LINE}\r{row}" for row in rows)
+
+        # CSI n B moves down relative rows. CSI n G restores an absolute terminal
+        # column; ANSI columns are 1-based while prompt_toolkit cursor.x is 0-based.
+        move_down = f"\033[{rows_down}B" if rows_down else ""
+        restore_column = f"\033[{cursor_column + 1}G"
+
         stream.write(
-            f"{HIDE_CURSOR}\033[{rows_up}A{body}\r\n"
-            f"\033[{rows_down}B\r{SHOW_CURSOR}"
+            f"{HIDE_CURSOR}"
+            f"\033[{rows_up}A"
+            f"{body}\r\n"
+            f"{move_down}"
+            f"{restore_column}"
+            f"{SHOW_CURSOR}"
         )
         stream.flush()
         return True
@@ -603,9 +669,13 @@ class BinaryRainHeader:
         )
 
     def _live_size_is_suitable(self, size: os.terminal_size) -> bool:
-        """Return whether the anchored header and prompt fit vertically."""
+        """Return whether the current cursor can safely reach the header."""
+        # write_live_frame restores prompt_toolkit's current cursor; it never
+        # traverses the rows beneath that cursor. The complete visible composer
+        # height remains useful layout state, but is not an anchored-move bound.
         return self._size_is_suitable(size) and (
-            size.lines > self._layout_for(size).height + self._live_rows_below_header
+            size.lines
+            > self._layout_for(size).height + self._live_rows_below_header
         )
 
     @staticmethod

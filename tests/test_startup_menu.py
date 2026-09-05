@@ -31,9 +31,16 @@ class MenuAnimator:
     def __init__(self, menu: StartupMenu) -> None:
         self.startup_menu = menu
         self.pause_calls = 0
+        self.redraws: list[str] = []
 
     def pause(self) -> None:
         self.pause_calls += 1
+
+    def request_redraw(self) -> None:
+        """Capture the panel the single header renderer would repaint."""
+        self.redraws.append(
+            "\n".join(self.startup_menu.panel_lines(startup_scene_layout(80)))
+        )
 
 
 def _run_prompt(monkeypatch, menu: StartupMenu, terminal_input: str) -> str:
@@ -66,6 +73,35 @@ def test_empty_composer_up_enters_menu_and_boundary_returns(monkeypatch, tmp_pat
     result = _run_prompt(monkeypatch, menu, ("\x1b[A" * 6) + "text\r")
 
     assert result == "text"
+    assert menu.focused is False
+
+
+def test_menu_keys_request_visible_header_frames(monkeypatch, tmp_path) -> None:
+    menu = StartupMenu(tmp_path, load_settings(tmp_path))
+    animator = MenuAnimator(menu)
+    result: list[str] = []
+
+    with create_pipe_input() as pipe_input:
+        monkeypatch.setattr(
+            "code_squid.console.ui.prompt_input.PromptSession",
+            lambda: PromptSession(input=pipe_input, output=DummyOutput()),
+        )
+
+        thread = threading.Thread(
+            target=lambda: result.append(prompt_multiline_input("> ", animator=animator))
+        )
+        thread.start()
+        # Enter menu focus, move twice, return to the composer, then submit.
+        pipe_input.send_text("\x1b[A\x1b[A\x1b[B\x1btext\r")
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+
+    assert result == ["text"]
+    assert len(animator.redraws) == 4
+    assert all(frame.count(">") == 1 for frame in animator.redraws[:3])
+    assert animator.redraws[0] != animator.redraws[1]
+    assert animator.redraws[1] != animator.redraws[2]
+    assert ">" not in animator.redraws[3]
     assert menu.focused is False
 
 

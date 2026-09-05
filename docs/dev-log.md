@@ -1,3 +1,38 @@
+- 2026-09-04: Fixed the startup rain/boxed-composer rendering seam. Confirmed
+  that prompt_toolkit's `run_in_terminal` contract erased, reset, and fully
+  repainted the framed prompt for every rain frame, causing idle flashing; live
+  frames now run directly on the PromptSession event loop and restore the
+  renderer-owned cursor without prompt teardown. After each completed prompt
+  render, the input seam publishes prompt_toolkit's actual cursor row and the
+  visible bottom-border height to `BinaryRainHeader`. Cursor-relative redraw
+  offsets update on wrapping/newlines/deletion and are also the sole live-fit
+  bound: rows below the current cursor are never traversed by the writer. This
+  prevents ordinary 27-30-row terminal viewports from falsely invalidating the
+  only animation callback.
+  The first shrink implementation's self-referential exact-height outer split
+  and explicit spacer were removed after real-terminal testing showed that they
+  separated the BufferControl's allocation from the visible frame, reducing
+  input to a one-cell viewport and placing its cursor outside the box. The
+  composer is again one natural fixed-width split. Only its middle input row is
+  capped from the normal PromptSession input container's own preferred height;
+  that container keeps its full 58-cell interior width while retained cleanup
+  rows stay below the bottom border and the visible frame still shrinks. Menu key actions now
+  explicitly wake that same worker for immediate shared-panel repaint. Windows
+  Terminal's legacy and CSI-u Shift+Enter (modifier 2) and Alt+Enter (modifier
+  3) encodings normalize to the multiline Ctrl+J binding. The single rain
+  worker remains active during composer growth and menu use; no fallback,
+  transcript renderer, pinned region, or stdout interception was added.
+  Focused prompt/header/menu/terminal/runtime-command/help tests: 285 passed;
+  full suite: 853 passed. Production compilation, an 81-module import walk,
+  and `git diff --check` passed. A forced-ANSI 80x40 ConPTY startup emitted 392
+  distinct live frames while exercising immediate menu repaint, wrapped input,
+  both CSI-u modified-Enter sequences, shrinkage, focus return, and clean
+  cancellation. The harness does not advertise ANSI support without forcing
+  that capability, and it is not a visible Windows Terminal window, so final
+  Windows Terminal visual confirmation remains manual. The completed-screen
+  read is the only remaining private prompt_toolkit dependency; the prior
+  custom attribute on `session.app` was removed. No model inference was run.
+
 - 2026-09-04: Added a transient boxed task composer without changing terminal
   ownership. The existing non-fullscreen `PromptSession` now renders normal
   task input in a dynamically tall rounded frame using the same canonical
