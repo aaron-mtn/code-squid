@@ -507,7 +507,7 @@ def test_display_starts_pauses_and_stops_owned_header(capsys) -> None:
     assert header.pauses == 0
     assert header.stops == 2
     assert header.startup_infos == [None]
-    assert header.live_content == [("", 2)]
+    assert header.live_content == [("", 1)]
 
 
 def test_display_retires_and_restarts_one_session_scene(capsys) -> None:
@@ -1667,6 +1667,36 @@ def test_loop_finished_prints_one_shared_completion_panel(
     assert "🗂️  Session files" in output
     assert "      app.py" in output
     assert "─" * RUN_PANEL_WIDTH not in output
+    assert all(_display_width(line) == RUN_PANEL_WIDTH for line in lines)
+
+
+def test_completion_panel_keeps_edges_aligned_across_unicode_and_styling(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    path = str(tmp_path / "wide-漢-file.py")
+    session = SimpleNamespace(
+        files_read={path},
+        files_written={path},
+        messages=[],
+    )
+    display = TerminalDisplay()
+    display.final_message("## What changed\n- **Styled report** with 🚫 content.")
+    display.loop_finished(session)
+
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert any(SQUID_GLYPH in line and "Report:" in line for line in lines)
+    session_index = next(
+        index for index, line in enumerate(lines) if "🗂️  Session files" in line
+    )
+    assert lines[session_index - 1]
+    assert lines[session_index + 1]
+    assert _display_width(lines[session_index - 1]) == RUN_PANEL_WIDTH
+    assert _display_width(lines[session_index]) == RUN_PANEL_WIDTH
+    assert _display_width(lines[session_index + 1]) == RUN_PANEL_WIDTH
+    assert any("\033]8;;" in line for line in lines)
     assert all(_display_width(line) == RUN_PANEL_WIDTH for line in lines)
 
 

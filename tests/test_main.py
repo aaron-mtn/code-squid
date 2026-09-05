@@ -635,19 +635,23 @@ def _cancel_prompt_task(label: str, animator=None) -> str:
 def test_prompt_task_uses_agent_prompt_without_toolbar(monkeypatch) -> None:
     prompt_calls = []
 
-    def fake_prompt(prompt, *, preface=None, animator=None) -> str:
-        prompt_calls.append((prompt, preface))
+    def fake_prompt(prompt, *, preface=None, animator=None, boxed=False) -> str:
+        prompt_calls.append((prompt, preface, boxed))
         return "Do the thing"
 
     monkeypatch.setattr("code_squid.console.cli.prompt_loop.prompt_multiline_input", fake_prompt)
 
     assert _prompt_task("Task") == "Do the thing"
 
-    prompt, preface = prompt_calls[0]
+    prompt, preface, boxed = prompt_calls[0]
     assert INPUT_IDENTITY_LINE == "@code-squid"
     assert "🦑" not in INPUT_IDENTITY_LINE
-    assert preface == [("", INPUT_IDENTITY_LINE)]
-    assert prompt() == [(PROMPT_STYLE, PROMPT_PREFIX)]
+    assert preface is None
+    assert boxed is True
+    assert prompt() == [
+        ("", f"  {INPUT_IDENTITY_LINE}\n  "),
+        (PROMPT_STYLE, PROMPT_PREFIX),
+    ]
     assert PROMPT_STYLE == ""
 
 
@@ -656,13 +660,14 @@ def test_composer_marker_tracks_menu_and_submenu_focus() -> None:
     animator = SimpleNamespace(startup_menu=menu)
     prompt = _composer_prompt(animator)
 
-    assert prompt() == [("", PROMPT_PREFIX)]
+    identity = ("", f"  {INPUT_IDENTITY_LINE}\n  ")
+    assert prompt() == [identity, ("", PROMPT_PREFIX)]
     menu.focused = True
-    assert prompt() == [("", "")]
+    assert prompt() == [identity, ("", "  ")]
     menu.mode = "mod"
-    assert prompt() == [("", "")]
+    assert prompt() == [identity, ("", "  ")]
     menu.focused = False
-    assert prompt() == [("", PROMPT_PREFIX)]
+    assert prompt() == [identity, ("", PROMPT_PREFIX)]
 
 
 def test_new_session_prints_banner_before_task_input(monkeypatch, tmp_path, capsys) -> None:

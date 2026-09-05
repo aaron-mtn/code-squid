@@ -19,8 +19,10 @@ RAIN_ROWS_BELOW_PANEL = 5
 BASE_PANEL_HEIGHT = 13
 SKILL_PANEL_HEIGHT = 15
 STARTUP_SEPARATOR_ROWS = 1
-PROMPT_PREFACE_ROWS = 1
-PROMPT_INPUT_ROWS = 1
+# The transient composer contributes top/header/input/bottom rows. Keeping this
+# reservation accurate prevents the startup animator from entering its region.
+PROMPT_PREFACE_ROWS = 2
+PROMPT_INPUT_ROWS = 2
 
 
 @dataclass(frozen=True)

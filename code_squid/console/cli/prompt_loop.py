@@ -94,11 +94,16 @@ def _print_help() -> None:
 
 
 def _composer_prompt(animator: BinaryRainHeader | None = None):
-    """Return a live prompt marker that follows composer/menu focus."""
+    """Return the padded identity/input rows with a focus-aware marker."""
     def fragments() -> FormattedText:
         menu = getattr(animator, "startup_menu", None)
-        marker = "" if menu is not None and menu.focused else PROMPT_PREFIX
-        return FormattedText([(PROMPT_STYLE, marker)])
+        marker = "  " if menu is not None and menu.focused else PROMPT_PREFIX
+        return FormattedText(
+            [
+                ("", f"  {INPUT_IDENTITY_LINE}\n  "),
+                (PROMPT_STYLE, marker),
+            ]
+        )
 
     return fragments
 
@@ -106,8 +111,8 @@ def _composer_prompt(animator: BinaryRainHeader | None = None):
 def _prompt_task(label: str, animator: BinaryRainHeader | None = None) -> str:
     return prompt_multiline_input(
         _composer_prompt(animator),
-        preface=FormattedText([("", INPUT_IDENTITY_LINE)]),
         animator=animator,
+        boxed=True,
     )
 
 

@@ -31,6 +31,8 @@ from code_squid.console.ui.formatting import (
     FINAL_SUMMARY_INDENT,
     DEFAULT_MOD_ACCENT_HEX,
     RESET_STYLE,
+    RUN_PANEL_WIDTH,
+    SESSION_FILES_GLYPH,
     SQUID_GLYPH,
     SOFT_CYAN_HEX,
     SOFT_CYAN_STYLE,
@@ -61,7 +63,6 @@ from code_squid.console.ui.tool_display import (
 )
 
 
-RUN_PANEL_WIDTH = 61
 RUN_EVENT_INDENT = "  "
 RUN_DETAIL_INDENT = "    "
 INPUT_IDENTITY_LINE = "@code-squid"
@@ -315,7 +316,9 @@ class TerminalDisplay:
         # The header owns the complete scene so rain and fixed UI share one
         # geometry and one redraw lifecycle.
         self.header.set_startup_info(self.startup_info)
-        self.header.set_live_content_below_header("", extra_rows=2)
+        # run_in_terminal erases the whole composer and returns to its top
+        # border, leaving only the ordinary separator below the startup scene.
+        self.header.set_live_content_below_header("", extra_rows=1)
         self.header.start()
         print()
 
@@ -458,7 +461,7 @@ class TerminalDisplay:
         if formatted:
             lines.extend(formatted.splitlines())
             lines.append("")
-        lines.extend(["🗂️  Session files", ""])
+        lines.extend([f"{SESSION_FILES_GLYPH}  Session files", ""])
         lines.extend(self._file_list_lines("Read", session.files_read))
         lines.append("")
         lines.extend(self._file_list_lines("Written", session.files_written))
@@ -542,5 +545,9 @@ class TerminalDisplay:
 def _display_width(value: str) -> int:
     """Return terminal cell width after removing local ANSI/OSC styling."""
     plain = ANSI_ESCAPE_PATTERN.sub("", value)
+    # prompt_toolkit and the target terminals render U+1F5C2 + VS16 as one
+    # cell, while sequence-aware wcswidth reports two. Keep this correction
+    # local to the structural Session files glyph that exposed the mismatch.
+    plain = plain.replace(SESSION_FILES_GLYPH, SESSION_FILES_GLYPH[:-1])
     width = wcswidth(plain)
     return len(plain) if width < 0 else width

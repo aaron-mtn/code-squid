@@ -1,4 +1,4 @@
-"""Shared terminal input helpers."""
+"""Shared terminal input helpers, including the transient boxed composer."""
 
 import asyncio
 
@@ -9,7 +9,73 @@ from prompt_toolkit.input.ansi_escape_sequences import ANSI_SEQUENCES
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.keys import Keys
+from prompt_toolkit.layout import Dimension, HSplit, Window
+from prompt_toolkit.layout.containers import VSplit
+from prompt_toolkit.styles import Style
+
 from code_squid.console.ui.binary_header import BinaryRainHeader
+from code_squid.console.ui.formatting import RUN_PANEL_WIDTH
+
+
+COMPOSER_RIGHT_PADDING = 1
+COMPOSER_STYLE = Style.from_dict({"frame.border": "dim"})
+
+
+def _configure_composer_frame(session: PromptSession) -> None:
+    """Give a normal PromptSession one exact-width, padded frame.
+
+    PromptSession owns the application and its ordinary non-fullscreen render
+    lifecycle. Its public ``show_frame`` option does not expose frame width or
+    right padding, so this deliberately narrow seam replaces only that frame
+    after PromptSession has built its standard layout.
+    """
+    root = session.layout.container
+    framed_input = root.children[0]
+    main_input = framed_input.alternative_content
+
+    def border(character: str, **kwargs) -> Window:
+        return Window(
+            char=character,
+            style="class:frame.border",
+            **kwargs,
+        )
+
+    composer = HSplit(
+        [
+            VSplit(
+                [
+                    border("╭", width=1),
+                    border("─"),
+                    border("╮", width=1),
+                ],
+                height=1,
+            ),
+            VSplit(
+                [
+                    border("│", width=1),
+                    main_input,
+                    Window(width=Dimension.exact(COMPOSER_RIGHT_PADDING)),
+                    border("│", width=1),
+                ],
+                padding=0,
+            ),
+            VSplit(
+                [
+                    border("╰", width=1),
+                    border("─"),
+                    border("╯", width=1),
+                ],
+                height=1,
+            ),
+        ],
+        width=Dimension.exact(RUN_PANEL_WIDTH),
+    )
+    # The root receives the terminal width. A sibling absorbs unused columns
+    # so the composer itself remains exactly RUN_PANEL_WIDTH cells wide.
+    framed_input.content = VSplit(
+        [composer, Window()],
+        padding=0,
+    )
 
 
 def _install_alt_enter_ansi_sequences() -> None:
@@ -93,8 +159,14 @@ def prompt_multiline_input(
     *,
     preface: AnyFormattedText | None = None,
     animator: BinaryRainHeader | None = None,
+    boxed: bool = False,
 ) -> str:
     session = PromptSession()
+    if boxed:
+        session.show_frame = True
+        session.style = COMPOSER_STYLE
+        session.reserve_space_for_menu = 0
+        _configure_composer_frame(session)
 
     if animator is None or not animator.has_animator:
         if preface is not None:

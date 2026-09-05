@@ -1,15 +1,91 @@
+import asyncio
 import threading
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.application.current import set_app
+from prompt_toolkit.input import DummyInput
 from prompt_toolkit.input.ansi_escape_sequences import ANSI_SEQUENCES
 from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.output import DummyOutput
 
 from code_squid.console.ui.prompt_input import (
+    COMPOSER_STYLE,
+    _configure_composer_frame,
     multiline_key_bindings,
     prompt_multiline_input,
 )
+from code_squid.console.ui.formatting import RUN_PANEL_WIDTH
+
+
+def _render_boxed_composer(text: str) -> list[list[str]]:
+    """Render the real composer layout into prompt_toolkit's cell screen."""
+
+    async def render() -> list[list[str]]:
+        session = PromptSession(input=DummyInput(), output=DummyOutput())
+        session.show_frame = True
+        session.style = COMPOSER_STYLE
+        session.reserve_space_for_menu = 0
+        _configure_composer_frame(session)
+        session.message = [("", "  @code-squid\n  › ")]
+        session.multiline = True
+        session.wrap_lines = True
+        with set_app(session.app):
+            session.default_buffer.text = text
+            session.default_buffer.cursor_position = len(text)
+            session.app.renderer.render(session.app, session.layout)
+        screen = session.app.renderer._last_screen
+        assert screen is not None
+        return [
+            [screen.data_buffer[row][column].char for column in range(RUN_PANEL_WIDTH)]
+            for row in range(screen.height)
+        ]
+
+    return asyncio.run(render())
+
+
+def _assert_fixed_composer_edges(rows: list[list[str]]) -> None:
+    assert rows[0][0] == "╭"
+    assert rows[0][-1] == "╮"
+    assert rows[-1][0] == "╰"
+    assert rows[-1][-1] == "╯"
+    assert all(len(row) == RUN_PANEL_WIDTH for row in rows)
+    assert all(row[0] == row[-1] == "│" for row in rows[1:-1])
+
+
+def test_boxed_composer_empty_and_short_geometry_is_fixed() -> None:
+    empty_rows = _render_boxed_composer("")
+    short_rows = _render_boxed_composer("hello")
+
+    _assert_fixed_composer_edges(empty_rows)
+    _assert_fixed_composer_edges(short_rows)
+    assert len(empty_rows) == len(short_rows) == 4
+    assert "".join(empty_rows[1]).startswith("│  @code-squid")
+    assert "".join(empty_rows[2]).startswith("│  › ")
+
+
+def test_boxed_composer_wraps_and_indents_continuations() -> None:
+    rows = _render_boxed_composer("word " * 40)
+
+    _assert_fixed_composer_edges(rows)
+    assert len(rows) > 4
+    assert "".join(rows[2]).startswith("│  › ")
+    assert all("".join(row).startswith("│    ") for row in rows[3:-1])
+
+
+def test_boxed_composer_explicit_newlines_grow_downward() -> None:
+    rows = _render_boxed_composer("first\nsecond\nthird")
+
+    _assert_fixed_composer_edges(rows)
+    assert len(rows) == 6
+    assert all("".join(row).startswith("│    ") for row in rows[3:-1])
+
+
+def test_boxed_composer_wide_unicode_keeps_stationary_edges() -> None:
+    rows = _render_boxed_composer("漢🙂" * 40)
+
+    _assert_fixed_composer_edges(rows)
+    assert len(rows) > 4
 
 
 def _submit_terminal_input(monkeypatch, terminal_input: str) -> str:

@@ -78,7 +78,10 @@ and application layer; `squid_core/` is the reusable agent runtime.
     `header_layout.py` owns the explicit startup-scene geometry: safe draw
     width, fixed title position, two-row title/panel gap, centered compact panel
     rectangle, three rain rows beneath the panel, and total
-    initial scene-plus-composer viewport height. `banner.py` owns the panel's
+    initial scene-plus-composer viewport height. The viewport reservation
+    includes the transient composer's complete minimum four-row box, while
+    live header redraws target the box's top after prompt_toolkit temporarily
+    erases the active prompt. `banner.py` owns the panel's
     Provider, Model, Safety, Mod, optional standalone Skill, and concise
     Workspace content. `approval.py`
     owns approval panels, prompts, and compact results; `tool_display.py` owns
@@ -120,7 +123,14 @@ and application layer; `squid_core/` is the reusable agent runtime.
     output to push the scene's own top out of view. Short terminals retain the
     sequential static fallback.
     `prompt_input.py`, `sessions.py`, and `spinner.py` retain their focused
-    input, saved-session, and animation responsibilities. Normal run output
+    input, saved-session, and animation responsibilities. The ordinary task
+    composer remains a non-fullscreen `PromptSession`, but its active prompt is
+    rendered in a dynamically tall 61-cell rounded frame with two cells of
+    left padding and one right gutter. The frame disappears from active
+    control on submission and remains only as normal terminal scrollback;
+    approval prompts continue to use the shared unboxed input helper. Its
+    marker is hidden without changing input alignment while the startup menu
+    owns focus. Normal run output
     uses ordinary scrollback and static 61-column printed panels: each visible
     assistant narration message owns one panel, while the final report and
     Session files share one completion panel. `final_message` retains only the
@@ -128,7 +138,12 @@ and application layer; `squid_core/` is the reusable agent runtime.
     it does not introduce a managed transcript or persistent terminal region.
     Tool results, approvals, warnings, and non-success status remain outside
     these panels, and standalone run/report/file dividers are not emitted.
-    Every run-panel border uses the same dim terminal-default styling.
+    Every composer and run-panel border uses the same dim terminal-default
+    styling and imports one product-owned 61-cell width from `formatting.py`.
+    Static panel measurement strips ANSI/OSC sequences and explicitly treats
+    the Session files `U+1F5C2 U+FE0F` sequence as the one cell used by the
+    prompt/target-terminal rendering seam, preventing that heading from
+    shifting the completion panel's right border.
     Thinking, narration, and report markers share a
     text-presentation squid glyph so the current semantic Mod accent can be
     rendered by ANSI foreground color without coloring adjacent text or panel

@@ -1,3 +1,23 @@
+- 2026-09-04: Added a transient boxed task composer without changing terminal
+  ownership. The existing non-fullscreen `PromptSession` now renders normal
+  task input in a dynamically tall rounded frame using the same canonical
+  61-cell width as narration and completion panels, two-cell left padding, a
+  one-cell right gutter, cell-aware prompt_toolkit wrapping, and continuation
+  alignment beneath the `› ` marker. Menu focus substitutes equal-width spaces
+  for the marker, preserving input position. Approval input remains unboxed.
+  Updated startup viewport/redraw geometry for the framed prompt while keeping
+  its one animator and ordinary scrollback lifecycle. Fixed the completion
+  edge defect at `🗂️ Session files` by reconciling that exact variation-selector
+  sequence with the target terminal's one-cell rendering during ANSI/OSC-aware
+  panel measurement. Added rendered-screen composer geometry and styled,
+  hyperlinked completion-panel regressions. Focused console tests: 259 passed;
+  full suite: 842 passed. Production compilation/import checks and
+  `git diff --check` passed. A real xterm PTY smoke verified startup, fixed and
+  growing composer geometry, long wrapping, Alt+Enter, menu marker hide/restore,
+  submitted/cancelled composer scrollback, `/exit` cleanup, and aligned styled
+  Report/Session files output with a wide path and OSC hyperlink. No model
+  inference was run.
+
 - 2026-09-04: Replaced divider-heavy normal-run presentation with fixed-width
   static panels while preserving ordinary print-based scrollback and the
   existing prompt-toolkit composer lifecycle. One canonical 61-column width
