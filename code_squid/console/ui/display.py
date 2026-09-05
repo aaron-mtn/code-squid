@@ -2,6 +2,9 @@
 
 from dataclasses import replace
 from pathlib import Path
+import re
+
+from wcwidth import wcswidth
 
 from squid_core.safety import ApprovalDecision, USER_DENIED_TOOL_ACTION
 from squid_core.mods import discover_mods
@@ -58,11 +61,15 @@ from code_squid.console.ui.tool_display import (
 )
 
 
-RAIL_WIDTH = 61
-FINAL_REPORT_DIVIDER = "─" * RAIL_WIDTH
+RUN_PANEL_WIDTH = 61
 RUN_EVENT_INDENT = "  "
 RUN_DETAIL_INDENT = "    "
 INPUT_IDENTITY_LINE = "@code-squid"
+PANEL_LEFT_PADDING = "  "
+PANEL_CONTENT_WIDTH = RUN_PANEL_WIDTH - 2 - len(PANEL_LEFT_PADDING) - 1
+ANSI_ESCAPE_PATTERN = re.compile(
+    r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x1b]*(?:\x1b\\|\x07))"
+)
 
 
 def _accent_for_mod(mod_name: str | None) -> str:
@@ -104,6 +111,8 @@ class TerminalDisplay:
         self._needs_detail_blank_after_assistant = False
         self._compacted_denied_action: dict | None = None
         self._session_scene_active = False
+        self._pending_final_content = ""
+        self._has_run_output = False
 
     def start(self) -> None:
         self._stop_spinner()
@@ -115,8 +124,8 @@ class TerminalDisplay:
         self.retire_session_scene()
         self._stop_spinner()
         print()
-        self._print_divider()
-        print()
+        self._pending_final_content = ""
+        self._has_run_output = False
         self._needs_leading_blank = False
         self._needs_detail_blank_after_assistant = False
 
@@ -140,20 +149,24 @@ class TerminalDisplay:
             return
 
         self._print_leading_blank_if_needed()
+        if self._needs_detail_blank_after_assistant:
+            print()
+            self._needs_detail_blank_after_assistant = False
         self._print_assistant_narration(content, trailing_blank=False)
         self._needs_leading_blank = False
         self._needs_detail_blank_after_assistant = True
 
     def final_message(self, content: str) -> None:
         self._stop_spinner()
-        content = content.strip()
-        if content:
-            self._print_final_summary(content)
+        # Session files arrive in loop_finished, so retain the report briefly to
+        # print both completion sections inside one static panel.
+        self._pending_final_content = content.strip()
 
     def action_started(self, action: dict) -> None:
         self._stop_spinner()
         if self.debug and action.get("tool") not in FILE_TOOLS:
             print(self._action_text(action))
+            self._has_run_output = True
 
     def approve_action(self, action: dict) -> ApprovalDecision:
         self._stop_spinner()
@@ -169,6 +182,7 @@ class TerminalDisplay:
         )
         for line in panel_lines:
             print(line)
+        self._has_run_output = True
         self._needs_leading_blank = True
         response = prompt_multiline_input(prompt)
         approved = response.strip() == ""
@@ -252,19 +266,15 @@ class TerminalDisplay:
         print()
         print("Code Squid could not get a response from the configured model provider.")
         print(f"Details saved to: {log_path.as_posix()}")
+        self._has_run_output = True
 
     def loop_finished(self, session, run_result=None) -> None:
         self._stop_spinner()
         if self._needs_leading_blank:
             self._print_leading_blank_if_needed()
-        else:
+        elif self._has_run_output:
             print()
-        self._print_divider()
-        print("🗂️  Session files")
-        print()
-        self._print_file_list("Read", session.files_read)
-        print()
-        self._print_file_list("Written", session.files_written)
+        self._print_completion_panel(session)
         status = getattr(run_result, "status", None)
         if status is None:
             status = "interrupted" if self._interrupted else "complete"
@@ -376,6 +386,7 @@ class TerminalDisplay:
             line = self._run_detail_line(line)
         print(styled_text(line, *(style, DIM_STYLE if dim else "")))
         self._needs_leading_blank = True
+        self._has_run_output = True
 
     def _run_event_line(self, line: str) -> str:
         return self._indented_run_line(line, RUN_EVENT_INDENT)
@@ -397,30 +408,26 @@ class TerminalDisplay:
         return messages.get(reason, "⚠️ Reply rejected: invalid assistant reply.")
 
     def _print_assistant_narration(self, content: str, trailing_blank: bool = True) -> None:
-        lines = content.splitlines() or [""]
-        if self.debug:
-            print(self._squid_line(f" {lines[0]}"))
-            for line in lines[1:]:
-                print(f"   {line}" if line else "")
-            if trailing_blank:
-                print()
-            return
-        for output_line in wrapped_display_lines(
-            lines[0],
-            initial_indent=f"{RUN_EVENT_INDENT}{SQUID_GLYPH} ",
-            subsequent_indent=f"{RUN_EVENT_INDENT}   ",
-        ):
-            print(self._accent_first_squid(output_line))
-        for line in lines[1:]:
-            if not line:
-                print()
+        source_lines = content.splitlines() or [""]
+        panel_lines: list[str] = []
+        narration_indent = " " * (_display_width(SQUID_GLYPH) + 1)
+        for index, source_line in enumerate(source_lines):
+            if not source_line:
+                panel_lines.append("")
                 continue
-            for output_line in wrapped_display_lines(
-                line,
-                initial_indent=f"{RUN_EVENT_INDENT}   ",
-                subsequent_indent=f"{RUN_EVENT_INDENT}   ",
-            ):
-                print(output_line)
+            prefix = f"{SQUID_GLYPH} " if index == 0 else narration_indent
+            panel_lines.extend(
+                wrapped_display_lines(
+                    source_line,
+                    initial_indent=prefix,
+                    subsequent_indent=narration_indent,
+                    width=PANEL_CONTENT_WIDTH,
+                )
+            )
+        if panel_lines:
+            panel_lines[0] = self._accent_first_squid(panel_lines[0])
+        self._print_panel(panel_lines)
+        self._has_run_output = True
         if trailing_blank:
             print()
 
@@ -441,15 +448,22 @@ class TerminalDisplay:
             debug_tool_result_lines(action, result, self._display_root()),
         )
 
-    def _print_final_summary(self, content: str) -> None:
-        formatted = format_final_summary(content)
-        if not formatted:
-            return
-        self._print_leading_blank_if_needed()
-        self._print_divider()
-        print(self._squid_line(" Report:"))
-        print()
-        print(formatted)
+    def _print_completion_panel(self, session) -> None:
+        """Print the report and unchanged session-file data as one panel."""
+        lines = [self._squid_line(" Report:"), ""]
+        formatted = format_final_summary(
+            self._pending_final_content,
+            width=PANEL_CONTENT_WIDTH,
+        )
+        if formatted:
+            lines.extend(formatted.splitlines())
+            lines.append("")
+        lines.extend(["🗂️  Session files", ""])
+        lines.extend(self._file_list_lines("Read", session.files_read))
+        lines.append("")
+        lines.extend(self._file_list_lines("Written", session.files_written))
+        self._print_panel(lines)
+        self._pending_final_content = ""
         self._needs_leading_blank = False
 
     def _active_mod_name(self) -> str | None:
@@ -477,22 +491,43 @@ class TerminalDisplay:
             f"{line[squid_index + len(SQUID_GLYPH):]}"
         )
 
-    def _print_divider(self) -> None:
-        """Print the shared low-emphasis divider used by normal run output."""
-        print(styled_text(FINAL_REPORT_DIVIDER, DIM_STYLE))
+    def _print_panel(self, lines: list[str]) -> None:
+        """Print fixed-width run content with quiet, terminal-neutral borders."""
+        horizontal = "─" * (RUN_PANEL_WIDTH - 2)
+        print(styled_text(f"╭{horizontal}╮", DIM_STYLE))
+        for line in lines:
+            visible_width = _display_width(line)
+            # All variable content is cell-wrapped before reaching this fixed
+            # geometry seam; fail close to the violating caller if that changes.
+            if visible_width > PANEL_CONTENT_WIDTH:
+                raise ValueError("run panel content exceeds its fixed width")
+            padding = " " * (PANEL_CONTENT_WIDTH - visible_width + 1)
+            left = styled_text("│", DIM_STYLE)
+            right = styled_text("│", DIM_STYLE)
+            print(f"{left}{PANEL_LEFT_PADDING}{line}{padding}{right}")
+        print(styled_text(f"╰{horizontal}╯", DIM_STYLE))
 
     def _format_final_summary(self, content: str) -> str:
         """Return final report text through the existing display test seam."""
         return format_final_summary(content)
 
-    def _print_file_list(self, title: str, paths: set[str]) -> None:
-        print(f"  {title}")
+    def _file_list_lines(self, title: str, paths: set[str]) -> list[str]:
+        lines = [f"    {title}"]
         if not paths:
-            print("    none")
-            return
+            lines.append("      none")
+            return lines
         for path in sorted(paths):
-            display_path = path if self.debug else file_link(path, self._short_path(path))
-            print(f"    {display_path}")
+            label = path if self.debug else self._short_path(path)
+            chunks = wrapped_display_lines(
+                label,
+                initial_indent="",
+                subsequent_indent="",
+                width=PANEL_CONTENT_WIDTH - 6,
+            ) or [""]
+            for chunk in chunks:
+                display_path = chunk if self.debug else file_link(path, chunk)
+                lines.append(f"      {display_path}")
+        return lines
 
     def _short_path(self, path: str) -> str:
         """Return a display path through the existing display test seam."""
@@ -502,3 +537,10 @@ class TerminalDisplay:
         if self.startup_info is not None:
             return self.startup_info.directory.resolve()
         return Path.cwd().resolve()
+
+
+def _display_width(value: str) -> int:
+    """Return terminal cell width after removing local ANSI/OSC styling."""
+    plain = ANSI_ESCAPE_PATTERN.sub("", value)
+    width = wcswidth(plain)
+    return len(plain) if width < 0 else width

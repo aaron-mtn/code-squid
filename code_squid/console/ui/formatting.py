@@ -6,6 +6,8 @@ import shutil
 import sys
 import textwrap
 
+from wcwidth import wcwidth, wcswidth
+
 
 PATH_LABEL_MAX = 56
 DISPLAY_WRAP_WIDTH = 64
@@ -168,23 +170,53 @@ def wrapped_display_lines(
     text: str,
     initial_indent: str,
     subsequent_indent: str,
+    width: int | None = None,
 ) -> list[str]:
     """Wrap display text to the configured or current terminal width."""
     if not text:
         return [""]
 
-    wrap_width = min(
-        DISPLAY_WRAP_WIDTH,
-        shutil.get_terminal_size(fallback=(DISPLAY_WRAP_WIDTH, 24)).columns,
-    )
-    return textwrap.wrap(
+    wrap_width = width
+    if wrap_width is None:
+        wrap_width = min(
+            DISPLAY_WRAP_WIDTH,
+            shutil.get_terminal_size(fallback=(DISPLAY_WRAP_WIDTH, 24)).columns,
+        )
+    lines = textwrap.wrap(
         text,
         width=max(wrap_width, 1),
         initial_indent=initial_indent,
         subsequent_indent=subsequent_indent,
-        break_long_words=False,
+        # Fixed-width panels must also contain paths and other unspaced text.
+        # Keep the historical terminal-width behavior for non-panel callers.
+        break_long_words=width is not None,
         break_on_hyphens=False,
     )
+    if width is None:
+        return lines
+
+    cell_wrapped: list[str] = []
+    for line_index, line in enumerate(lines):
+        indent = initial_indent if line_index == 0 else subsequent_indent
+        payload = line.removeprefix(indent)
+        chunk_indent = indent
+        while payload:
+            available_cells = max(width - wcswidth(chunk_indent), 1)
+            chunk, payload = _take_display_cells(payload, available_cells)
+            cell_wrapped.append(f"{chunk_indent}{chunk}")
+            chunk_indent = subsequent_indent
+    return cell_wrapped
+
+
+def _take_display_cells(text: str, width: int) -> tuple[str, str]:
+    """Take a prefix that fits within a terminal-cell width."""
+    current_width = 0
+    for index, character in enumerate(text):
+        character_width = max(wcwidth(character), 0)
+        if index and current_width + character_width > width:
+            return text[:index], text[index:]
+        current_width += character_width
+    return text, ""
 
 
 def render_inline_markdown(text: str) -> str:
@@ -202,47 +234,68 @@ def render_inline_markdown(text: str) -> str:
     return "".join(rendered_parts)
 
 
-def markdown_display_lines(line: str) -> list[str]:
+def markdown_display_lines(line: str, width: int | None = None) -> list[str]:
     """Render and wrap one final-report Markdown line."""
     heading_match = re.match(r"^\s{0,3}(#{2,3})\s+(.+?)\s*#*\s*$", line)
     if heading_match:
         level, heading = heading_match.groups()
         indent = FINAL_SUMMARY_INDENT if level == "##" else f"{FINAL_SUMMARY_INDENT}  "
-        return [f"{indent}{styled_text(heading, BOLD_STYLE)}"]
+        if width is None:
+            return [f"{indent}{styled_text(heading, BOLD_STYLE)}"]
+        return [
+            f"{indent}{styled_text(part.removeprefix(indent), BOLD_STYLE)}"
+            for part in wrapped_display_lines(
+                heading,
+                initial_indent=indent,
+                subsequent_indent=indent,
+                width=width,
+            )
+        ]
 
-    rendered = render_inline_markdown(line)
-    stripped = rendered.lstrip()
+    stripped = line.lstrip()
     unordered_bullet_match = re.match(r"^([-*+])\s+(.+)$", stripped)
     if unordered_bullet_match:
-        return wrapped_display_lines(
-            unordered_bullet_match.group(2),
-            initial_indent=f"{FINAL_SUMMARY_INDENT}• ",
-            subsequent_indent=f"{FINAL_SUMMARY_INDENT}  ",
-        )
+        return [
+            render_inline_markdown(part)
+            for part in wrapped_display_lines(
+                unordered_bullet_match.group(2),
+                initial_indent=f"{FINAL_SUMMARY_INDENT}• ",
+                subsequent_indent=f"{FINAL_SUMMARY_INDENT}  ",
+                width=width,
+            )
+        ]
 
     numbered_bullet_match = re.match(r"^(\d+\.\s+)(.+)$", stripped)
     if numbered_bullet_match:
         marker = numbered_bullet_match.group(1)
         rendered = f"{marker}{numbered_bullet_match.group(2)}"
-        return wrapped_display_lines(
-            rendered,
+        return [
+            render_inline_markdown(part)
+            for part in wrapped_display_lines(
+                rendered,
+                initial_indent=FINAL_SUMMARY_INDENT,
+                subsequent_indent=f"{FINAL_SUMMARY_INDENT}{' ' * len(marker)}",
+                width=width,
+            )
+        ]
+
+    return [
+        render_inline_markdown(part)
+        for part in wrapped_display_lines(
+            stripped,
             initial_indent=FINAL_SUMMARY_INDENT,
-            subsequent_indent=f"{FINAL_SUMMARY_INDENT}{' ' * len(marker)}",
+            subsequent_indent=FINAL_SUMMARY_INDENT,
+            width=width,
         )
-
-    return wrapped_display_lines(
-        stripped,
-        initial_indent=FINAL_SUMMARY_INDENT,
-        subsequent_indent=FINAL_SUMMARY_INDENT,
-    )
+    ]
 
 
-def format_final_summary(content: str) -> str:
+def format_final_summary(content: str, width: int | None = None) -> str:
     """Render the supported final-report Markdown while preserving its layout."""
     formatted_lines: list[str] = []
     previous_rendered_bullet = False
     for line in content.splitlines():
-        rendered_lines = markdown_display_lines(line)
+        rendered_lines = markdown_display_lines(line, width=width)
         is_rendered_bullet = bool(rendered_lines) and rendered_lines[0].startswith(
             f"{FINAL_SUMMARY_INDENT}• "
         )

@@ -16,11 +16,10 @@ from code_squid.console.ui.display import (
     BOLD_STYLE,
     DIM_STYLE,
     DEFAULT_MOD_ACCENT_HEX,
-    FINAL_REPORT_DIVIDER,
     FINAL_SUMMARY_INDENT,
     INPUT_PROMPT_PREFIX,
     INPUT_PROMPT_STYLE,
-    RAIL_WIDTH,
+    RUN_PANEL_WIDTH,
     RUN_DETAIL_INDENT,
     RESET_STYLE,
     RUN_EVENT_INDENT,
@@ -33,6 +32,7 @@ from code_squid.console.ui.display import (
     SOFT_YELLOW_HEX,
     SOFT_YELLOW_STYLE,
     _accent_for_mod,
+    _display_width,
     StartupInfo,
     TerminalDisplay,
 )
@@ -59,6 +59,19 @@ class FakeSpinner:
 
     def stop(self) -> None:
         self.stops += 1
+
+
+def empty_session(**overrides):
+    """Return the smallest session-shaped object used by display tests."""
+    values = {"files_read": set(), "files_written": set(), "messages": []}
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def finish_display(display: TerminalDisplay, content: str = "") -> None:
+    """Drive the two callbacks that compose the final completion panel."""
+    display.final_message(content)
+    display.loop_finished(empty_session())
 
 
 class FakeHeader:
@@ -762,6 +775,7 @@ def test_active_mod_change_updates_later_squid_glyphs_only(
     display.assistant_message("First narration.")
     menu.mod_name = "warm"
     display.final_message("Finished.")
+    display.loop_finished(empty_session())
 
     output = capsys.readouterr().out
     purple_squid = f"{ansi_fg('#bd88ff')}{SQUID_GLYPH}{RESET_STYLE}"
@@ -793,7 +807,10 @@ def test_mod_accent_does_not_theme_tool_or_session_file_output(
 
     output = capsys.readouterr().out
     assert "🗂️  Session files" in output
-    assert ansi_fg("#bd88ff") not in output
+    accented_squid = f"{ansi_fg('#bd88ff')}{SQUID_GLYPH}{RESET_STYLE}"
+    assert output.count(ansi_fg("#bd88ff")) == 1
+    assert accented_squid in output
+    assert f"{ansi_fg('#bd88ff')}╭" not in output
 
 
 def test_default_spinner_uses_default_mod_accent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -817,7 +834,7 @@ def test_default_spinner_uses_default_mod_accent(monkeypatch: pytest.MonkeyPatch
     ]
 
 
-def test_run_started_prints_plain_dim_divider(
+def test_run_started_uses_blank_spacing_without_a_divider(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -825,14 +842,14 @@ def test_run_started_prints_plain_dim_divider(
     TerminalDisplay().run_started()
 
     output = capsys.readouterr().out
-    assert output == f"\n{DIM_STYLE}{FINAL_REPORT_DIVIDER}{RESET_STYLE}\n\n"
+    assert output == "\n"
     assert "starting run" not in output
-    assert "╰" not in output
+    assert "─" * RUN_PANEL_WIDTH not in output
     assert ansi_fg(DEFAULT_MOD_ACCENT_HEX) not in output
 
 
-def test_report_divider_matches_rail_width() -> None:
-    assert len(FINAL_REPORT_DIVIDER) == RAIL_WIDTH
+def test_run_panel_uses_the_existing_canonical_rail_width() -> None:
+    assert RUN_PANEL_WIDTH == 61
 
 
 def test_model_request_failed_prints_short_message_with_log_path(
@@ -1134,11 +1151,9 @@ def test_tool_result_followed_by_assistant_message_has_one_blank_line(
     )
     display.assistant_message("The directory doesn't exist yet.")
 
-    assert capsys.readouterr().out == (
-        f"{RUN_DETAIL_INDENT}🔎 Listed files\n"
-        "\n"
-        f"{RUN_EVENT_INDENT}{SQUID_GLYPH} The directory doesn't exist yet.\n"
-    )
+    output = capsys.readouterr().out
+    assert output.startswith(f"{RUN_DETAIL_INDENT}🔎 Listed files\n\n╭")
+    assert f"│  {SQUID_GLYPH} The directory doesn't exist yet." in output
 
 
 def test_assistant_message_followed_by_tool_result_has_blank_line(
@@ -1152,11 +1167,10 @@ def test_assistant_message_followed_by_tool_result_has_blank_line(
         {"ok": True},
     )
 
-    assert capsys.readouterr().out == (
-        f"{RUN_EVENT_INDENT}{SQUID_GLYPH} Directory created.\n"
-        "\n"
-        f"{RUN_DETAIL_INDENT}📝 Wrote: kanban_toy2/index.html\n"
-    )
+    output = capsys.readouterr().out
+    assert output.startswith("╭")
+    assert f"│  {SQUID_GLYPH} Directory created." in output
+    assert output.endswith(f"\n\n{RUN_DETAIL_INDENT}📝 Wrote: kanban_toy2/index.html\n")
 
 
 def test_first_visible_output_after_header_has_no_extra_leading_blank(
@@ -1359,9 +1373,9 @@ def test_assistant_message_stops_spinner_before_printing_content(
 
     assert spinner.starts == 1
     assert spinner.stops == 1
-    assert capsys.readouterr().out == (
-        f"{RUN_EVENT_INDENT}{SQUID_GLYPH} The directory doesn't exist yet.\n"
-    )
+    output = capsys.readouterr().out
+    assert f"│  {SQUID_GLYPH} The directory doesn't exist yet." in output
+    assert output.count("╭") == output.count("╰") == 1
 
 
 def test_normal_assistant_message_uses_squid_marker(
@@ -1369,9 +1383,9 @@ def test_normal_assistant_message_uses_squid_marker(
 ) -> None:
     TerminalDisplay().assistant_message("The directory doesn't exist yet.")
 
-    assert capsys.readouterr().out == (
-        f"{RUN_EVENT_INDENT}{SQUID_GLYPH} The directory doesn't exist yet.\n"
-    )
+    output = capsys.readouterr().out
+    assert f"│  {SQUID_GLYPH} The directory doesn't exist yet." in output
+    assert all(_display_width(line) == RUN_PANEL_WIDTH for line in output.splitlines())
 
 
 def test_assistant_message_does_not_hide_fallback_like_narration(
@@ -1379,7 +1393,8 @@ def test_assistant_message_does_not_hide_fallback_like_narration(
 ) -> None:
     TerminalDisplay().assistant_message("Using read_file.")
 
-    assert capsys.readouterr().out == f"{RUN_EVENT_INDENT}{SQUID_GLYPH} Using read_file.\n"
+    output = capsys.readouterr().out
+    assert f"│  {SQUID_GLYPH} Using read_file." in output
 
 
 def test_multiline_assistant_message_indents_continuation_lines(
@@ -1390,13 +1405,12 @@ def test_multiline_assistant_message_indents_continuation_lines(
         "I need to create it and then build the Kanban board."
     )
 
-    assert capsys.readouterr().out == (
-        f"{RUN_EVENT_INDENT}{SQUID_GLYPH} The directory doesn't exist yet.\n"
-        f"{RUN_EVENT_INDENT}   I need to create it and then build the Kanban board.\n"
-    )
+    output = capsys.readouterr().out
+    assert f"│  {SQUID_GLYPH} The directory doesn't exist yet." in output
+    assert "│     I need to create it and then build the Kanban board." in output
 
 
-def test_assistant_message_wraps_to_terminal_width(
+def test_assistant_message_wraps_to_fixed_panel_width(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1409,10 +1423,64 @@ def test_assistant_message_wraps_to_terminal_width(
         "This assistant narration line should wrap cleanly under the squid marker."
     )
 
-    assert capsys.readouterr().out == (
-        f"{RUN_EVENT_INDENT}{SQUID_GLYPH} This assistant narration line should\n"
-        f"{RUN_EVENT_INDENT}   wrap cleanly under the squid marker.\n"
+    output = capsys.readouterr().out
+    lines = output.splitlines()
+    assert all(_display_width(line) == RUN_PANEL_WIDTH for line in lines)
+    assert f"│  {SQUID_GLYPH} This assistant narration line should wrap cleanly" in output
+    assert "│     under the squid marker." in output
+
+
+def test_multiple_narration_messages_use_separate_equal_width_panels(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    display = TerminalDisplay()
+
+    display.assistant_message("Short.")
+    display.assistant_message("A second narration message in its own box.")
+
+    output = capsys.readouterr().out
+    lines = [line for line in output.splitlines() if line]
+    assert sum(line.startswith("╭") for line in lines) == 2
+    assert sum(line.startswith("╰") for line in lines) == 2
+    assert all(_display_width(line) == RUN_PANEL_WIDTH for line in lines)
+    assert "╯\n\n╭" in output
+
+
+def test_long_unbroken_narration_wraps_without_expanding_panel(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay().assistant_message("x" * 140)
+
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) > 3
+    assert all(_display_width(line) == RUN_PANEL_WIDTH for line in lines)
+
+
+def test_wide_character_narration_stays_within_panel_cells(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay().assistant_message("漢" * 80)
+
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) > 3
+    assert all(_display_width(line) == RUN_PANEL_WIDTH for line in lines)
+
+
+def test_tool_result_remains_outside_narration_panel(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    display = TerminalDisplay()
+    display.assistant_message("I'll write the file.")
+    display.tool_result(
+        {"tool": "write_file", "args": {"path": "notes.txt"}},
+        {"ok": True},
     )
+
+    output = capsys.readouterr().out
+    panel_end = output.index("╯\n")
+    tool_index = output.index("📝 Wrote: notes.txt")
+    assert tool_index > panel_end
+    assert "│    📝 Wrote" not in output
 
 
 def test_tool_result_stops_spinner_before_printing_result(
@@ -1512,11 +1580,9 @@ def test_approval_prompt_follows_assistant_with_single_blank(
     display.assistant_message("I'll inspect the file.")
     display.approve_action({"tool": "read_file"})
 
-    assert capsys.readouterr().out == (
-        f"{RUN_EVENT_INDENT}{SQUID_GLYPH} I'll inspect the file.\n"
-        "\n"
-        f"{_approval_panel_output('read_file', 'Path', '')}"
-    )
+    output = capsys.readouterr().out
+    narration_end = output.index("╯\n") + len("╯\n")
+    assert output[narration_end:].startswith("\n" + _approval_panel_output("read_file", "Path", ""))
 
 
 def test_interrupted_stops_spinner_before_printing(
@@ -1582,7 +1648,7 @@ def test_loop_Done_prints_status_label(
     assert "✅ Done!" not in output
 
 
-def test_loop_finished_prints_divider_before_file_report(
+def test_loop_finished_prints_one_shared_completion_panel(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     session = SimpleNamespace(
@@ -1593,21 +1659,35 @@ def test_loop_finished_prints_divider_before_file_report(
 
     TerminalDisplay().loop_finished(session)
 
-    assert capsys.readouterr().out == (
-        "\n"
-        f"{FINAL_REPORT_DIVIDER}\n"
-        "🗂️  Session files\n"
-        "\n"
-        "  Read\n"
-        "    app.py\n"
-        "\n"
-        "  Written\n"
-        "    app.py\n"
-        "\n"
-    )
+    output = capsys.readouterr().out
+    lines = output.strip().splitlines()
+    assert lines[0] == f"╭{'─' * (RUN_PANEL_WIDTH - 2)}╮"
+    assert lines[-1] == f"╰{'─' * (RUN_PANEL_WIDTH - 2)}╯"
+    assert f"│  {SQUID_GLYPH} Report:" in output
+    assert "🗂️  Session files" in output
+    assert "      app.py" in output
+    assert "─" * RUN_PANEL_WIDTH not in output
+    assert all(_display_width(line) == RUN_PANEL_WIDTH for line in lines)
 
 
-def test_loop_finished_keeps_file_report_divider_neutral_and_dim_in_tty(
+def test_direct_final_run_prints_one_clean_completion_panel(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    display = TerminalDisplay()
+    display.run_started()
+    finish_display(display, "Yes.")
+
+    output = capsys.readouterr().out
+    assert output.startswith("\n╭")
+    assert not output.startswith("\n\n")
+    assert output.count("╭") == output.count("╰") == 1
+    assert f"│  {SQUID_GLYPH} Report:" in output
+    assert "Yes." in output
+    assert "🗂️  Session files" in output
+    assert "─" * RUN_PANEL_WIDTH not in output
+
+
+def test_completion_panel_borders_are_neutral_and_dim_in_tty(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1617,11 +1697,10 @@ def test_loop_finished_keeps_file_report_divider_neutral_and_dim_in_tty(
     TerminalDisplay().loop_finished(session)
 
     output = capsys.readouterr().out
-    assert output.startswith(
-        f"\n{DIM_STYLE}{FINAL_REPORT_DIVIDER}{RESET_STYLE}\n"
-        "🗂️  Session files\n"
-    )
-    assert ansi_fg(DEFAULT_MOD_ACCENT_HEX) not in output
+    top = f"{DIM_STYLE}╭{'─' * (RUN_PANEL_WIDTH - 2)}╮{RESET_STYLE}"
+    assert output.startswith(f"{top}\n")
+    assert f"{ansi_fg(DEFAULT_MOD_ACCENT_HEX)}{SQUID_GLYPH}{RESET_STYLE}" in output
+    assert f"{ansi_fg(DEFAULT_MOD_ACCENT_HEX)}╭" not in output
 
 
 def test_loop_finished_prints_shortened_paths_in_final_file_report(
@@ -1637,7 +1716,7 @@ def test_loop_finished_prints_shortened_paths_in_final_file_report(
     TerminalDisplay().loop_finished(session)
 
     output = capsys.readouterr().out
-    assert "    pomodoro_timer/index.html\n" in output
+    assert "      pomodoro_timer/index.html" in output
     assert "\033]8" not in output
     assert full_path not in output
 
@@ -1660,7 +1739,7 @@ def test_loop_finished_prints_clickable_file_links_in_tty(
     TerminalDisplay().loop_finished(session)
 
     output = capsys.readouterr().out
-    assert f"    \033]8;;{file_uri}\033\\{label}\033]8;;\033\\\n" in output
+    assert f"      \033]8;;{file_uri}\033\\{label}\033]8;;\033\\" in output
     assert f"\033\\{full_path}\033]8" not in output
 
 
@@ -1680,14 +1759,15 @@ def test_debug_loop_finished_keeps_file_paths_plain_in_tty(
     TerminalDisplay(debug=True).loop_finished(session)
 
     output = capsys.readouterr().out
-    assert f"    {full_path}\n" in output
+    assert all(part in output for part in ("C:\\Users", "calcula", "tor.py"))
     assert "\033]8" not in output
 
 
 def test_final_message_renders_report_heading(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    TerminalDisplay().final_message(
+    display = TerminalDisplay()
+    finish_display(display,
         "## Files changed\n"
         "- `ui/terminal.py`\n"
         "\n"
@@ -1702,21 +1782,25 @@ def test_final_message_renders_report_heading(
     )
 
     output = capsys.readouterr().out
-    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n{SQUID_GLYPH} Report:\n\n")
-    assert f"{FINAL_SUMMARY_INDENT}Files changed\n{FINAL_SUMMARY_INDENT}• `ui/terminal.py`" in output
-    assert f"{FINAL_SUMMARY_INDENT}What changed\n{FINAL_SUMMARY_INDENT}• Polished display." in output
+    assert f"│  {SQUID_GLYPH} Report:" in output
+    assert "🗂️  Session files" in output
+    assert f"{FINAL_SUMMARY_INDENT}Files changed" in output
+    assert f"{FINAL_SUMMARY_INDENT}• `ui/terminal.py`" in output
+    assert f"{FINAL_SUMMARY_INDENT}What changed" in output
+    assert f"{FINAL_SUMMARY_INDENT}• Polished display." in output
 
 
 def test_final_message_displays_unlabeled_content_under_report_heading(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    TerminalDisplay().final_message(
+    display = TerminalDisplay()
+    finish_display(display,
         "I ran `pwd`; the workspace is "
         "`/tmp/code-squid-workspace/projects`."
     )
 
     output = capsys.readouterr().out
-    assert output.startswith(f"{FINAL_REPORT_DIVIDER}\n{SQUID_GLYPH} Report:\n\n")
+    assert f"│  {SQUID_GLYPH} Report:" in output
     assert f"{FINAL_SUMMARY_INDENT}I ran `pwd`; the workspace is" in output
     assert f"{FINAL_SUMMARY_INDENT}`/tmp/code-squid-workspace/projects`." in output
 
@@ -1727,7 +1811,8 @@ def test_final_summary_keeps_divider_neutral_and_accents_only_squid_in_tty(
 ) -> None:
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
 
-    TerminalDisplay().final_message(
+    display = TerminalDisplay()
+    finish_display(display,
         "## Files changed\n"
         "- `ui/terminal.py`\n"
         "## What changed\n"
@@ -1740,11 +1825,9 @@ def test_final_summary_keeps_divider_neutral_and_accents_only_squid_in_tty(
 
     accent_style = ansi_fg(DEFAULT_MOD_ACCENT_HEX)
     output = capsys.readouterr().out
-    assert output.startswith(
-        f"{DIM_STYLE}{FINAL_REPORT_DIVIDER}{RESET_STYLE}\n"
-        f"{accent_style}{SQUID_GLYPH}{RESET_STYLE} Report:\n\n"
-    )
-    assert f"{accent_style}{FINAL_REPORT_DIVIDER}" not in output
+    assert f"{accent_style}{SQUID_GLYPH}{RESET_STYLE} Report:" in output
+    assert f"{accent_style}╭" not in output
+    assert f"{DIM_STYLE}╭" in output
 
 
 def test_final_summary_headings_are_bold_in_tty(
@@ -1753,7 +1836,8 @@ def test_final_summary_headings_are_bold_in_tty(
 ) -> None:
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
 
-    TerminalDisplay().final_message(
+    display = TerminalDisplay()
+    finish_display(display,
         "## Files changed\n"
         "- `ui/terminal.py`\n"
         "## What changed\n"
@@ -1765,19 +1849,12 @@ def test_final_summary_headings_are_bold_in_tty(
     )
 
     output = capsys.readouterr().out
-    assert (
-        f"{FINAL_SUMMARY_INDENT}{BOLD_STYLE}Files changed{RESET_STYLE}\n"
-        f"{FINAL_SUMMARY_INDENT}• `ui/terminal.py`"
-    ) in output
-    assert (
-        f"{FINAL_SUMMARY_INDENT}{BOLD_STYLE}What changed{RESET_STYLE}\n"
-        f"{FINAL_SUMMARY_INDENT}• Polished display."
-    ) in output
-    assert f"{FINAL_SUMMARY_INDENT}{BOLD_STYLE}Verification{RESET_STYLE}\n" in output
-    assert (
-        f"{FINAL_SUMMARY_INDENT}{BOLD_STYLE}Remaining risks / notes{RESET_STYLE}\n"
-        f"{FINAL_SUMMARY_INDENT}• none"
-    ) in output
+    assert f"{FINAL_SUMMARY_INDENT}{BOLD_STYLE}Files changed{RESET_STYLE}" in output
+    assert f"{FINAL_SUMMARY_INDENT}• `ui/terminal.py`" in output
+    assert f"{FINAL_SUMMARY_INDENT}{BOLD_STYLE}What changed{RESET_STYLE}" in output
+    assert f"{FINAL_SUMMARY_INDENT}• Polished display." in output
+    assert f"{FINAL_SUMMARY_INDENT}{BOLD_STYLE}Verification{RESET_STYLE}" in output
+    assert f"{FINAL_SUMMARY_INDENT}{BOLD_STYLE}Remaining risks / notes{RESET_STYLE}" in output
 
 
 def test_final_summary_inline_bold_markers_render_as_bold_in_tty(
@@ -1786,7 +1863,8 @@ def test_final_summary_inline_bold_markers_render_as_bold_in_tty(
 ) -> None:
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
 
-    TerminalDisplay().final_message(
+    display = TerminalDisplay()
+    finish_display(display,
         "## What changed\n"
         "- Rendered **Markdown headings** and **bold text** in the final summary."
     )
@@ -1801,7 +1879,8 @@ def test_final_summary_inline_bold_markers_render_as_bold_in_tty(
 def test_final_message_with_markdown_sections_preserves_preamble(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    TerminalDisplay().final_message(
+    display = TerminalDisplay()
+    finish_display(display,
         "All tests pass now. Let me provide the final summary.\n"
         "## Files changed\n"
         "- `ui/terminal.py`\n"
@@ -1815,15 +1894,18 @@ def test_final_message_with_markdown_sections_preserves_preamble(
 
     output = capsys.readouterr().out
     assert "All tests pass now" in output
-    assert f"{FINAL_SUMMARY_INDENT}Files changed\n{FINAL_SUMMARY_INDENT}• `ui/terminal.py`" in output
-    assert f"{FINAL_SUMMARY_INDENT}Verification\n{FINAL_SUMMARY_INDENT}• `pytest tests/test_terminal.py`" in output
-    assert f"{FINAL_SUMMARY_INDENT}Remaining risks / notes\n{FINAL_SUMMARY_INDENT}• No known remaining risks" in output
+    assert f"{FINAL_SUMMARY_INDENT}Files changed" in output
+    assert f"{FINAL_SUMMARY_INDENT}• `ui/terminal.py`" in output
+    assert f"{FINAL_SUMMARY_INDENT}Verification" in output
+    assert f"{FINAL_SUMMARY_INDENT}• `pytest tests/test_terminal.py`" in output
+    assert f"{FINAL_SUMMARY_INDENT}Remaining risks / notes" in output
 
 
 def test_final_message_renders_unordered_bullet_markers_as_terminal_bullets(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    TerminalDisplay().final_message(
+    display = TerminalDisplay()
+    finish_display(display,
         "- dash item\n"
         "* star item\n"
         "+ plus item"
@@ -1953,7 +2035,8 @@ def test_final_summary_indented_bullets_rendered_as_bullets_get_spacing() -> Non
 def test_final_message_preserves_numbered_bullet_markers(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    TerminalDisplay().final_message(
+    display = TerminalDisplay()
+    finish_display(display,
         "1. First item\n"
         "2. Second item"
     )
@@ -1966,7 +2049,8 @@ def test_final_message_preserves_numbered_bullet_markers(
 def test_final_message_preserves_multiline_fields(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    TerminalDisplay().final_message(
+    display = TerminalDisplay()
+    finish_display(display,
         "## Files changed\n"
         "- `ui/terminal.py`\n"
         "## What changed\n"
@@ -1980,13 +2064,10 @@ def test_final_message_preserves_multiline_fields(
     )
 
     output = capsys.readouterr().out
-    assert (
-        f"{FINAL_SUMMARY_INDENT}What changed\n"
-        f"{FINAL_SUMMARY_INDENT}Polished display\n"
-        f"{FINAL_SUMMARY_INDENT}• grouped final files\n"
-        "\n"
-        f"{FINAL_SUMMARY_INDENT}• sectioned summary\n"
-    ) in output
+    assert f"{FINAL_SUMMARY_INDENT}What changed" in output
+    assert f"{FINAL_SUMMARY_INDENT}Polished display" in output
+    assert f"{FINAL_SUMMARY_INDENT}• grouped final files" in output
+    assert f"{FINAL_SUMMARY_INDENT}• sectioned summary" in output
 
 
 def test_final_message_wraps_body_lines(
@@ -1998,7 +2079,8 @@ def test_final_message_wraps_body_lines(
         lambda fallback: os.terminal_size((44, 24)),
     )
 
-    TerminalDisplay().final_message(
+    display = TerminalDisplay()
+    finish_display(display,
         "## Files changed\n"
         "- `ui/terminal.py`\n"
         "## What changed\n"
@@ -2010,12 +2092,9 @@ def test_final_message_wraps_body_lines(
     )
 
     output = capsys.readouterr().out
-    assert (
-        f"{FINAL_SUMMARY_INDENT}What changed\n"
-        f"{FINAL_SUMMARY_INDENT}This final summary body line should wrap\n"
-        f"{FINAL_SUMMARY_INDENT}neatly while keeping Markdown display\n"
-        f"{FINAL_SUMMARY_INDENT}readable.\n"
-    ) in output
+    assert f"{FINAL_SUMMARY_INDENT}This final summary body line should" in output
+    assert f"{FINAL_SUMMARY_INDENT}keeping Markdown display readable." in output
+    assert all(_display_width(line) == RUN_PANEL_WIDTH for line in output.strip().splitlines())
 
 
 def test_final_message_wraps_unordered_bullet_continuation_under_text(
@@ -2027,16 +2106,14 @@ def test_final_message_wraps_unordered_bullet_continuation_under_text(
         lambda fallback: os.terminal_size((38, 24)),
     )
 
-    TerminalDisplay().final_message(
+    display = TerminalDisplay()
+    finish_display(display,
         "- This bullet line should wrap with continuation text aligned beneath the item text."
     )
 
     output = capsys.readouterr().out
-    assert (
-        f"{FINAL_SUMMARY_INDENT}• This bullet line should wrap with\n"
-        f"{FINAL_SUMMARY_INDENT}  continuation text aligned beneath\n"
-        f"{FINAL_SUMMARY_INDENT}  the item text."
-    ) in output
+    assert f"{FINAL_SUMMARY_INDENT}• This bullet line should wrap with continuation" in output
+    assert f"{FINAL_SUMMARY_INDENT}  aligned beneath the item text." in output
 
 
 def test_debug_assistant_message_preserves_raw_task_complete(
@@ -2044,7 +2121,9 @@ def test_debug_assistant_message_preserves_raw_task_complete(
 ) -> None:
     TerminalDisplay(debug=True).assistant_message("TASK COMPLETE")
 
-    assert capsys.readouterr().out == f"{SQUID_GLYPH} TASK COMPLETE\n\n"
+    output = capsys.readouterr().out
+    assert f"│  {SQUID_GLYPH} TASK COMPLETE" in output
+    assert output.endswith("╯\n\n")
 
 
 def test_debug_loop_finished_does_not_print_transcript_by_default(

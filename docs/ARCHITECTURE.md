@@ -121,10 +121,18 @@ and application layer; `squid_core/` is the reusable agent runtime.
     sequential static fallback.
     `prompt_input.py`, `sessions.py`, and `spinner.py` retain their focused
     input, saved-session, and animation responsibilities. Normal run output
-    uses one dim, terminal-default divider for run starts, final reports, and
-    Session files. Thinking, narration, and report markers share a
+    uses ordinary scrollback and static 61-column printed panels: each visible
+    assistant narration message owns one panel, while the final report and
+    Session files share one completion panel. `final_message` retains only the
+    current report text until `loop_finished` supplies the session file sets;
+    it does not introduce a managed transcript or persistent terminal region.
+    Tool results, approvals, warnings, and non-success status remain outside
+    these panels, and standalone run/report/file dividers are not emitted.
+    Every run-panel border uses the same dim terminal-default styling.
+    Thinking, narration, and report markers share a
     text-presentation squid glyph so the current semantic Mod accent can be
-    rendered by ANSI foreground color without coloring adjacent text.
+    rendered by ANSI foreground color without coloring adjacent text or panel
+    borders.
     Presentation modules do not own approval policy, Tool execution, or
     Tool-result semantics.
 

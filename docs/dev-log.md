@@ -1,3 +1,19 @@
+- 2026-09-04: Replaced divider-heavy normal-run presentation with fixed-width
+  static panels while preserving ordinary print-based scrollback and the
+  existing prompt-toolkit composer lifecycle. One canonical 61-column width
+  now governs every narration panel and the shared Report/Session files
+  completion panel; narration, report text, and long file labels wrap within
+  that geometry. Tool results, approvals, warnings, and failure/interruption
+  statuses remain outside panels. Removed standalone run, report, and file
+  dividers, including the direct-final duplicate structure. Borders use the
+  same dim/default treatment everywhere, while the text-presentation squid
+  alone retains the live Mod accent and immediate foreground reset. Focused
+  terminal/composer/spinner tests: 155 passed; full suite: 837 passed.
+  Production compilation/import checks and `git diff --check` passed. A real
+  PTY smoke verified the unchanged startup scene, plain composer, `/new`,
+  `/exit`, and clean terminal teardown; no live model inference or
+  terminal-ownership refactor was performed.
+
 - 2026-09-04: Completed the small normal-CLI presentation cleanup. Thinking,
   narration, report, and spinner markers now use the squid's text-presentation
   sequence (`U+1F991 U+FE0E`), allowing the existing semantic Mod accent ANSI
