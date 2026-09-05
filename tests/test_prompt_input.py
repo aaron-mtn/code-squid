@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 import random
 import threading
+import time
 
 import pytest
 from prompt_toolkit import PromptSession
@@ -19,6 +20,10 @@ from prompt_toolkit.output import DummyOutput
 from code_squid.console.startup_menu import StartupMenu
 from code_squid.console.ui.banner import StartupInfo
 from code_squid.console.ui.binary_header import BinaryRainHeader, TITLE
+from code_squid.console.ui.composer_layout import (
+    COMPOSER_MAX_CONTENT_ROWS,
+    COMPOSER_MIN_CONTENT_ROWS,
+)
 from code_squid.console.ui.formatting import RUN_PANEL_WIDTH
 from code_squid.console.ui.prompt_input import (
     COMPOSER_STYLE,
@@ -146,6 +151,59 @@ def test_wrapping_grows_then_deletion_shrinks_without_duplicate_border() -> None
     assert sum(row.startswith("╰") for row in short) == 1
 
 
+def test_startup_composer_stays_inside_physical_viewport_then_scrolls_internally() -> None:
+    startup = _startup(rows=30)
+    medium = _render_startup(startup, "wrapped input " * 80)
+    maximum = _render_startup(startup, "wrapped input " * 800)
+    position = maximum.visible_windows_to_write_positions[startup.input_window]
+    cursor = maximum.get_cursor_position(startup.input_window)
+
+    assert startup.application.output is startup.output
+    assert startup.application.output.get_size() == Size(rows=30, columns=80)
+    assert medium.height <= startup.application.output.get_size().rows
+    assert TITLE in "\n".join(_screen_rows(medium))
+    # The 23-row scene, separator, and frame leave four physical content rows.
+    assert len(_composer_rows(maximum)) == 6
+    assert position.height == 3
+    assert position.ypos <= cursor.y < position.ypos + position.height
+    assert startup.buffer.text == "wrapped input " * 800
+
+
+def test_startup_and_followup_share_content_height_policy() -> None:
+    startup = _startup()
+    assert len(_composer_rows(_render_startup(startup))) == COMPOSER_MIN_CONTENT_ROWS + 2
+
+    output = SizedOutput(rows=40)
+    session = PromptSession(input=DummyInput(), output=output)
+    session.show_frame = True
+    session.style = COMPOSER_STYLE
+    session.reserve_space_for_menu = 0
+    _configure_composer_frame(session)
+    session.message = [("", "  @code-squid\n  › ")]
+    session.multiline = True
+    session.wrap_lines = True
+
+    async def render(text: str):
+        session.default_buffer.text = text
+        session.default_buffer.cursor_position = len(text)
+        with set_app(session.app):
+            session.app.renderer.render(session.app, session.layout)
+        return session.app.renderer._last_screen
+
+    short = asyncio.run(render(""))
+    tall = asyncio.run(render("follow-up input " * 800))
+    assert short is not None and tall is not None
+    assert len(_composer_rows(short)) == COMPOSER_MIN_CONTENT_ROWS + 2
+    assert len(_composer_rows(tall)) == COMPOSER_MAX_CONTENT_ROWS + 2
+
+    output.size = Size(rows=8, columns=80)
+    physically_bounded = asyncio.run(render(session.default_buffer.text))
+    assert physically_bounded is not None
+    assert physically_bounded.height <= 8
+    assert len(_composer_rows(physically_bounded)) == 8
+    assert session.default_buffer.text == "follow-up input " * 800
+
+
 def test_large_input_scrolls_in_short_viewport_without_fallback() -> None:
     startup = _startup(rows=30)
     task = "first line\n" + ("large-paste " * 300) + "\nlast line"
@@ -200,6 +258,26 @@ def test_resize_degrades_without_fallback_and_recovers(columns: int, rows: int) 
     assert "resizable input" in "\n".join(recovered)
 
 
+def test_long_composer_tracks_shrink_and_enlarge_without_losing_buffer() -> None:
+    startup = _startup(rows=50)
+    task = "wrapped input " * 800
+    large = _render_startup(startup, task)
+    assert len(_composer_rows(large)) == COMPOSER_MAX_CONTENT_ROWS + 2
+
+    startup.output.size = Size(rows=30, columns=80)
+    small = _render_startup(startup, task)
+    small_position = small.visible_windows_to_write_positions[startup.input_window]
+    small_cursor = small.get_cursor_position(startup.input_window)
+    assert small.height <= 30
+    assert len(_composer_rows(small)) == 6
+    assert small_position.ypos <= small_cursor.y < small_position.ypos + small_position.height
+
+    startup.output.size = Size(rows=50, columns=80)
+    recovered = _render_startup(startup, task)
+    assert len(_composer_rows(recovered)) == COMPOSER_MAX_CONTENT_ROWS + 2
+    assert startup.buffer.text == task
+
+
 def _run_input(terminal_input: str, *, startup: bool = False) -> str:
     result: list[str] = []
     errors: list[BaseException] = []
@@ -245,6 +323,53 @@ def test_startup_large_bracketed_paste_and_deletion_preserve_buffer() -> None:
     task = "first\n" + ("x" * 20_000) + "\nlast"
     pasted = f"\x1b[200~{task}\x1b[201~"
     assert _run_input(pasted + ("\x7f" * 4) + "\r", startup=True) == task[:-4]
+
+
+def test_startup_fast_vertical_navigation_uses_prompt_toolkit_bindings() -> None:
+    task = "\n".join(f"line {index}" for index in range(100))
+    with create_pipe_input() as pipe_input:
+        startup = _startup(rows=30, input=pipe_input)
+        result: list[str] = []
+        thread = threading.Thread(target=lambda: result.append(startup.run()))
+        thread.start()
+
+        def wait_for(predicate) -> None:
+            deadline = time.monotonic() + 5
+            while not predicate() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert predicate()
+
+        try:
+            pipe_input.send_text(f"\x1b[200~{task}\x1b[201~")
+            wait_for(
+                lambda: startup.buffer.text == task
+                and startup.input_window.render_info is not None
+            )
+
+            pipe_input.send_text("\x1b[1;5H")  # Ctrl+Home.
+            wait_for(lambda: startup.buffer.cursor_position == 0)
+            pipe_input.send_text("\x1b[6~")  # PageDown.
+            wait_for(lambda: startup.buffer.cursor_position > 0)
+            page_down_position = startup.buffer.cursor_position
+
+            pipe_input.send_text("\x1b[1;5B")  # Ctrl+Down.
+            wait_for(lambda: startup.buffer.cursor_position > page_down_position)
+            control_down_position = startup.buffer.cursor_position
+            pipe_input.send_text("\x1b[1;5A")  # Ctrl+Up.
+            wait_for(lambda: startup.buffer.cursor_position < control_down_position)
+
+            pipe_input.send_text("\x1b[5~")  # PageUp.
+            wait_for(lambda: startup.buffer.cursor_position < page_down_position)
+            pipe_input.send_text("\x1b[1;5F")  # Ctrl+End.
+            wait_for(lambda: startup.buffer.cursor_position == len(task))
+            pipe_input.send_text("\r")
+            thread.join(timeout=5)
+        finally:
+            if thread.is_alive():
+                pipe_input.send_bytes(b"\x03")
+                thread.join(timeout=5)
+
+    assert result == [task]
 
 
 def test_startup_ctrl_c_raises_shutdown_interrupt() -> None:

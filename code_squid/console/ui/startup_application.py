@@ -12,16 +12,21 @@ from prompt_toolkit.layout import Dimension, HSplit, Layout, Window
 from prompt_toolkit.layout.containers import ScrollOffsets, VSplit
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.processors import BeforeInput
+from prompt_toolkit.output.defaults import create_output
 from prompt_toolkit.output.base import Output
 from prompt_toolkit.styles import Style
 
 from code_squid.console.ui.binary_header import BinaryRainHeader, FRAME_INTERVAL
+from code_squid.console.ui.composer_layout import (
+    COMPOSER_FRAME_ROWS,
+    COMPOSER_MIN_CONTENT_ROWS,
+    desired_composer_content_height,
+)
 from code_squid.console.ui.formatting import RUN_PANEL_WIDTH
 from code_squid.console.ui.header_layout import STARTUP_SEPARATOR_ROWS
 
 
 COMPOSER_RIGHT_PADDING = 1
-COMPOSER_MIN_CONTENT_ROWS = 2
 
 
 class StartupApplication:
@@ -44,6 +49,9 @@ class StartupApplication:
     ) -> None:
         self.rain = rain
         self.prompt = prompt
+        # Keep the real Output as the sole source of terminal geometry. In
+        # particular, CPR and resize reconciliation must describe this viewport.
+        self.output = output or create_output()
         self.buffer = Buffer(multiline=True)
         self.buffer_control = BufferControl(
             buffer=self.buffer,
@@ -53,7 +61,7 @@ class StartupApplication:
             self.buffer_control,
             wrap_lines=True,
             dont_extend_height=True,
-            scroll_offsets=ScrollOffsets(top=0, bottom=0),
+            scroll_offsets=ScrollOffsets(top=1, bottom=1),
             get_line_prefix=self._continuation_prefix,
         )
         self.scene_control = FormattedTextControl(self._scene_fragments)
@@ -68,11 +76,12 @@ class StartupApplication:
             [
                 self.scene_window,
                 Window(height=self._separator_height),
-                VSplit([self.composer, Window()], padding=0),
-                # A retained non-full-screen Screen can be taller after input
-                # shrinks. This neutral sink receives cleanup rows so the box
-                # itself always ends at its natural bottom border.
-                Window(),
+                # The width sink must not claim vertical space from the
+                # deliberately bounded startup surface.
+                VSplit(
+                    [self.composer, Window(dont_extend_height=True)],
+                    padding=0,
+                ),
             ],
             padding=0,
         )
@@ -85,7 +94,7 @@ class StartupApplication:
             refresh_interval=FRAME_INTERVAL,
             before_render=self._advance_rain,
             input=input,
-            output=output,
+            output=self.output,
         )
         # `/new` constructs a new temporary Application around the same display
         # model, so reset drops here to make every session scene genuinely fresh.
@@ -96,7 +105,7 @@ class StartupApplication:
         return self.application.run()
 
     def _output_size(self):
-        return self.application.output.get_size()
+        return self.output.get_size()
 
     def _composer_width(self) -> int:
         # Sixty-one cells is the product design. On narrower terminals the
@@ -106,8 +115,12 @@ class StartupApplication:
     def _scene_height(self) -> Dimension:
         size = self._output_size()
         full_height = self.rain.layout_for(size.columns).height
-        composer_rows = COMPOSER_MIN_CONTENT_ROWS + 2
-        available = max(size.rows - composer_rows, 0)
+        # On a short physical viewport, retain enough space for the normal
+        # minimum composer and clip only the bottom of the decorative scene.
+        available = max(
+            size.rows - COMPOSER_FRAME_ROWS - COMPOSER_MIN_CONTENT_ROWS,
+            0,
+        )
         if available <= STARTUP_SEPARATOR_ROWS:
             return Dimension.exact(0)
         return Dimension.exact(min(full_height, available - STARTUP_SEPARATOR_ROWS))
@@ -115,6 +128,16 @@ class StartupApplication:
     def _separator_height(self) -> Dimension:
         return Dimension.exact(
             STARTUP_SEPARATOR_ROWS if self._scene_height().preferred else 0
+        )
+
+    def _safe_composer_content_rows(self) -> int:
+        """Return content rows left inside the real terminal viewport."""
+        return max(
+            self._output_size().rows
+            - self._scene_height().preferred
+            - self._separator_height().preferred
+            - COMPOSER_FRAME_ROWS,
+            0,
         )
 
     def _scene_fragments(self):
@@ -177,8 +200,18 @@ class StartupApplication:
             [border("╰", width=1), border("─"), border("╯", width=1)],
             height=1,
         )
+        natural_content = HSplit([identity_row, input_row], padding=0)
+        bounded_content = HSplit(
+            [natural_content],
+            height=lambda: desired_composer_content_height(
+                natural_content,
+                self._composer_width(),
+                self._safe_composer_content_rows(),
+            ),
+            padding=0,
+        )
         return HSplit(
-            [top, identity_row, input_row, bottom],
+            [top, bounded_content, bottom],
             width=composer_width,
             padding=0,
         )

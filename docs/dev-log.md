@@ -1,3 +1,28 @@
+- 2026-09-05: Repaired boxed composer growth after Windows Terminal resize
+  testing exposed corruption from a startup Output adapter that reported a
+  canvas taller than the real terminal, disabled CPR, and overrode physical
+  rows below the cursor. Startup now passes prompt_toolkit the real Output
+  unchanged. A shared `composer_layout.py` policy still grows startup and
+  follow-up composers from 2 through 14 visible content rows using
+  prompt_toolkit's cell-aware preferred-height calculation, but each caller
+  supplies a separate cap derived from its real viewport. Startup subtracts
+  its currently visible scene, separator, and two frame rows; constrained
+  terminals clip the decorative scene from the bottom to retain the ordinary
+  two-row content minimum. BufferControl owns internal scrolling and retains
+  the complete input. PageUp/PageDown use prompt_toolkit page navigation,
+  Ctrl+Up/Ctrl+Down use its half-page navigation, Ctrl+Home/Ctrl+End keep the
+  standard buffer-boundary behavior, and input windows use one-row top/bottom
+  scroll offsets. No assistant/run renderer or rain-during-run behavior
+  changed. Focused prompt/input, startup-menu, binary-header, and terminal
+  tests passed (190); selected interactive `/new`/startup lifecycle tests
+  passed (3). Targeted Python compilation, import smoke, and
+  `git diff --check` passed. Pipe-input/rendered-screen coverage exercised
+  short and long input, both height caps, fast navigation, resize shrink and
+  recovery, deletion, submission, Ctrl+C, and complete Buffer retention. A
+  real Windows PTY smoke was not available because this environment has no
+  winpty, pywinpty, or pexpect package; Windows Terminal resize behavior still
+  requires manual confirmation.
+
 - 2026-09-04: Replaced the startup's competing prompt_toolkit/ANSI-renderer
   architecture with one temporary nonfullscreen `StartupApplication`. The old
   split ownership let `BinaryRainHeader` move the physical cursor while

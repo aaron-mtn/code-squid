@@ -93,12 +93,15 @@ and application layer; `squid_core/` is the reusable agent runtime.
     temporary, nonfullscreen prompt_toolkit `Application`; that Application's
     refresh timer advances rain and invalidates the same renderer. There is no
     rain thread or independent ANSI writer, and production startup code reads
-    no completed-screen or cursor geometry. Growing input receives the physical
-    rows left by the scene and scrolls through prompt_toolkit's normal Window
-    behavior when its complete Buffer exceeds the viewport. Constrained
-    terminals contract the scene and composer width instead of displaying
-    prompt_toolkit's `Window too small...` fallback; restoring space restores
-    the complete scene and the normal 61-cell composer.
+    no completed-screen or cursor geometry. The composer follows the shared
+    product policy of 2 through 14 visible content rows, capped again by the
+    rows physically available below the startup scene, separator, and frame.
+    On constrained terminals the decorative scene clips from the bottom to
+    preserve the normal composer minimum; the real Output remains the sole
+    source of viewport, CPR, and cursor geometry. Once either the product or
+    physical cap is reached, the BufferControl scrolls internally while
+    retaining the complete Buffer. Constrained terminals also contract
+    composer width instead of inventing a larger render surface.
 
     `TerminalDisplay` marks startup active at a session boundary but performs
     no startup terminal writes. `prompt_input.py` selects StartupApplication
@@ -131,14 +134,17 @@ and application layer; `squid_core/` is the reusable agent runtime.
     composer remains a non-fullscreen `PromptSession`, but its active prompt is
     rendered in a dynamically tall 61-cell rounded frame with two cells of
     left padding and one right gutter. The normal PromptSession input container
-    retains its full 58-cell allocation inside the borders. The
-    frame disappears from active control on submission and remains only as
-    normal terminal scrollback;
-    approval prompts continue to use the shared unboxed input helper. Shift+Enter
-    and Alt+Enter normalize to the multiline Ctrl+J action, while ordinary Enter
-    submits. Its
-    marker is hidden without changing input alignment while the startup menu
-    owns focus. Normal run output
+    retains up to 58 cells inside the borders and uses the same product and
+    physical viewport caps as startup. The frame disappears from active
+    control on submission and remains only as normal terminal scrollback.
+    PageUp/PageDown move by pages, Ctrl+Up/Ctrl+Down move by
+    half pages, and Ctrl+Home/Ctrl+End retain their standard buffer-boundary
+    behavior. A one-row scroll offset keeps the cursor away from the top and
+    bottom borders when the viewport has enough room. Approval prompts continue
+    to use the shared unboxed input helper. Shift+Enter and Alt+Enter normalize
+    to the multiline Ctrl+J action, while ordinary Enter submits. Its marker is
+    hidden without changing input alignment while the startup menu owns focus.
+    Normal run output
     uses ordinary scrollback and static 61-column printed panels: each visible
     assistant narration message owns one panel, while the final report and
     Session files share one completion panel. `final_message` retains only the

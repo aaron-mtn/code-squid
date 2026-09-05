@@ -7,19 +7,28 @@ from prompt_toolkit.application import get_app
 from prompt_toolkit.formatted_text import AnyFormattedText
 from prompt_toolkit.input.ansi_escape_sequences import ANSI_SEQUENCES
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.key_binding.bindings.scroll import (
+    scroll_half_page_down,
+    scroll_half_page_up,
+    scroll_page_down,
+    scroll_page_up,
+)
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import Dimension, HSplit, Window
-from prompt_toolkit.layout.containers import VSplit
+from prompt_toolkit.layout.containers import ScrollOffsets, VSplit
 from prompt_toolkit.styles import Style
 
 from code_squid.console.ui.binary_header import BinaryRainHeader
+from code_squid.console.ui.composer_layout import (
+    COMPOSER_FRAME_ROWS,
+    desired_composer_content_height,
+)
 from code_squid.console.ui.formatting import RUN_PANEL_WIDTH
 from code_squid.console.ui.startup_application import StartupApplication
 
 
 COMPOSER_RIGHT_PADDING = 1
-COMPOSER_INPUT_WIDTH = RUN_PANEL_WIDTH - 2 - COMPOSER_RIGHT_PADDING
 COMPOSER_STYLE = Style.from_dict({"frame.border": "dim"})
 
 
@@ -34,6 +43,18 @@ def _configure_composer_frame(session: PromptSession) -> Window:
     root = session.layout.container
     framed_input = root.children[0]
     main_input = framed_input.alternative_content
+    # PromptSession's focused Buffer Window is nested inside ``main_input``.
+    # A one-row offset keeps its cursor away from the frame when room permits.
+    session.layout.current_window.scroll_offsets = ScrollOffsets(top=1, bottom=1)
+
+    def composer_width_cells() -> int:
+        return max(min(RUN_PANEL_WIDTH, get_app().output.get_size().columns), 1)
+
+    def safe_content_rows() -> int:
+        return max(
+            get_app().output.get_size().rows - COMPOSER_FRAME_ROWS,
+            0,
+        )
 
     def border(character: str, **kwargs) -> Window:
         return Window(
@@ -50,6 +71,11 @@ def _configure_composer_frame(session: PromptSession) -> Window:
             Window(width=Dimension.exact(COMPOSER_RIGHT_PADDING)),
             border("│", width=1),
         ],
+        height=lambda: desired_composer_content_height(
+            main_input,
+            max(composer_width_cells() - 2 - COMPOSER_RIGHT_PADDING, 1),
+            safe_content_rows(),
+        ),
         padding=0,
     )
     composer = HSplit(
@@ -72,10 +98,10 @@ def _configure_composer_frame(session: PromptSession) -> Window:
                 height=1,
             ),
         ],
-        width=Dimension.exact(RUN_PANEL_WIDTH),
+        width=lambda: Dimension.exact(composer_width_cells()),
     )
     # The root receives the terminal width. A sibling absorbs unused columns
-    # so the composer itself remains exactly RUN_PANEL_WIDTH cells wide.
+    # so the composer stays at its product width whenever the viewport permits.
     framed_input.content = VSplit(
         [composer, Window()],
         padding=0,
@@ -157,6 +183,22 @@ def multiline_key_bindings(
     @bindings.add("c-j", filter=~menu_focused)
     def _(event) -> None:
         event.current_buffer.insert_text("\n")
+
+    @bindings.add("pageup", filter=~menu_focused)
+    def _(event) -> None:
+        scroll_page_up(event)
+
+    @bindings.add("pagedown", filter=~menu_focused)
+    def _(event) -> None:
+        scroll_page_down(event)
+
+    @bindings.add("c-up", filter=~menu_focused)
+    def _(event) -> None:
+        scroll_half_page_up(event)
+
+    @bindings.add("c-down", filter=~menu_focused)
+    def _(event) -> None:
+        scroll_half_page_down(event)
 
     @bindings.add("escape", "enter", filter=~menu_focused)
     def _(event) -> None:
