@@ -95,6 +95,7 @@ def _run_new_session_task(
         task=task,
         settings=settings,
         display=display,
+        on_event=getattr(display, "handle_event", None),
         skill_name=skill_name,
         mod_name=mod_name,
     )
@@ -128,6 +129,7 @@ def _run_follow_up_task(
         task=follow_up_task,
         settings=settings,
         display=display,
+        on_event=getattr(display, "handle_event", None),
         skill_name=skill_name,
         mod_name=mod_name,
         session=session,

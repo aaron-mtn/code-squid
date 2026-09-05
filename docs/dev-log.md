@@ -1,3 +1,19 @@
+- 2026-09-05: Added CLI-owned streamed assistant narration using Core's
+  existing event callback without changing Core, providers, or persistence.
+  `session_runner.py` now passes the display event handler into fresh and
+  resumed runs. A small `StreamingNarration` renderer opens without drawing,
+  appends deltas into one TTY panel, repaints only the rows it owns, and settles
+  authoritative `assistant_message` text in place. Rejected and final replies,
+  failures, cancellation completion, and KeyboardInterrupt presentation erase
+  provisional rows and clear state; final text continues through the existing
+  report path. Spinner ownership ends before the first visible delta, while
+  debug and redirected output retain their prior static behavior. Focused
+  CLI/UI/Core-event coverage passed (284), and the full suite passed (845).
+  Compilation, import smoke, `git diff --check`, and a real PTY smoke covering
+  growth, wrapping, settlement, following Tool output, and interruption passed.
+  Interactive resize and provider-backed rejection/final streaming remain for
+  manual confirmation in the target terminal; no live model inference ran.
+
 - 2026-09-05: Repaired boxed composer growth after Windows Terminal resize
   testing exposed corruption from a startup Output adapter that reported a
   canvas taller than the real terminal, disabled CPR, and overrode physical

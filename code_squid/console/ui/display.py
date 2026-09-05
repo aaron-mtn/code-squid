@@ -3,6 +3,7 @@
 from dataclasses import replace
 from pathlib import Path
 import re
+from typing import TextIO
 
 from wcwidth import wcswidth
 
@@ -54,6 +55,7 @@ from code_squid.console.ui.formatting import (
 )
 from code_squid.console.ui.prompt_input import prompt_multiline_input
 from code_squid.console.ui.spinner import TerminalSpinner
+from code_squid.console.ui.streaming_narration import StreamingNarration
 from code_squid.console.ui.tool_display import (
     FILE_TOOLS,
     action_label,
@@ -93,6 +95,7 @@ class TerminalDisplay:
         startup_info: StartupInfo | None = None,
         _spinner: TerminalSpinner | None = None,
         _header: BinaryRainHeader | None = None,
+        _output_stream: TextIO | None = None,
     ) -> None:
         self.debug = debug
         self.show_transcript = show_transcript
@@ -114,14 +117,23 @@ class TerminalDisplay:
         self._session_scene_active = False
         self._pending_final_content = ""
         self._has_run_output = False
+        self._streaming_narration = StreamingNarration(
+            self._assistant_narration_panel_lines,
+            stream=_output_stream,
+            # Debug mode is a static diagnostic transcript; live rewrites
+            # would interleave with its reply details.
+            enabled=not debug,
+        )
 
     def start(self) -> None:
+        self._streaming_narration.discard()
         self._stop_spinner()
         self.start_session_scene()
         self._needs_leading_blank = False
         self._needs_detail_blank_after_assistant = False
 
     def run_started(self) -> None:
+        self._streaming_narration.discard()
         self.retire_session_scene()
         self._stop_spinner()
         print()
@@ -142,6 +154,8 @@ class TerminalDisplay:
     def assistant_message(self, content: str) -> None:
         self._stop_spinner()
         content = content.strip()
+        if self._commit_streamed_narration(content):
+            return
         if self.debug:
             if content:
                 self._print_assistant_narration(content)
@@ -158,6 +172,7 @@ class TerminalDisplay:
         self._needs_detail_blank_after_assistant = True
 
     def final_message(self, content: str) -> None:
+        self._streaming_narration.discard()
         self._stop_spinner()
         # Session files arrive in loop_finished, so retain the report briefly to
         # print both completion sections inside one static panel.
@@ -237,6 +252,7 @@ class TerminalDisplay:
         self._print_debug_tool_result(action, result)
 
     def reply_rejected(self, reason: str) -> None:
+        self._streaming_narration.discard()
         self._stop_spinner()
         self._print_visible_line(self._reply_rejected_line(reason), style=SOFT_YELLOW_STYLE)
 
@@ -255,11 +271,13 @@ class TerminalDisplay:
         )
 
     def interrupted(self) -> None:
+        self._streaming_narration.discard()
         self._stop_spinner()
         self._interrupted = True
         self._print_visible_line("⏹️ Interrupted", style=SOFT_YELLOW_STYLE)
 
     def model_request_failed(self, log_path: Path) -> None:
+        self._streaming_narration.discard()
         self._stop_spinner()
         # Provider details belong in the saved log; normal CLI output stays stable.
         self._print_leading_blank_if_needed()
@@ -270,6 +288,7 @@ class TerminalDisplay:
         self._has_run_output = True
 
     def loop_finished(self, session, run_result=None) -> None:
+        self._streaming_narration.discard()
         self._stop_spinner()
         if self._needs_leading_blank:
             self._print_leading_blank_if_needed()
@@ -307,6 +326,35 @@ class TerminalDisplay:
             )
         if reply.get("format_error"):
             print(f"format_error: {reply['format_error']}")
+
+    def handle_event(self, event: dict) -> None:
+        """Translate Core's streamed-assistant events into CLI presentation."""
+        event_type = event.get("type")
+        if event_type == "assistant_message_started":
+            self._streaming_narration.begin()
+            return
+        if event_type == "assistant_delta":
+            delta = event.get("delta", "")
+            if not isinstance(delta, str) or not delta:
+                return
+            if (
+                not self._streaming_narration.visible
+                and self._streaming_narration.can_render
+            ):
+                self._prepare_assistant_narration()
+            self._streaming_narration.append(delta)
+            return
+        if event_type == "assistant_message" and self._streaming_narration.active:
+            content = str(event.get("message", "")).strip()
+            self._commit_streamed_narration(content)
+            return
+        if event_type in {"reply_rejected", "final_message"}:
+            self._streaming_narration.discard()
+
+    @property
+    def streaming_narration_active(self) -> bool:
+        """Return whether temporary narration currently owns lifecycle state."""
+        return self._streaming_narration.active
 
     def _stop_spinner(self) -> None:
         # Clear animation before ordinary prints so logs contain complete lines.
@@ -400,6 +448,13 @@ class TerminalDisplay:
         return messages.get(reason, "⚠️ Reply rejected: invalid assistant reply.")
 
     def _print_assistant_narration(self, content: str, trailing_blank: bool = True) -> None:
+        self._print_rendered_lines(self._assistant_narration_panel_lines(content))
+        self._has_run_output = True
+        if trailing_blank:
+            print()
+
+    def _assistant_narration_panel_lines(self, content: str) -> list[str]:
+        """Return physical panel rows shared by static and live narration."""
         source_lines = content.splitlines() or [""]
         panel_lines: list[str] = []
         narration_indent = " " * (_display_width(SQUID_GLYPH) + 1)
@@ -418,10 +473,24 @@ class TerminalDisplay:
             )
         if panel_lines:
             panel_lines[0] = self._accent_first_squid(panel_lines[0])
-        self._print_panel(panel_lines)
-        self._has_run_output = True
-        if trailing_blank:
+        return self._render_panel_lines(panel_lines)
+
+    def _prepare_assistant_narration(self) -> None:
+        """Transfer terminal ownership from the spinner to the live panel."""
+        self._stop_spinner()
+        self._print_leading_blank_if_needed()
+        if self._needs_detail_blank_after_assistant:
             print()
+            self._needs_detail_blank_after_assistant = False
+
+    def _commit_streamed_narration(self, content: str) -> bool:
+        settled = self._streaming_narration.commit(content)
+        if not settled:
+            return False
+        self._has_run_output = True
+        self._needs_leading_blank = False
+        self._needs_detail_blank_after_assistant = True
+        return True
 
     def _debug_block(self, title: str, lines: list[str]) -> None:
         width = 47
@@ -485,8 +554,17 @@ class TerminalDisplay:
 
     def _print_panel(self, lines: list[str]) -> None:
         """Print fixed-width run content with quiet, terminal-neutral borders."""
+        self._print_rendered_lines(self._render_panel_lines(lines))
+
+    def _print_rendered_lines(self, lines: list[str]) -> None:
+        """Print already-built physical rows through ordinary terminal output."""
+        for line in lines:
+            print(line)
+
+    def _render_panel_lines(self, lines: list[str]) -> list[str]:
+        """Build fixed-width physical rows without taking terminal ownership."""
         horizontal = "─" * (RUN_PANEL_WIDTH - 2)
-        print(styled_text(f"╭{horizontal}╮", DIM_STYLE))
+        rendered = [styled_text(f"╭{horizontal}╮", DIM_STYLE)]
         for line in lines:
             visible_width = _display_width(line)
             # All variable content is cell-wrapped before reaching this fixed
@@ -496,8 +574,9 @@ class TerminalDisplay:
             padding = " " * (PANEL_CONTENT_WIDTH - visible_width + 1)
             left = styled_text("│", DIM_STYLE)
             right = styled_text("│", DIM_STYLE)
-            print(f"{left}{PANEL_LEFT_PADDING}{line}{padding}{right}")
-        print(styled_text(f"╰{horizontal}╯", DIM_STYLE))
+            rendered.append(f"{left}{PANEL_LEFT_PADDING}{line}{padding}{right}")
+        rendered.append(styled_text(f"╰{horizontal}╯", DIM_STYLE))
+        return rendered
 
     def _format_final_summary(self, content: str) -> str:
         """Return final report text through the existing display test seam."""

@@ -129,6 +129,16 @@ and application layer; `squid_core/` is the reusable agent runtime.
     heads are staggered through the full rain height so the first frame is
     populated above, beside, and below the panel; later resets continue to
     enter naturally from above.
+    `streaming_narration.py` owns only the current provisional assistant panel.
+    The CLI passes `TerminalDisplay.handle_event` to Core and translates
+    `assistant_message_started`/`assistant_delta` into that temporary region.
+    On a TTY it redraws only its known panel rows with ANSI cursor movement;
+    redirected and debug output remain static. Validated display callbacks
+    settle authoritative assistant text or discard provisional text before a
+    rejection, final report, failure, or interruption can print. The spinner
+    is stopped before the first visible delta, so there is only one active
+    normal-output writer.
+
     `prompt_input.py`, `sessions.py`, and `spinner.py` retain their focused
     input, saved-session, and animation responsibilities. The ordinary task
     composer remains a non-fullscreen `PromptSession`, but its active prompt is
@@ -144,12 +154,14 @@ and application layer; `squid_core/` is the reusable agent runtime.
     to use the shared unboxed input helper. Shift+Enter and Alt+Enter normalize
     to the multiline Ctrl+J action, while ordinary Enter submits. Its marker is
     hidden without changing input alignment while the startup menu owns focus.
-    Normal run output
-    uses ordinary scrollback and static 61-column printed panels: each visible
-    assistant narration message owns one panel, while the final report and
-    Session files share one completion panel. `final_message` retains only the
-    current report text until `loop_finished` supplies the session file sets;
-    it does not introduce a managed transcript or persistent terminal region.
+    Normal run output uses ordinary scrollback and 61-column panels. While
+    streaming is enabled, one provisional narration panel grows in place and
+    becomes ordinary scrollback when the validated assistant callback settles
+    it; non-streamed narration remains a static print. The final report and
+    Session files share one completion panel. `final_message` discards any
+    provisional narration and retains only the current report text until
+    `loop_finished` supplies the session file sets. This does not introduce a
+    managed transcript, alternate screen, or persistent terminal region.
     Tool results, approvals, warnings, and non-success status remain outside
     these panels, and standalone run/report/file dividers are not emitted.
     Every composer and run-panel border uses the same dim terminal-default
@@ -288,9 +300,11 @@ and application layer; `squid_core/` is the reusable agent runtime.
 Code Squid can emit small runtime event dictionaries through optional
 `on_event(event)` callbacks. If no callback is supplied, nothing changes.
 
-This path is intended for external Python wrappers and tiny host applications,
-such as local event viewers. Events are machine-readable facts, not terminal
-output. Terminal display is still separate and wrappers should not scrape it.
+This path is intended for frontends, external Python wrappers, and tiny host
+applications such as local event viewers. Events are machine-readable facts,
+not preformatted terminal output. The CLI consumes only the streamed-assistant
+subset through its product-owned display; other wrappers should not scrape
+terminal output.
 
 Current loop-level event types include:
 
