@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from code_squid.app_paths import workspace_sessions_dir
+from code_squid.console.ui.formatting import SQUID_GLYPH
 from squid_core.storage.session_index import (
     latest_session_id,
     list_sessions,
@@ -11,9 +12,9 @@ from squid_core.storage.session_index import (
     session_dir_for,
 )
 
-# Print a compact index of saved sessions.
 def print_sessions(repo_root: Path) -> None:
-    print("🦑 Code Squid Sessions")
+    """Print a compact index of saved sessions."""
+    print(f"{SQUID_GLYPH} Code Squid Sessions")
     print()
 
     sessions = list_sessions(workspace_sessions_dir(repo_root))
@@ -45,7 +46,7 @@ def print_session(repo_root: Path, session_id: str) -> bool:
     metadata_dict = json.loads(metadata)
     entries = load_session_entries(sessions_dir, session_id)
 
-    print(f"🦑 Session: {metadata_dict.get('session_id', session_id)}")
+    print(f"{SQUID_GLYPH} Session: {metadata_dict.get('session_id', session_id)}")
     print(f"status: {metadata_dict.get('status', '')}")
     print(f"updated: {metadata_dict.get('updated_at', '')}")
     print(f"task: {metadata_dict.get('task', '')}")

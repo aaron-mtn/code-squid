@@ -161,14 +161,13 @@ and application layer; `squid_core/` is the reusable agent runtime.
     has fully stopped before either path returns, so tool/static output cannot
     compete with it. Empty streams never start it, and redirected and debug
     output remain static. The thinking pulse is stopped before the first
-    visible delta, so there is only one active normal-output writer. A streamed
-    `tool_preparing` event restarts that same pulse after narration releases
-    the terminal; when a provider emits the event before the authoritative
-    assistant-message callback, `TerminalDisplay` retains one pending
-    presentation flag and starts the pulse only after the live panel settles.
-    `tool_started` and all existing output/finalization boundaries stop it.
-    Code Squid owns no raw cursor-up or clear-row repaint geometry for live
-    narration.
+    visible delta, so there is only one active normal-output writer. Provider
+    `tool_preparing` events arrive while streamed narration is still
+    provisional, before the authoritative assistant message and Tool start;
+    the CLI deliberately does not turn that early parse signal into a second
+    pulse. `tool_started` and all existing output/finalization boundaries stop
+    any active pulse. Code Squid owns no raw cursor-up or clear-row repaint
+    geometry for live narration.
 
     `prompt_input.py`, `sessions.py`, and `spinner.py` retain their focused
     input, saved-session, and animation responsibilities. The ordinary task
@@ -201,12 +200,12 @@ and application layer; `squid_core/` is the reusable agent runtime.
     styling and imports one product-owned 61-cell width from `formatting.py`.
     Static panel measurement strips ANSI/OSC sequences before calculating the
     padding needed to keep the completion panel's right border aligned.
-    Normal thinking uses one CLI-owned four-frame dot pulse whose complete
-    `Thinking...` line receives the current semantic Mod accent. Narration and
-    report markers share a text-presentation squid glyph so the same accent can
-    be rendered by ANSI foreground color without coloring adjacent text or
-    panel borders. Each accented surface resets ANSI foreground state
-    immediately.
+    Normal thinking uses one neutral, CLI-owned four-frame dot pulse; neither
+    its symbol nor `Thinking...` receives the current Mod accent. Narration and
+    report markers share the canonical U+1F991 U+FE0E text-presentation squid
+    glyph. The active Mod accent wraps only that two-code-point sequence and
+    resets immediately, leaving adjacent text and the dim neutral panel borders
+    in terminal-default color.
     Presentation modules do not own approval policy, Tool execution, or
     Tool-result semantics.
 

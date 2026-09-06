@@ -113,7 +113,6 @@ class TerminalDisplay:
             else TerminalSpinner(
                 enabled=not debug,
                 prefix=RUN_EVENT_INDENT,
-                style=ansi_fg(DEFAULT_MOD_ACCENT_HEX),
             )
         )
         self._needs_leading_blank = False
@@ -125,10 +124,6 @@ class TerminalDisplay:
         # The action lifecycle counts read-only and custom tools too; written
         # files are deliberately not a proxy for whether this is a report.
         self._tool_used_in_run = False
-        # Providers can announce a Tool while the provisional narration
-        # renderer still owns the terminal. Defer the pulse until narration
-        # settles instead of allowing two live writers to compete.
-        self._tool_preparing_pending = False
         self._streaming_narration = StreamingNarration(
             self._assistant_narration_panel_lines,
             stream=_output_stream,
@@ -140,7 +135,6 @@ class TerminalDisplay:
 
     def start(self) -> None:
         self._streaming_narration.discard()
-        self._tool_preparing_pending = False
         self._stop_spinner()
         self.start_session_scene()
         self._needs_leading_blank = False
@@ -148,7 +142,6 @@ class TerminalDisplay:
 
     def run_started(self) -> None:
         self._streaming_narration.discard()
-        self._tool_preparing_pending = False
         self.retire_session_scene()
         self._stop_spinner()
         # Construction and the model request can proceed during the fade. The
@@ -165,29 +158,24 @@ class TerminalDisplay:
         self._needs_detail_blank_after_assistant = False
 
     def thinking(self) -> None:
-        self._tool_preparing_pending = False
         self._finish_startup_before_output()
         if self.debug:
             print("Thinking...")
             print()
             return
         self._print_leading_blank_if_needed()
-        self._spinner.style = ansi_fg(self._accent_hex())
         self._spinner.start()
 
     def assistant_message(self, content: str) -> None:
         self._stop_spinner()
         content = content.strip()
         if self._commit_streamed_narration(content):
-            self._start_pending_tool_pulse()
             return
         if self.debug:
             if content:
                 self._print_assistant_narration(content)
-            self._start_pending_tool_pulse()
             return
         if not content:
-            self._start_pending_tool_pulse()
             return
 
         self._finish_startup_before_output()
@@ -198,11 +186,9 @@ class TerminalDisplay:
         self._print_assistant_narration(content, trailing_blank=False)
         self._needs_leading_blank = False
         self._needs_detail_blank_after_assistant = True
-        self._start_pending_tool_pulse()
 
     def final_message(self, content: str) -> None:
         self._streaming_narration.discard()
-        self._tool_preparing_pending = False
         self._stop_spinner()
         # Written paths arrive in loop_finished, so retain the report briefly to
         # print both completion sections inside one static panel when needed.
@@ -210,7 +196,6 @@ class TerminalDisplay:
 
     def action_started(self, action: dict) -> None:
         self._tool_used_in_run = True
-        self._tool_preparing_pending = False
         self._stop_spinner()
         if self.debug and action.get("tool") not in FILE_TOOLS:
             self._finish_startup_before_output()
@@ -219,7 +204,6 @@ class TerminalDisplay:
 
     def approve_action(self, action: dict) -> ApprovalDecision:
         self._finish_startup_before_output()
-        self._tool_preparing_pending = False
         self._stop_spinner()
         self._print_leading_blank_if_needed()
         if self._needs_detail_blank_after_assistant:
@@ -272,7 +256,6 @@ class TerminalDisplay:
 
     def tool_result(self, action: dict, result: dict) -> None:
         self._finish_startup_before_output()
-        self._tool_preparing_pending = False
         self._stop_spinner()
         if result.get("error") == USER_DENIED_TOOL_ACTION:
             if self._compacted_denied_action == action:
@@ -291,13 +274,11 @@ class TerminalDisplay:
     def reply_rejected(self, reason: str) -> None:
         self._finish_startup_before_output()
         self._streaming_narration.discard()
-        self._tool_preparing_pending = False
         self._stop_spinner()
         self._print_visible_line(self._reply_rejected_line(reason), style=SOFT_YELLOW_STYLE)
 
     def repeated_invalid_replies(self, reason: str, count: int) -> None:
         self._finish_startup_before_output()
-        self._tool_preparing_pending = False
         self._stop_spinner()
         self._print_visible_line(
             f"⚠️ Stopping after {count} invalid replies: {reason}",
@@ -306,7 +287,6 @@ class TerminalDisplay:
 
     def step_limit_reached(self, max_tool_steps: int) -> None:
         self._finish_startup_before_output()
-        self._tool_preparing_pending = False
         self._stop_spinner()
         self._print_visible_line(
             f"⚠️ Stopping after reaching tool step limit: {max_tool_steps}",
@@ -316,7 +296,6 @@ class TerminalDisplay:
     def interrupted(self) -> None:
         self._finish_startup_before_output()
         self._streaming_narration.discard()
-        self._tool_preparing_pending = False
         self._stop_spinner()
         self._interrupted = True
         self._print_visible_line("⏹️ Interrupted", style=SOFT_YELLOW_STYLE)
@@ -324,7 +303,6 @@ class TerminalDisplay:
     def model_request_failed(self, log_path: Path) -> None:
         self._finish_startup_before_output()
         self._streaming_narration.discard()
-        self._tool_preparing_pending = False
         self._stop_spinner()
         # Provider details belong in the saved log; normal CLI output stays stable.
         self._print_leading_blank_if_needed()
@@ -337,7 +315,6 @@ class TerminalDisplay:
     def loop_finished(self, session, run_result=None) -> None:
         self._finish_startup_before_output()
         self._streaming_narration.discard()
-        self._tool_preparing_pending = False
         self._stop_spinner()
         if self._needs_leading_blank:
             self._print_leading_blank_if_needed()
@@ -397,11 +374,6 @@ class TerminalDisplay:
         if event_type == "assistant_message" and self._streaming_narration.active:
             content = str(event.get("message", "")).strip()
             self._commit_streamed_narration(content)
-            self._start_pending_tool_pulse()
-            return
-        if event_type == "tool_preparing":
-            self._tool_preparing_pending = True
-            self._start_pending_tool_pulse()
             return
         if event_type in {
             "tool_started",
@@ -410,11 +382,9 @@ class TerminalDisplay:
             "run_failed",
             "run_finished",
         }:
-            self._tool_preparing_pending = False
             self._stop_spinner()
             return
         if event_type in {"reply_rejected", "final_message"}:
-            self._tool_preparing_pending = False
             self._streaming_narration.discard()
             self._stop_spinner()
 
@@ -426,14 +396,6 @@ class TerminalDisplay:
     def _stop_spinner(self) -> None:
         # Clear animation before ordinary prints so logs contain complete lines.
         self._spinner.stop()
-
-    def _start_pending_tool_pulse(self) -> None:
-        """Start deferred Tool preparation feedback once narration releases."""
-        if not self._tool_preparing_pending or self._streaming_narration.active:
-            return
-        self._tool_preparing_pending = False
-        if not self.debug:
-            self.thinking()
 
     def _print_startup_banner(self) -> None:
         # Scene state is prepared here, but the temporary StartupApplication

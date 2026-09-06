@@ -1,7 +1,7 @@
 from wcwidth import wcswidth
 
-from code_squid.console.ui.spinner import RESET_STYLE, SPINNER_FRAMES, TerminalSpinner
-from code_squid.console.ui.formatting import SOFT_CYAN_STYLE, SQUID_GLYPH
+from code_squid.console.ui.spinner import SPINNER_FRAMES, TerminalSpinner
+from code_squid.console.ui.formatting import SQUID_GLYPH
 
 
 class FakeStream:
@@ -32,6 +32,10 @@ def test_spinner_frames_are_stable_thinking_pulse() -> None:
     assert [wcswidth(frame[0]) for frame in SPINNER_FRAMES] == [1, 1, 1, 1]
 
 
+def test_thinking_pulse_keeps_committed_speed() -> None:
+    assert TerminalSpinner().interval == 0.17
+
+
 def test_spinner_is_quiet_when_stdout_is_not_tty() -> None:
     stream = FakeStream(tty=False)
     spinner = TerminalSpinner(stream=stream)
@@ -53,22 +57,20 @@ def test_spinner_writes_and_clears_one_tty_line() -> None:
     assert stream.writes == ["\r\u00b7 Thinking...", "\r\033[K"]
 
 
-def test_spinner_styles_tty_frame_and_resets() -> None:
+def test_default_thinking_frame_is_terminal_neutral() -> None:
     stream = FakeStream(tty=True)
-    spinner = TerminalSpinner(stream=stream, interval=10, style=SOFT_CYAN_STYLE)
+    spinner = TerminalSpinner(stream=stream, interval=10)
 
     spinner.start()
     spinner.stop()
 
-    assert stream.writes == [
-        f"\r{SOFT_CYAN_STYLE}\u00b7 Thinking...{RESET_STYLE}",
-        "\r\033[K",
-    ]
+    assert stream.writes == ["\r\u00b7 Thinking...", "\r\033[K"]
+    assert "\033[" not in stream.writes[0]
 
 
 def test_spinner_ignores_style_when_stdout_is_not_tty() -> None:
     stream = FakeStream(tty=False)
-    spinner = TerminalSpinner(stream=stream, style=SOFT_CYAN_STYLE)
+    spinner = TerminalSpinner(stream=stream, style="\033[31m")
 
     spinner.start()
     spinner.stop()
@@ -79,7 +81,7 @@ def test_spinner_ignores_style_when_stdout_is_not_tty() -> None:
 
 def test_spinner_is_quiet_when_disabled() -> None:
     stream = FakeStream(tty=True)
-    spinner = TerminalSpinner(stream=stream, enabled=False, style=SOFT_CYAN_STYLE)
+    spinner = TerminalSpinner(stream=stream, enabled=False, style="\033[31m")
 
     spinner.start()
     spinner.stop()

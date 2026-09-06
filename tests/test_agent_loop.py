@@ -1200,6 +1200,15 @@ def test_streaming_enabled_emits_tool_preparing_before_message_and_tool_started(
     loop.run()
 
     event_types = [event["type"] for event in events]
+    assert event_types[:7] == [
+        "run_started",
+        "assistant_message_started",
+        "assistant_delta",
+        "tool_preparing",
+        "assistant_message",
+        "tool_started",
+        "tool_finished",
+    ]
     preparing_index = event_types.index("tool_preparing")
     assistant_index = event_types.index("assistant_message")
     started_index = event_types.index("tool_started")

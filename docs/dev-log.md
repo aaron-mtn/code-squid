@@ -1,3 +1,20 @@
+- 2026-09-06: Corrected the presentation regressions in the thinking-pulse
+  patch without changing its four frames or 0.17-second interval. Normal
+  thinking is terminal-neutral again; Mod accents remain limited to narration
+  and report squid markers, with the existing dim neutral panel borders left
+  unchanged. Removed the CLI's `_tool_preparing_pending` state and stopped
+  presenting `tool_preparing` as a pulse: providers emit that parse-time event
+  before the authoritative `assistant_message` and `tool_started`, so deferring
+  it until narration committed caused the observed last-moment flash. Added
+  coverage for the final static and prompt_toolkit output paths, proving every
+  emitted U+1F991 remains directly followed by U+FE0E and the glyph accent is
+  immediately reset before neutral narration/report text. Saved-session
+  headings now reuse the canonical text-presentation constant instead of
+  embedding color-emoji literals. Focused presentation/event coverage passed
+  (256), the full suite passed (872), production compilation and a fresh
+  31-module import walk passed, and `git diff --check` passed. No Core or
+  renderer changes were made, and no live model inference ran.
+
 - 2026-09-06: Replaced the normal thinking squid/Braille spinner with one
   four-frame `\u00b7`/`\u2022`/`\u25cf`/`\u2022` `Thinking...` pulse. The existing
   spinner thread and terminal lifecycle remain unchanged, while the complete

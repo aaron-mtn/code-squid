@@ -14,6 +14,7 @@ from prompt_toolkit.output.vt100 import Vt100_Output
 
 from code_squid.console.cli import session_runner
 from code_squid.console.ui.display import TerminalDisplay
+from code_squid.console.ui.formatting import SQUID_GLYPH
 from code_squid.console.ui.streaming_narration import StreamingNarration
 
 
@@ -79,6 +80,9 @@ def test_deltas_repaint_one_growing_narration_region(monkeypatch) -> None:
     # Differential rendering writes only the changed suffix on the second frame.
     assert "I inspected" in output
     assert "parser." in output
+    # The live ANSI-to-prompt_toolkit path must not detach or drop VS15.
+    assert SQUID_GLYPH in output
+    assert output.count("\U0001f991") == output.count(SQUID_GLYPH)
     assert output.count("╭") == 1
     # prompt_toolkit keeps the caret hidden for the lifetime of the region.
     assert "\033[?25l" in output
@@ -192,39 +196,40 @@ def test_tool_output_follows_settled_narration_cleanly(monkeypatch) -> None:
     assert display.streaming_narration_active is False
 
 
-def test_tool_preparing_after_settled_narration_restarts_thinking(monkeypatch) -> None:
+def test_tool_preparing_during_narration_does_not_schedule_late_thinking(
+    monkeypatch,
+) -> None:
     spinner = CountingSpinner()
     display, _stream = interactive_display(monkeypatch, spinner=spinner)
 
     display.thinking()
     display.handle_event({"type": "assistant_message_started"})
     display.handle_event({"type": "assistant_delta", "delta": "Writing now."})
-    display.assistant_message("Writing now.")
     display.handle_event({"type": "tool_preparing", "tool": "write_file"})
-
-    assert spinner.starts == 2
-    assert spinner.stops == 2
-
+    display.assistant_message("Writing now.")
     display.handle_event({"type": "tool_started", "tool": "write_file"})
+
+    assert spinner.starts == 1
     assert spinner.stops == 3
 
 
-def test_tool_preparing_waits_for_live_narration_to_settle(monkeypatch) -> None:
+def test_tool_preparing_after_settled_narration_does_not_flash_thinking(
+    monkeypatch,
+) -> None:
     spinner = CountingSpinner()
     display, _stream = interactive_display(monkeypatch, spinner=spinner)
 
     display.thinking()
     display.handle_event({"type": "assistant_message_started"})
     display.handle_event({"type": "assistant_delta", "delta": "Writing now."})
-    display.handle_event({"type": "tool_preparing", "tool": "write_file"})
-    assert spinner.starts == 1
-
     display.assistant_message("Writing now.")
-    assert spinner.starts == 2
+    display.handle_event({"type": "tool_preparing", "tool": "write_file"})
+
+    assert spinner.starts == 1
     assert spinner.stops == 2
 
 
-def test_repeated_narration_and_tool_preparation_cycles_stay_clean(monkeypatch) -> None:
+def test_repeated_model_and_tool_turns_leave_no_orphan_thinking(monkeypatch) -> None:
     spinner = CountingSpinner()
     display, _stream = interactive_display(monkeypatch, spinner=spinner)
 
@@ -236,11 +241,11 @@ def test_repeated_narration_and_tool_preparation_cycles_stay_clean(monkeypatch) 
         display.assistant_message(text)
         display.handle_event({"type": "tool_started", "tool": "read_file"})
 
-    assert spinner.starts == 4
+    assert spinner.starts == 2
     assert spinner.stops == 6
 
 
-def test_visible_tool_output_stops_tool_preparation_pulse(monkeypatch) -> None:
+def test_visible_tool_output_never_competes_with_thinking(monkeypatch) -> None:
     spinner = CountingSpinner()
     display, _stream = interactive_display(monkeypatch, spinner=spinner)
 
@@ -250,7 +255,7 @@ def test_visible_tool_output_stops_tool_preparation_pulse(monkeypatch) -> None:
         {"ok": True},
     )
 
-    assert spinner.starts == 1
+    assert spinner.starts == 0
     assert spinner.stops == 1
 
 
@@ -272,11 +277,13 @@ def test_final_reply_does_not_restart_thinking_after_narration(monkeypatch) -> N
     "event_type",
     ["tool_started", "tool_finished", "run_cancelled", "run_failed", "run_finished"],
 )
-def test_tool_preparing_cleanup_events_stop_thinking(monkeypatch, event_type: str) -> None:
+def test_tool_lifecycle_and_run_boundaries_stop_thinking(
+    monkeypatch, event_type: str
+) -> None:
     spinner = CountingSpinner()
     display, _stream = interactive_display(monkeypatch, spinner=spinner)
 
-    display.handle_event({"type": "tool_preparing", "tool": "read_file"})
+    display.thinking()
     display.handle_event({"type": event_type})
 
     assert spinner.starts == 1

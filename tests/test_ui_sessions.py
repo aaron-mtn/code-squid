@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from code_squid.app_paths import workspace_sessions_dir
+from code_squid.console.ui.formatting import SQUID_GLYPH
 from squid_core.storage import SessionStore
 from code_squid.console.ui.sessions import handle_session_viewer, print_session
 
@@ -24,6 +25,7 @@ def test_print_session_shows_run_context_events(
     print_session(tmp_path, store.session_id)
 
     output = capsys.readouterr().out
+    assert output.startswith(f"{SQUID_GLYPH} Session:")
     assert "[run context]" in output
     assert "skill: user-review" in output
     assert "tools: read_file, run_command" in output

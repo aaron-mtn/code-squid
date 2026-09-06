@@ -1,5 +1,6 @@
 """Tests for Code Squid terminal presentation and interaction helpers."""
 
+import inspect
 import os
 from pathlib import Path
 import shutil
@@ -679,6 +680,35 @@ def test_accent_squid_uses_text_presentation_sequence() -> None:
     assert SQUID_GLYPH == "\U0001f991\ufe0e"
 
 
+def test_final_narration_and_report_output_preserve_text_squid_and_reset(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    display = TerminalDisplay()
+
+    display.assistant_message("Narration remains neutral.")
+    display.action_started({"tool": "read_file", "args": {"path": "app.py"}})
+    display.final_message("Report content remains neutral.")
+    display.loop_finished(empty_session())
+
+    output = capsys.readouterr().out
+    accented_squid = f"{ansi_fg(DEFAULT_MOD_ACCENT_HEX)}{SQUID_GLYPH}{RESET_STYLE}"
+    assert f"{accented_squid} Narration remains neutral." in output
+    assert f"{accented_squid} Report:" in output
+    assert output.count("\U0001f991") == output.count(SQUID_GLYPH) == 2
+    assert f"{SQUID_GLYPH}{RESET_STYLE}" in output
+    assert f"{ansi_fg(DEFAULT_MOD_ACCENT_HEX)}Narration" not in output
+    assert f"{ansi_fg(DEFAULT_MOD_ACCENT_HEX)}Report" not in output
+
+
+def test_product_ui_does_not_embed_a_color_emoji_squid_literal() -> None:
+    ui_root = Path(inspect.getsourcefile(TerminalDisplay)).parent
+    sources = [path.read_text(encoding="utf-8") for path in ui_root.glob("*.py")]
+
+    assert all("🦑" not in source for source in sources)
+
+
 @pytest.mark.parametrize("accent", [None, "unknown", "#bd88ff"])
 def test_missing_unknown_or_hex_mod_accent_falls_back_to_cyan(accent) -> None:
     # Metadata remains semantic: arbitrary hex strings are not palette names.
@@ -771,7 +801,7 @@ def test_mod_accent_does_not_theme_tool_or_changed_file_output(
     assert f"{ansi_fg('#bd88ff')}╭" not in output
 
 
-def test_default_spinner_uses_default_mod_accent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_default_spinner_is_not_given_a_mod_accent(monkeypatch: pytest.MonkeyPatch) -> None:
     spinner_kwargs = []
 
     class CapturingSpinner(FakeSpinner):
@@ -787,12 +817,11 @@ def test_default_spinner_uses_default_mod_accent(monkeypatch: pytest.MonkeyPatch
         {
             "enabled": True,
             "prefix": RUN_EVENT_INDENT,
-            "style": ansi_fg(DEFAULT_MOD_ACCENT_HEX),
         }
     ]
 
 
-def test_mod_change_updates_next_thinking_pulse_accent(
+def test_mod_change_does_not_accent_thinking_pulse(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class AccentSpinner(FakeSpinner):
@@ -824,7 +853,7 @@ def test_mod_change_updates_next_thinking_pulse_accent(
     display.set_specialization(mod_name="warm", skill_name=None)
     display.thinking()
 
-    assert spinner.started_styles == [ansi_fg("#bd88ff"), ansi_fg("#ff6475")]
+    assert spinner.started_styles == ["", ""]
 
 
 def test_run_started_uses_blank_spacing_without_a_divider(
