@@ -1,3 +1,22 @@
+- 2026-09-05: Replaced streamed narration's Code Squid-owned ANSI row clearing
+  and cursor movement with a temporary nonfullscreen prompt_toolkit
+  `Application` and `FormattedTextControl`. The renderer starts only on the
+  first visible delta, reads each layout from the real terminal `Output`,
+  hides its cursor, invalidates coherently as content grows or the viewport
+  changes, and uses a private pipe rather than consuming terminal input.
+  Accepted narration exits with its authoritative final frame retained in
+  ordinary scrollback; rejection, final report, interruption, failure, and
+  loop cleanup erase the provisional frame and synchronously release renderer
+  ownership before static or Tool output proceeds. The existing Core events,
+  fresh/resumed `on_event` wiring, persistence, spinner handoff, and debug and
+  redirected static fallbacks are unchanged. Focused narration/composer/
+  startup/terminal coverage passed (207); broader CLI/UI coverage passed
+  (307); and the full suite passed (849). Production compilation and an
+  82-module fresh import walk passed, the obsolete raw repaint constants are
+  absent, and `git diff --check` passed. A real PTY utility was not available
+  in this Windows environment, so target-terminal resize/flashing confirmation
+  remains manual; no live model inference was run.
+
 - 2026-09-05: Added CLI-owned streamed assistant narration using Core's
   existing event callback without changing Core, providers, or persistence.
   `session_runner.py` now passes the display event handler into fresh and

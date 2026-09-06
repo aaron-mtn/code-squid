@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 from typing import TextIO
 
+from prompt_toolkit.output.base import Output
 from wcwidth import wcswidth
 
 from squid_core.safety import ApprovalDecision, USER_DENIED_TOOL_ACTION
@@ -96,6 +97,7 @@ class TerminalDisplay:
         _spinner: TerminalSpinner | None = None,
         _header: BinaryRainHeader | None = None,
         _output_stream: TextIO | None = None,
+        _narration_output: Output | None = None,
     ) -> None:
         self.debug = debug
         self.show_transcript = show_transcript
@@ -123,6 +125,7 @@ class TerminalDisplay:
             # Debug mode is a static diagnostic transcript; live rewrites
             # would interleave with its reply details.
             enabled=not debug,
+            output=_narration_output,
         )
 
     def start(self) -> None:
@@ -453,8 +456,17 @@ class TerminalDisplay:
         if trailing_blank:
             print()
 
-    def _assistant_narration_panel_lines(self, content: str) -> list[str]:
+    def _assistant_narration_panel_lines(
+        self,
+        content: str,
+        viewport_width: int = RUN_PANEL_WIDTH,
+    ) -> list[str]:
         """Return physical panel rows shared by static and live narration."""
+        # Below nine cells the squid marker and structural padding cannot form
+        # a valid panel. Keep valid internal geometry and let prompt_toolkit
+        # clip it to the truthful (smaller) physical viewport.
+        panel_width = max(min(RUN_PANEL_WIDTH, viewport_width), 9)
+        content_width = panel_width - 2 - len(PANEL_LEFT_PADDING) - 1
         source_lines = content.splitlines() or [""]
         panel_lines: list[str] = []
         narration_indent = " " * (_display_width(SQUID_GLYPH) + 1)
@@ -468,12 +480,12 @@ class TerminalDisplay:
                     source_line,
                     initial_indent=prefix,
                     subsequent_indent=narration_indent,
-                    width=PANEL_CONTENT_WIDTH,
+                    width=content_width,
                 )
             )
         if panel_lines:
             panel_lines[0] = self._accent_first_squid(panel_lines[0])
-        return self._render_panel_lines(panel_lines)
+        return self._render_panel_lines(panel_lines, panel_width=panel_width)
 
     def _prepare_assistant_narration(self) -> None:
         """Transfer terminal ownership from the spinner to the live panel."""
@@ -561,17 +573,23 @@ class TerminalDisplay:
         for line in lines:
             print(line)
 
-    def _render_panel_lines(self, lines: list[str]) -> list[str]:
+    def _render_panel_lines(
+        self,
+        lines: list[str],
+        *,
+        panel_width: int = RUN_PANEL_WIDTH,
+    ) -> list[str]:
         """Build fixed-width physical rows without taking terminal ownership."""
-        horizontal = "─" * (RUN_PANEL_WIDTH - 2)
+        content_width = panel_width - 2 - len(PANEL_LEFT_PADDING) - 1
+        horizontal = "─" * (panel_width - 2)
         rendered = [styled_text(f"╭{horizontal}╮", DIM_STYLE)]
         for line in lines:
             visible_width = _display_width(line)
             # All variable content is cell-wrapped before reaching this fixed
             # geometry seam; fail close to the violating caller if that changes.
-            if visible_width > PANEL_CONTENT_WIDTH:
+            if visible_width > content_width:
                 raise ValueError("run panel content exceeds its fixed width")
-            padding = " " * (PANEL_CONTENT_WIDTH - visible_width + 1)
+            padding = " " * (content_width - visible_width + 1)
             left = styled_text("│", DIM_STYLE)
             right = styled_text("│", DIM_STYLE)
             rendered.append(f"{left}{PANEL_LEFT_PADDING}{line}{padding}{right}")

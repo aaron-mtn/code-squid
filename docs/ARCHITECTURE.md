@@ -132,12 +132,21 @@ and application layer; `squid_core/` is the reusable agent runtime.
     `streaming_narration.py` owns only the current provisional assistant panel.
     The CLI passes `TerminalDisplay.handle_event` to Core and translates
     `assistant_message_started`/`assistant_delta` into that temporary region.
-    On a TTY it redraws only its known panel rows with ANSI cursor movement;
-    redirected and debug output remain static. Validated display callbacks
-    settle authoritative assistant text or discard provisional text before a
-    rejection, final report, failure, or interruption can print. The spinner
-    is stopped before the first visible delta, so there is only one active
-    normal-output writer.
+    The first visible TTY delta starts one temporary, nonfullscreen
+    prompt_toolkit `Application` around a `FormattedTextControl`; subsequent
+    deltas update its content and invalidate that renderer. A private pipe
+    prevents this presentation-only Application from consuming stdin, while
+    its real terminal `Output` remains the sole source of viewport and cursor
+    geometry. The live panel contracts and rewraps from the current output
+    width, and its `Window` hides the cursor while it owns the region. An
+    accepted message exits with the authoritative last frame retained as
+    ordinary scrollback; rejection, finalization, failure, or interruption
+    exits with prompt_toolkit erasing the provisional frame. The Application
+    has fully stopped before either path returns, so tool/static output cannot
+    compete with it. Empty streams never start it, and redirected and debug
+    output remain static. The spinner is stopped before the first visible
+    delta, so there is only one active normal-output writer. Code Squid owns no
+    raw cursor-up or clear-row repaint geometry for live narration.
 
     `prompt_input.py`, `sessions.py`, and `spinner.py` retain their focused
     input, saved-session, and animation responsibilities. The ordinary task
