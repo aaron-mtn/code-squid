@@ -1,3 +1,39 @@
+- 2026-09-05: Let the existing startup-rain drops continue falling during the
+  global fade. Fade advancement now uses a non-resetting movement path, so no
+  replacement drops enter after submit and off-screen drops are not recycled;
+  the final step still clears the entire remaining population atomically. The
+  style progression and startup Application lifecycle are unchanged. Focused
+  rain/startup/composer/display/narration coverage passed (216), and the full
+  suite passed (858). Production compileall and a fresh 82-module import walk
+  passed, as did `git diff --check`. No live model inference was run.
+
+- 2026-09-05: Corrected the startup-rain fade's visual model without changing
+  its non-blocking Application lifecycle. Fade frames now keep every existing
+  drop frozen and apply one global prompt_toolkit intensity step to all rain;
+  the last faint frame retains the complete rain geometry and the next frame
+  clears it atomically. Title, startup panel, and submitted composer styling
+  remain fixed. Focused rain/startup/composer coverage passed (197), focused
+  narration/startup coverage passed (41), and the full suite passed (856).
+  Production compileall and a fresh 82-module import walk passed, as did
+  `git diff --check`. No live model inference was run.
+
+- 2026-09-05: Added a short non-blocking startup-rain exit fade without
+  restoring post-submit rain continuation. Enter now freezes and makes the
+  composer read-only, returns its task immediately, and lets the one existing
+  nonfullscreen prompt_toolkit Application remove its existing drops across
+  eight frames (a nominal 350 ms: one immediate frame plus seven 50 ms refresh
+  intervals). The clean frame retains the title, startup panel, and submitted
+  composer with zero rain cells, then exits into normal scrollback. A shared
+  CLI ownership seam forces that clean render and synchronously joins the
+  startup renderer before early narration, Tool/debug output, approvals,
+  failures, interruptions, direct commands, or cleanup can write. No Core,
+  alternate-screen, stdout-interception, custom ANSI repaint, or second
+  startup-renderer change was made. Focused startup/rain/composer/narration/
+  display tests passed (214), with the submit lifecycle also passing three
+  consecutive focused runs. The full suite passed (856). Production compileall
+  and a fresh 84-module import walk passed, and `git diff --check` passed. No
+  live model inference was run.
+
 - 2026-09-05: Simplified the final CLI completion panel's file summary from the
   always-present `Session files` Read/Written split to an optional, glyph-free
   `Changed files` section listing only paths recorded in `files_written`. Runs

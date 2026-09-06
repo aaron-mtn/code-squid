@@ -28,6 +28,25 @@ HEADER_HEIGHT = startup_scene_layout(80).height
 RAIN_SPEED = 0.7
 FRAME_INTERVAL = 0.05
 DROP_DENSITY = 0.24
+# Eight fade frames (the first is invalidated immediately, followed by seven
+# refresh ticks) retain the submitted scene for a nominal 350 ms. Another
+# terminal writer may force the state directly to the final frame sooner.
+FADE_FRAME_COUNT = 8
+
+# The paired values preserve the head/trail distinction while assigning every
+# visible rain cell to the same global intensity step. Restrained neutral grays
+# degrade predictably in Windows Terminal without terminal-specific repaint
+# behavior.
+FADE_RAIN_STYLES: tuple[tuple[str, str], ...] = (
+    ("bold", "dim"),
+    ("fg:#c0c0c0", "fg:#858585"),
+    ("fg:#969696", "fg:#686868"),
+    ("fg:#747474", "fg:#505050"),
+    ("fg:#595959", "fg:#3e3e3e"),
+    ("fg:#454545", "fg:#303030"),
+    ("fg:#363636", "fg:#252525"),
+    ("fg:#292929", "fg:#1d1d1d"),
+)
 
 EMPTY = 0
 TRAIL_BIT = 1
@@ -85,6 +104,10 @@ class Drop:
         self.head += self.speed
         if self.head - len(self.bits) >= scene_height:
             self.reset(rng)
+
+    def advance_without_reset(self) -> None:
+        """Advance one fade frame without replacing a drop that leaves."""
+        self.head += self.speed
 
     def bit_at(self, row: int) -> str | None:
         """Return the trail bit visible at ``row``, if this drop covers it."""
@@ -231,7 +254,47 @@ class BinaryRainHeader:
         self.startup_info = startup_info
         self._width = 0
         self._drops: list[Drop] = []
+        self._fade_started = False
+        self._fade_step = 0
         self.startup_menu: StartupMenu | None = None
+
+    @property
+    def fade_active(self) -> bool:
+        """Return whether submitted rain is currently moving and fading."""
+        return self._fade_started and self._fade_step < FADE_FRAME_COUNT
+
+    @property
+    def fade_complete(self) -> bool:
+        """Return whether the final, rain-free startup frame is ready."""
+        return self._fade_started and self._fade_step >= FADE_FRAME_COUNT
+
+    def begin_fade(self) -> None:
+        """Freeze the current population and begin its global intensity fade."""
+        if self._fade_started:
+            return
+        self._fade_started = True
+        self._fade_step = 0
+
+    def advance_fade(self) -> None:
+        """Move and dim existing drops, clearing them all at the final step."""
+        if not self._fade_started or self.fade_complete:
+            return
+        # Fade motion deliberately bypasses normal recycling: existing drops
+        # may fall out of view, but replacements must not enter after submit.
+        for drop in self._drops:
+            drop.advance_without_reset()
+        self._fade_step += 1
+        if self.fade_complete:
+            # The last visible step still owns the complete original drop
+            # population; the following clean frame removes it atomically.
+            self._drops.clear()
+
+    def complete_fade(self) -> None:
+        """Advance immediately to the required clean no-rain frame."""
+        if not self._fade_started:
+            self.begin_fade()
+        self._fade_step = FADE_FRAME_COUNT
+        self._drops.clear()
 
     def set_startup_info(self, startup_info: StartupInfo | None) -> None:
         """Set the application-owned values used by subsequent scene frames."""
@@ -245,6 +308,8 @@ class BinaryRainHeader:
         """Create one fresh deterministic scene for a startup boundary."""
         layout = self.layout_for(terminal_columns)
         self._width = layout.width
+        self._fade_started = False
+        self._fade_step = 0
         self._drops = create_drops(
             layout.width,
             self.rng,
@@ -254,6 +319,9 @@ class BinaryRainHeader:
     def advance(self, terminal_columns: int) -> None:
         """Advance rain state; the owning Application decides when to repaint."""
         layout = self.layout_for(terminal_columns)
+        if self._fade_started:
+            self.advance_fade()
+            return
         if layout.width != self._width or not self._drops:
             self.reset(terminal_columns)
             layout = self.layout_for(terminal_columns)
@@ -263,7 +331,9 @@ class BinaryRainHeader:
     def formatted_frame(self, terminal_columns: int) -> StyleAndTextTuples:
         """Return the current scene as prompt_toolkit-owned styled fragments."""
         layout = self.layout_for(terminal_columns)
-        if layout.width != self._width or not self._drops:
+        if not self._fade_started and (
+            layout.width != self._width or not self._drops
+        ):
             self.reset(terminal_columns)
         cells, bits = compose_cells(
             layout,
@@ -271,14 +341,17 @@ class BinaryRainHeader:
             self._panel_lines(layout),
         )
         fragments: StyleAndTextTuples = []
+        head_style, trail_style = FADE_RAIN_STYLES[
+            min(self._fade_step, len(FADE_RAIN_STYLES) - 1)
+        ]
         for row_index, (row_cells, row_bits) in enumerate(zip(cells, bits)):
             current_style: str | None = None
             current_text: list[str] = []
             for cell, bit in zip(row_cells, row_bits):
                 style = (
-                    "bold"
+                    head_style
                     if cell == HEAD_BIT
-                    else "dim"
+                    else trail_style
                     if cell == TRAIL_BIT
                     else ""
                 )
@@ -298,7 +371,9 @@ class BinaryRainHeader:
     def plain_frame(self, terminal_columns: int) -> str:
         """Return a style-free frame for diagnostics and deterministic tests."""
         layout = self.layout_for(terminal_columns)
-        if layout.width != self._width or not self._drops:
+        if not self._fade_started and (
+            layout.width != self._width or not self._drops
+        ):
             self.reset(terminal_columns)
         cells, bits = compose_cells(layout, self._drops, self._panel_lines(layout))
         return render_cells(cells, bits, ansi=False)

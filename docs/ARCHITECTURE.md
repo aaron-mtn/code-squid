@@ -91,9 +91,13 @@ and application layer; `squid_core/` is the reusable agent runtime.
     `startup_application.py` owns the complete live startup surface: rain,
     title, menu panel, and boxed multiline `BufferControl`. It creates one
     temporary, nonfullscreen prompt_toolkit `Application`; that Application's
-    refresh timer advances rain and invalidates the same renderer. There is no
-    rain thread or independent ANSI writer, and production startup code reads
-    no completed-screen or cursor geometry. The composer follows the shared
+    refresh timer advances rain and invalidates the same renderer. Submission
+    makes the Buffer read-only, publishes its task immediately, and starts an
+    eight-frame global rain-fade state in `BinaryRainHeader`. The blocking
+    Application event loop lives on one narrowly owned renderer thread so the
+    caller can begin model work during the nominal 350 ms fade; this is not a
+    second renderer or an independent rain worker. Production startup code
+    reads no completed-screen or cursor geometry. The composer follows the shared
     product policy of 2 through 14 visible content rows, capped again by the
     rows physically available below the startup scene, separator, and frame.
     On constrained terminals the decorative scene clips from the bottom to
@@ -105,15 +109,27 @@ and application layer; `squid_core/` is the reusable agent runtime.
 
     `TerminalDisplay` marks startup active at a session boundary but performs
     no startup terminal writes. `prompt_input.py` selects StartupApplication
-    only for that active scene. Submission or Ctrl+C exits the Application and
-    its refresh lifecycle completely before the scene is retired and any agent
-    output can print. Ordinary later prompts remain composer-only
+    only for that active scene. After submit, the existing Application keeps
+    the title, startup panel, and immutable submitted composer while its own
+    50 ms refresh timer keeps the submitted drop population falling while it
+    progressively dims the complete visible rain field. Drops that leave are
+    not reset or replaced, and none are selectively removed. The eighth step
+    clears every remaining rain cell simultaneously and exits only after that
+    clean frame renders, retaining the scene in ordinary scrollback. If
+    narration, Tool or
+    debug output, approval, failure, interruption, cleanup, or another direct
+    CLI writer needs the terminal first, `TerminalDisplay` forces the same
+    model to its clean state and synchronously joins the Application before the
+    writer proceeds. Ctrl+C also exits and joins the startup lifecycle safely.
+    Ordinary later prompts remain composer-only
     `PromptSession` instances; `/new` creates a fresh temporary Application and
     resets rain at the current terminal position. This strict boundary is not
     the rejected PinnedComposer design: there is no stdout interception,
     managed transcript, persistent composer, alternate-screen transcript, or
-    live renderer during normal run output. The completed startup remains in
-    ordinary terminal history and print-based output continues below it.
+    live renderer during normal run output. There is no stdout interception,
+    alternate screen, or custom startup ANSI repaint geometry. The completed
+    startup remains in ordinary terminal history and print-based output
+    continues below it.
     The composer and startup menu share prompt-toolkit key bindings rather than
     a raw input reader: Up from an empty buffer always focuses the bottom main
     row, arrows navigate, Enter replaces the same panel with a submenu or

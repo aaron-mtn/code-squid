@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import contextvars
+import threading
+
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.formatted_text import AnyFormattedText, to_formatted_text
 from prompt_toolkit.formatted_text.utils import split_lines
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.input.base import Input
 from prompt_toolkit.key_binding import KeyBindingsBase
 from prompt_toolkit.layout import Dimension, HSplit, Layout, Window
@@ -29,13 +33,31 @@ from code_squid.console.ui.header_layout import STARTUP_SEPARATOR_ROWS
 COMPOSER_RIGHT_PADDING = 1
 
 
+_active_startups: dict[int, "StartupApplication"] = {}
+_active_startups_lock = threading.Lock()
+
+
+def finish_startup_application(rain: BinaryRainHeader) -> None:
+    """Synchronously retain a clean startup frame before another writer runs."""
+    with _active_startups_lock:
+        startup = _active_startups.get(id(rain))
+    if startup is not None:
+        startup.finish_fade()
+
+
+def startup_application_active(rain: BinaryRainHeader) -> bool:
+    """Return whether the rain model still has a live startup renderer."""
+    with _active_startups_lock:
+        return id(rain) in _active_startups
+
+
 class StartupApplication:
     """Own rain, panel, menu presentation, and composer until submission.
 
-    This Application is intentionally temporary and non-full-screen. It exits
-    before any agent/run output is printed; normal terminal scrollback resumes
-    immediately afterward. Keeping that boundary strict avoids recreating the
-    rejected persistent transcript/composer UI.
+    This Application is intentionally temporary and non-full-screen. Submit
+    releases the caller while this same renderer briefly fades its rain; any
+    run output synchronously finishes that renderer first. Keeping that
+    boundary strict avoids recreating a persistent transcript/composer UI.
     """
 
     def __init__(
@@ -49,10 +71,20 @@ class StartupApplication:
     ) -> None:
         self.rain = rain
         self.prompt = prompt
+        self._submitted = threading.Event()
+        self._result = ""
+        self._failure: BaseException | None = None
+        self._thread: threading.Thread | None = None
+        self.final_screen = None
         # Keep the real Output as the sole source of terminal geometry. In
         # particular, CPR and resize reconciliation must describe this viewport.
         self.output = output or create_output()
-        self.buffer = Buffer(multiline=True)
+        # Read-only state takes effect in the same key event that publishes the
+        # task, so no input can mutate the retained composer during the fade.
+        self.buffer = Buffer(
+            multiline=True,
+            read_only=Condition(self._submitted.is_set),
+        )
         self.buffer_control = BufferControl(
             buffer=self.buffer,
             input_processors=[BeforeInput(self._prompt_marker)],
@@ -93,16 +125,74 @@ class StartupApplication:
             erase_when_done=False,
             refresh_interval=FRAME_INTERVAL,
             before_render=self._advance_rain,
+            after_render=self._exit_after_clean_frame,
             input=input,
             output=self.output,
         )
+        # The shared key bindings use this narrow product callback only for the
+        # startup Application; ordinary PromptSession submission is unchanged.
+        self.application.code_squid_submit = self.submit  # type: ignore[attr-defined]
         # `/new` constructs a new temporary Application around the same display
         # model, so reset drops here to make every session scene genuinely fresh.
         self.rain.reset(self.application.output.get_size().columns)
 
     def run(self) -> str:
-        """Run until submit or interruption, leaving no live renderer behind."""
-        return self.application.run()
+        """Return on submit while the existing Application finishes its fade."""
+        context = contextvars.copy_context()
+        self._thread = threading.Thread(
+            target=context.run,
+            args=(self._run_application,),
+            name="code-squid-startup-renderer",
+        )
+        with _active_startups_lock:
+            _active_startups[id(self.rain)] = self
+        self._thread.start()
+        self._submitted.wait()
+        self._raise_failure()
+        return self._result
+
+    def submit(self, task: str) -> None:
+        """Publish the immutable composer value and start the short fade."""
+        if self._submitted.is_set():
+            return
+        self._result = task
+        self.rain.begin_fade()
+        self._submitted.set()
+        self.application.invalidate()
+
+    def finish_fade(self) -> None:
+        """Force, render, and retain the clean frame before returning."""
+        if self.application.is_running and self.application.loop is not None:
+            # Mutate render state on its owning event loop. This prevents a
+            # force request from landing between composition and after_render.
+            self.application.loop.call_soon_threadsafe(self._force_fade)
+        else:
+            self.rain.complete_fade()
+        if (
+            self._thread is not None
+            and self._thread is not threading.current_thread()
+        ):
+            self._thread.join()
+        self._raise_failure()
+
+    def _force_fade(self) -> None:
+        self.rain.complete_fade()
+        self.application.invalidate()
+
+    def _run_application(self) -> None:
+        try:
+            self.application.run()
+        except BaseException as error:
+            self._failure = error
+        finally:
+            self._submitted.set()
+            with _active_startups_lock:
+                if _active_startups.get(id(self.rain)) is self:
+                    del _active_startups[id(self.rain)]
+
+    def _raise_failure(self) -> None:
+        if self._failure is not None:
+            raise self._failure
 
     def _output_size(self):
         return self.output.get_size()
@@ -160,6 +250,20 @@ class StartupApplication:
 
     def _advance_rain(self, app: Application[str]) -> None:
         self.rain.advance(app.output.get_size().columns)
+
+    def _exit_after_clean_frame(self, app: Application[str]) -> None:
+        # after_render is the crucial ordering boundary: the no-rain scene has
+        # reached Output before terminal ownership is released.
+        if not self.rain.fade_complete:
+            return
+        if app.renderer._last_screen is not None:
+            self.final_screen = app.renderer._last_screen
+        if (
+            app.is_running
+            and app.future is not None
+            and not app.future.done()
+        ):
+            app.exit(result=self._result)
 
     @staticmethod
     def _continuation_prefix(line_number: int, wrap_count: int):

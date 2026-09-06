@@ -56,6 +56,10 @@ from code_squid.console.ui.formatting import (
 from code_squid.console.ui.prompt_input import prompt_multiline_input
 from code_squid.console.ui.spinner import TerminalSpinner
 from code_squid.console.ui.streaming_narration import StreamingNarration
+from code_squid.console.ui.startup_application import (
+    finish_startup_application,
+    startup_application_active,
+)
 from code_squid.console.ui.tool_display import (
     FILE_TOOLS,
     action_label,
@@ -141,14 +145,21 @@ class TerminalDisplay:
         self._streaming_narration.discard()
         self.retire_session_scene()
         self._stop_spinner()
-        print()
+        # Construction and the model request can proceed during the fade. The
+        # traditional separating blank is deferred until visible output needs
+        # the terminal, at which point ownership is transferred synchronously.
+        if startup_application_active(self.header):
+            self._needs_leading_blank = True
+        else:
+            print()
+            self._needs_leading_blank = False
         self._pending_final_content = ""
         self._has_run_output = False
         self._tool_used_in_run = False
-        self._needs_leading_blank = False
         self._needs_detail_blank_after_assistant = False
 
     def thinking(self) -> None:
+        self._finish_startup_before_output()
         if self.debug:
             print(self._squid_line(" Thinking..."))
             print()
@@ -169,6 +180,7 @@ class TerminalDisplay:
         if not content:
             return
 
+        self._finish_startup_before_output()
         self._print_leading_blank_if_needed()
         if self._needs_detail_blank_after_assistant:
             print()
@@ -188,10 +200,12 @@ class TerminalDisplay:
         self._tool_used_in_run = True
         self._stop_spinner()
         if self.debug and action.get("tool") not in FILE_TOOLS:
+            self._finish_startup_before_output()
             print(self._action_text(action))
             self._has_run_output = True
 
     def approve_action(self, action: dict) -> ApprovalDecision:
+        self._finish_startup_before_output()
         self._stop_spinner()
         self._print_leading_blank_if_needed()
         if self._needs_detail_blank_after_assistant:
@@ -243,6 +257,7 @@ class TerminalDisplay:
         print(rejected_approval_result(instruction, RUN_DETAIL_INDENT))
 
     def tool_result(self, action: dict, result: dict) -> None:
+        self._finish_startup_before_output()
         self._stop_spinner()
         if result.get("error") == USER_DENIED_TOOL_ACTION:
             if self._compacted_denied_action == action:
@@ -259,11 +274,13 @@ class TerminalDisplay:
         self._print_debug_tool_result(action, result)
 
     def reply_rejected(self, reason: str) -> None:
+        self._finish_startup_before_output()
         self._streaming_narration.discard()
         self._stop_spinner()
         self._print_visible_line(self._reply_rejected_line(reason), style=SOFT_YELLOW_STYLE)
 
     def repeated_invalid_replies(self, reason: str, count: int) -> None:
+        self._finish_startup_before_output()
         self._stop_spinner()
         self._print_visible_line(
             f"⚠️ Stopping after {count} invalid replies: {reason}",
@@ -271,6 +288,7 @@ class TerminalDisplay:
         )
 
     def step_limit_reached(self, max_tool_steps: int) -> None:
+        self._finish_startup_before_output()
         self._stop_spinner()
         self._print_visible_line(
             f"⚠️ Stopping after reaching tool step limit: {max_tool_steps}",
@@ -278,12 +296,14 @@ class TerminalDisplay:
         )
 
     def interrupted(self) -> None:
+        self._finish_startup_before_output()
         self._streaming_narration.discard()
         self._stop_spinner()
         self._interrupted = True
         self._print_visible_line("⏹️ Interrupted", style=SOFT_YELLOW_STYLE)
 
     def model_request_failed(self, log_path: Path) -> None:
+        self._finish_startup_before_output()
         self._streaming_narration.discard()
         self._stop_spinner()
         # Provider details belong in the saved log; normal CLI output stays stable.
@@ -295,6 +315,7 @@ class TerminalDisplay:
         self._has_run_output = True
 
     def loop_finished(self, session, run_result=None) -> None:
+        self._finish_startup_before_output()
         self._streaming_narration.discard()
         self._stop_spinner()
         if self._needs_leading_blank:
@@ -323,6 +344,7 @@ class TerminalDisplay:
     def debug_reply(self, reply: dict) -> None:
         if not self.debug:
             return
+        self._finish_startup_before_output()
         self._stop_spinner()
         actions = reply.get("actions", [])
         if not actions:
@@ -373,8 +395,17 @@ class TerminalDisplay:
         self.header.set_startup_info(self.startup_info)
 
     def stop_header(self) -> None:
-        """Mark startup inactive; its temporary Application already exited."""
+        """Synchronously stop any submitted fade and mark startup inactive."""
+        finish_startup_application(self.header)
         self._session_scene_active = False
+
+    def finish_startup_fade(self) -> None:
+        """Release startup ownership before a direct CLI print operation."""
+        self._finish_startup_before_output()
+
+    def _finish_startup_before_output(self) -> None:
+        """Give ordinary output exclusive ownership of the terminal."""
+        finish_startup_application(self.header)
 
     @property
     def session_scene_active(self) -> bool:
@@ -421,6 +452,7 @@ class TerminalDisplay:
     def _print_leading_blank_if_needed(self) -> None:
         # Tool results are one-line event blocks; separate the next visible block here.
         if self._needs_leading_blank:
+            self._finish_startup_before_output()
             print()
             self._needs_leading_blank = False
 
@@ -493,6 +525,7 @@ class TerminalDisplay:
 
     def _prepare_assistant_narration(self) -> None:
         """Transfer terminal ownership from the spinner to the live panel."""
+        self._finish_startup_before_output()
         self._stop_spinner()
         self._print_leading_blank_if_needed()
         if self._needs_detail_blank_after_assistant:
@@ -509,6 +542,7 @@ class TerminalDisplay:
         return True
 
     def _debug_block(self, title: str, lines: list[str]) -> None:
+        self._finish_startup_before_output()
         width = 47
         top_label = f"─ {title} "
         print(structural_text(f"┌{top_label}{'─' * max(width - len(top_label), 0)}"))
@@ -573,6 +607,7 @@ class TerminalDisplay:
 
     def _print_rendered_lines(self, lines: list[str]) -> None:
         """Print already-built physical rows through ordinary terminal output."""
+        self._finish_startup_before_output()
         for line in lines:
             print(line)
 

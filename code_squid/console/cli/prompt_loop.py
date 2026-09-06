@@ -117,6 +117,13 @@ def _prompt_task(label: str, animator: BinaryRainHeader | None = None) -> str:
     )
 
 
+def _finish_startup_fade(display: TerminalDisplay) -> None:
+    """Release real startup ownership; lightweight test displays own none."""
+    finish = getattr(display, "finish_startup_fade", None)
+    if finish is not None:
+        finish()
+
+
 def _prompt_task_or_cancel(
     label: str,
     display: TerminalDisplay | None = None,
@@ -146,9 +153,11 @@ def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
         if task is None:
             return 0
         if _is_help_input(task):
+            _finish_startup_fade(display)
             _print_help()
             return 0
         if not task.strip():
+            _finish_startup_fade(display)
             print("No task entered; nothing to run.")
             return 0
 
@@ -205,14 +214,26 @@ def _run_interactive(
             if task is None:
                 return 0
             if _is_exit_input(task):
+                _finish_startup_fade(display)
                 return 0
             if _is_new_input(task):
+                _finish_startup_fade(display)
                 active_session_id = None
                 display.start_session_scene()
                 continue
             if _is_help_input(task):
+                _finish_startup_fade(display)
                 _print_help()
                 continue
+            # Every remaining command handler can print directly. Finish the
+            # startup renderer before dispatch, then restart no scene unless
+            # this input proves to be an actual model task below.
+            is_direct_command = (
+                task.strip().startswith("/")
+                or not task.strip()
+            )
+            if is_direct_command:
+                _finish_startup_fade(display)
             handled, settings = handle_runtime_command(repo_root, task, settings)
             if handled:
                 menu.sync(settings, mod_name=mod_name, skill_name=skill_name)

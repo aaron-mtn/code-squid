@@ -38,17 +38,24 @@ class MenuAnimator(BinaryRainHeader):
 def _run_prompt(monkeypatch, menu: StartupMenu, terminal_input: str) -> str:
     result: list[str] = []
     errors: list[BaseException] = []
+    startups: list[StartupApplication] = []
     with create_pipe_input() as pipe_input:
         animator = MenuAnimator(menu)
-        monkeypatch.setattr(
-            "code_squid.console.ui.prompt_input.StartupApplication",
-            lambda prompt, rain, bindings: StartupApplication(
+
+        def build_startup(prompt, rain, bindings):
+            startup = StartupApplication(
                 prompt,
                 rain,
                 bindings,
                 input=pipe_input,
                 output=DummyOutput(),
-            ),
+            )
+            startups.append(startup)
+            return startup
+
+        monkeypatch.setattr(
+            "code_squid.console.ui.prompt_input.StartupApplication",
+            build_startup,
         )
 
         def prompt() -> None:
@@ -62,6 +69,7 @@ def _run_prompt(monkeypatch, menu: StartupMenu, terminal_input: str) -> str:
         pipe_input.send_text(terminal_input)
         thread.join(timeout=5)
         assert not thread.is_alive()
+        startups[0].finish_fade()
     assert not errors
     return result[0]
 
@@ -81,15 +89,22 @@ def test_menu_keys_update_visible_panel_state(monkeypatch, tmp_path) -> None:
     result: list[str] = []
 
     with create_pipe_input() as pipe_input:
-        monkeypatch.setattr(
-            "code_squid.console.ui.prompt_input.StartupApplication",
-            lambda prompt, rain, bindings: StartupApplication(
+        startups: list[StartupApplication] = []
+
+        def build_startup(prompt, rain, bindings):
+            startup = StartupApplication(
                 prompt,
                 rain,
                 bindings,
                 input=pipe_input,
                 output=DummyOutput(),
-            ),
+            )
+            startups.append(startup)
+            return startup
+
+        monkeypatch.setattr(
+            "code_squid.console.ui.prompt_input.StartupApplication",
+            build_startup,
         )
 
         thread = threading.Thread(
@@ -100,6 +115,7 @@ def test_menu_keys_update_visible_panel_state(monkeypatch, tmp_path) -> None:
         pipe_input.send_text("\x1b[A\x1b[A\x1b[B\x1btext\r")
         thread.join(timeout=5)
         assert not thread.is_alive()
+        startups[0].finish_fade()
 
     assert result == ["text"]
     assert menu.focused is False

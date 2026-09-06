@@ -10,6 +10,7 @@ from code_squid.console.ui.binary_header import (
     BRIGHT_STYLE,
     DIM_STYLE,
     EMPTY,
+    FADE_FRAME_COUNT,
     HEAD_BIT,
     RAIN_SPEED,
     RESET_STYLE,
@@ -154,3 +155,134 @@ def test_rain_speed_remains_the_designed_factor() -> None:
     assert RAIN_SPEED == 0.7
     drops = create_drops(80, random.Random(1), density=1.0)
     assert len({drop.speed for drop in drops}) > 1
+
+
+def _rain_positions(rain: BinaryRainHeader, columns: int) -> set[tuple[int, int]]:
+    layout = rain.layout_for(columns)
+    cells, _ = compose_cells(layout, rain._drops, rain._panel_lines(layout))
+    return {
+        (row, column)
+        for row, line in enumerate(cells)
+        for column, cell in enumerate(line)
+        if cell in (HEAD_BIT, TRAIL_BIT)
+    }
+
+
+def _rain_styles(rain: BinaryRainHeader, columns: int) -> set[str]:
+    return {
+        style
+        for style, text in rain.formatted_frame(columns)
+        if style and any(bit in text for bit in "01")
+    }
+
+
+def _fixed_scene_content(
+    rain: BinaryRainHeader,
+    columns: int,
+) -> tuple[str, tuple[str, ...]]:
+    layout = rain.layout_for(columns)
+    _, bits = compose_cells(layout, rain._drops, rain._panel_lines(layout))
+    title = "".join(
+        bits[layout.title_row][
+            layout.title_column : layout.title_column + len(TITLE)
+        ]
+    )
+    panel = tuple(
+        "".join(
+            bits[row][layout.panel.left : layout.panel.left + layout.panel.width]
+        )
+        for row in range(layout.panel.top, layout.panel.bottom + 1)
+    )
+    return title, panel
+
+
+def test_fade_moves_existing_drops_until_the_final_clean_step() -> None:
+    rain = BinaryRainHeader(rng=random.Random(5), startup_info=_startup_info())
+    rain.reset(80)
+    original_drops = [
+        (id(drop), drop.column, drop.speed, tuple(drop.bits))
+        for drop in rain._drops
+    ]
+    original_heads = [drop.head for drop in rain._drops]
+    fixed_content = _fixed_scene_content(rain, 80)
+    style_steps = []
+
+    rain.begin_fade()
+    assert [
+        (id(drop), drop.column, drop.speed, tuple(drop.bits))
+        for drop in rain._drops
+    ] == original_drops
+    style_steps.append(_rain_styles(rain, 80))
+    for frame in range(1, FADE_FRAME_COUNT):
+        rain.advance(40)  # Resizing must not rebuild frozen fade state either.
+        assert [
+            (id(drop), drop.column, drop.speed, tuple(drop.bits))
+            for drop in rain._drops
+        ] == original_drops
+        assert [drop.head for drop in rain._drops] == pytest.approx(
+            [
+                head + (drop.speed * frame)
+                for head, drop in zip(original_heads, rain._drops)
+            ]
+        )
+        assert _fixed_scene_content(rain, 80) == fixed_content
+        style_steps.append(_rain_styles(rain, 80))
+
+    assert len(set(map(frozenset, style_steps))) == FADE_FRAME_COUNT
+    assert len(rain._drops) == len(original_drops)
+    assert _rain_positions(rain, 80)
+    assert rain.fade_complete is False
+
+    rain.advance(40)
+
+    assert rain.fade_complete is True
+    assert rain._drops == []
+    assert all(style not in {"bold", "dim"} for style, _ in rain.formatted_frame(40))
+    final_plain_frame = rain.plain_frame(80)
+    assert "0" not in final_plain_frame
+    assert "1" not in final_plain_frame
+
+
+def test_drop_that_leaves_during_fade_is_not_reset_or_replaced() -> None:
+    rain = BinaryRainHeader(rng=random.Random(6), startup_info=_startup_info())
+    layout = rain.layout_for(80)
+    departing = Drop(
+        column=0,
+        head=float(layout.height + 3),
+        speed=0.5,
+        bits=["1", "0"],
+    )
+    rain._width = layout.width
+    rain._drops = [departing]
+
+    rain.begin_fade()
+    rain.advance(80)
+
+    assert rain._drops == [departing]
+    assert departing.head == layout.height + 3.5
+    assert departing.speed == 0.5
+    assert departing.bits == ["1", "0"]
+
+
+def test_normal_rain_still_resets_a_completed_drop() -> None:
+    scene_height = 10
+    drop = Drop(column=0, head=13.0, speed=0.5, bits=["1", "0"])
+
+    drop.advance(random.Random(9), scene_height=scene_height)
+
+    assert -TITLE_ROW <= drop.head <= 0
+    assert 0.3 * RAIN_SPEED <= drop.speed <= 1.2 * RAIN_SPEED
+    assert 3 <= len(drop.bits) <= 6
+
+
+def test_forced_fade_completion_never_repopulates_rain() -> None:
+    rain = BinaryRainHeader(rng=random.Random(8), startup_info=_startup_info())
+    rain.reset(80)
+
+    rain.begin_fade()
+    rain.complete_fade()
+    rain.advance(120)
+    rain.plain_frame(120)
+
+    assert rain.fade_complete is True
+    assert rain._drops == []

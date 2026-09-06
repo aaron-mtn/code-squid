@@ -302,6 +302,10 @@ def _run_input(terminal_input: str, *, startup: bool = False) -> str:
         pipe_input.send_text(terminal_input)
         thread.join(timeout=10)
         assert not thread.is_alive()
+        if startup:
+            # The production display owns this handoff. Tests must release the
+            # asynchronous startup renderer before closing their private pipe.
+            app.finish_fade()
     assert not errors
     return result[0]
 
@@ -364,6 +368,7 @@ def test_startup_fast_vertical_navigation_uses_prompt_toolkit_bindings() -> None
             wait_for(lambda: startup.buffer.cursor_position == len(task))
             pipe_input.send_text("\r")
             thread.join(timeout=5)
+            startup.finish_fade()
         finally:
             if thread.is_alive():
                 pipe_input.send_bytes(b"\x03")
@@ -386,6 +391,68 @@ def test_startup_ctrl_c_raises_shutdown_interrupt() -> None:
     assert len(errors) == 1 and isinstance(errors[0], KeyboardInterrupt)
     assert startup.application.is_running is False
     assert all(thread.name != "code-squid-binary-rain" for thread in threading.enumerate())
+    assert all(
+        thread.name != "code-squid-startup-renderer"
+        for thread in threading.enumerate()
+    )
+
+
+def test_startup_submit_returns_before_fade_and_retains_clean_composer() -> None:
+    with create_pipe_input() as pipe_input:
+        startup = _startup(input=pipe_input)
+        result: list[str] = []
+        caller = threading.Thread(target=lambda: result.append(startup.run()))
+        caller.start()
+        started = time.monotonic()
+        pipe_input.send_text("submitted task\r")
+        caller.join(timeout=0.2)
+        elapsed = time.monotonic() - started
+
+        assert not caller.is_alive()
+        assert result == ["submitted task"]
+        assert elapsed < 0.2
+        assert startup.application.is_running is True
+        assert startup.buffer.read_only() is True
+        assert startup.buffer.text == "submitted task"
+
+        assert startup._thread is not None
+        startup._thread.join(timeout=2)
+        assert not startup._thread.is_alive()
+
+    screen = startup.final_screen
+    assert screen is not None
+    rows = "\n".join(_screen_rows(screen))
+    assert "submitted task" in rows
+    assert TITLE in rows
+    assert startup.rain.fade_complete is True
+    assert startup.rain._drops == []
+    assert startup.application.is_running is False
+
+
+def test_early_narration_forces_and_joins_startup_fade() -> None:
+    from code_squid.console.ui.display import TerminalDisplay
+
+    with create_pipe_input() as pipe_input:
+        startup = _startup(input=pipe_input)
+        result: list[str] = []
+        caller = threading.Thread(target=lambda: result.append(startup.run()))
+        caller.start()
+        pipe_input.send_text("task\r")
+        caller.join(timeout=0.2)
+        assert result == ["task"]
+
+        display = TerminalDisplay(_header=startup.rain)
+        display.run_started()
+        assert startup.application.is_running is True
+        display.assistant_message("Early narration")
+
+        assert startup.rain.fade_complete is True
+        assert startup.application.is_running is False
+        assert startup._thread is not None and not startup._thread.is_alive()
+        assert not any(
+            thread.name == "code-squid-startup-renderer" and thread.is_alive()
+            for thread in threading.enumerate()
+        )
 
 
 def _capture_error(callback, errors: list[BaseException]) -> None:

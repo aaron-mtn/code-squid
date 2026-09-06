@@ -172,12 +172,20 @@ def multiline_key_bindings(
 
     @bindings.add("enter", filter=~menu_focused)
     def _(event) -> None:
+        startup_submit = getattr(event.app, "code_squid_submit", None)
+        if startup_submit is not None:
+            startup_submit(event.current_buffer.text)
+            return
         event.app.exit(result=event.current_buffer.text)
 
     @bindings.add("c-c", eager=True)
     def _(event) -> None:
         # Ctrl+C is Code Squid shutdown, including while the startup menu owns
         # ordinary keys. Application cleanup restores terminal cursor state.
+        if animator is not None and animator.fade_active:
+            animator.complete_fade()
+            event.app.invalidate()
+            return
         event.app.exit(exception=KeyboardInterrupt)
 
     @bindings.add("c-j", filter=~menu_focused)
