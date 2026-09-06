@@ -166,19 +166,19 @@ and application layer; `squid_core/` is the reusable agent runtime.
     Normal run output uses ordinary scrollback and 61-column panels. While
     streaming is enabled, one provisional narration panel grows in place and
     becomes ordinary scrollback when the validated assistant callback settles
-    it; non-streamed narration remains a static print. The final report and
-    Session files share one completion panel. `final_message` discards any
-    provisional narration and retains only the current report text until
-    `loop_finished` supplies the session file sets. This does not introduce a
-    managed transcript, alternate screen, or persistent terminal region.
+    it; non-streamed narration remains a static print. The final report and an
+    optional Changed files section share one completion panel. `final_message`
+    discards any provisional narration and retains only the current report text
+    until `loop_finished` supplies the session's written paths. The section
+    lists only files written by the run and is omitted when that set is empty.
+    This does not introduce a managed transcript, alternate screen, or
+    persistent terminal region.
     Tool results, approvals, warnings, and non-success status remain outside
     these panels, and standalone run/report/file dividers are not emitted.
     Every composer and run-panel border uses the same dim terminal-default
     styling and imports one product-owned 61-cell width from `formatting.py`.
-    Static panel measurement strips ANSI/OSC sequences and explicitly treats
-    the Session files `U+1F5C2 U+FE0F` sequence as the one cell used by the
-    prompt/target-terminal rendering seam, preventing that heading from
-    shifting the completion panel's right border.
+    Static panel measurement strips ANSI/OSC sequences before calculating the
+    padding needed to keep the completion panel's right border aligned.
     Thinking, narration, and report markers share a
     text-presentation squid glyph so the current semantic Mod accent can be
     rendered by ANSI foreground color without coloring adjacent text or panel

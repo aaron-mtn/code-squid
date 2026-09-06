@@ -34,7 +34,6 @@ from code_squid.console.ui.formatting import (
     DEFAULT_MOD_ACCENT_HEX,
     RESET_STYLE,
     RUN_PANEL_WIDTH,
-    SESSION_FILES_GLYPH,
     SQUID_GLYPH,
     SOFT_CYAN_HEX,
     SOFT_CYAN_STYLE,
@@ -177,8 +176,8 @@ class TerminalDisplay:
     def final_message(self, content: str) -> None:
         self._streaming_narration.discard()
         self._stop_spinner()
-        # Session files arrive in loop_finished, so retain the report briefly to
-        # print both completion sections inside one static panel.
+        # Written paths arrive in loop_finished, so retain the report briefly to
+        # print both completion sections inside one static panel when needed.
         self._pending_final_content = content.strip()
 
     def action_started(self, action: dict) -> None:
@@ -522,7 +521,7 @@ class TerminalDisplay:
         )
 
     def _print_completion_panel(self, session) -> None:
-        """Print the report and unchanged session-file data as one panel."""
+        """Print the report and any files changed by the run as one panel."""
         lines = [self._squid_line(" Report:"), ""]
         formatted = format_final_summary(
             self._pending_final_content,
@@ -530,11 +529,9 @@ class TerminalDisplay:
         )
         if formatted:
             lines.extend(formatted.splitlines())
-            lines.append("")
-        lines.extend([f"{SESSION_FILES_GLYPH}  Session files", ""])
-        lines.extend(self._file_list_lines("Read", session.files_read))
-        lines.append("")
-        lines.extend(self._file_list_lines("Written", session.files_written))
+        if session.files_written:
+            lines.extend(["", "Changed files", ""])
+            lines.extend(self._file_lines(session.files_written))
         self._print_panel(lines)
         self._pending_final_content = ""
         self._needs_leading_blank = False
@@ -600,11 +597,9 @@ class TerminalDisplay:
         """Return final report text through the existing display test seam."""
         return format_final_summary(content)
 
-    def _file_list_lines(self, title: str, paths: set[str]) -> list[str]:
-        lines = [f"    {title}"]
-        if not paths:
-            lines.append("      none")
-            return lines
+    def _file_lines(self, paths: set[str]) -> list[str]:
+        """Return wrapped file rows for a non-empty changed-path set."""
+        lines = []
         for path in sorted(paths):
             label = path if self.debug else self._short_path(path)
             chunks = wrapped_display_lines(
@@ -631,9 +626,5 @@ class TerminalDisplay:
 def _display_width(value: str) -> int:
     """Return terminal cell width after removing local ANSI/OSC styling."""
     plain = ANSI_ESCAPE_PATTERN.sub("", value)
-    # prompt_toolkit and the target terminals render U+1F5C2 + VS16 as one
-    # cell, while sequence-aware wcswidth reports two. Keep this correction
-    # local to the structural Session files glyph that exposed the mismatch.
-    plain = plain.replace(SESSION_FILES_GLYPH, SESSION_FILES_GLYPH[:-1])
     width = wcswidth(plain)
     return len(plain) if width < 0 else width

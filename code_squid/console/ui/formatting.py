@@ -19,7 +19,6 @@ RESET_STYLE = "\033[0m"
 # Force text presentation so terminal foreground color applies to the squid.
 # Color-emoji fonts commonly ignore ANSI foreground styles on the default glyph.
 SQUID_GLYPH = "\U0001f991\ufe0e"
-SESSION_FILES_GLYPH = "\U0001f5c2\ufe0f"
 SOFT_CYAN_HEX = "#7dd3fc"
 SOFT_GREEN_HEX = "#86efac"
 SOFT_YELLOW_HEX = "#ffea80"

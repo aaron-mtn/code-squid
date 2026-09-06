@@ -1,3 +1,13 @@
+- 2026-09-05: Simplified the final CLI completion panel's file summary from the
+  always-present `Session files` Read/Written split to an optional, glyph-free
+  `Changed files` section listing only paths recorded in `files_written`. Runs
+  without written files now show only the existing report content. Removed the
+  obsolete folder-glyph constant and its special display-width correction;
+  streaming narration and panel styling are unchanged. Focused TerminalDisplay
+  coverage passed (143); broader CLI/UI coverage passed (154); and the full
+  suite passed (849). Production compilation and an 82-module fresh import walk
+  passed, and `git diff --check` passed. No live model inference was run.
+
 - 2026-09-05: Replaced streamed narration's Code Squid-owned ANSI row clearing
   and cursor movement with a temporary nonfullscreen prompt_toolkit
   `Application` and `FormattedTextControl`. The renderer starts only on the

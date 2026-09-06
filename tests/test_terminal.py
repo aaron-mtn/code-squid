@@ -742,7 +742,7 @@ def test_active_mod_change_updates_later_squid_glyphs_only(
     assert f"{ansi_fg('#ff6475')}{SQUID_GLYPH} Report" not in output
 
 
-def test_mod_accent_does_not_theme_tool_or_session_file_output(
+def test_mod_accent_does_not_theme_tool_or_changed_file_output(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -757,11 +757,13 @@ def test_mod_accent_does_not_theme_tool_or_session_file_output(
 
     display.tool_result({"tool": "read_file", "args": {"path": "app.py"}}, {"ok": True})
     display.loop_finished(
-        SimpleNamespace(files_read={"app.py"}, files_written=set(), messages=[])
+        SimpleNamespace(files_read={"app.py"}, files_written={"app.py"}, messages=[])
     )
 
     output = capsys.readouterr().out
-    assert "🗂️  Session files" in output
+    # TTY border styling inserts ANSI resets between the border and its padding.
+    assert "  Changed files" in output
+    assert "🗂️" not in output
     accented_squid = f"{ansi_fg('#bd88ff')}{SQUID_GLYPH}{RESET_STYLE}"
     assert output.count(ansi_fg("#bd88ff")) == 1
     assert accented_squid in output
@@ -1571,7 +1573,7 @@ def test_normal_completion_omits_redundant_success_line(
 
     output = capsys.readouterr().out
     assert "✅ Done!" not in output
-    assert "🗂️  Session files" in output
+    assert "Changed files" not in output
 
 
 @pytest.mark.parametrize(
@@ -1597,11 +1599,11 @@ def test_loop_Done_prints_status_label(
     assert "✅ Done!" not in output
 
 
-def test_loop_finished_prints_one_shared_completion_panel(
+def test_loop_finished_prints_only_changed_files_in_shared_completion_panel(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     session = SimpleNamespace(
-        files_read={"app.py"},
+        files_read={"read-only.py"},
         files_written={"app.py"},
         messages=[],
     )
@@ -1613,8 +1615,12 @@ def test_loop_finished_prints_one_shared_completion_panel(
     assert lines[0] == f"╭{'─' * (RUN_PANEL_WIDTH - 2)}╮"
     assert lines[-1] == f"╰{'─' * (RUN_PANEL_WIDTH - 2)}╯"
     assert f"│  {SQUID_GLYPH} Report:" in output
-    assert "🗂️  Session files" in output
+    assert "│  Changed files" in output
+    assert "🗂️" not in output
     assert "      app.py" in output
+    assert "read-only.py" not in output
+    assert "Read" not in output
+    assert "Written" not in output
     assert "─" * RUN_PANEL_WIDTH not in output
     assert all(_display_width(line) == RUN_PANEL_WIDTH for line in lines)
 
@@ -1637,14 +1643,14 @@ def test_completion_panel_keeps_edges_aligned_across_unicode_and_styling(
 
     lines = capsys.readouterr().out.strip().splitlines()
     assert any(SQUID_GLYPH in line and "Report:" in line for line in lines)
-    session_index = next(
-        index for index, line in enumerate(lines) if "🗂️  Session files" in line
+    changed_files_index = next(
+        index for index, line in enumerate(lines) if "Changed files" in line
     )
-    assert lines[session_index - 1]
-    assert lines[session_index + 1]
-    assert _display_width(lines[session_index - 1]) == RUN_PANEL_WIDTH
-    assert _display_width(lines[session_index]) == RUN_PANEL_WIDTH
-    assert _display_width(lines[session_index + 1]) == RUN_PANEL_WIDTH
+    assert lines[changed_files_index - 1]
+    assert lines[changed_files_index + 1]
+    assert _display_width(lines[changed_files_index - 1]) == RUN_PANEL_WIDTH
+    assert _display_width(lines[changed_files_index]) == RUN_PANEL_WIDTH
+    assert _display_width(lines[changed_files_index + 1]) == RUN_PANEL_WIDTH
     assert any("\033]8;;" in line for line in lines)
     assert all(_display_width(line) == RUN_PANEL_WIDTH for line in lines)
 
@@ -1662,7 +1668,7 @@ def test_direct_final_run_prints_one_clean_completion_panel(
     assert output.count("╭") == output.count("╰") == 1
     assert f"│  {SQUID_GLYPH} Report:" in output
     assert "Yes." in output
-    assert "🗂️  Session files" in output
+    assert "Changed files" not in output
     assert "─" * RUN_PANEL_WIDTH not in output
 
 
@@ -1762,7 +1768,7 @@ def test_final_message_renders_report_heading(
 
     output = capsys.readouterr().out
     assert f"│  {SQUID_GLYPH} Report:" in output
-    assert "🗂️  Session files" in output
+    assert "Changed files" not in output
     assert f"{FINAL_SUMMARY_INDENT}Files changed" in output
     assert f"{FINAL_SUMMARY_INDENT}• `ui/terminal.py`" in output
     assert f"{FINAL_SUMMARY_INDENT}What changed" in output
@@ -2118,7 +2124,7 @@ def test_debug_loop_finished_does_not_print_transcript_by_default(
 
     output = capsys.readouterr().out
     assert "✅ Done" not in output
-    assert "🗂️  Session files" in output
+    assert "Changed files" not in output
     assert "Full transcript:" not in output
     assert "secret task" not in output
 
