@@ -118,6 +118,9 @@ class TerminalDisplay:
         self._session_scene_active = False
         self._pending_final_content = ""
         self._has_run_output = False
+        # The action lifecycle counts read-only and custom tools too; written
+        # files are deliberately not a proxy for whether this is a report.
+        self._tool_used_in_run = False
         self._streaming_narration = StreamingNarration(
             self._assistant_narration_panel_lines,
             stream=_output_stream,
@@ -141,6 +144,7 @@ class TerminalDisplay:
         print()
         self._pending_final_content = ""
         self._has_run_output = False
+        self._tool_used_in_run = False
         self._needs_leading_blank = False
         self._needs_detail_blank_after_assistant = False
 
@@ -181,6 +185,7 @@ class TerminalDisplay:
         self._pending_final_content = content.strip()
 
     def action_started(self, action: dict) -> None:
+        self._tool_used_in_run = True
         self._stop_spinner()
         if self.debug and action.get("tool") not in FILE_TOOLS:
             print(self._action_text(action))
@@ -521,8 +526,9 @@ class TerminalDisplay:
         )
 
     def _print_completion_panel(self, session) -> None:
-        """Print the report and any files changed by the run as one panel."""
-        lines = [self._squid_line(" Report:"), ""]
+        """Print the final response and any files changed as one panel."""
+        heading = " Report:" if self._tool_used_in_run else ""
+        lines = [self._squid_line(heading), ""]
         formatted = format_final_summary(
             self._pending_final_content,
             width=PANEL_CONTENT_WIDTH,

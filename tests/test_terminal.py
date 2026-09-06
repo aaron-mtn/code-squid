@@ -729,6 +729,7 @@ def test_active_mod_change_updates_later_squid_glyphs_only(
     display.thinking()
     display.assistant_message("First narration.")
     menu.mod_name = "warm"
+    display.action_started({"tool": "read_file", "args": {"path": "app.py"}})
     display.final_message("Finished.")
     display.loop_finished(empty_session())
 
@@ -1599,7 +1600,7 @@ def test_loop_Done_prints_status_label(
     assert "✅ Done!" not in output
 
 
-def test_loop_finished_prints_only_changed_files_in_shared_completion_panel(
+def test_changed_files_remain_independent_from_report_label_selection(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     session = SimpleNamespace(
@@ -1614,7 +1615,8 @@ def test_loop_finished_prints_only_changed_files_in_shared_completion_panel(
     lines = output.strip().splitlines()
     assert lines[0] == f"╭{'─' * (RUN_PANEL_WIDTH - 2)}╮"
     assert lines[-1] == f"╰{'─' * (RUN_PANEL_WIDTH - 2)}╯"
-    assert f"│  {SQUID_GLYPH} Report:" in output
+    assert f"│  {SQUID_GLYPH} " in output
+    assert "Report:" not in output
     assert "│  Changed files" in output
     assert "🗂️" not in output
     assert "      app.py" in output
@@ -1638,6 +1640,7 @@ def test_completion_panel_keeps_edges_aligned_across_unicode_and_styling(
         messages=[],
     )
     display = TerminalDisplay()
+    display.action_started({"tool": "write_file", "args": {"path": path}})
     display.final_message("## What changed\n- **Styled report** with 🚫 content.")
     display.loop_finished(session)
 
@@ -1655,7 +1658,7 @@ def test_completion_panel_keeps_edges_aligned_across_unicode_and_styling(
     assert all(_display_width(line) == RUN_PANEL_WIDTH for line in lines)
 
 
-def test_direct_final_run_prints_one_clean_completion_panel(
+def test_no_tool_final_run_prints_squid_marker_without_report_label(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     display = TerminalDisplay()
@@ -1666,10 +1669,54 @@ def test_direct_final_run_prints_one_clean_completion_panel(
     assert output.startswith("\n╭")
     assert not output.startswith("\n\n")
     assert output.count("╭") == output.count("╰") == 1
-    assert f"│  {SQUID_GLYPH} Report:" in output
+    assert f"│  {SQUID_GLYPH} " in output
+    assert "Report:" not in output
     assert "Yes." in output
     assert "Changed files" not in output
     assert "─" * RUN_PANEL_WIDTH not in output
+
+
+def test_tool_using_run_keeps_report_label(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    display = TerminalDisplay()
+    display.run_started()
+    display.action_started({"tool": "write_file", "args": {"path": "app.py"}})
+    finish_display(display, "Updated the app.")
+
+    output = capsys.readouterr().out
+    assert f"│  {SQUID_GLYPH} Report:" in output
+
+
+def test_read_only_tool_use_keeps_report_label_without_changed_files(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    display = TerminalDisplay()
+    display.run_started()
+    display.action_started({"tool": "read_file", "args": {"path": "app.py"}})
+    finish_display(display, "The file looks correct.")
+
+    output = capsys.readouterr().out
+    assert f"│  {SQUID_GLYPH} Report:" in output
+    assert "Changed files" not in output
+
+
+def test_starting_later_run_resets_tool_used_state(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    display = TerminalDisplay()
+    display.run_started()
+    display.action_started({"tool": "read_file", "args": {"path": "app.py"}})
+    finish_display(display, "First response.")
+    first_output = capsys.readouterr().out
+    assert f"│  {SQUID_GLYPH} Report:" in first_output
+
+    display.run_started()
+    finish_display(display, "Second response.")
+
+    second_output = capsys.readouterr().out
+    assert f"│  {SQUID_GLYPH} " in second_output
+    assert "Report:" not in second_output
 
 
 def test_completion_panel_borders_are_neutral_and_dim_in_tty(
@@ -1752,6 +1799,7 @@ def test_final_message_renders_report_heading(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     display = TerminalDisplay()
+    display.action_started({"tool": "read_file", "args": {"path": "ui/terminal.py"}})
     finish_display(display,
         "## Files changed\n"
         "- `ui/terminal.py`\n"
@@ -1779,6 +1827,7 @@ def test_final_message_displays_unlabeled_content_under_report_heading(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     display = TerminalDisplay()
+    display.action_started({"tool": "run_command", "args": {"command": "pwd"}})
     finish_display(display,
         "I ran `pwd`; the workspace is "
         "`/tmp/code-squid-workspace/projects`."
@@ -1797,6 +1846,7 @@ def test_final_summary_keeps_divider_neutral_and_accents_only_squid_in_tty(
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
 
     display = TerminalDisplay()
+    display.action_started({"tool": "read_file", "args": {"path": "ui/terminal.py"}})
     finish_display(display,
         "## Files changed\n"
         "- `ui/terminal.py`\n"
