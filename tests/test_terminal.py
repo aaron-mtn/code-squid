@@ -736,7 +736,7 @@ def test_active_mod_change_updates_later_squid_glyphs_only(
     output = capsys.readouterr().out
     purple_squid = f"{ansi_fg('#bd88ff')}{SQUID_GLYPH}{RESET_STYLE}"
     red_squid = f"{ansi_fg('#ff6475')}{SQUID_GLYPH}{RESET_STYLE}"
-    assert f"{purple_squid} Thinking..." in output
+    assert output.startswith("Thinking...\n\n")
     assert f"{purple_squid} First narration." in output
     assert f"{red_squid} Report:" in output
     assert f"{ansi_fg('#bd88ff')}{SQUID_GLYPH} First" not in output
@@ -790,6 +790,41 @@ def test_default_spinner_uses_default_mod_accent(monkeypatch: pytest.MonkeyPatch
             "style": ansi_fg(DEFAULT_MOD_ACCENT_HEX),
         }
     ]
+
+
+def test_mod_change_updates_next_thinking_pulse_accent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class AccentSpinner(FakeSpinner):
+        def __init__(self) -> None:
+            super().__init__()
+            self.style = ""
+            self.started_styles: list[str] = []
+
+        def start(self) -> None:
+            super().start()
+            self.started_styles.append(self.style)
+
+    monkeypatch.setattr(
+        "code_squid.console.ui.display.discover_mods",
+        lambda home: {
+            "violet": SimpleNamespace(accent="purple"),
+            "warm": SimpleNamespace(accent="red"),
+        },
+    )
+    spinner = AccentSpinner()
+    display = TerminalDisplay(
+        startup_info=StartupInfo(
+            Path("workspace"), "provider", "model", "balanced", mod_name="violet"
+        ),
+        _spinner=spinner,
+    )
+
+    display.thinking()
+    display.set_specialization(mod_name="warm", skill_name=None)
+    display.thinking()
+
+    assert spinner.started_styles == [ansi_fg("#bd88ff"), ansi_fg("#ff6475")]
 
 
 def test_run_started_uses_blank_spacing_without_a_divider(
@@ -1311,7 +1346,7 @@ def test_debug_thinking_is_plain_and_does_not_animate(
 
     assert spinner.starts == 0
     assert spinner.stops == 0
-    assert capsys.readouterr().out == f"{SQUID_GLYPH} Thinking...\n\n"
+    assert capsys.readouterr().out == "Thinking...\n\n"
 
 
 def test_assistant_message_stops_spinner_before_printing_content(

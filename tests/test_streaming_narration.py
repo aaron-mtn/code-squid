@@ -192,6 +192,97 @@ def test_tool_output_follows_settled_narration_cleanly(monkeypatch) -> None:
     assert display.streaming_narration_active is False
 
 
+def test_tool_preparing_after_settled_narration_restarts_thinking(monkeypatch) -> None:
+    spinner = CountingSpinner()
+    display, _stream = interactive_display(monkeypatch, spinner=spinner)
+
+    display.thinking()
+    display.handle_event({"type": "assistant_message_started"})
+    display.handle_event({"type": "assistant_delta", "delta": "Writing now."})
+    display.assistant_message("Writing now.")
+    display.handle_event({"type": "tool_preparing", "tool": "write_file"})
+
+    assert spinner.starts == 2
+    assert spinner.stops == 2
+
+    display.handle_event({"type": "tool_started", "tool": "write_file"})
+    assert spinner.stops == 3
+
+
+def test_tool_preparing_waits_for_live_narration_to_settle(monkeypatch) -> None:
+    spinner = CountingSpinner()
+    display, _stream = interactive_display(monkeypatch, spinner=spinner)
+
+    display.thinking()
+    display.handle_event({"type": "assistant_message_started"})
+    display.handle_event({"type": "assistant_delta", "delta": "Writing now."})
+    display.handle_event({"type": "tool_preparing", "tool": "write_file"})
+    assert spinner.starts == 1
+
+    display.assistant_message("Writing now.")
+    assert spinner.starts == 2
+    assert spinner.stops == 2
+
+
+def test_repeated_narration_and_tool_preparation_cycles_stay_clean(monkeypatch) -> None:
+    spinner = CountingSpinner()
+    display, _stream = interactive_display(monkeypatch, spinner=spinner)
+
+    for text in ("Reading now.", "Writing now."):
+        display.thinking()
+        display.handle_event({"type": "assistant_message_started"})
+        display.handle_event({"type": "assistant_delta", "delta": text})
+        display.handle_event({"type": "tool_preparing", "tool": "read_file"})
+        display.assistant_message(text)
+        display.handle_event({"type": "tool_started", "tool": "read_file"})
+
+    assert spinner.starts == 4
+    assert spinner.stops == 6
+
+
+def test_visible_tool_output_stops_tool_preparation_pulse(monkeypatch) -> None:
+    spinner = CountingSpinner()
+    display, _stream = interactive_display(monkeypatch, spinner=spinner)
+
+    display.handle_event({"type": "tool_preparing", "tool": "read_file"})
+    display.tool_result(
+        {"tool": "read_file", "args": {"path": "app.py"}},
+        {"ok": True},
+    )
+
+    assert spinner.starts == 1
+    assert spinner.stops == 1
+
+
+def test_final_reply_does_not_restart_thinking_after_narration(monkeypatch) -> None:
+    spinner = CountingSpinner()
+    display, _stream = interactive_display(monkeypatch, spinner=spinner)
+
+    display.thinking()
+    display.handle_event({"type": "assistant_message_started"})
+    display.handle_event({"type": "assistant_delta", "delta": "All done."})
+    display.final_message("All done.")
+    display.handle_event({"type": "final_message", "message": "All done."})
+
+    assert spinner.starts == 1
+    assert spinner.stops == 3
+
+
+@pytest.mark.parametrize(
+    "event_type",
+    ["tool_started", "tool_finished", "run_cancelled", "run_failed", "run_finished"],
+)
+def test_tool_preparing_cleanup_events_stop_thinking(monkeypatch, event_type: str) -> None:
+    spinner = CountingSpinner()
+    display, _stream = interactive_display(monkeypatch, spinner=spinner)
+
+    display.handle_event({"type": "tool_preparing", "tool": "read_file"})
+    display.handle_event({"type": event_type})
+
+    assert spinner.starts == 1
+    assert spinner.stops == 1
+
+
 @pytest.mark.parametrize("cleanup", ["interrupted", "failed", "finished"])
 def test_terminal_exit_paths_clear_streaming_state(monkeypatch, cleanup: str) -> None:
     display, stream = interactive_display(monkeypatch)

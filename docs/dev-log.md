@@ -1,3 +1,21 @@
+- 2026-09-06: Replaced the normal thinking squid/Braille spinner with one
+  four-frame `\u00b7`/`\u2022`/`\u25cf`/`\u2022` `Thinking...` pulse. The existing
+  spinner thread and terminal lifecycle remain unchanged, while the complete
+  pulse line now resolves and applies the current Mod accent with an immediate
+  ANSI reset; debug thinking is static plain text. The CLI's already-wired
+  `tool_preparing` event now restarts the same pulse after streamed narration
+  settles, using one deferred display flag when provider event order announces
+  the Tool before the authoritative assistant message. Tool, visible-output,
+  rejection, failure, cancellation, interruption, and finalization boundaries
+  clear the pending/running pulse. Narration and report retain the canonical
+  U+1F991 U+FE0E squid marker and live accent resolution. No Core, Tool/error
+  icon, startup, composer, approval, or streaming-renderer change was made.
+  Focused spinner/narration/display coverage passed (181), focused runtime
+  event/provider coverage passed (132), and the full suite passed (869).
+  Production `code_squid` compilation and a fresh 31-module import walk passed,
+  as did `git diff --check`. Brightness modulation and the broader Tool/error
+  icon cleanup remain intentionally deferred; no live model inference ran.
+
 - 2026-09-05: Let the existing startup-rain drops continue falling during the
   global fade. Fade advancement now uses a non-resetting movement path, so no
   replacement drops enter after submit and off-screen drops are not recycled;
