@@ -13,6 +13,7 @@ from code_squid.console.cli.control_commands import (
 )
 from code_squid.console.cli.prompt_loop import _resume_session, _run_interactive
 from code_squid.console.cli.runtime_commands import handle_runtime_command
+from code_squid.console.startup_menu import MAIN_ROWS
 from code_squid.settings import load_settings
 from squid_core.storage import SessionStore
 
@@ -47,6 +48,10 @@ class QuietDisplay:
     header = None
     session_scene_active = False
 
+    def __init__(self) -> None:
+        self.loaded_sessions = []
+        self.loaded_session_scene_states = []
+
     def start(self) -> None:
         self.start_session_scene()
 
@@ -58,6 +63,10 @@ class QuietDisplay:
 
     def stop_header(self) -> None:
         pass
+
+    def previous_session_loaded(self, title, age, message_count=None) -> None:
+        self.loaded_sessions.append((title, age, message_count))
+        self.loaded_session_scene_states.append(self.session_scene_active)
 
 
 def test_provider_status_lists_effective_and_supported_values(tmp_path, capsys) -> None:
@@ -377,7 +386,7 @@ def test_shell_resume_enters_the_same_multi_turn_interactive_loop(
     assert follow_ups == [(saved.session_id, "first"), (saved.session_id, "second")]
 
 
-def test_startup_session_selection_uses_existing_follow_up_runner(
+def test_startup_session_selection_notices_once_and_uses_existing_follow_up_runner(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -385,7 +394,7 @@ def test_startup_session_selection_uses_existing_follow_up_runner(
     display = QuietDisplay()
     selected_menu = None
     follow_ups = []
-    prompts = iter(["continue it", "/exit"])
+    prompts = iter(["continue it", "continue again", "/exit"])
 
     def set_startup_menu(menu):
         nonlocal selected_menu
@@ -394,10 +403,11 @@ def test_startup_session_selection_uses_existing_follow_up_runner(
     def prompt(_label, animator=None):
         task = next(prompts)
         if task == "continue it":
-            selected_menu.set_active_session(
-                saved.session_id,
-                title="original task",
-            )
+            selected_menu.focus_from_composer()
+            selected_menu.selected_index = MAIN_ROWS.index("Session")
+            selected_menu.activate()
+            selected_menu.selected_index = 1
+            selected_menu.activate()
         return task
 
     def follow_up(
@@ -424,4 +434,11 @@ def test_startup_session_selection_uses_existing_follow_up_runner(
     )
 
     assert _run_interactive(tmp_path) == 0
-    assert follow_ups == [(saved.session_id, "continue it")]
+    assert follow_ups == [
+        (saved.session_id, "continue it"),
+        (saved.session_id, "continue again"),
+    ]
+    assert len(display.loaded_sessions) == 1
+    assert display.loaded_sessions[0][0] == "original task"
+    assert display.loaded_sessions[0][2] is None
+    assert display.loaded_session_scene_states == [False]

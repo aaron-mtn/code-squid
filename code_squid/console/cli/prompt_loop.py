@@ -124,6 +124,16 @@ def _finish_startup_fade(display: TerminalDisplay) -> None:
         finish()
 
 
+def _print_selected_session_notice(
+    display: TerminalDisplay,
+    menu: StartupMenu,
+) -> None:
+    """Print and consume the startup picker's pending saved-session notice."""
+    notice = menu.take_selected_session_notice()
+    if notice is not None:
+        display.previous_session_loaded(*notice)
+
+
 def _prompt_task_or_cancel(
     label: str,
     display: TerminalDisplay | None = None,
@@ -153,6 +163,7 @@ def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
         selected_session_id = menu.session_id
         if task is None:
             return 0
+        _print_selected_session_notice(display, menu)
         if _is_help_input(task):
             _finish_startup_fade(display)
             _print_help()
@@ -233,6 +244,7 @@ def _run_interactive(
             active_session_id = menu.session_id
             if task is None:
                 return 0
+            _print_selected_session_notice(display, menu)
             if _is_exit_input(task):
                 _finish_startup_fade(display)
                 return 0

@@ -689,6 +689,25 @@ def test_accent_squid_uses_text_presentation_sequence() -> None:
     assert SQUID_GLYPH == "\U0001f991\ufe0e"
 
 
+def test_previous_session_notice_is_two_dim_neutral_lines(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    TerminalDisplay().previous_session_loaded(
+        "Fix Skate Wizard startup crash",
+        "2h",
+        17,
+    )
+
+    assert capsys.readouterr().out == (
+        f"{DIM_STYLE}↩ Previous session loaded{RESET_STYLE}\n"
+        f"{DIM_STYLE}  Fix Skate Wizard startup crash · 17 messages · 2h"
+        f"{RESET_STYLE}\n"
+    )
+
+
 def test_final_narration_and_report_output_preserve_text_squid_and_reset(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

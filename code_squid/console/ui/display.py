@@ -501,6 +501,22 @@ class TerminalDisplay:
         """Connect keyboard menu state to the existing header renderer."""
         self.header.set_startup_menu(startup_menu)
 
+    def previous_session_loaded(
+        self,
+        title: str,
+        age: str,
+        message_count: int | None = None,
+    ) -> None:
+        """Print one quiet status notice after startup session selection."""
+        self._finish_startup_before_output()
+        details = [title]
+        if message_count is not None:
+            details.append(f"{message_count} messages")
+        if age:
+            details.append(age)
+        print(styled_text("↩ Previous session loaded", DIM_STYLE))
+        print(styled_text(f"  {' · '.join(details)}", DIM_STYLE))
+
     def _startup_info_panel(self, startup_info: StartupInfo) -> str:
         """Return startup details through the existing display test seam."""
         return startup_info_panel(startup_info)

@@ -75,10 +75,11 @@ and application layer; `squid_core/` is the reusable agent runtime.
     non-destructive fallback while an adapter has no such capability. Session
     discovery stays in `control_commands.py`, which takes the newest 20
     metadata records from Core's presentation-neutral workspace
-    `list_sessions` index. The menu retains only the chosen ID and display
-    title; `prompt_loop.py` routes submitted text through the existing new-run
-    or follow-up runner, and `session_runner.py` remains the sole owner of
-    opening the store and loading a resumed transcript.
+    `list_sessions` index. The menu retains the chosen ID and display title,
+    plus the already-read selected metadata until the CLI consumes its
+    one-time status notice; `prompt_loop.py` routes submitted text through the
+    existing new-run or follow-up runner, and `session_runner.py` remains the
+    sole owner of opening the store and loading a resumed transcript.
   - `console/ui/` owns terminal presentation and input. `display.py` keeps
     `TerminalDisplay` as the lifecycle coordinator used by the Agent loop.
     `header_layout.py` owns the explicit startup-scene geometry: safe draw
@@ -151,11 +152,17 @@ and application layer; `squid_core/` is the reusable agent runtime.
     same panel with pinned `New session` plus a viewport of five saved
     sessions. The backing list is capped at 20; arrow movement scrolls it,
     Enter commits an ID through the same resolver as `/resume`, and Esc
-    discards the submenu highlight. Ages use `now`, whole minutes, whole
-    hours, or whole days. Session task titles normalize all whitespace to
-    single spaces before any presentation or truncation, keeping both the
-    submenu and main Session row single-line; submenu titles then truncate
-    before a stable right-aligned age column. Mod/Skill
+    discards the submenu highlight. After the submitted startup scene retires,
+    an explicitly selected saved session produces one dim, neutral two-line
+    CLI status notice; `New session`, launch-time resume state, and subsequent
+    follow-ups do not. The notice reuses the selected index record and never
+    opens the transcript for presentation. Its title and age use the picker's
+    shared formatters, and a message count appears only if that count already
+    exists in metadata. Ages use `now`, whole minutes, whole hours, or whole
+    days. Session task titles normalize all whitespace to single spaces before
+    any presentation or truncation, keeping both the submenu and main Session
+    row single-line; submenu titles then truncate before a stable
+    right-aligned age column. Mod/Skill
     selection updates the presentation copy used by the active scene;
     selection semantics remain owned by the CLI command handlers. Initial drop
     heads are staggered through the full rain height so the first frame is

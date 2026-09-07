@@ -443,6 +443,75 @@ def test_session_escape_does_not_change_selection_and_enter_uses_resume_seam(
     assert menu.session_title is None
 
 
+def test_saved_session_selection_exposes_one_normalized_notice_from_index(
+    tmp_path,
+) -> None:
+    now = datetime(2026, 9, 7, 12, tzinfo=timezone.utc)
+    recent = [
+        {
+            "session_id": "saved-session",
+            "task": "Fix Skate Wizard startup crash\n  without replaying it",
+            "updated_at": (now - timedelta(hours=2)).isoformat(),
+            "message_count": 17,
+        }
+    ]
+    menu = StartupMenu(
+        tmp_path,
+        load_settings(tmp_path),
+        session_discovery=lambda _: recent,
+        session_resolver=lambda _root, session_id: session_id,
+        now=lambda: now,
+    )
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Session")
+    menu.activate()
+    menu.selected_index = 1
+    menu.activate()
+
+    assert menu.take_selected_session_notice() == (
+        "Fix Skate Wizard startup crash without replaying it",
+        "2h",
+        17,
+    )
+    assert menu.take_selected_session_notice() is None
+
+
+def test_new_session_clears_notice_and_missing_index_count_stays_omitted(
+    tmp_path,
+) -> None:
+    now = datetime(2026, 9, 7, 12, tzinfo=timezone.utc)
+    recent = [
+        {
+            "session_id": "saved-session",
+            "task": "Saved task",
+            "updated_at": (now - timedelta(minutes=12)).isoformat(),
+        }
+    ]
+    menu = StartupMenu(
+        tmp_path,
+        load_settings(tmp_path),
+        session_discovery=lambda _: recent,
+        session_resolver=lambda _root, session_id: session_id,
+        now=lambda: now,
+    )
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Session")
+    menu.activate()
+    menu.selected_index = 1
+    menu.activate()
+    assert menu.take_selected_session_notice() == ("Saved task", "12m", None)
+
+    menu.activate()
+    menu.selected_index = 1
+    menu.activate()
+    menu.activate()
+    menu.selected_index = 0
+    menu.activate()
+
+    assert menu.session_id is None
+    assert menu.take_selected_session_notice() is None
+
+
 def test_long_session_titles_truncate_and_keep_aligned_timestamps(tmp_path) -> None:
     now = datetime(2026, 9, 7, 12, tzinfo=timezone.utc)
     recent = [

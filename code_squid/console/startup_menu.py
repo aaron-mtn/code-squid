@@ -77,6 +77,9 @@ class StartupMenu:
         self._options: tuple[str, ...] = ()
         self._model_message: tuple[str, ...] = ()
         self._session_metadata: tuple[dict, ...] = ()
+        # Only an explicit saved-session choice arms the one-time CLI notice.
+        # Initial ``--resume`` state and later follow-ups must remain silent.
+        self._selected_session_notice: dict | None = None
         if self.session_id is not None and self.session_title is None:
             self.set_active_session(self.session_id)
 
@@ -131,6 +134,28 @@ class StartupMenu:
         )
         self.session_title = (
             _session_title(metadata) if metadata is not None else "Saved session"
+        )
+
+    def take_selected_session_notice(
+        self,
+    ) -> tuple[str, str, int | None] | None:
+        """Consume display data for one saved session selected in the picker."""
+        metadata = self._selected_session_notice
+        self._selected_session_notice = None
+        if metadata is None:
+            return None
+
+        message_count = metadata.get("message_count")
+        if (
+            not isinstance(message_count, int)
+            or isinstance(message_count, bool)
+            or message_count < 0
+        ):
+            message_count = None
+        return (
+            _session_title(metadata),
+            _session_age(metadata, self.now()),
+            message_count,
         )
 
     def focus_from_composer(self) -> None:
@@ -193,6 +218,7 @@ class StartupMenu:
             if self.selected_index == 0:
                 self.session_id = None
                 self.session_title = None
+                self._selected_session_notice = None
             else:
                 metadata = self._session_metadata[self.selected_index - 1]
                 requested_id = str(metadata.get("session_id", ""))
@@ -200,6 +226,11 @@ class StartupMenu:
                 self.set_active_session(
                     resolved_id,
                     title=_session_title(metadata),
+                )
+                # Retain the already-read index record; the notice must not
+                # open the transcript merely to enrich presentation.
+                self._selected_session_notice = (
+                    metadata if resolved_id is not None else None
                 )
         self.mode = "main"
         self.selected_index = self._main_selected_index

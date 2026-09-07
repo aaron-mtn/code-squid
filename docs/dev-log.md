@@ -1,3 +1,20 @@
+- 2026-09-07: Added one quiet CLI status notice for a saved session explicitly
+  selected through the startup Session picker. After the startup scene retires,
+  the display prints two neutral dim lines with the shared normalized title and
+  compact age, then consumes the selected metadata so subsequent follow-ups do
+  not repeat it. `New session` and sessions active before picker interaction
+  remain silent. The notice reuses the already-read workspace metadata record;
+  current persisted metadata has no message count, so normal output omits it
+  and no transcript is opened or scanned. A count is rendered only when an
+  existing metadata record already supplies a valid `message_count`. Session
+  resolution, transcript loading, and follow-up construction are unchanged.
+  Focused startup/session/terminal coverage passed (210 tests), and the broader
+  relevant CLI suite passed (296 tests). The full suite reached 908 passed with
+  the same four unrelated prompt-policy assertion failures in
+  `test_coding_agent.py` and `test_core_agent.py` recorded by the preceding
+  Session-picker work. Production compilation, affected imports, and
+  `git diff --check` passed. No live model inference ran.
+
 - 2026-09-07: Normalized saved task whitespace at the startup menu's shared
   session-title seam so multiline tasks remain one-line presentation data in
   both the recent-session submenu and the main Session row. Runs of whitespace,
