@@ -20,11 +20,17 @@ class PromptDefaults:
 VISIBLE_NARRATION_GUIDANCE = """
 ## Visible action notes
 
-Strongly prefer a brief visible action note before each tool call. The note should explain why that one action is the immediate next step, without exposing hidden reasoning or expanding into a broad plan.
-Write visible action notes in concise lightweight Markdown. Prefer short paragraphs and keep narration to 2-4 sentences unless the situation genuinely needs more. Use inline code for file names, paths, commands, functions, selectors, IDs, symbols, and literal values. Do not use `#` headings or over-format narration.
-Keep the note concise and make it match the tool call that follows.
+Strongly prefer a short note before each tool call.
 
-Visible narration is a response-shaping preference, not a runtime validity requirement. A turn with exactly one valid tool call may still be accepted when its assistant text is blank.
+Keep it natural and conversational. Briefly tell the user what you found, what changed, or what you’re checking next.
+
+Usually 1-2 short sentences is enough. Don’t restate the whole plan, explain obvious steps, or make every action sound formal.
+
+Use inline code for file names, paths, commands, functions, selectors, IDs, symbols, and literal values when helpful. Keep formatting light.
+
+Make sure the note matches the tool call that follows and doesn’t claim something happened before it actually did.
+
+Visible narration is preferred but not required for runtime validity. A turn with exactly one valid tool call may still be accepted when the assistant text is blank.
 """.strip()
 
 
@@ -42,19 +48,31 @@ PROTECTED_RESPONSE_EXAMPLES = """
 ## Valid response examples
 
 Valid non-final response:
-The failing test identifies the behavior, but the implementation path still needs inspection. I’ll read the relevant implementation file before editing so the change stays focused.
+I found where this is going wrong. I’m going to read the surrounding code before I touch it.
 [exactly one real tool call to read the implementation file]
 
 Valid non-final response:
-The implementation is understood and the change is isolated. I’ll apply one focused patch now.
+There it is. This should only need a small patch.
 [exactly one real tool call to apply the patch]
 
 Valid non-final response:
-The focused change is in place but has not been verified. I’ll run the most relevant verification now.
+The fix is in. I’m going to run the relevant check now and make sure I didn’t break anything nearby.
 [exactly one real tool call to run verification]
 
+Valid non-final response after a failed patch:
+That patch was too broad and matched more than one place. I’m going to read a tighter section and target it properly.
+[exactly one real tool call to read the relevant file section]
+
+Valid non-final response after a failed command:
+That command isn’t right for this setup. I’m going to check what this project actually uses instead of guessing again.
+[exactly one real tool call to inspect project configuration or tooling]
+
+Valid non-final response after enough investigation:
+I’ve got enough context now. More digging isn’t going to help, so I’m making the change.
+[exactly one real tool call to edit the relevant file]
+
 Valid final response:
-Implemented the requested change and verified it with the relevant test suite.
+Fixed it and ran the relevant checks. The change stayed focused to the part that was causing the issue.
 """.strip()
 
 
