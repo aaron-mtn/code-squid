@@ -69,17 +69,25 @@ and application layer; `squid_core/` is the reusable agent runtime.
     trace/debug settings, and handles new/resumed session-backed runs; and
     `skill_commands.py` handles Skill status, listing, and selection.
     `console/startup_menu.py` owns the startup panel's small keyboard focus,
-    view, and selection state. It reuses the CLI's runtime-setting and Mod
-    selection operations; provider adapters remain the source of any optional
-    model enumeration, with `/model <name>` shown as the non-destructive
-    fallback while an adapter has no such capability.
+    view, and selection state. It reuses the CLI's runtime-setting, Mod, and
+    session-selection operations; provider adapters remain the source of any
+    optional model enumeration, with `/model <name>` shown as the
+    non-destructive fallback while an adapter has no such capability. Session
+    discovery stays in `control_commands.py`, which takes the newest 20
+    metadata records from Core's presentation-neutral workspace
+    `list_sessions` index. The menu retains only the chosen ID and display
+    title; `prompt_loop.py` routes submitted text through the existing new-run
+    or follow-up runner, and `session_runner.py` remains the sole owner of
+    opening the store and loading a resumed transcript.
   - `console/ui/` owns terminal presentation and input. `display.py` keeps
     `TerminalDisplay` as the lifecycle coordinator used by the Agent loop.
     `header_layout.py` owns the explicit startup-scene geometry: safe draw
     width, fixed title position, two-row title/panel gap, centered compact panel
     rectangle, and rain rows beneath the panel. `banner.py` owns the panel's
-    Provider, Model, Safety, Mod, optional standalone Skill, and concise
-    Workspace content. `approval.py`
+    Provider, Model, Safety, Mod, Session, optional standalone Skill, and
+    concise Workspace content. The Session row retains the fixed panel
+    rectangle by keeping blank rows between fields rather than around the
+    complete field list. `approval.py`
     owns approval panels, prompts, and compact results; `tool_display.py` owns
     tool/action labels, command recognition, and debug result projection; and
     `formatting.py` owns shared styles, links, path shortening, wrapping, and
@@ -139,7 +147,15 @@ and application layer; `squid_core/` is the reusable agent runtime.
     and arrows retain normal multiline behavior whenever the composer contains
     text. Every focus, movement, activation, and back action invalidates the
     owning Application, so the shared scene repaints immediately without a
-    second renderer or animation lifecycle. Mod/Skill
+    second renderer or animation lifecycle. The Session row replaces that
+    same panel with pinned `New session` plus a viewport of five saved
+    sessions. The backing list is capped at 20; arrow movement scrolls it,
+    Enter commits an ID through the same resolver as `/resume`, and Esc
+    discards the submenu highlight. Ages use `now`, whole minutes, whole
+    hours, or whole days. Session task titles normalize all whitespace to
+    single spaces before any presentation or truncation, keeping both the
+    submenu and main Session row single-line; submenu titles then truncate
+    before a stable right-aligned age column. Mod/Skill
     selection updates the presentation copy used by the active scene;
     selection semantics remain owned by the CLI command handlers. Initial drop
     heads are staggered through the full rain height so the first frame is

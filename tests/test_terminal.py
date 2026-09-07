@@ -554,7 +554,7 @@ def test_startup_panel_preserves_blank_rows_between_every_menu_item() -> None:
     owned_lines = [line.lstrip() for line in panel.splitlines()]
 
     assert len(owned_lines) == 13
-    assert all(line == f"│{' ' * 38}│" for line in owned_lines[1:-1:2])
+    assert all(line == f"│{' ' * 38}│" for line in owned_lines[2:-1:2])
 
 
 def test_startup_panel_includes_active_skill_when_set() -> None:
@@ -626,7 +626,14 @@ def test_startup_panel_items_have_stable_menu_order() -> None:
         )
     ]
 
-    assert labels == ["Provider", "Model", "Safety", "Mod", "Workspace"]
+    assert labels == [
+        "Provider",
+        "Model",
+        "Safety",
+        "Mod",
+        "Session",
+        "Workspace",
+    ]
 
 
 def test_short_path_prefers_startup_workspace_root(tmp_path: Path) -> None:

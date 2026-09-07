@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import threading
 from types import SimpleNamespace
@@ -13,7 +14,9 @@ from prompt_toolkit.output import DummyOutput
 from code_squid.console.startup_menu import (
     MAIN_ROWS,
     MODEL_FALLBACK,
+    SESSION_VISIBLE_SAVED_LIMIT,
     StartupMenu,
+    _session_title,
     discover_provider_models,
 )
 from code_squid.console.ui.banner import startup_panel_lines
@@ -77,7 +80,7 @@ def _run_prompt(monkeypatch, menu: StartupMenu, terminal_input: str) -> str:
 def test_empty_composer_up_enters_menu_and_boundary_returns(monkeypatch, tmp_path) -> None:
     menu = StartupMenu(tmp_path, load_settings(tmp_path))
 
-    result = _run_prompt(monkeypatch, menu, ("\x1b[A" * 6) + "text\r")
+    result = _run_prompt(monkeypatch, menu, ("\x1b[A" * 7) + "text\r")
 
     assert result == "text"
     assert menu.focused is False
@@ -285,7 +288,7 @@ def test_workspace_view_is_read_only_and_shows_full_path(tmp_path) -> None:
     menu = StartupMenu(tmp_path, load_settings(tmp_path))
     original_root = menu.repo_root
     menu.focus_from_composer()
-    menu.selected_index = 4
+    menu.selected_index = MAIN_ROWS.index("Workspace")
     menu.activate()
 
     lines = menu.panel_lines(startup_scene_layout(80))
@@ -299,7 +302,7 @@ def test_workspace_view_keeps_centered_footer_for_long_paths(tmp_path) -> None:
     long_root = tmp_path.joinpath(*(["nested-workspace-segment"] * 12))
     menu = StartupMenu(long_root, load_settings(tmp_path))
     menu.focus_from_composer()
-    menu.selected_index = 4
+    menu.selected_index = MAIN_ROWS.index("Workspace")
     menu.activate()
 
     inner = [line[1:-1] for line in menu.panel_lines(startup_scene_layout(80))]
@@ -327,3 +330,185 @@ def test_submenu_centers_title_options_as_one_column_and_footer(tmp_path) -> Non
     assert footer == "Esc  back".center(len(footer))
     assert selected.index("a") == unselected.index("long-option")
     assert selected.index(">") == unselected.index("long-option") - 2
+
+
+def _recent_sessions(count: int, now: datetime) -> list[dict]:
+    return [
+        {
+            "session_id": f"session-{index}",
+            "task": f"Task {index}",
+            "updated_at": (now - timedelta(minutes=index + 1)).isoformat(),
+        }
+        for index in range(count)
+    ]
+
+
+def test_session_title_collapses_multiline_and_repeated_whitespace() -> None:
+    assert _session_title({"task": "Fix the first line\nthen the second"}) == (
+        "Fix the first line then the second"
+    )
+    assert _session_title({"task": "  tabs\tand   spaces  "}) == "tabs and spaces"
+    assert _session_title({"task": "Already one line"}) == "Already one line"
+
+
+def test_session_row_opens_with_new_first_and_recent_sessions_newest_first(
+    tmp_path,
+) -> None:
+    now = datetime(2026, 9, 7, 12, tzinfo=timezone.utc)
+    recent = _recent_sessions(3, now)
+    menu = StartupMenu(
+        tmp_path,
+        load_settings(tmp_path),
+        session_discovery=lambda _: recent,
+        now=lambda: now,
+    )
+    layout = startup_scene_layout(80)
+
+    assert "Session   New" in "\n".join(menu.panel_lines(layout))
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Session")
+    menu.activate()
+
+    rendered = "\n".join(menu.panel_lines(layout))
+    assert menu.mode == "session"
+    assert menu._options == ("", "session-0", "session-1", "session-2")
+    assert rendered.index("New session") < rendered.index("Task 0")
+    assert rendered.index("Task 0") < rendered.index("Task 1")
+
+
+def test_session_viewport_scrolls_after_five_saved_sessions(tmp_path) -> None:
+    now = datetime(2026, 9, 7, 12, tzinfo=timezone.utc)
+    recent = _recent_sessions(9, now)
+    menu = StartupMenu(
+        tmp_path,
+        load_settings(tmp_path),
+        session_discovery=lambda _: recent,
+        now=lambda: now,
+    )
+    layout = startup_scene_layout(80)
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Session")
+    menu.activate()
+
+    initial = "\n".join(menu.panel_lines(layout))
+    assert initial.count("Task ") == SESSION_VISIBLE_SAVED_LIMIT
+    assert "New session" in initial
+    assert "Task 5" not in initial
+
+    for _ in range(SESSION_VISIBLE_SAVED_LIMIT + 1):
+        menu.move(1)
+    scrolled = "\n".join(menu.panel_lines(layout))
+    assert menu.selected_index == SESSION_VISIBLE_SAVED_LIMIT + 1
+    assert "New session" in scrolled
+    assert "Task 0" not in scrolled
+    assert "Task 5" in scrolled
+
+
+def test_session_escape_does_not_change_selection_and_enter_uses_resume_seam(
+    tmp_path,
+) -> None:
+    now = datetime(2026, 9, 7, 12, tzinfo=timezone.utc)
+    recent = _recent_sessions(2, now)
+    resolved: list[str] = []
+
+    def resolve(_repo_root, session_id):
+        resolved.append(session_id)
+        return session_id
+
+    menu = StartupMenu(
+        tmp_path,
+        load_settings(tmp_path),
+        session_discovery=lambda _: recent,
+        session_resolver=resolve,
+        now=lambda: now,
+    )
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Session")
+    menu.activate()
+    menu.selected_index = 1
+    menu.back()
+    assert menu.session_id is None
+
+    menu.activate()
+    menu.selected_index = 2
+    menu.activate()
+    assert menu.session_id == "session-1"
+    assert menu.session_title == "Task 1"
+    assert resolved == ["session-1"]
+
+    menu.activate()
+    menu.selected_index = 0
+    menu.activate()
+    assert menu.session_id is None
+    assert menu.session_title is None
+
+
+def test_long_session_titles_truncate_and_keep_aligned_timestamps(tmp_path) -> None:
+    now = datetime(2026, 9, 7, 12, tzinfo=timezone.utc)
+    recent = [
+        {
+            "session_id": "long-session",
+            "task": (
+                "A very long session title\n"
+                "that cannot possibly fit\tinside the fixed panel"
+            ),
+            "updated_at": (now - timedelta(hours=3)).isoformat(),
+        },
+        {
+            "session_id": "short-session",
+            "task": "Short",
+            "updated_at": (now - timedelta(days=1)).isoformat(),
+        },
+    ]
+    menu = StartupMenu(
+        tmp_path,
+        load_settings(tmp_path),
+        session_discovery=lambda _: recent,
+        now=lambda: now,
+    )
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Session")
+    menu.activate()
+    inner = [line[1:-1] for line in menu.panel_lines(startup_scene_layout(80))]
+    long_row = next(line for line in inner if "..." in line)
+    short_row = next(line for line in inner if "Short" in line)
+
+    assert long_row.rstrip().endswith("3h")
+    assert short_row.rstrip().endswith("1d")
+    assert long_row.rindex("3h") == short_row.rindex("1d")
+
+
+def test_session_panel_stays_fixed_height_with_multiline_metadata(tmp_path) -> None:
+    now = datetime(2026, 9, 7, 12, tzinfo=timezone.utc)
+    recent = [
+        {
+            "session_id": "multiline-session",
+            "task": "First line\nSecond line\twith details",
+            "updated_at": (now - timedelta(minutes=4)).isoformat(),
+        }
+    ]
+    menu = StartupMenu(
+        tmp_path,
+        load_settings(tmp_path),
+        session_discovery=lambda _: recent,
+        session_resolver=lambda _root, session_id: session_id,
+        now=lambda: now,
+    )
+    layout = startup_scene_layout(80)
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Session")
+    menu.activate()
+
+    lines = menu.panel_lines(layout)
+    rendered = "\n".join(lines)
+
+    assert len(lines) == layout.panel.height
+    assert all("\n" not in line and "\t" not in line for line in lines)
+    session_rows = [line for line in lines if "First line Second line" in line]
+    assert len(session_rows) == 1
+
+    menu.selected_index = 1
+    menu.activate()
+    assert menu.session_title == "First line Second line with details"
+    assert "Session" in rendered
+    assert "First line Second line" in "\n".join(menu.panel_lines(layout))

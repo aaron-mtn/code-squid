@@ -38,6 +38,7 @@ class StartupInfo:
     approval_mode: str
     skill_name: str | None = None
     mod_name: str | None = None
+    session_title: str | None = None
 
 
 def concise_workspace_name(directory: Path) -> str:
@@ -56,6 +57,7 @@ def startup_panel_items(startup_info: StartupInfo) -> list[tuple[str, str]]:
         ("Model", startup_info.model),
         ("Safety", startup_info.approval_mode),
         ("Mod", startup_info.mod_name or "none"),
+        ("Session", startup_info.session_title or "New"),
     ]
     # A directly selected Skill is distinct from a Mod and must remain visible.
     if startup_info.skill_name is not None and startup_info.mod_name is None:
@@ -86,15 +88,16 @@ def startup_panel_lines(
     content_left = max(min(5, inner_width - 20), 0)
     content_width = max(inner_width - content_left - 1, 0)
 
-    rows = [top, blank]
-    for label, value in items:
+    rows = [top]
+    for index, (label, value) in enumerate(items):
         content = f"{label:<{PANEL_LABEL_WIDTH}}{value}"[:content_width]
         right_padding = inner_width - content_left - len(content)
         rows.append(
             f"{PANEL_VERTICAL}{' ' * content_left}{content}"
             f"{' ' * right_padding}{PANEL_VERTICAL}"
         )
-        rows.append(blank)
+        if index < len(items) - 1:
+            rows.append(blank)
     rows.append(bottom)
     assert len(rows) == layout.panel.height
     return rows

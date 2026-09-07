@@ -150,6 +150,7 @@ def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
         display.start()
         task = _prompt_task_or_cancel("Task", display)
         settings = menu.settings
+        selected_session_id = menu.session_id
         if task is None:
             return 0
         if _is_help_input(task):
@@ -161,7 +162,17 @@ def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
             print("No task entered; nothing to run.")
             return 0
 
-        if menu.mod_name is None:
+        if selected_session_id is not None:
+            status, _ = _run_follow_up_task(
+                repo_root,
+                selected_session_id,
+                task,
+                settings,
+                display,
+                menu.skill_name,
+                mod_name=menu.mod_name,
+            )
+        elif menu.mod_name is None:
             status, _ = _run_new_session_task(
                 repo_root,
                 task,
@@ -200,7 +211,13 @@ def _run_interactive(
     settings = load_settings(repo_root)
     display = _run_display(repo_root, settings, skill_name)
     mod_name: str | None = None
-    menu = StartupMenu(repo_root, settings, mod_name=mod_name, skill_name=skill_name)
+    menu = StartupMenu(
+        repo_root,
+        settings,
+        mod_name=mod_name,
+        skill_name=skill_name,
+        session_id=active_session_id,
+    )
     if hasattr(display, "set_startup_menu"):
         display.set_startup_menu(menu)
 
@@ -211,6 +228,9 @@ def _run_interactive(
             settings = menu.settings
             mod_name = menu.mod_name
             skill_name = menu.skill_name
+            # The menu selects only an ID; the existing follow-up runner still
+            # owns transcript loading and construction of the resumed run.
+            active_session_id = menu.session_id
             if task is None:
                 return 0
             if _is_exit_input(task):
@@ -219,6 +239,8 @@ def _run_interactive(
             if _is_new_input(task):
                 _finish_startup_fade(display)
                 active_session_id = None
+                menu.session_id = None
+                menu.session_title = None
                 display.start_session_scene()
                 continue
             if _is_help_input(task):
@@ -244,6 +266,8 @@ def _run_interactive(
                 active_session_id,
             )
             if handled:
+                if active_session_id != menu.session_id:
+                    menu.set_active_session(active_session_id)
                 continue
             if _is_skill_input(task):
                 skill_name, mod_name = _handle_skill_input(task, skill_name, mod_name)
@@ -258,7 +282,8 @@ def _run_interactive(
             if not task.strip():
                 continue
 
-            if active_session_id is None:
+            started_new_session = active_session_id is None
+            if started_new_session:
                 if mod_name is None:
                     status, session_id = _run_new_session_task(
                         repo_root, task, settings, display, skill_name
@@ -284,6 +309,8 @@ def _run_interactive(
 
             if session_id is not None:
                 active_session_id = session_id
+                selected_title = task if started_new_session else menu.session_title
+                menu.set_active_session(session_id, title=selected_title)
             if status != 0:
                 return status
     finally:

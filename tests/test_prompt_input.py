@@ -242,7 +242,7 @@ def test_menu_focus_marker_and_composer_marker_update_on_render(tmp_path) -> Non
     assert "›" in "\n".join(unfocused)
     assert "›" not in "\n".join(focused)
     assert "Workspace" in next(row for row in focused if ">" in row)
-    assert "Mod" in next(row for row in moved if ">" in row)
+    assert "Session" in next(row for row in moved if ">" in row)
     assert startup.buffer.text == ""
 
 

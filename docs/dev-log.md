@@ -1,3 +1,33 @@
+- 2026-09-07: Normalized saved task whitespace at the startup menu's shared
+  session-title seam so multiline tasks remain one-line presentation data in
+  both the recent-session submenu and the main Session row. Runs of whitespace,
+  including newlines and tabs, now collapse to one space before truncation;
+  empty results still use `Untitled session`. Panel geometry, scrolling,
+  timestamp alignment, and prompt_toolkit lifecycle behavior are unchanged.
+  Added focused coverage for normalization, truncation, age visibility and
+  alignment, fixed panel height, and unchanged single-line titles. The focused
+  startup-menu suite passed (21 tests); related CLI runtime, prompt-input,
+  terminal, and session UI suites passed (213 tests). Compilation, an affected
+  import smoke check, and `git diff --check` passed. No live model inference
+  ran.
+
+- 2026-09-07: Added a Session row and recent-session picker to the existing
+  fixed startup panel and its sole temporary prompt_toolkit Application. The
+  submenu keeps `New session` first, shows five of the newest 20 workspace
+  sessions at once, scrolls with the existing arrow-key state, truncates task
+  titles ahead of a stable compact age column, commits with Enter, and backs
+  out without mutation with Esc. Discovery reuses Core's presentation-neutral
+  `list_sessions` index through CLI-owned `discover_recent_sessions`; selection
+  reuses the `/resume` path's `resolve_session_id`; transcript loading and
+  resumed-run construction remain exclusively in the existing follow-up
+  runner. Main-menu focus, panel geometry, rain, composer, mouse behavior, and
+  persistence formats are unchanged. Focused startup/menu/session/CLI/header/
+  composer/display coverage passed (344 tests). The full suite reached 903
+  passed with four unrelated prompt-policy assertion failures in
+  `test_coding_agent.py` and `test_core_agent.py`; this patch changes no prompt
+  or agent-policy files. Production compilation, affected imports, and
+  `git diff --check` passed. No live model inference ran.
+
 - 2026-09-07: Improved the existing CLI `tool_preparing` pulse without changing
   Core, providers, events, narration rendering, or completed Tool presentation.
   `TerminalSpinner.start()` now accepts an optional active label and repaints

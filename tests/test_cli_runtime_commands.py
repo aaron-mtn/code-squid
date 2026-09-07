@@ -6,7 +6,11 @@ from pathlib import Path
 import pytest
 
 from code_squid.app_paths import workspace_sessions_dir
-from code_squid.console.cli.control_commands import handle_control_command
+from code_squid.console.cli.control_commands import (
+    RECENT_SESSION_LIMIT,
+    discover_recent_sessions,
+    handle_control_command,
+)
 from code_squid.console.cli.prompt_loop import _resume_session, _run_interactive
 from code_squid.console.cli.runtime_commands import handle_runtime_command
 from code_squid.settings import load_settings
@@ -231,6 +235,26 @@ def _saved_session(repo_root: Path, task: str) -> SessionStore:
     return store
 
 
+def test_recent_session_discovery_reuses_workspace_index_and_caps_results(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    sessions = [{"session_id": str(index)} for index in range(25)]
+    seen = []
+
+    def list_index(sessions_dir):
+        seen.append(sessions_dir)
+        return sessions
+
+    monkeypatch.setattr(
+        "code_squid.console.cli.control_commands.list_sessions",
+        list_index,
+    )
+
+    assert discover_recent_sessions(tmp_path) == sessions[:RECENT_SESSION_LIMIT]
+    assert seen == [workspace_sessions_dir(tmp_path)]
+
+
 def test_sessions_and_show_current_latest_and_explicit(tmp_path, capsys) -> None:
     current = _saved_session(tmp_path, "current transcript")
 
@@ -351,3 +375,53 @@ def test_shell_resume_enters_the_same_multi_turn_interactive_loop(
 
     assert _resume_session(tmp_path, saved.session_id) == 0
     assert follow_ups == [(saved.session_id, "first"), (saved.session_id, "second")]
+
+
+def test_startup_session_selection_uses_existing_follow_up_runner(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    saved = _saved_session(tmp_path, "original task")
+    display = QuietDisplay()
+    selected_menu = None
+    follow_ups = []
+    prompts = iter(["continue it", "/exit"])
+
+    def set_startup_menu(menu):
+        nonlocal selected_menu
+        selected_menu = menu
+
+    def prompt(_label, animator=None):
+        task = next(prompts)
+        if task == "continue it":
+            selected_menu.set_active_session(
+                saved.session_id,
+                title="original task",
+            )
+        return task
+
+    def follow_up(
+        repo_root,
+        session_id,
+        task,
+        settings,
+        current_display,
+        skill_name=None,
+        mod_name=None,
+    ):
+        follow_ups.append((session_id, task))
+        return 0, session_id
+
+    display.set_startup_menu = set_startup_menu
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._run_display",
+        lambda *args: display,
+    )
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", prompt)
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._run_follow_up_task",
+        follow_up,
+    )
+
+    assert _run_interactive(tmp_path) == 0
+    assert follow_ups == [(saved.session_id, "continue it")]

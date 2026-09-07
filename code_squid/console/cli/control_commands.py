@@ -5,7 +5,19 @@ from pathlib import Path
 from code_squid.app_paths import workspace_sessions_dir, workspace_undo_dir
 from code_squid.console.ui.sessions import print_session, print_sessions
 from squid_core.storage import UndoStore
-from squid_core.storage.session_index import latest_session_id, session_dir_for
+from squid_core.storage.session_index import (
+    latest_session_id,
+    list_sessions,
+    session_dir_for,
+)
+
+
+RECENT_SESSION_LIMIT = 20
+
+
+def discover_recent_sessions(repo_root: Path) -> list[dict]:
+    """Return the newest workspace session metadata for CLI selection surfaces."""
+    return list_sessions(workspace_sessions_dir(repo_root))[:RECENT_SESSION_LIMIT]
 
 
 def undo_latest_run(repo_root: Path) -> bool:

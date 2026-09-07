@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 import textwrap
 from typing import Callable, Sequence
@@ -13,6 +14,10 @@ from code_squid.console.cli.runtime_commands import (
     apply_model,
     apply_provider,
     apply_safety,
+)
+from code_squid.console.cli.control_commands import (
+    discover_recent_sessions,
+    resolve_session_id,
 )
 from code_squid.console.cli.mod_commands import apply_mod_selection
 from code_squid.console.ui.banner import (
@@ -33,8 +38,9 @@ from squid_core.mods import discover_mods
 from squid_core.providers import build_provider
 
 
-MAIN_ROWS = ("Provider", "Model", "Safety", "Mod", "Workspace")
+MAIN_ROWS = ("Provider", "Model", "Safety", "Mod", "Session", "Workspace")
 MODEL_FALLBACK = ("No model list available", "Use /model <name>")
+SESSION_VISIBLE_SAVED_LIMIT = 5
 
 
 def discover_provider_models(settings: Settings) -> list[str] | None:
@@ -55,16 +61,24 @@ class StartupMenu:
     settings: Settings
     mod_name: str | None = None
     skill_name: str | None = None
+    session_id: str | None = None
+    session_title: str | None = None
     mode: str = "main"
     selected_index: int = 0
     focused: bool = False
     model_discovery: Callable[[Settings], list[str] | None] = discover_provider_models
+    session_discovery: Callable[[Path], list[dict]] = discover_recent_sessions
+    session_resolver: Callable[[Path, str], str | None] = resolve_session_id
+    now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
 
     def __post_init__(self) -> None:
         self.repo_root = self.repo_root.resolve()
         self._main_selected_index = self.selected_index
         self._options: tuple[str, ...] = ()
         self._model_message: tuple[str, ...] = ()
+        self._session_metadata: tuple[dict, ...] = ()
+        if self.session_id is not None and self.session_title is None:
+            self.set_active_session(self.session_id)
 
     @property
     def startup_info(self) -> StartupInfo:
@@ -78,6 +92,7 @@ class StartupMenu:
             ],
             skill_name=self.skill_name,
             mod_name=self.mod_name,
+            session_title=self.session_title,
         )
 
     def sync(
@@ -91,6 +106,32 @@ class StartupMenu:
         self.settings = settings
         self.mod_name = mod_name
         self.skill_name = skill_name
+
+    def set_active_session(
+        self,
+        session_id: str | None,
+        *,
+        title: str | None = None,
+    ) -> None:
+        """Mirror CLI-owned active-session state for startup presentation."""
+        self.session_id = session_id
+        if session_id is None:
+            self.session_title = None
+            return
+        if title is not None:
+            self.session_title = title
+            return
+        metadata = next(
+            (
+                item
+                for item in self.session_discovery(self.repo_root)
+                if item.get("session_id") == session_id
+            ),
+            None,
+        )
+        self.session_title = (
+            _session_title(metadata) if metadata is not None else "Saved session"
+        )
 
     def focus_from_composer(self) -> None:
         """Focus the bottom main-menu row without submitting input."""
@@ -148,6 +189,18 @@ class StartupMenu:
                 selected,
                 self.skill_name,
             )
+        elif self.mode == "session":
+            if self.selected_index == 0:
+                self.session_id = None
+                self.session_title = None
+            else:
+                metadata = self._session_metadata[self.selected_index - 1]
+                requested_id = str(metadata.get("session_id", ""))
+                resolved_id = self.session_resolver(self.repo_root, requested_id)
+                self.set_active_session(
+                    resolved_id,
+                    title=_session_title(metadata),
+                )
         self.mode = "main"
         self.selected_index = self._main_selected_index
 
@@ -178,6 +231,14 @@ class StartupMenu:
                 sorted(name for name, mod in mods.items() if mod.valid)
             )
             self._select_current(self.mod_name or "none")
+        elif self.mode == "session":
+            self._session_metadata = tuple(self.session_discovery(self.repo_root))
+            self._options = ("",) + tuple(
+                str(metadata.get("session_id", ""))
+                for metadata in self._session_metadata
+            )
+            if self.session_id in self._options:
+                self.selected_index = self._options.index(self.session_id)
         else:
             self._options = ()
 
@@ -201,6 +262,7 @@ class StartupMenu:
             info.model,
             info.approval_mode,
             info.mod_name or "none",
+            info.session_title or "New",
             concise_workspace_name(info.directory),
         )
         width = layout.panel.width
@@ -212,7 +274,6 @@ class StartupMenu:
         content_width = max(inner_width - content_left - 1, 0)
         rows = [
             f"{PANEL_TOP_LEFT}{PANEL_HORIZONTAL * inner_width}{PANEL_TOP_RIGHT}",
-            blank,
         ]
         for index, (label, value) in enumerate(zip(MAIN_ROWS, values)):
             marker = ">" if self.focused and index == self.selected_index else " "
@@ -225,7 +286,8 @@ class StartupMenu:
                 f"{PANEL_VERTICAL}{prefix}{gap}{content}"
                 f"{' ' * max(right_padding, 0)}{PANEL_VERTICAL}"
             )
-            rows.append(blank)
+            if index < len(MAIN_ROWS) - 1:
+                rows.append(blank)
         rows.append(
             f"{PANEL_BOTTOM_LEFT}{PANEL_HORIZONTAL * inner_width}{PANEL_BOTTOM_RIGHT}"
         )
@@ -257,6 +319,9 @@ class StartupMenu:
             content = [title, "", *self._model_message, "", "Esc  back"]
             return _framed_rows(content, layout)
 
+        if self.mode == "session":
+            return self._session_panel_lines(layout)
+
         # Keep the selected option visible if discovered Mods exceed panel space.
         visible_count = 5
         start = min(
@@ -285,6 +350,98 @@ class StartupMenu:
             "Esc  back".center(inner_width),
         ]
         return _framed_rows(content, layout)
+
+    def _session_panel_lines(self, layout: StartupSceneLayout) -> list[str]:
+        """Render a bounded session viewport while keeping selection visible."""
+        saved_selected_index = max(self.selected_index - 1, 0)
+        saved_start = min(
+            max(saved_selected_index - SESSION_VISIBLE_SAVED_LIMIT + 1, 0),
+            max(len(self._session_metadata) - SESSION_VISIBLE_SAVED_LIMIT, 0),
+        )
+        visible = self._session_metadata[
+            saved_start : saved_start + SESSION_VISIBLE_SAVED_LIMIT
+        ]
+        rows: list[tuple[str, str, int]] = [
+            ("New session", "now", 0),
+        ]
+        rows.extend(
+            (
+                _session_title(metadata),
+                _session_age(metadata, self.now()),
+                saved_start + index + 1,
+            )
+            for index, metadata in enumerate(visible)
+        )
+
+        inner_width = max(layout.panel.width - 2, 0)
+        option_rows = [
+            _session_option_row(
+                title,
+                age,
+                selected=option_index == self.selected_index,
+                width=inner_width,
+            )
+            for title, age, option_index in rows
+        ]
+        content = [
+            "Session".center(inner_width),
+            "",
+            *option_rows,
+            "",
+            "↑↓ select   Enter   Esc".center(inner_width),
+        ]
+        return _framed_rows(content, layout)
+
+
+def _session_title(metadata: dict) -> str:
+    """Return the human-facing task title without falling back to the ID."""
+    task = metadata.get("task")
+    if task is not None:
+        title = " ".join(str(task).split())
+        if title:
+            return title
+    return "Untitled session"
+
+
+def _session_age(metadata: dict, now: datetime) -> str:
+    """Format one compact age from the session index timestamp."""
+    value = metadata.get("updated_at")
+    if not isinstance(value, str):
+        return ""
+    try:
+        updated = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if updated.tzinfo is None:
+        updated = updated.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    seconds = max(int((now - updated).total_seconds()), 0)
+    if seconds < 60:
+        return "now"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    if seconds < 86400:
+        return f"{seconds // 3600}h"
+    return f"{seconds // 86400}d"
+
+
+def _session_option_row(
+    title: str,
+    age: str,
+    *,
+    selected: bool,
+    width: int,
+) -> str:
+    """Fit a title and stable right-aligned age into one panel row."""
+    inset = min(2, max(width // 8, 0))
+    row_width = max(width - (inset * 2), 0)
+    marker = "> " if selected else "  "
+    label_width = max(row_width - len(marker) - len(age) - 1, 0)
+    if len(title) > label_width:
+        title = (title[: max(label_width - 3, 0)] + "...")[:label_width]
+    body = f"{marker}{title:<{label_width}} {age}"[:row_width]
+    return f"{' ' * inset}{body.ljust(row_width)}{' ' * inset}"
 
 
 def _framed_rows(content: Sequence[str], layout: StartupSceneLayout) -> list[str]:
