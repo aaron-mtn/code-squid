@@ -33,6 +33,12 @@ from code_squid.console.ui.header_layout import STARTUP_SEPARATOR_ROWS
 COMPOSER_RIGHT_PADDING = 1
 
 
+# A saved-session choice ends the startup scene without pretending the user
+# submitted an empty task. The caller can then print status and open the normal
+# composer only after this Application has released the terminal.
+STARTUP_SESSION_SELECTED = object()
+
+
 _active_startups: dict[int, "StartupApplication"] = {}
 _active_startups_lock = threading.Lock()
 
@@ -52,12 +58,13 @@ def startup_application_active(rain: BinaryRainHeader) -> bool:
 
 
 class StartupApplication:
-    """Own rain, panel, menu presentation, and composer until submission.
+    """Own rain, panel, menu presentation, and composer until handoff.
 
-    This Application is intentionally temporary and non-full-screen. Submit
-    releases the caller while this same renderer briefly fades its rain; any
-    run output synchronously finishes that renderer first. Keeping that
-    boundary strict avoids recreating a persistent transcript/composer UI.
+    This Application is intentionally temporary and non-full-screen. Task
+    submission or saved-session selection releases the caller while this same
+    renderer briefly fades its rain; any ordinary output synchronously finishes
+    that renderer first. Keeping that boundary strict avoids recreating a
+    persistent transcript/composer UI.
     """
 
     def __init__(
@@ -72,7 +79,7 @@ class StartupApplication:
         self.rain = rain
         self.prompt = prompt
         self._submitted = threading.Event()
-        self._result = ""
+        self._result: str | object = ""
         self._failure: BaseException | None = None
         self._thread: threading.Thread | None = None
         self.final_screen = None
@@ -117,7 +124,7 @@ class StartupApplication:
             ],
             padding=0,
         )
-        self.application: Application[str] = Application(
+        self.application: Application[object] = Application(
             layout=Layout(root, focused_element=self.buffer_control),
             key_bindings=key_bindings,
             style=Style.from_dict({"frame.border": "dim"}),
@@ -132,12 +139,15 @@ class StartupApplication:
         # The shared key bindings use this narrow product callback only for the
         # startup Application; ordinary PromptSession submission is unchanged.
         self.application.code_squid_submit = self.submit  # type: ignore[attr-defined]
+        self.application.code_squid_session_selected = (  # type: ignore[attr-defined]
+            self.select_saved_session
+        )
         # `/new` constructs a new temporary Application around the same display
         # model, so reset drops here to make every session scene genuinely fresh.
         self.rain.reset(self.application.output.get_size().columns)
 
-    def run(self) -> str:
-        """Return on submit while the existing Application finishes its fade."""
+    def run(self) -> str | object:
+        """Return on handoff while the existing Application finishes its fade."""
         context = contextvars.copy_context()
         self._thread = threading.Thread(
             target=context.run,
@@ -156,6 +166,15 @@ class StartupApplication:
         if self._submitted.is_set():
             return
         self._result = task
+        self.rain.begin_fade()
+        self._submitted.set()
+        self.application.invalidate()
+
+    def select_saved_session(self) -> None:
+        """Release startup with a result distinct from task submission."""
+        if self._submitted.is_set():
+            return
+        self._result = STARTUP_SESSION_SELECTED
         self.rain.begin_fade()
         self._submitted.set()
         self.application.invalidate()
@@ -248,10 +267,10 @@ class StartupApplication:
     def _prompt_marker(self):
         return self._prompt_lines()[-1]
 
-    def _advance_rain(self, app: Application[str]) -> None:
+    def _advance_rain(self, app: Application[object]) -> None:
         self.rain.advance(app.output.get_size().columns)
 
-    def _exit_after_clean_frame(self, app: Application[str]) -> None:
+    def _exit_after_clean_frame(self, app: Application[object]) -> None:
         # after_render is the crucial ordering boundary: the no-rain scene has
         # reached Output before terminal ownership is released.
         if not self.rain.fade_complete:

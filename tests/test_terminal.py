@@ -689,7 +689,7 @@ def test_accent_squid_uses_text_presentation_sequence() -> None:
     assert SQUID_GLYPH == "\U0001f991\ufe0e"
 
 
-def test_previous_session_notice_is_two_dim_neutral_lines(
+def test_previous_session_notice_is_one_indented_dim_neutral_line(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -702,10 +702,24 @@ def test_previous_session_notice_is_two_dim_neutral_lines(
     )
 
     assert capsys.readouterr().out == (
-        f"{DIM_STYLE}↩ Previous session loaded{RESET_STYLE}\n"
-        f"{DIM_STYLE}  Fix Skate Wizard startup crash · 17 messages · 2h"
-        f"{RESET_STYLE}\n"
+        f"{DIM_STYLE}{RUN_DETAIL_INDENT}↩ Previous session loaded · "
+        f"Fix Skate Wizard startup crash · 17 messages · 2h{RESET_STYLE}\n"
     )
+
+
+def test_previous_session_notice_truncates_title_but_keeps_age(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    TerminalDisplay().previous_session_loaded("A very long title " * 12, "20m")
+
+    output = capsys.readouterr().out
+    assert output.count("\n") == 1
+    assert "... · 20m" in output
+    assert output.startswith(f"{DIM_STYLE}{RUN_DETAIL_INDENT}")
+    assert output.endswith(f"{RESET_STYLE}\n")
 
 
 def test_final_narration_and_report_output_preserve_text_squid_and_reset(

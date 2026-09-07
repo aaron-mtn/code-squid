@@ -152,14 +152,17 @@ and application layer; `squid_core/` is the reusable agent runtime.
     same panel with pinned `New session` plus a viewport of five saved
     sessions. The backing list is capped at 20; arrow movement scrolls it,
     Enter commits an ID through the same resolver as `/resume`, and Esc
-    discards the submenu highlight. After the submitted startup scene retires,
-    an explicitly selected saved session produces one dim, neutral two-line
-    CLI status notice; `New session`, launch-time resume state, and subsequent
-    follow-ups do not. The notice reuses the selected index record and never
-    opens the transcript for presentation. Its title and age use the picker's
-    shared formatters, and a message count appears only if that count already
-    exists in metadata. Ages use `now`, whole minutes, whole hours, or whole
-    days. Session task titles normalize all whitespace to single spaces before
+    discards the submenu highlight. A saved-session activation returns a
+    distinct result from that same startup Application, allowing the CLI to
+    finish and join its fade before printing and opening an ordinary composer;
+    no nested Application or extra startup renderer is created. The CLI then
+    immediately consumes the selected metadata into one dim, neutral,
+    detail-indented status line. `New session`, launch-time resume state, and
+    subsequent follow-ups remain silent. The notice never opens the transcript
+    for presentation; its locally truncated title and compact age use the
+    picker's shared normalized data, and a message count appears only if that
+    count already exists in metadata. Ages use `now`, whole minutes, whole
+    hours, or whole days. Session task titles normalize all whitespace to single spaces before
     any presentation or truncation, keeping both the submenu and main Session
     row single-line; submenu titles then truncate before a stable
     right-aligned age column. Mod/Skill

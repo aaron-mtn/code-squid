@@ -1,3 +1,20 @@
+- 2026-09-07: Moved the saved-session notice from the next task-submission
+  boundary to the startup Session picker's activation boundary. A successful
+  saved-session selection now returns a distinct result from the existing
+  temporary startup Application; the CLI retires and joins that renderer,
+  prints the one-time notice, and opens the ordinary composer before the user
+  submits another task. `StartupMenu` still owns selection state only, and
+  session resolution, transcript loading, and follow-up construction are
+  unchanged. Restyled the notice as one fully dim, normally detail-indented
+  line, with a local 40-character title limit that preserves the compact age
+  and optional cheap metadata message count. `New session`, launch-time resume,
+  and later follow-ups remain silent. Focused startup/menu/input/runtime/display
+  coverage passed (236 tests). The full suite reached 910 passed with the same
+  four unrelated prompt-policy assertion failures in `test_coding_agent.py`
+  and `test_core_agent.py` recorded by the preceding Session-picker work.
+  Production compilation, affected imports, and `git diff --check` passed. No
+  live model inference ran.
+
 - 2026-09-07: Added one quiet CLI status notice for a saved session explicitly
   selected through the startup Session picker. After the startup scene retires,
   the display prints two neutral dim lines with the shared normalized title and

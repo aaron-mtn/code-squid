@@ -14,6 +14,7 @@ from code_squid.console.cli.control_commands import (
 from code_squid.console.cli.prompt_loop import _resume_session, _run_interactive
 from code_squid.console.cli.runtime_commands import handle_runtime_command
 from code_squid.console.startup_menu import MAIN_ROWS
+from code_squid.console.ui.startup_application import STARTUP_SESSION_SELECTED
 from code_squid.settings import load_settings
 from squid_core.storage import SessionStore
 
@@ -394,21 +395,36 @@ def test_startup_session_selection_notices_once_and_uses_existing_follow_up_runn
     display = QuietDisplay()
     selected_menu = None
     follow_ups = []
-    prompts = iter(["continue it", "continue again", "/exit"])
+    prompts = iter([STARTUP_SESSION_SELECTED, "continue it", "continue again", "/exit"])
+    prompt_animators = []
+    startup_released = False
 
     def set_startup_menu(menu):
         nonlocal selected_menu
         selected_menu = menu
+        display.header = object()
 
     def prompt(_label, animator=None):
+        prompt_animators.append(animator)
         task = next(prompts)
-        if task == "continue it":
+        if task is STARTUP_SESSION_SELECTED:
             selected_menu.focus_from_composer()
             selected_menu.selected_index = MAIN_ROWS.index("Session")
             selected_menu.activate()
             selected_menu.selected_index = 1
-            selected_menu.activate()
+            assert selected_menu.activate() is True
+        elif task == "continue it":
+            # The notice must already be visible when the ordinary composer is
+            # available, rather than after this task has been submitted.
+            assert display.loaded_sessions
+            assert startup_released is True
         return task
+
+    def finish_startup_fade():
+        nonlocal startup_released
+        startup_released = True
+
+    display.finish_startup_fade = finish_startup_fade
 
     def follow_up(
         repo_root,
@@ -442,3 +458,5 @@ def test_startup_session_selection_notices_once_and_uses_existing_follow_up_runn
     assert display.loaded_sessions[0][0] == "original task"
     assert display.loaded_sessions[0][2] is None
     assert display.loaded_session_scene_states == [False]
+    assert prompt_animators[0] is display.header
+    assert prompt_animators[1:] == [None, None, None]

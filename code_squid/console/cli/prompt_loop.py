@@ -25,6 +25,7 @@ from code_squid.console.ui.approval import (
 )
 from code_squid.console.ui.display import INPUT_IDENTITY_LINE, TerminalDisplay
 from code_squid.console.ui.binary_header import BinaryRainHeader
+from code_squid.console.ui.startup_application import STARTUP_SESSION_SELECTED
 from code_squid.console.startup_menu import StartupMenu
 
 
@@ -109,7 +110,7 @@ def _composer_prompt(animator: BinaryRainHeader | None = None):
     return fragments
 
 
-def _prompt_task(label: str, animator: BinaryRainHeader | None = None) -> str:
+def _prompt_task(label: str, animator: BinaryRainHeader | None = None) -> str | object:
     return prompt_multiline_input(
         _composer_prompt(animator),
         animator=animator,
@@ -137,14 +138,27 @@ def _print_selected_session_notice(
 def _prompt_task_or_cancel(
     label: str,
     display: TerminalDisplay | None = None,
+    menu: StartupMenu | None = None,
 ) -> str | None:
     try:
         if display is not None:
             animator = display.header if display.session_scene_active else None
             task = _prompt_task(label, animator)
             display.retire_session_scene()
+            if task is STARTUP_SESSION_SELECTED:
+                # The result is published before the fade finishes. Join the
+                # sole startup renderer before ordinary output takes ownership.
+                _finish_startup_fade(display)
+                if menu is not None:
+                    _print_selected_session_notice(display, menu)
+                task = _prompt_task(label)
+                assert isinstance(task, str)
+                return task
+            assert isinstance(task, str)
             return task
-        return _prompt_task(label)
+        task = _prompt_task(label)
+        assert isinstance(task, str)
+        return task
     except KeyboardInterrupt:
         print(CANCELLED_BEFORE_RUN_MESSAGE)
         return None
@@ -158,12 +172,11 @@ def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
         display.set_startup_menu(menu)
     try:
         display.start()
-        task = _prompt_task_or_cancel("Task", display)
+        task = _prompt_task_or_cancel("Task", display, menu)
         settings = menu.settings
         selected_session_id = menu.session_id
         if task is None:
             return 0
-        _print_selected_session_notice(display, menu)
         if _is_help_input(task):
             _finish_startup_fade(display)
             _print_help()
@@ -235,7 +248,7 @@ def _run_interactive(
     try:
         display.start()
         while True:
-            task = _prompt_task_or_cancel("Task", display)
+            task = _prompt_task_or_cancel("Task", display, menu)
             settings = menu.settings
             mod_name = menu.mod_name
             skill_name = menu.skill_name
@@ -244,7 +257,6 @@ def _run_interactive(
             active_session_id = menu.session_id
             if task is None:
                 return 0
-            _print_selected_session_notice(display, menu)
             if _is_exit_input(task):
                 _finish_startup_fade(display)
                 return 0

@@ -194,15 +194,16 @@ class StartupMenu:
         self.mode = "main"
         self.selected_index = self._main_selected_index
 
-    def activate(self) -> None:
-        """Open the selected main row or apply one selected submenu option."""
+    def activate(self) -> bool:
+        """Apply the selected option and report a saved-session activation."""
         if self.mode == "main":
             self._open_main_row()
-            return
+            return False
         if self.mode == "workspace" or not self._options:
-            return
+            return False
 
         selected = self._options[self.selected_index]
+        saved_session_activated = False
         if self.mode == "provider":
             self.settings = apply_provider(self.repo_root, selected)
         elif self.mode == "model":
@@ -232,8 +233,14 @@ class StartupMenu:
                 self._selected_session_notice = (
                     metadata if resolved_id is not None else None
                 )
+                saved_session_activated = resolved_id is not None
+                if saved_session_activated:
+                    # The startup renderer exits at this boundary; keep menu
+                    # focus from leaking into a later fresh startup scene.
+                    self.focused = False
         self.mode = "main"
         self.selected_index = self._main_selected_index
+        return saved_session_activated
 
     def _open_main_row(self) -> None:
         self._main_selected_index = self.selected_index

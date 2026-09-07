@@ -26,7 +26,10 @@ from code_squid.console.ui.prompt_input import (
     multiline_key_bindings,
     prompt_multiline_input,
 )
-from code_squid.console.ui.startup_application import StartupApplication
+from code_squid.console.ui.startup_application import (
+    STARTUP_SESSION_SELECTED,
+    StartupApplication,
+)
 from code_squid.settings import VALID_PROVIDERS, load_settings
 
 
@@ -474,6 +477,33 @@ def test_saved_session_selection_exposes_one_normalized_notice_from_index(
         17,
     )
     assert menu.take_selected_session_notice() is None
+
+
+def test_saved_session_activation_releases_startup_before_task_submission(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    recent = [{"session_id": "saved-session", "task": "Saved task"}]
+    menu = StartupMenu(
+        tmp_path,
+        load_settings(tmp_path),
+        session_discovery=lambda _: recent,
+        session_resolver=lambda _root, session_id: session_id,
+    )
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Session")
+    assert menu.activate() is False
+
+    result = _run_prompt(
+        monkeypatch,
+        menu,
+        "\x1b[B\r",
+    )
+
+    assert result is STARTUP_SESSION_SELECTED
+    assert menu.session_id == "saved-session"
+    assert menu.focused is False
+    assert menu.take_selected_session_notice() is not None
 
 
 def test_new_session_clears_notice_and_missing_index_count_stays_omitted(

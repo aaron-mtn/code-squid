@@ -72,6 +72,7 @@ from code_squid.console.ui.tool_display import (
 
 RUN_EVENT_INDENT = "  "
 RUN_DETAIL_INDENT = "    "
+PREVIOUS_SESSION_TITLE_MAX_LENGTH = 40
 INPUT_IDENTITY_LINE = "@code-squid"
 PANEL_LEFT_PADDING = "  "
 PANEL_CONTENT_WIDTH = RUN_PANEL_WIDTH - 2 - len(PANEL_LEFT_PADDING) - 1
@@ -507,15 +508,17 @@ class TerminalDisplay:
         age: str,
         message_count: int | None = None,
     ) -> None:
-        """Print one quiet status notice after startup session selection."""
+        """Print one compact status line after startup session selection."""
         self._finish_startup_before_output()
+        if len(title) > PREVIOUS_SESSION_TITLE_MAX_LENGTH:
+            title = f"{title[:PREVIOUS_SESSION_TITLE_MAX_LENGTH - 3].rstrip()}..."
         details = [title]
         if message_count is not None:
             details.append(f"{message_count} messages")
         if age:
             details.append(age)
-        print(styled_text("↩ Previous session loaded", DIM_STYLE))
-        print(styled_text(f"  {' · '.join(details)}", DIM_STYLE))
+        line = f"↩ Previous session loaded · {' · '.join(details)}"
+        self._print_visible_line(line, dim=True)
 
     def _startup_info_panel(self, startup_info: StartupInfo) -> str:
         """Return startup details through the existing display test seam."""
