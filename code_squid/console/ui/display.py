@@ -581,14 +581,34 @@ class TerminalDisplay:
 
     def _print_completion_panel(self, session) -> None:
         """Print the final response and any files changed as one panel."""
-        heading = " Report:" if self._tool_used_in_run else ""
-        lines = [self._squid_line(heading), ""]
+        narration_indent = " " * (_display_width(SQUID_GLYPH) + 1)
+        summary_width = PANEL_CONTENT_WIDTH
+        if not self._tool_used_in_run:
+            # The no-tool marker shares the first content row, so reserve its
+            # extra cell while preserving the formatter's relative indentation.
+            summary_width -= len(narration_indent) - len(FINAL_SUMMARY_INDENT)
         formatted = format_final_summary(
             self._pending_final_content,
-            width=PANEL_CONTENT_WIDTH,
+            width=summary_width,
         )
-        if formatted:
-            lines.extend(formatted.splitlines())
+        if self._tool_used_in_run:
+            lines = [self._squid_line(" Report:"), ""]
+            if formatted:
+                lines.extend(formatted.splitlines())
+        elif formatted:
+            summary_lines = [
+                line.removeprefix(FINAL_SUMMARY_INDENT)
+                for line in formatted.splitlines()
+            ]
+            summary_lines[0] = f"{SQUID_GLYPH} {summary_lines[0]}"
+            lines = [self._accent_first_squid(summary_lines[0])]
+            lines.extend(
+                f"{narration_indent}{line}" if line else line
+                for line in summary_lines[1:]
+            )
+        else:
+            # Preserve the established empty/file-only completion layout.
+            lines = [self._squid_line(""), ""]
         if session.files_written:
             lines.extend(["", "Changed files", ""])
             lines.extend(self._file_lines(session.files_written))

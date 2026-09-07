@@ -1733,11 +1733,33 @@ def test_no_tool_final_run_prints_squid_marker_without_report_label(
     assert output.startswith("\n╭")
     assert not output.startswith("\n\n")
     assert output.count("╭") == output.count("╰") == 1
-    assert f"│  {SQUID_GLYPH} " in output
+    assert f"│  {SQUID_GLYPH} Yes." in output
+    assert f"{SQUID_GLYPH} \n" not in output
     assert "Report:" not in output
-    assert "Yes." in output
     assert "Changed files" not in output
     assert "─" * RUN_PANEL_WIDTH not in output
+
+
+def test_no_tool_final_wraps_and_aligns_continuation_lines_with_narration(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    display = TerminalDisplay()
+    display.run_started()
+    finish_display(
+        display,
+        "This normal conversational response starts on the squid row and wraps "
+        "onto a consistently aligned continuation row.",
+    )
+
+    lines = capsys.readouterr().out.splitlines()
+    content_lines = [line for line in lines if "│" in line]
+    narration_indent = " " * (_display_width(SQUID_GLYPH) + 1)
+    assert content_lines[0].startswith(f"│  {SQUID_GLYPH} This normal")
+    assert content_lines[1].startswith(f"│  {narration_indent}")
+    assert "wraps onto" in content_lines[1]
+    assert all(
+        _display_width(line) == RUN_PANEL_WIDTH for line in lines[1:] if line
+    )
 
 
 def test_tool_using_run_keeps_report_label(
@@ -1750,6 +1772,12 @@ def test_tool_using_run_keeps_report_label(
 
     output = capsys.readouterr().out
     assert f"│  {SQUID_GLYPH} Report:" in output
+    panel_lines = output.splitlines()
+    heading_index = next(
+        index for index, line in enumerate(panel_lines) if "Report:" in line
+    )
+    assert panel_lines[heading_index + 1].strip("│ ") == ""
+    assert f"{FINAL_SUMMARY_INDENT}Updated the app." in output
 
 
 def test_read_only_tool_use_keeps_report_label_without_changed_files(
@@ -1936,6 +1964,7 @@ def test_final_summary_headings_are_bold_in_tty(
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
 
     display = TerminalDisplay()
+    display.action_started({"tool": "read_file", "args": {"path": "ui/terminal.py"}})
     finish_display(display,
         "## Files changed\n"
         "- `ui/terminal.py`\n"
@@ -2004,6 +2033,7 @@ def test_final_message_renders_unordered_bullet_markers_as_terminal_bullets(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     display = TerminalDisplay()
+    display.action_started({"tool": "read_file", "args": {"path": "ui/terminal.py"}})
     finish_display(display,
         "- dash item\n"
         "* star item\n"
@@ -2135,6 +2165,7 @@ def test_final_message_preserves_numbered_bullet_markers(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     display = TerminalDisplay()
+    display.action_started({"tool": "read_file", "args": {"path": "ui/terminal.py"}})
     finish_display(display,
         "1. First item\n"
         "2. Second item"
@@ -2179,6 +2210,7 @@ def test_final_message_wraps_body_lines(
     )
 
     display = TerminalDisplay()
+    display.action_started({"tool": "read_file", "args": {"path": "ui/terminal.py"}})
     finish_display(display,
         "## Files changed\n"
         "- `ui/terminal.py`\n"
@@ -2206,6 +2238,7 @@ def test_final_message_wraps_unordered_bullet_continuation_under_text(
     )
 
     display = TerminalDisplay()
+    display.action_started({"tool": "read_file", "args": {"path": "ui/terminal.py"}})
     finish_display(display,
         "- This bullet line should wrap with continuation text aligned beneath the item text."
     )
