@@ -164,12 +164,18 @@ class AgentLoop:
                 tool_definitions=tool_definitions,
             )
 
-        self._emit_event({"type": "assistant_message_started"})
+        self._emit_event(
+            {
+                "type": "assistant_message_started",
+                "phase": "narration",
+            }
+        )
 
         def on_text_delta(delta: str) -> None:
             self._emit_event(
                 {
                     "type": "assistant_delta",
+                    "phase": "narration",
                     "delta": delta,
                 }
             )
@@ -466,6 +472,7 @@ class AgentLoop:
                     self._emit_event(
                         {
                             "type": "assistant_message",
+                            "phase": "narration",
                             "message": assistant_content,
                             "text": assistant_content,
                         }
@@ -476,6 +483,7 @@ class AgentLoop:
                     self._emit_event(
                         {
                             "type": "final_message",
+                            "phase": "final",
                             "message": assistant_content,
                             "text": assistant_content,
                         }

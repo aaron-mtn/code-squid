@@ -1108,12 +1108,28 @@ def test_loop_emits_basic_run_events(tmp_path) -> None:
     assert events[0]["task"] == ""
     assert events[1]["message"] == "Reading file."
     assert events[1]["text"] == "Reading file."
+    assert events[1]["phase"] == "narration"
+    assert {key: value for key, value in events[1].items() if key != "timestamp"} == {
+        "session_id": None,
+        "type": "assistant_message",
+        "phase": "narration",
+        "message": "Reading file.",
+        "text": "Reading file.",
+    }
     assert events[2]["tool"] == "read_file"
     assert events[2]["path"] == str(target)
     assert events[3]["ok"] is True
     assert events[3]["path"] == str(target)
     assert events[4]["message"] == "TASK COMPLETE"
     assert events[4]["text"] == "TASK COMPLETE"
+    assert events[4]["phase"] == "final"
+    assert {key: value for key, value in events[4].items() if key != "timestamp"} == {
+        "session_id": None,
+        "type": "final_message",
+        "phase": "final",
+        "message": "TASK COMPLETE",
+        "text": "TASK COMPLETE",
+    }
     assert events[5]["status"] == "complete"
     assert all("timestamp" in event for event in events)
 
@@ -1154,9 +1170,41 @@ def test_streaming_enabled_emits_started_deltas_and_full_assistant_message() -> 
         "Reading ",
         "file.",
     ]
-    assert next(event for event in events if event["type"] == "assistant_message")[
-        "message"
-    ] == "Reading file."
+    started_event = next(
+        event for event in events if event["type"] == "assistant_message_started"
+    )
+    delta_events = [event for event in events if event["type"] == "assistant_delta"]
+    assistant_event = next(
+        event for event in events if event["type"] == "assistant_message"
+    )
+    assert started_event["phase"] == "narration"
+    assert all(event["phase"] == "narration" for event in delta_events)
+    assert assistant_event["phase"] == "narration"
+    assert assistant_event["message"] == "Reading file."
+    assert {
+        key: value for key, value in started_event.items() if key != "timestamp"
+    } == {
+        "session_id": None,
+        "type": "assistant_message_started",
+        "phase": "narration",
+    }
+    assert [
+        {key: value for key, value in event.items() if key != "timestamp"}
+        for event in delta_events
+    ] == [
+        {
+            "session_id": None,
+            "type": "assistant_delta",
+            "phase": "narration",
+            "delta": "Reading ",
+        },
+        {
+            "session_id": None,
+            "type": "assistant_delta",
+            "phase": "narration",
+            "delta": "file.",
+        },
+    ]
 
 
 def test_streaming_enabled_emits_tool_preparing_before_message_and_tool_started() -> None:
@@ -1221,6 +1269,16 @@ def test_streaming_enabled_emits_tool_preparing_before_message_and_tool_started(
     assert tool_preparing["tool_call_id"] == "call_1"
     assert "args" not in tool_preparing
     assert "content" not in tool_preparing
+    assert "phase" not in tool_preparing
+    assert {
+        key: value for key, value in tool_preparing.items() if key != "timestamp"
+    } == {
+        "session_id": None,
+        "type": "tool_preparing",
+        "tool": "write_file",
+        "tool_call_index": 0,
+        "tool_call_id": "call_1",
+    }
 
 
 def test_streaming_enabled_does_not_execute_tool_until_full_reply_returns_and_validates() -> None:
@@ -1315,6 +1373,7 @@ def test_assistant_message_event_includes_full_message() -> None:
     )
     assert assistant_event["message"] == assistant_text
     assert assistant_event["text"] == assistant_event["message"]
+    assert assistant_event["phase"] == "narration"
     assert assistant_event["message"] == display.assistant_messages[0]
 
 
@@ -1333,6 +1392,7 @@ def test_final_message_event_includes_full_message() -> None:
     final_event = next(event for event in events if event["type"] == "final_message")
     assert final_event["message"] == final_text
     assert final_event["text"] == final_event["message"]
+    assert final_event["phase"] == "final"
     assert final_event["message"] == display.final_messages[0]
 
 

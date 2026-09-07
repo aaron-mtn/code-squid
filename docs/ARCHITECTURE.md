@@ -344,6 +344,7 @@ Current loop-level event types include:
 - `assistant_message_started`
 - `assistant_delta`
 - `assistant_message`
+- `tool_preparing`
 - `tool_started`
 - `tool_finished`
 - `reply_rejected`
@@ -351,6 +352,14 @@ Current loop-level event types include:
 - `run_failed`
 - `run_cancelled`
 - `run_finished`
+
+Assistant-text events identify their semantic phase without introducing a
+separate model call or event family. `assistant_message_started`,
+`assistant_delta`, and `assistant_message` carry `phase: "narration"` for
+user-visible mid-turn text that may be followed by tool activity.
+`final_message` carries `phase: "final"` for the terminal assistant response.
+`tool_preparing` remains the transition from streamed narration into structured
+tool-call preparation and does not carry an assistant-text phase.
 
 Event payloads should stay compact. They must not include raw file contents,
 full command output, prompts, provider payloads, API keys, headers, or secrets.
@@ -869,8 +878,9 @@ Supported approval modes are `never`, `guarded`, and `always`.
 provider, the loop emits `assistant_message_started` before generation and
 `assistant_delta` events for visible text chunks, then emits the normal full
 `assistant_message` or `final_message` after the complete reply is assembled and
-validated. Streamed deltas are UI events only; tool execution still waits for
-the full validated assistant response.
+validated. These events carry the `narration` or `final` phase described in
+Events And External Wrappers. Streamed deltas are UI events only; tool execution
+still waits for the full validated assistant response.
 `model.temperature` is `null` or a number from 0 through 2.
 
 Environment overrides are optional development, headless, and automation

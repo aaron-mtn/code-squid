@@ -1,3 +1,12 @@
+- 2026-09-06: Added an explicit semantic `phase` to Core assistant-text
+  events: `assistant_message_started`, `assistant_delta`, and
+  `assistant_message` now carry `narration`, while `final_message` carries
+  `final`. This is an additive observer-protocol change only; the existing
+  model call, event families, payload fields, and `tool_preparing` ordering and
+  behavior remain unchanged. The focused agent-loop suite passed (69), the full
+  suite passed (872), production compilation and a fresh 82-module import walk
+  passed, and `git diff --check` passed. No live model inference ran.
+
 - 2026-09-06: Corrected the presentation regressions in the thinking-pulse
   patch without changing its four frames or 0.17-second interval. Normal
   thinking is terminal-neutral again; Mod accents remain limited to narration
