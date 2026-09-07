@@ -264,11 +264,20 @@ class TerminalDisplay:
             if self._compacted_denied_action == action:
                 self._compacted_denied_action = None
                 return
-            self._print_visible_line("🚫 Action denied", style=SOFT_RED_STYLE)
+            self._print_visible_line(
+                "🚫 Action denied",
+                style=SOFT_RED_STYLE if self.debug else "",
+                dim=not self.debug,
+            )
             self._print_debug_tool_result(action, result)
             return
 
-        presentation = tool_result_line(action, result, self._display_root())
+        presentation = tool_result_line(
+            action,
+            result,
+            self._display_root(),
+            debug=self.debug,
+        )
         if presentation is not None:
             label, style, dim = presentation
             self._print_visible_line(label, style=style, dim=dim)
@@ -278,7 +287,11 @@ class TerminalDisplay:
         self._finish_startup_before_output()
         self._streaming_narration.discard()
         self._stop_spinner()
-        self._print_visible_line(self._reply_rejected_line(reason), style=SOFT_YELLOW_STYLE)
+        self._print_visible_line(
+            self._reply_rejected_line(reason),
+            style=SOFT_YELLOW_STYLE if self.debug else "",
+            dim=not self.debug,
+        )
 
     def repeated_invalid_replies(self, reason: str, count: int) -> None:
         self._finish_startup_before_output()

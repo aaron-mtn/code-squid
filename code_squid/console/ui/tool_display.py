@@ -72,11 +72,13 @@ def tool_result_line(
     action: dict,
     result: dict,
     display_root: Path,
+    *,
+    debug: bool = False,
 ) -> tuple[str, str, bool] | None:
-    """Return one normal-mode result line as ``(label, style, dim)``."""
+    """Return one result line as ``(label, style, dim)``."""
     tool_name = action.get("tool")
     if tool_name == "run_command":
-        return run_command_result_line(action, result, display_root)
+        return run_command_result_line(action, result, display_root, debug=debug)
 
     if result.get("ok", False):
         if tool_name in FILE_TOOLS:
@@ -86,31 +88,41 @@ def tool_result_line(
         return None
 
     error = result.get("error", "unknown error")
+    style = SOFT_RED_STYLE if debug else ""
+    dim = not debug
     if tool_name in FILE_TOOLS:
         label = action_label(action, "failure", display_root)
-        return f"{label} - {error}", SOFT_RED_STYLE, False
-    return f"❌ {tool_name} failed: {error}", SOFT_RED_STYLE, False
+        return f"{label} - {error}", style, dim
+    return f"❌ {tool_name} failed: {error}", style, dim
 
 
 def run_command_result_line(
     action: dict,
     result: dict,
     display_root: Path,
+    *,
+    debug: bool = False,
 ) -> tuple[str, str, bool]:
     """Return the visible command-result label, style, and dimming decision."""
     if result.get("timed_out"):
-        return "⌛️ Command timed out", SOFT_YELLOW_STYLE, False
+        if debug:
+            return "⌛️ Command timed out", SOFT_YELLOW_STYLE, False
+        return "⌛️ Command timed out", "", True
 
     summary = pytest_summary(result.get("output", ""))
     if summary:
         if "failed" in summary:
-            return f"🔎 Tests need review: {summary}", SOFT_YELLOW_STYLE, False
+            if debug:
+                return f"🔎 Tests need review: {summary}", SOFT_YELLOW_STYLE, False
+            return f"🔎 Tests need review: {summary}", "", True
         return f"🧪 Tests passed: {summary}", SOFT_GREEN_STYLE, False
 
     phase = "success" if result.get("ok", False) else "failure"
     label = action_label(action, phase, display_root)
     if phase == "failure":
-        return label, SOFT_RED_STYLE, False
+        if debug:
+            return label, SOFT_RED_STYLE, False
+        return label, "", True
     return label, "", True
 
 

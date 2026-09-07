@@ -887,6 +887,22 @@ def test_model_request_failed_prints_short_message_with_log_path(
     )
 
 
+def test_terminal_model_request_failure_remains_red_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    TerminalDisplay().model_request_failed(Path(".code-squid/logs/latest.log"))
+
+    assert capsys.readouterr().out == (
+        f"{SOFT_RED_STYLE}🚫 Model request failed{RESET_STYLE}\n"
+        "\n"
+        "Code Squid could not get a response from the configured model provider.\n"
+        "Details saved to: .code-squid/logs/latest.log\n"
+    )
+
+
 def test_read_write_action_started_is_quiet_in_debug_mode(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -968,7 +984,7 @@ def test_reply_rejected_prints_friendly_nudge_for_empty_final_reply(
     )
 
 
-def test_reply_rejected_colors_friendly_nudge_yellow_in_tty(
+def test_reply_rejected_dims_friendly_nudge_in_tty(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -977,7 +993,7 @@ def test_reply_rejected_colors_friendly_nudge_yellow_in_tty(
     TerminalDisplay().reply_rejected("empty_final_reply")
 
     assert capsys.readouterr().out == (
-        f"{SOFT_YELLOW_STYLE}{RUN_DETAIL_INDENT}↪ Asking model to continue or finalize…"
+        f"{DIM_STYLE}{RUN_DETAIL_INDENT}↪ Asking model to continue or finalize…"
         f"{RESET_STYLE}\n"
     )
 
@@ -989,6 +1005,20 @@ def test_debug_reply_rejected_keeps_raw_reason(
 
     assert capsys.readouterr().out == (
         "⚠️ Reply rejected: empty_final_reply\n"
+    )
+
+
+def test_terminal_invalid_reply_stop_remains_yellow_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    TerminalDisplay().repeated_invalid_replies("malformed_tool_call", 3)
+
+    assert capsys.readouterr().out == (
+        f"{SOFT_YELLOW_STYLE}{RUN_DETAIL_INDENT}"
+        f"⚠️ Stopping after 3 invalid replies: malformed_tool_call{RESET_STYLE}\n"
     )
 
 
@@ -1239,7 +1269,7 @@ def test_tests_passed_line_is_green_in_tty(
     )
 
 
-def test_command_failure_line_is_red_in_tty(
+def test_recoverable_command_failure_line_is_dim_in_tty(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1251,8 +1281,50 @@ def test_command_failure_line_is_red_in_tty(
     )
 
     assert capsys.readouterr().out == (
-        f"{SOFT_RED_STYLE}{RUN_DETAIL_INDENT}❌ Command failed: pytest{RESET_STYLE}\n"
+        f"{DIM_STYLE}{RUN_DETAIL_INDENT}❌ Command failed: pytest{RESET_STYLE}\n"
     )
+
+
+def test_recoverable_patch_failure_line_is_dim_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    TerminalDisplay().tool_result(
+        {"tool": "apply_patch", "args": {"path": "skateboard-game/game.js"}},
+        {"ok": False, "error": "old_text_not_found"},
+    )
+
+    assert capsys.readouterr().out == (
+        f"{DIM_STYLE}{RUN_DETAIL_INDENT}❌ Patch failed: skateboard-game/game.js"
+        f" - old_text_not_found{RESET_STYLE}\n"
+    )
+
+
+def test_debug_recoverable_status_styling_is_unchanged_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    display = TerminalDisplay(debug=True)
+
+    display.reply_rejected("empty_final_reply")
+    display.tool_result(
+        {"tool": "apply_patch", "args": {"path": "skateboard-game/game.js"}},
+        {"ok": False, "error": "old_text_not_found"},
+    )
+
+    output = capsys.readouterr().out
+    assert output.startswith(
+        f"{SOFT_YELLOW_STYLE}⚠️ Reply rejected: empty_final_reply{RESET_STYLE}\n\n"
+        f"{SOFT_RED_STYLE}❌ Patch failed: skateboard-game/game.js"
+        f" - old_text_not_found{RESET_STYLE}\n"
+    )
+    rail = f"{SOFT_CYAN_STYLE}│{RESET_STYLE}"
+    assert f"{rail} ok: false" in output
+    assert f"{rail} tool: apply_patch" in output
+    assert f"{rail} error: old_text_not_found" in output
 
 
 def test_debug_read_file_result_omits_full_content(
@@ -2314,6 +2386,22 @@ def test_tool_result_displays_action_denied(capsys: pytest.CaptureFixture[str]) 
     )
 
     assert capsys.readouterr().out == f"{RUN_DETAIL_INDENT}🚫 Action denied\n"
+
+
+def test_recoverable_action_denial_is_dim_in_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    TerminalDisplay().tool_result(
+        {"tool": "read_file"},
+        {"ok": False, "error": USER_DENIED_TOOL_ACTION},
+    )
+
+    assert capsys.readouterr().out == (
+        f"{DIM_STYLE}{RUN_DETAIL_INDENT}🚫 Action denied{RESET_STYLE}\n"
+    )
 
 
 def test_denied_run_command_displays_action_denied(
