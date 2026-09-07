@@ -138,6 +138,7 @@ class StreamingNarration:
         self._active = False
         self._buffer = ""
         self._live_region: _PromptToolkitLiveRegion | None = None
+        self._retained = False
 
     @property
     def active(self) -> bool:
@@ -148,6 +149,11 @@ class StreamingNarration:
     def visible(self) -> bool:
         """Return whether prompt_toolkit currently owns terminal rows."""
         return self._live_region is not None
+
+    @property
+    def retained(self) -> bool:
+        """Return whether the provisional frame is already terminal scrollback."""
+        return self._retained
 
     @property
     def can_render(self) -> bool:
@@ -176,10 +182,24 @@ class StreamingNarration:
         else:
             self._live_region.update(self._buffer)
 
+    def retain_live_frame(self) -> bool:
+        """Stop live rendering while retaining the frame for later settlement."""
+        if self._live_region is None:
+            return False
+        self._live_region.close(erase=False)
+        self._live_region = None
+        # Keep the message logically active so its authoritative callback can
+        # settle bookkeeping without printing the retained text a second time.
+        self._retained = True
+        return True
+
     def commit(self, full_text: str) -> bool:
         """Settle authoritative text and report whether a live panel was retained."""
         if not self._active:
             return False
+        if self._retained:
+            self._reset()
+            return True
         if self._live_region is None:
             self._reset()
             return False
@@ -204,3 +224,4 @@ class StreamingNarration:
         self._active = False
         self._buffer = ""
         self._live_region = None
+        self._retained = False

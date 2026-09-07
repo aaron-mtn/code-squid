@@ -1,3 +1,16 @@
+- 2026-09-06: Updated the CLI for Core's narration-phase transition. A live
+  streamed narration panel now exposes one narrow `retain_live_frame()`
+  lifecycle operation: `tool_preparing` uses it to synchronously stop the
+  prompt_toolkit Application while preserving its visible frame as scrollback,
+  then immediately starts the existing Thinking pulse. The authoritative
+  narration callback consumes retained state without reprinting text or
+  stopping/restarting Thinking; `tool_started` still stops the pulse. Static,
+  debug, redirected-output, rejection, finalization, failure, cancellation,
+  and ordinary commit behavior remain on their existing paths. Focused
+  console/UI tests passed (202), the full suite passed (874), production
+  compilation and import smoke checks passed, and `git diff --check` passed.
+  No live model inference ran.
+
 - 2026-09-06: Added an explicit semantic `phase` to Core assistant-text
   events: `assistant_message_started`, `assistant_delta`, and
   `assistant_message` now carry `narration`, while `final_message` carries

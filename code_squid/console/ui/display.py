@@ -167,8 +167,11 @@ class TerminalDisplay:
         self._spinner.start()
 
     def assistant_message(self, content: str) -> None:
-        self._stop_spinner()
         content = content.strip()
+        if self._streaming_narration.retained:
+            self._commit_streamed_narration(content)
+            return
+        self._stop_spinner()
         if self._commit_streamed_narration(content):
             return
         if self.debug:
@@ -370,6 +373,15 @@ class TerminalDisplay:
             ):
                 self._prepare_assistant_narration()
             self._streaming_narration.append(delta)
+            return
+        if event_type == "tool_preparing":
+            if (
+                self._streaming_narration.can_render
+                and self._streaming_narration.retain_live_frame()
+            ):
+                # retain_live_frame joins the Application thread first, so the
+                # ordinary spinner cannot compete with prompt_toolkit output.
+                self.thinking()
             return
         if event_type == "assistant_message" and self._streaming_narration.active:
             content = str(event.get("message", "")).strip()

@@ -196,24 +196,87 @@ def test_tool_output_follows_settled_narration_cleanly(monkeypatch) -> None:
     assert display.streaming_narration_active is False
 
 
-def test_tool_preparing_during_narration_does_not_schedule_late_thinking(
+def test_tool_preparing_retains_narration_and_starts_thinking(monkeypatch) -> None:
+    spinner = CountingSpinner()
+    display, stream = interactive_display(monkeypatch, spinner=spinner)
+
+    display.thinking()
+    display.handle_event(
+        {"type": "assistant_message_started", "phase": "narration"}
+    )
+    display.handle_event(
+        {"type": "assistant_delta", "phase": "narration", "delta": "Writing now."}
+    )
+    display.handle_event({"type": "tool_preparing", "tool": "write_file"})
+
+    assert display.streaming_narration_active is True
+    assert display._streaming_narration.visible is False
+    assert "Writing now." in stream.getvalue()
+    assert spinner.starts == 2
+    assert spinner.stops == 1
+
+
+def test_authoritative_narration_settles_without_duplicate_or_spinner_restart(
     monkeypatch,
 ) -> None:
     spinner = CountingSpinner()
-    display, _stream = interactive_display(monkeypatch, spinner=spinner)
+    display, stream = interactive_display(monkeypatch, spinner=spinner)
 
     display.thinking()
-    display.handle_event({"type": "assistant_message_started"})
-    display.handle_event({"type": "assistant_delta", "delta": "Writing now."})
+    display.handle_event(
+        {"type": "assistant_message_started", "phase": "narration"}
+    )
+    display.handle_event(
+        {"type": "assistant_delta", "phase": "narration", "delta": "Writing now."}
+    )
     display.handle_event({"type": "tool_preparing", "tool": "write_file"})
-    display.assistant_message("Writing now.")
+    retained_output = stream.getvalue()
+
+    display.handle_event(
+        {
+            "type": "assistant_message",
+            "phase": "narration",
+            "message": "Writing now.",
+        }
+    )
+
+    assert stream.getvalue() == retained_output
+    assert display.streaming_narration_active is False
+    assert spinner.starts == 2
+    assert spinner.stops == 1
+
     display.handle_event({"type": "tool_started", "tool": "write_file"})
 
-    assert spinner.starts == 1
-    assert spinner.stops == 3
+    assert spinner.starts == 2
+    assert spinner.stops == 2
 
 
-def test_tool_preparing_after_settled_narration_does_not_flash_thinking(
+def test_display_callback_consumes_retained_narration_without_stopping_thinking(
+    monkeypatch,
+) -> None:
+    spinner = CountingSpinner()
+    display, stream = interactive_display(monkeypatch, spinner=spinner)
+
+    display.thinking()
+    display.handle_event(
+        {"type": "assistant_message_started", "phase": "narration"}
+    )
+    display.handle_event(
+        {"type": "assistant_delta", "phase": "narration", "delta": "Writing now."}
+    )
+    display.handle_event({"type": "tool_preparing", "tool": "write_file"})
+    retained_output = stream.getvalue()
+
+    # Core's normal display callback currently precedes its observer event.
+    display.assistant_message("Writing now.")
+
+    assert stream.getvalue() == retained_output
+    assert display.streaming_narration_active is False
+    assert spinner.starts == 2
+    assert spinner.stops == 1
+
+
+def test_tool_preparing_after_settled_narration_does_not_start_thinking(
     monkeypatch,
 ) -> None:
     spinner = CountingSpinner()
@@ -241,8 +304,8 @@ def test_repeated_model_and_tool_turns_leave_no_orphan_thinking(monkeypatch) -> 
         display.assistant_message(text)
         display.handle_event({"type": "tool_started", "tool": "read_file"})
 
-    assert spinner.starts == 2
-    assert spinner.stops == 6
+    assert spinner.starts == 4
+    assert spinner.stops == 4
 
 
 def test_visible_tool_output_never_competes_with_thinking(monkeypatch) -> None:

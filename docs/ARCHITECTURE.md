@@ -156,7 +156,11 @@ and application layer; `squid_core/` is the reusable agent runtime.
     geometry. The live panel contracts and rewraps from the current output
     width, and its `Window` hides the cursor while it owns the region. An
     accepted message exits with the authoritative last frame retained as
-    ordinary scrollback; rejection, finalization, failure, or interruption
+    ordinary scrollback. When `tool_preparing` arrives during live narration,
+    the CLI synchronously retains the current provisional frame and releases
+    the Application before restarting the ordinary thinking pulse; the later
+    authoritative narration settles bookkeeping without another print or
+    spinner handoff. Rejection, finalization, failure, or interruption
     exits with prompt_toolkit erasing the provisional frame. The Application
     has fully stopped before either path returns, so tool/static output cannot
     compete with it. Empty streams never start it, and redirected and debug
@@ -164,10 +168,10 @@ and application layer; `squid_core/` is the reusable agent runtime.
     visible delta, so there is only one active normal-output writer. Provider
     `tool_preparing` events arrive while streamed narration is still
     provisional, before the authoritative assistant message and Tool start;
-    the CLI deliberately does not turn that early parse signal into a second
-    pulse. `tool_started` and all existing output/finalization boundaries stop
-    any active pulse. Code Squid owns no raw cursor-up or clear-row repaint
-    geometry for live narration.
+    this is the presentation boundary that transfers ownership from the live
+    panel back to the existing thinking pulse. `tool_started` and all existing
+    output/finalization boundaries stop any active pulse. Code Squid owns no
+    raw cursor-up or clear-row repaint geometry for live narration.
 
     `prompt_input.py`, `sessions.py`, and `spinner.py` retain their focused
     input, saved-session, and animation responsibilities. The ordinary task
