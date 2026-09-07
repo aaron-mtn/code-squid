@@ -12,6 +12,7 @@ from squid_core.safety import ApprovalDecision, USER_DENIED_TOOL_ACTION
 from squid_core.mods import discover_mods
 
 from code_squid.app_paths import code_squid_home
+from code_squid.console.ui import formatting
 from code_squid.console.ui.approval import (
     APPROVAL_PANEL_WIDTH,
     INPUT_PROMPT_PREFIX,
@@ -265,7 +266,7 @@ class TerminalDisplay:
                 self._compacted_denied_action = None
                 return
             self._print_visible_line(
-                "🚫 Action denied",
+                f"{formatting.RECOVERABLE_STATUS_ICON} Action denied",
                 style=SOFT_RED_STYLE if self.debug else "",
                 dim=not self.debug,
             )
@@ -511,13 +512,14 @@ class TerminalDisplay:
 
     def _reply_rejected_line(self, reason: str) -> str:
         if self.debug:
-            return f"⚠️ Reply rejected: {reason}"
+            return f"{formatting.RECOVERABLE_STATUS_ICON} Reply rejected: {reason}"
         messages = {
-            "empty_final_reply": "↪ Asking model to continue or finalize…",
-            "non_final_too_many_tool_calls": "⚠️ Reply rejected: expected exactly one tool call.",
-            "malformed_tool_call": "⚠️ Reply rejected: could not read the requested tool call.",
+            "empty_final_reply": "Asking model to continue or finalize…",
+            "non_final_too_many_tool_calls": "Reply rejected: expected exactly one tool call.",
+            "malformed_tool_call": "Reply rejected: could not read the requested tool call.",
         }
-        return messages.get(reason, "⚠️ Reply rejected: invalid assistant reply.")
+        message = messages.get(reason, "Reply rejected: invalid assistant reply.")
+        return f"{formatting.RECOVERABLE_STATUS_ICON} {message}"
 
     def _print_assistant_narration(self, content: str, trailing_blank: bool = True) -> None:
         self._print_rendered_lines(self._assistant_narration_panel_lines(content))

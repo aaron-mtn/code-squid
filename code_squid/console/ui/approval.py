@@ -5,6 +5,7 @@ import sys
 
 from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
 
+from code_squid.console.ui import formatting
 from code_squid.console.ui.formatting import (
     DISPLAY_WRAP_WIDTH,
     SOFT_CYAN_STYLE,
@@ -107,7 +108,7 @@ def rejected_approval_result(instruction: str, detail_indent: str) -> str:
         label = f"💬 User note: {comment}"
         style = SOFT_CYAN_STYLE
     else:
-        label = "🚫 Action denied"
+        label = f"{formatting.RECOVERABLE_STATUS_ICON} Action denied"
         style = SOFT_RED_STYLE
     return styled_text(_indented_line(label, detail_indent), style)
 

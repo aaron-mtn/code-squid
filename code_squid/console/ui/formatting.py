@@ -16,6 +16,7 @@ FINAL_SUMMARY_INDENT = "  "
 DIM_STYLE = "\033[2m"
 BOLD_STYLE = "\033[1m"
 RESET_STYLE = "\033[0m"
+RECOVERABLE_STATUS_ICON = "🌀"
 # Force text presentation so terminal foreground color applies to the squid.
 # Color-emoji fonts commonly ignore ANSI foreground styles on the default glyph.
 SQUID_GLYPH = "\U0001f991\ufe0e"

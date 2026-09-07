@@ -12,6 +12,7 @@ from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
 
 from squid_core.safety import USER_DENIED_TOOL_ACTION
 from squid_core.agent_loop import RunResult
+from code_squid.console.ui.approval import rejected_approval_result
 from code_squid.console.ui.display import (
     APPROVAL_PANEL_WIDTH,
     BOLD_STYLE,
@@ -42,6 +43,7 @@ from code_squid.console.ui.banner import (
     startup_info_panel,
     startup_panel_items,
 )
+from code_squid.console.ui import formatting
 from code_squid.console.ui.formatting import (
     MOD_ACCENT_HEX,
     SQUID_GLYPH,
@@ -980,7 +982,8 @@ def test_reply_rejected_prints_friendly_nudge_for_empty_final_reply(
     TerminalDisplay().reply_rejected("empty_final_reply")
 
     assert capsys.readouterr().out == (
-        f"{RUN_DETAIL_INDENT}↪ Asking model to continue or finalize…\n"
+        f"{RUN_DETAIL_INDENT}{formatting.RECOVERABLE_STATUS_ICON} "
+        "Asking model to continue or finalize…\n"
     )
 
 
@@ -993,7 +996,8 @@ def test_reply_rejected_dims_friendly_nudge_in_tty(
     TerminalDisplay().reply_rejected("empty_final_reply")
 
     assert capsys.readouterr().out == (
-        f"{DIM_STYLE}{RUN_DETAIL_INDENT}↪ Asking model to continue or finalize…"
+        f"{DIM_STYLE}{RUN_DETAIL_INDENT}{formatting.RECOVERABLE_STATUS_ICON} "
+        "Asking model to continue or finalize…"
         f"{RESET_STYLE}\n"
     )
 
@@ -1004,8 +1008,33 @@ def test_debug_reply_rejected_keeps_raw_reason(
     TerminalDisplay(debug=True).reply_rejected("empty_final_reply")
 
     assert capsys.readouterr().out == (
-        "⚠️ Reply rejected: empty_final_reply\n"
+        f"{formatting.RECOVERABLE_STATUS_ICON} Reply rejected: empty_final_reply\n"
     )
+
+
+@pytest.mark.parametrize(
+    ("reason", "wording"),
+    [
+        ("empty_final_reply", "Asking model to continue or finalize…"),
+        (
+            "non_final_too_many_tool_calls",
+            "Reply rejected: expected exactly one tool call.",
+        ),
+        (
+            "malformed_tool_call",
+            "Reply rejected: could not read the requested tool call.",
+        ),
+        ("unknown", "Reply rejected: invalid assistant reply."),
+    ],
+)
+def test_recoverable_reply_rejections_follow_shared_icon(
+    monkeypatch: pytest.MonkeyPatch,
+    reason: str,
+    wording: str,
+) -> None:
+    monkeypatch.setattr(formatting, "RECOVERABLE_STATUS_ICON", "shared-icon")
+
+    assert TerminalDisplay()._reply_rejected_line(reason) == f"shared-icon {wording}"
 
 
 def test_terminal_invalid_reply_stop_remains_yellow_in_tty(
@@ -1019,6 +1048,16 @@ def test_terminal_invalid_reply_stop_remains_yellow_in_tty(
     assert capsys.readouterr().out == (
         f"{SOFT_YELLOW_STYLE}{RUN_DETAIL_INDENT}"
         f"⚠️ Stopping after 3 invalid replies: malformed_tool_call{RESET_STYLE}\n"
+    )
+
+
+def test_terminal_step_limit_icon_remains_unchanged(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay().step_limit_reached(12)
+
+    assert capsys.readouterr().out == (
+        f"{RUN_DETAIL_INDENT}⚠️ Stopping after reaching tool step limit: 12\n"
     )
 
 
@@ -1269,6 +1308,75 @@ def test_tests_passed_line_is_green_in_tty(
     )
 
 
+@pytest.mark.parametrize(
+    ("action", "result", "wording"),
+    [
+        (
+            {"tool": "read_file", "args": {"path": "missing.py"}},
+            {"ok": False, "error": "not found"},
+            "Read failed: missing.py - not found",
+        ),
+        (
+            {"tool": "write_file", "args": {"path": "locked.py"}},
+            {"ok": False, "error": "permission denied"},
+            "Write failed: locked.py - permission denied",
+        ),
+        (
+            {"tool": "apply_patch", "args": {"path": "changed.py"}},
+            {"ok": False, "error": "old_text_not_found"},
+            "Patch failed: changed.py - old_text_not_found",
+        ),
+        (
+            {"tool": "run_command", "args": {"command": "ruff check"}},
+            {"ok": False, "output": ""},
+            "Command failed: ruff check",
+        ),
+        (
+            {"tool": "custom-tool", "args": {}},
+            {"ok": False, "error": "unavailable"},
+            "custom-tool failed: unavailable",
+        ),
+        (
+            {"tool": "run_command", "args": {"command": "pytest"}},
+            {"ok": False, "timed_out": True},
+            "Command timed out",
+        ),
+        (
+            {"tool": "run_command", "args": {"command": "pytest"}},
+            {"ok": False, "output": "1 failed in 0.01s"},
+            "Tests need review: 1 failed",
+        ),
+        (
+            {"tool": "read_file", "args": {"path": "private.py"}},
+            {"ok": False, "error": USER_DENIED_TOOL_ACTION},
+            "Action denied",
+        ),
+    ],
+)
+def test_recoverable_tool_statuses_follow_shared_icon(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    action: dict,
+    result: dict,
+    wording: str,
+) -> None:
+    monkeypatch.setattr(formatting, "RECOVERABLE_STATUS_ICON", "shared-icon")
+
+    TerminalDisplay().tool_result(action, result)
+
+    assert capsys.readouterr().out == f"{RUN_DETAIL_INDENT}shared-icon {wording}\n"
+
+
+def test_rejected_approval_status_follows_shared_icon(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(formatting, "RECOVERABLE_STATUS_ICON", "shared-icon")
+
+    assert rejected_approval_result("", RUN_DETAIL_INDENT) == (
+        f"{RUN_DETAIL_INDENT}shared-icon Action denied"
+    )
+
+
 def test_recoverable_command_failure_line_is_dim_in_tty(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -1281,7 +1389,8 @@ def test_recoverable_command_failure_line_is_dim_in_tty(
     )
 
     assert capsys.readouterr().out == (
-        f"{DIM_STYLE}{RUN_DETAIL_INDENT}❌ Command failed: pytest{RESET_STYLE}\n"
+        f"{DIM_STYLE}{RUN_DETAIL_INDENT}{formatting.RECOVERABLE_STATUS_ICON} "
+        f"Command failed: pytest{RESET_STYLE}\n"
     )
 
 
@@ -1297,7 +1406,8 @@ def test_recoverable_patch_failure_line_is_dim_in_tty(
     )
 
     assert capsys.readouterr().out == (
-        f"{DIM_STYLE}{RUN_DETAIL_INDENT}❌ Patch failed: skateboard-game/game.js"
+        f"{DIM_STYLE}{RUN_DETAIL_INDENT}{formatting.RECOVERABLE_STATUS_ICON} "
+        "Patch failed: skateboard-game/game.js"
         f" - old_text_not_found{RESET_STYLE}\n"
     )
 
@@ -1317,8 +1427,10 @@ def test_debug_recoverable_status_styling_is_unchanged_in_tty(
 
     output = capsys.readouterr().out
     assert output.startswith(
-        f"{SOFT_YELLOW_STYLE}⚠️ Reply rejected: empty_final_reply{RESET_STYLE}\n\n"
-        f"{SOFT_RED_STYLE}❌ Patch failed: skateboard-game/game.js"
+        f"{SOFT_YELLOW_STYLE}{formatting.RECOVERABLE_STATUS_ICON} "
+        f"Reply rejected: empty_final_reply{RESET_STYLE}\n\n"
+        f"{SOFT_RED_STYLE}{formatting.RECOVERABLE_STATUS_ICON} "
+        "Patch failed: skateboard-game/game.js"
         f" - old_text_not_found{RESET_STYLE}\n"
     )
     rail = f"{SOFT_CYAN_STYLE}│{RESET_STYLE}"
@@ -1371,7 +1483,7 @@ def test_debug_failed_read_file_result_shows_error_not_empty_metadata(
     TerminalDisplay(debug=True).tool_result(action, result)
 
     output = capsys.readouterr().out
-    assert "❌ Read failed:" in output
+    assert f"{formatting.RECOVERABLE_STATUS_ICON} Read failed:" in output
     assert "│ ok: false" in output
     assert "│ tool: read_file" in output
     assert "│ error: file not found" in output
@@ -1393,7 +1505,7 @@ def test_debug_failed_write_file_result_shows_error(
     TerminalDisplay(debug=True).tool_result(action, result)
 
     output = capsys.readouterr().out
-    assert "❌ Write failed:" in output
+    assert f"{formatting.RECOVERABLE_STATUS_ICON} Write failed:" in output
     assert "│ ok: false" in output
     assert "│ tool: write_file" in output
     assert "│ error: permission denied" in output
@@ -2385,7 +2497,9 @@ def test_tool_result_displays_action_denied(capsys: pytest.CaptureFixture[str]) 
         {"ok": False, "error": USER_DENIED_TOOL_ACTION},
     )
 
-    assert capsys.readouterr().out == f"{RUN_DETAIL_INDENT}🚫 Action denied\n"
+    assert capsys.readouterr().out == (
+        f"{RUN_DETAIL_INDENT}{formatting.RECOVERABLE_STATUS_ICON} Action denied\n"
+    )
 
 
 def test_recoverable_action_denial_is_dim_in_tty(
@@ -2400,7 +2514,8 @@ def test_recoverable_action_denial_is_dim_in_tty(
     )
 
     assert capsys.readouterr().out == (
-        f"{DIM_STYLE}{RUN_DETAIL_INDENT}🚫 Action denied{RESET_STYLE}\n"
+        f"{DIM_STYLE}{RUN_DETAIL_INDENT}{formatting.RECOVERABLE_STATUS_ICON} "
+        f"Action denied{RESET_STYLE}\n"
     )
 
 
@@ -2413,5 +2528,7 @@ def test_denied_run_command_displays_action_denied(
     )
 
     output = capsys.readouterr().out
-    assert output == f"{RUN_DETAIL_INDENT}🚫 Action denied\n"
+    assert output == (
+        f"{RUN_DETAIL_INDENT}{formatting.RECOVERABLE_STATUS_ICON} Action denied\n"
+    )
     assert "🕵️ Review output" not in output

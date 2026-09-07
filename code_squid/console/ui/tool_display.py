@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import shlex
 
+from code_squid.console.ui import formatting
 from code_squid.console.ui.formatting import (
     SOFT_GREEN_STYLE,
     SOFT_RED_STYLE,
@@ -27,7 +28,7 @@ def action_label(action: dict, phase: str, display_root: Path) -> str:
     if tool_name == "read_file":
         path = short_path(args.get("path", ""), display_root)
         if phase == "failure":
-            return f"❌ Read failed: {path}"
+            return f"{formatting.RECOVERABLE_STATUS_ICON} Read failed: {path}"
         return f"📖 Read: {path}"
 
     if tool_name == "write_file":
@@ -35,7 +36,7 @@ def action_label(action: dict, phase: str, display_root: Path) -> str:
         if phase == "success":
             return f"📝 Wrote: {path}"
         if phase == "failure":
-            return f"❌ Write failed: {path}"
+            return f"{formatting.RECOVERABLE_STATUS_ICON} Write failed: {path}"
         return f"📝 Write: {path}"
 
     if tool_name == "apply_patch":
@@ -43,7 +44,7 @@ def action_label(action: dict, phase: str, display_root: Path) -> str:
         if phase == "success":
             return f"🩹 Patched: {path}"
         if phase == "failure":
-            return f"❌ Patch failed: {path}"
+            return f"{formatting.RECOVERABLE_STATUS_ICON} Patch failed: {path}"
         return f"🩹 Patch: {path}"
 
     if tool_name == "run_command":
@@ -93,7 +94,7 @@ def tool_result_line(
     if tool_name in FILE_TOOLS:
         label = action_label(action, "failure", display_root)
         return f"{label} - {error}", style, dim
-    return f"❌ {tool_name} failed: {error}", style, dim
+    return f"{formatting.RECOVERABLE_STATUS_ICON} {tool_name} failed: {error}", style, dim
 
 
 def run_command_result_line(
@@ -106,15 +107,27 @@ def run_command_result_line(
     """Return the visible command-result label, style, and dimming decision."""
     if result.get("timed_out"):
         if debug:
-            return "⌛️ Command timed out", SOFT_YELLOW_STYLE, False
-        return "⌛️ Command timed out", "", True
+            return (
+                f"{formatting.RECOVERABLE_STATUS_ICON} Command timed out",
+                SOFT_YELLOW_STYLE,
+                False,
+            )
+        return f"{formatting.RECOVERABLE_STATUS_ICON} Command timed out", "", True
 
     summary = pytest_summary(result.get("output", ""))
     if summary:
         if "failed" in summary:
             if debug:
-                return f"🔎 Tests need review: {summary}", SOFT_YELLOW_STYLE, False
-            return f"🔎 Tests need review: {summary}", "", True
+                return (
+                    f"{formatting.RECOVERABLE_STATUS_ICON} Tests need review: {summary}",
+                    SOFT_YELLOW_STYLE,
+                    False,
+                )
+            return (
+                f"{formatting.RECOVERABLE_STATUS_ICON} Tests need review: {summary}",
+                "",
+                True,
+            )
         return f"🧪 Tests passed: {summary}", SOFT_GREEN_STYLE, False
 
     phase = "success" if result.get("ok", False) else "failure"
@@ -143,7 +156,7 @@ def command_label(
         )
         verb = "Ran" if phase == "success" else "Run"
         if phase == "failure":
-            return f"❌ Command failed: {pytest_command}"
+            return f"{formatting.RECOVERABLE_STATUS_ICON} Command failed: {pytest_command}"
         return f"💿 {verb}: {pytest_command}"
 
     if first in {"find", "rg", "grep"}:
@@ -155,14 +168,14 @@ def command_label(
     if node_check:
         verb = "Ran" if phase == "success" else "Run"
         if phase == "failure":
-            return f"❌ Command failed: {node_check}"
+            return f"{formatting.RECOVERABLE_STATUS_ICON} Command failed: {node_check}"
         return f"💿 {verb}: {node_check}"
 
     command = truncate_middle(command, max_length)
     if phase == "success":
         return f"💿 Ran: {command}"
     if phase == "failure":
-        return f"❌ Command failed: {command}"
+        return f"{formatting.RECOVERABLE_STATUS_ICON} Command failed: {command}"
     return f"💿 Run: {command}"
 
 
