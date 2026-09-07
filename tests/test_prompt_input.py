@@ -31,7 +31,11 @@ from code_squid.console.ui.prompt_input import (
     multiline_key_bindings,
     prompt_multiline_input,
 )
-from code_squid.console.ui.startup_application import StartupApplication
+from code_squid.console.ui.startup_application import (
+    STARTUP_SESSION_SELECTED,
+    StartupApplication,
+    wait_for_startup_application,
+)
 from code_squid.settings import load_settings
 
 
@@ -98,6 +102,14 @@ def _composer_rows(screen) -> list[str]:
     top = next(index for index, row in enumerate(rows) if row.startswith("╭"))
     bottom = next(index for index, row in enumerate(rows[top:], top) if row.startswith("╰"))
     return rows[top : bottom + 1]
+
+
+def _wait_for(predicate) -> None:
+    """Wait for a renderer-thread condition in deterministic lifecycle tests."""
+    deadline = time.monotonic() + 5
+    while not predicate() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert predicate()
 
 
 @pytest.mark.parametrize(
@@ -427,6 +439,45 @@ def test_startup_submit_returns_before_fade_and_retains_clean_composer() -> None
     assert startup.rain.fade_complete is True
     assert startup.rain._drops == []
     assert startup.application.is_running is False
+
+
+def test_saved_session_handoff_hides_composer_and_waits_for_natural_fade(
+    monkeypatch,
+) -> None:
+    with create_pipe_input() as pipe_input:
+        startup = _startup(input=pipe_input)
+        result: list[object] = []
+        caller = threading.Thread(target=lambda: result.append(startup.run()))
+        caller.start()
+        _wait_for(lambda: startup.application.is_running)
+
+        forced_fades = 0
+        complete_fade = startup.rain.complete_fade
+
+        def track_forced_fade() -> None:
+            nonlocal forced_fades
+            forced_fades += 1
+            complete_fade()
+
+        monkeypatch.setattr(startup.rain, "complete_fade", track_forced_fade)
+        startup.select_saved_session()
+        caller.join(timeout=0.2)
+
+        assert result == [STARTUP_SESSION_SELECTED]
+        assert startup.rain.fade_active is True
+        assert startup.composer.filter() is False
+        assert startup.application.is_running is True
+
+        wait_for_startup_application(startup.rain)
+
+    assert forced_fades == 0
+    assert startup.rain.fade_complete is True
+    assert startup.application.is_running is False
+    assert startup._thread is not None and not startup._thread.is_alive()
+    assert startup.final_screen is not None
+    final_rows = "\n".join(_screen_rows(startup.final_screen))
+    assert "@code-squid" not in final_rows
+    assert TITLE in final_rows
 
 
 def test_early_narration_forces_and_joins_startup_fade() -> None:

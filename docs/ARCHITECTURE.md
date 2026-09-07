@@ -153,9 +153,12 @@ and application layer; `squid_core/` is the reusable agent runtime.
     sessions. The backing list is capped at 20; arrow movement scrolls it,
     Enter commits an ID through the same resolver as `/resume`, and Esc
     discards the submenu highlight. A saved-session activation returns a
-    distinct result from that same startup Application, allowing the CLI to
-    finish and join its fade before printing and opening an ordinary composer;
-    no nested Application or extra startup renderer is created. The CLI then
+    distinct result from that same startup Application and hides the unused
+    empty startup composer in subsequent retained frames. The CLI joins the
+    renderer without force-completing the already-running fade, then prints and
+    opens an ordinary composer only after terminal ownership is released; no
+    nested Application or extra startup renderer is created. Other direct CLI
+    writers retain the synchronous force-and-join handoff. The CLI then
     immediately consumes the selected metadata into one dim, neutral,
     detail-indented status line. `New session`, launch-time resume state, and
     subsequent follow-ups remain silent. The notice never opens the transcript

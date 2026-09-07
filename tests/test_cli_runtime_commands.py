@@ -398,6 +398,7 @@ def test_startup_session_selection_notices_once_and_uses_existing_follow_up_runn
     prompts = iter([STARTUP_SESSION_SELECTED, "continue it", "continue again", "/exit"])
     prompt_animators = []
     startup_released = False
+    forced_handoffs = 0
 
     def set_startup_menu(menu):
         nonlocal selected_menu
@@ -418,12 +419,18 @@ def test_startup_session_selection_notices_once_and_uses_existing_follow_up_runn
             # available, rather than after this task has been submitted.
             assert display.loaded_sessions
             assert startup_released is True
+            assert forced_handoffs == 0
         return task
 
-    def finish_startup_fade():
+    def wait_for_startup_fade():
         nonlocal startup_released
         startup_released = True
 
+    def finish_startup_fade():
+        nonlocal forced_handoffs
+        forced_handoffs += 1
+
+    display.wait_for_startup_fade = wait_for_startup_fade
     display.finish_startup_fade = finish_startup_fade
 
     def follow_up(
@@ -460,3 +467,4 @@ def test_startup_session_selection_notices_once_and_uses_existing_follow_up_runn
     assert display.loaded_session_scene_states == [False]
     assert prompt_animators[0] is display.header
     assert prompt_animators[1:] == [None, None, None]
+    assert forced_handoffs == 1

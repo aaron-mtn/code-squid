@@ -125,6 +125,13 @@ def _finish_startup_fade(display: TerminalDisplay) -> None:
         finish()
 
 
+def _wait_for_startup_fade(display: TerminalDisplay) -> None:
+    """Join the natural startup fade without forcing its clean frame."""
+    wait = getattr(display, "wait_for_startup_fade", None)
+    if wait is not None:
+        wait()
+
+
 def _print_selected_session_notice(
     display: TerminalDisplay,
     menu: StartupMenu,
@@ -148,7 +155,7 @@ def _prompt_task_or_cancel(
             if task is STARTUP_SESSION_SELECTED:
                 # The result is published before the fade finishes. Join the
                 # sole startup renderer before ordinary output takes ownership.
-                _finish_startup_fade(display)
+                _wait_for_startup_fade(display)
                 if menu is not None:
                     _print_selected_session_notice(display, menu)
                 task = _prompt_task(label)

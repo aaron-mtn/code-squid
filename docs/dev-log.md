@@ -1,3 +1,16 @@
+- 2026-09-07: Polished saved-session startup handoff without adding another
+  renderer or fade. Saved-session selection now conditionally removes its
+  unused empty composer from the existing StartupApplication, then the CLI
+  joins that renderer's natural binary-rain fade before printing the previous-
+  session notice or opening PromptSession. The established force-and-join seam
+  remains unchanged for ordinary writers that need immediate terminal
+  ownership. Focused startup/menu/runtime coverage passed (66 tests); the
+  broader console/UI suite passed (363 tests). The full suite reached 911
+  passed with the same four unrelated prompt-policy assertion failures in
+  `test_coding_agent.py` and `test_core_agent.py` recorded below. Production
+  compilation, affected imports, and `git diff --check` passed. No live model
+  inference ran.
+
 - 2026-09-07: Moved the saved-session notice from the next task-submission
   boundary to the startup Session picker's activation boundary. A successful
   saved-session selection now returns a distinct result from the existing

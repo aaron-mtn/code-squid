@@ -75,6 +75,7 @@ def _run_prompt(monkeypatch, menu: StartupMenu, terminal_input: str) -> str:
         pipe_input.send_text(terminal_input)
         thread.join(timeout=5)
         assert not thread.is_alive()
+        assert len(startups) == 1
         startups[0].finish_fade()
     assert not errors
     return result[0]

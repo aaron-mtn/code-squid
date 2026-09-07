@@ -13,7 +13,11 @@ from prompt_toolkit.filters import Condition
 from prompt_toolkit.input.base import Input
 from prompt_toolkit.key_binding import KeyBindingsBase
 from prompt_toolkit.layout import Dimension, HSplit, Layout, Window
-from prompt_toolkit.layout.containers import ScrollOffsets, VSplit
+from prompt_toolkit.layout.containers import (
+    ConditionalContainer,
+    ScrollOffsets,
+    VSplit,
+)
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.processors import BeforeInput
 from prompt_toolkit.output.defaults import create_output
@@ -51,6 +55,14 @@ def finish_startup_application(rain: BinaryRainHeader) -> None:
         startup.finish_fade()
 
 
+def wait_for_startup_application(rain: BinaryRainHeader) -> None:
+    """Join a naturally finishing startup renderer without forcing its fade."""
+    with _active_startups_lock:
+        startup = _active_startups.get(id(rain))
+    if startup is not None:
+        startup.wait_for_exit()
+
+
 def startup_application_active(rain: BinaryRainHeader) -> bool:
     """Return whether the rain model still has a live startup renderer."""
     with _active_startups_lock:
@@ -62,9 +74,10 @@ class StartupApplication:
 
     This Application is intentionally temporary and non-full-screen. Task
     submission or saved-session selection releases the caller while this same
-    renderer briefly fades its rain; any ordinary output synchronously finishes
-    that renderer first. Keeping that boundary strict avoids recreating a
-    persistent transcript/composer UI.
+    renderer briefly fades its rain. Ordinary run output can force and join
+    that renderer when needed; saved-session output instead joins the natural
+    fade. Keeping that boundary strict avoids recreating a persistent
+    transcript/composer UI.
     """
 
     def __init__(
@@ -80,6 +93,7 @@ class StartupApplication:
         self.prompt = prompt
         self._submitted = threading.Event()
         self._result: str | object = ""
+        self._saved_session_handoff = False
         self._failure: BaseException | None = None
         self._thread: threading.Thread | None = None
         self.final_screen = None
@@ -110,7 +124,10 @@ class StartupApplication:
             wrap_lines=False,
             always_hide_cursor=True,
         )
-        self.composer = self._composer_container()
+        self.composer = ConditionalContainer(
+            self._composer_container(),
+            filter=Condition(lambda: not self._saved_session_handoff),
+        )
         root = HSplit(
             [
                 self.scene_window,
@@ -175,9 +192,21 @@ class StartupApplication:
         if self._submitted.is_set():
             return
         self._result = STARTUP_SESSION_SELECTED
+        # This buffer was never submitted, so retaining its empty frame would
+        # leave a misleading composer in scrollback after the handoff.
+        self._saved_session_handoff = True
         self.rain.begin_fade()
         self._submitted.set()
         self.application.invalidate()
+
+    def wait_for_exit(self) -> None:
+        """Wait for the existing fade lifecycle to release the terminal."""
+        if (
+            self._thread is not None
+            and self._thread is not threading.current_thread()
+        ):
+            self._thread.join()
+        self._raise_failure()
 
     def finish_fade(self) -> None:
         """Force, render, and retain the clean frame before returning."""

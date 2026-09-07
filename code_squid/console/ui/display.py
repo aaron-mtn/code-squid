@@ -60,6 +60,7 @@ from code_squid.console.ui.streaming_narration import StreamingNarration
 from code_squid.console.ui.startup_application import (
     finish_startup_application,
     startup_application_active,
+    wait_for_startup_application,
 )
 from code_squid.console.ui.tool_display import (
     FILE_TOOLS,
@@ -459,6 +460,10 @@ class TerminalDisplay:
     def finish_startup_fade(self) -> None:
         """Release startup ownership before a direct CLI print operation."""
         self._finish_startup_before_output()
+
+    def wait_for_startup_fade(self) -> None:
+        """Let an active startup fade finish before ordinary output."""
+        wait_for_startup_application(self.header)
 
     def _finish_startup_before_output(self) -> None:
         """Give ordinary output exclusive ownership of the terminal."""
