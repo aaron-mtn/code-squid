@@ -78,6 +78,19 @@ PANEL_CONTENT_WIDTH = RUN_PANEL_WIDTH - 2 - len(PANEL_LEFT_PADDING) - 1
 ANSI_ESCAPE_PATTERN = re.compile(
     r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x1b]*(?:\x1b\\|\x07))"
 )
+TOOL_PREPARING_LABELS = {
+    "read_file": "Reading...",
+    "write_file": "Writing...",
+    "apply_patch": "Patching...",
+    "run_command": "Running...",
+}
+
+
+def tool_preparing_label(tool: object) -> str:
+    """Return the active CLI label for a tool whose call is still forming."""
+    if not isinstance(tool, str):
+        return "Using tool..."
+    return TOOL_PREPARING_LABELS.get(tool, "Using tool...")
 
 
 def _accent_for_mod(mod_name: str | None) -> str:
@@ -389,13 +402,22 @@ class TerminalDisplay:
             self._streaming_narration.append(delta)
             return
         if event_type == "tool_preparing":
+            narration_released = False
             if (
                 self._streaming_narration.can_render
                 and self._streaming_narration.retain_live_frame()
             ):
                 # retain_live_frame joins the Application thread first, so the
                 # ordinary spinner cannot compete with prompt_toolkit output.
-                self.thinking()
+                narration_released = True
+            if self.debug:
+                # Preserve the existing static diagnostic after live narration.
+                if narration_released:
+                    self.thinking()
+                return
+            self._finish_startup_before_output()
+            self._print_leading_blank_if_needed()
+            self._spinner.start(tool_preparing_label(event.get("tool")))
             return
         if event_type == "assistant_message" and self._streaming_narration.active:
             content = str(event.get("message", "")).strip()

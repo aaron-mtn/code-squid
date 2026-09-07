@@ -57,6 +57,22 @@ def test_spinner_writes_and_clears_one_tty_line() -> None:
     assert stream.writes == ["\r\u00b7 Thinking...", "\r\033[K"]
 
 
+def test_active_spinner_reuses_pulse_frames_with_requested_label() -> None:
+    stream = FakeStream(tty=True)
+    spinner = TerminalSpinner(stream=stream, interval=10)
+
+    spinner.start()
+    spinner.start("Writing...")
+    spinner.stop()
+
+    assert stream.writes == [
+        "\r\u00b7 Thinking...",
+        "\r\033[K",
+        "\r\u00b7 Writing...",
+        "\r\033[K",
+    ]
+
+
 def test_default_thinking_frame_is_terminal_neutral() -> None:
     stream = FakeStream(tty=True)
     spinner = TerminalSpinner(stream=stream, interval=10)

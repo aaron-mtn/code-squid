@@ -1,3 +1,16 @@
+- 2026-09-07: Improved the existing CLI `tool_preparing` pulse without changing
+  Core, providers, events, narration rendering, or completed Tool presentation.
+  `TerminalSpinner.start()` now accepts an optional active label and repaints
+  its already-owned line when that label changes; its four pulse frames and
+  0.17-second interval remain unchanged. The CLI maps `read_file` to
+  `Reading...`, `write_file` to `Writing...`, `apply_patch` to `Patching...`,
+  and `run_command` to `Running...`, with `Using tool...` for custom or unknown
+  tools. Ordinary work remains `Thinking...`, existing Tool/run boundaries
+  still stop the pulse, and debug mode retains its static diagnostics. Focused
+  console/UI tests passed (213), the full suite passed (901), production
+  compilation passed, and `git diff --check` passed. No live model inference
+  ran.
+
 - 2026-09-06: Updated the CLI for Core's narration-phase transition. A live
   streamed narration panel now exposes one narrow `retain_live_frame()`
   lifecycle operation: `tool_preparing` uses it to synchronously stop the

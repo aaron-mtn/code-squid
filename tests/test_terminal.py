@@ -57,7 +57,7 @@ class FakeSpinner:
         self.starts = 0
         self.stops = 0
 
-    def start(self) -> None:
+    def start(self, label: str = "Thinking...") -> None:
         self.starts += 1
 
     def stop(self) -> None:
@@ -832,8 +832,8 @@ def test_mod_change_does_not_accent_thinking_pulse(
             self.style = ""
             self.started_styles: list[str] = []
 
-        def start(self) -> None:
-            super().start()
+        def start(self, label: str = "Thinking...") -> None:
+            super().start(label)
             self.started_styles.append(self.style)
 
     monkeypatch.setattr(

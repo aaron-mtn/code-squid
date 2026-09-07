@@ -14,10 +14,11 @@ SPINNER_FRAMES = (
     "\u2022 Thinking...",
 )
 RESET_STYLE = "\033[0m"
+THINKING_LABEL = "Thinking..."
 
 
 class TerminalSpinner:
-    """Animates one terminal line while the model is thinking."""
+    """Animate one terminal line for the model's current active status."""
 
     def __init__(
         self,
@@ -37,16 +38,25 @@ class TerminalSpinner:
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self._active = False
+        self._label = THINKING_LABEL
 
-    def start(self) -> None:
+    def start(self, label: str = THINKING_LABEL) -> None:
+        """Start the pulse, or update the label of the active pulse."""
         if not self._can_animate():
             return
 
         with self._lock:
             if self._active:
+                if self._label != label:
+                    self._label = label
+                    # Labels have different widths, so clear the old text before
+                    # repainting the same spinner-owned terminal line.
+                    self.stream.write("\r\033[K")
+                    self._write_frame(0)
                 return
 
             self._active = True
+            self._label = label
             self._stop_event.clear()
             self._write_frame(0)
             self._thread = threading.Thread(target=self._run, daemon=True)
@@ -84,6 +94,10 @@ class TerminalSpinner:
 
     def _write_frame(self, frame_index: int) -> None:
         frame = SPINNER_FRAMES[frame_index]
+        if self._label != THINKING_LABEL:
+            # Keep the established pulse glyphs while changing only its status.
+            pulse, _separator, _thinking_label = frame.partition(" ")
+            frame = f"{pulse} {self._label}"
         if self.style and self.stream.isatty():
             # The pulse is one semantic status line. Reset immediately so its
             # active Mod accent cannot bleed into later terminal output.

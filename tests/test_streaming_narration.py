@@ -32,9 +32,11 @@ class CountingSpinner:
         self.starts = 0
         self.stops = 0
         self.style = ""
+        self.labels: list[str] = []
 
-    def start(self) -> None:
+    def start(self, label: str = "Thinking...") -> None:
         self.starts += 1
+        self.labels.append(label)
 
     def stop(self) -> None:
         self.stops += 1
@@ -196,7 +198,7 @@ def test_tool_output_follows_settled_narration_cleanly(monkeypatch) -> None:
     assert display.streaming_narration_active is False
 
 
-def test_tool_preparing_retains_narration_and_starts_thinking(monkeypatch) -> None:
+def test_tool_preparing_retains_narration_and_starts_tool_pulse(monkeypatch) -> None:
     spinner = CountingSpinner()
     display, stream = interactive_display(monkeypatch, spinner=spinner)
 
@@ -213,6 +215,41 @@ def test_tool_preparing_retains_narration_and_starts_thinking(monkeypatch) -> No
     assert display._streaming_narration.visible is False
     assert "Writing now." in stream.getvalue()
     assert spinner.starts == 2
+    assert spinner.stops == 1
+    assert spinner.labels == ["Thinking...", "Writing..."]
+
+
+@pytest.mark.parametrize(
+    ("tool", "label"),
+    [
+        ("read_file", "Reading..."),
+        ("write_file", "Writing..."),
+        ("apply_patch", "Patching..."),
+        ("run_command", "Running..."),
+        ("custom_tool", "Using tool..."),
+    ],
+)
+def test_tool_preparing_uses_tool_specific_pulse(
+    monkeypatch, tool: str, label: str
+) -> None:
+    spinner = CountingSpinner()
+    display, _stream = interactive_display(monkeypatch, spinner=spinner)
+
+    display.thinking()
+    display.handle_event({"type": "tool_preparing", "tool": tool})
+
+    assert spinner.labels == ["Thinking...", label]
+
+
+def test_tool_started_stops_active_tool_preparation_pulse(monkeypatch) -> None:
+    spinner = CountingSpinner()
+    display, _stream = interactive_display(monkeypatch, spinner=spinner)
+
+    display.thinking()
+    display.handle_event({"type": "tool_preparing", "tool": "read_file"})
+    display.handle_event({"type": "tool_started", "tool": "read_file"})
+
+    assert spinner.labels == ["Thinking...", "Reading..."]
     assert spinner.stops == 1
 
 
@@ -276,7 +313,7 @@ def test_display_callback_consumes_retained_narration_without_stopping_thinking(
     assert spinner.stops == 1
 
 
-def test_tool_preparing_after_settled_narration_does_not_start_thinking(
+def test_tool_preparing_after_settled_narration_starts_tool_pulse(
     monkeypatch,
 ) -> None:
     spinner = CountingSpinner()
@@ -288,7 +325,7 @@ def test_tool_preparing_after_settled_narration_does_not_start_thinking(
     display.assistant_message("Writing now.")
     display.handle_event({"type": "tool_preparing", "tool": "write_file"})
 
-    assert spinner.starts == 1
+    assert spinner.starts == 2
     assert spinner.stops == 2
 
 
@@ -318,7 +355,7 @@ def test_visible_tool_output_never_competes_with_thinking(monkeypatch) -> None:
         {"ok": True},
     )
 
-    assert spinner.starts == 0
+    assert spinner.starts == 1
     assert spinner.stops == 1
 
 

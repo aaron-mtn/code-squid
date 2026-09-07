@@ -158,8 +158,9 @@ and application layer; `squid_core/` is the reusable agent runtime.
     accepted message exits with the authoritative last frame retained as
     ordinary scrollback. When `tool_preparing` arrives during live narration,
     the CLI synchronously retains the current provisional frame and releases
-    the Application before restarting the ordinary thinking pulse; the later
-    authoritative narration settles bookkeeping without another print or
+    the Application before starting the existing pulse with a tool-specific
+    preparation label; the later authoritative narration settles bookkeeping
+    without another print or
     spinner handoff. Rejection, finalization, failure, or interruption
     exits with prompt_toolkit erasing the provisional frame. The Application
     has fully stopped before either path returns, so tool/static output cannot
@@ -169,7 +170,9 @@ and application layer; `squid_core/` is the reusable agent runtime.
     `tool_preparing` events arrive while streamed narration is still
     provisional, before the authoritative assistant message and Tool start;
     this is the presentation boundary that transfers ownership from the live
-    panel back to the existing thinking pulse. `tool_started` and all existing
+    panel back to the existing pulse. Known built-in tools use `Reading...`,
+    `Writing...`, `Patching...`, or `Running...`; other tools use
+    `Using tool...`. `tool_started` and all existing
     output/finalization boundaries stop any active pulse. Code Squid owns no
     raw cursor-up or clear-row repaint geometry for live narration.
 
@@ -205,7 +208,9 @@ and application layer; `squid_core/` is the reusable agent runtime.
     Static panel measurement strips ANSI/OSC sequences before calculating the
     padding needed to keep the completion panel's right border aligned.
     Normal thinking uses one neutral, CLI-owned four-frame dot pulse; neither
-    its symbol nor `Thinking...` receives the current Mod accent. Narration and
+    its symbol nor its active label receives the current Mod accent. The label
+    remains `Thinking...` until a specific tool is known, when the same spinner
+    line and timing switch to the CLI-owned preparation label. Narration and
     report markers share the canonical U+1F991 U+FE0E text-presentation squid
     glyph. The active Mod accent wraps only that two-code-point sequence and
     resets immediately, leaving adjacent text and the dim neutral panel borders
