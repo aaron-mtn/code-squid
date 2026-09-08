@@ -1,3 +1,17 @@
+- 2026-09-08: Separated model discovery capability from inference readiness.
+  OpenRouter model discovery now uses its public unauthenticated `GET /models`
+  catalog, including in the startup Model menu when no API key is configured.
+  OpenRouter remains `not connected` without a key, and normal inference
+  construction plus direct inference use continue to reject keyless
+  configuration. Shared discovery no longer calls `is_ready()` first; each
+  provider's `list_models()` now determines whether its catalog is reachable.
+  Added regressions for request headers, keyless readiness, startup display,
+  and inference credential enforcement. Focused provider/startup/runtime/Core
+  verification passed 119 tests. The full suite passed 942 tests with the four
+  pre-existing prompt-policy assertion failures and one pre-existing Windows
+  TTY path-fragment failure documented below. Production compilation, affected
+  imports, and `git diff --check` passed. No live model inference ran.
+
 - 2026-09-08: Fixed startup Provider selection corrupting the live
   prompt-toolkit scene. The startup menu now applies the shared provider result
   and suppresses its optional informational explanation because the menu has no

@@ -1064,8 +1064,9 @@ Their identities remain distinct so setup probes can use the correct contract:
 - Ollama defaults to `http://127.0.0.1:11434`; both lightweight readiness and
   discovery use native `GET /api/tags`, while inference remains `/api/chat`.
 - OpenRouter defaults to `https://openrouter.ai/api/v1` and
-  `OPENROUTER_API_KEY`; authenticated `GET /models` supplies readiness and
-  discovery.
+  `OPENROUTER_API_KEY`. Its public, unauthenticated `GET /models` supplies
+  discovery even when no key is configured. Inference readiness remains
+  separate and requires an API key.
 - OpenAI Compatible defaults to `http://127.0.0.1:8000/v1` with key placeholder
   `local`; generic authenticated `GET /models` supplies readiness and discovery.
 
@@ -1074,6 +1075,14 @@ selection and `/model <name>` persist it verbatim; Core's spawner passes that
 same `ProviderSettings.model_name` into `ModelAdapter` and then provider
 inference. Provider switching preserves the configured ID and reports when the
 new connected provider does not expose it.
+
+Model discovery calls each provider's `list_models()` directly instead of
+requiring `is_ready()` first. This preserves local discovery behaviorâ€”a stopped
+local service fails its own catalog requestâ€”while allowing public catalogs to
+remain visible independently of inference credentials. Core provider
+construction defaults to the inference boundary and therefore still rejects a
+keyless OpenRouter configuration; the application discovery seam explicitly
+requests discovery-only construction.
 
 OpenRouter is supported through the OpenAI-compatible provider path by setting
 `model.provider` or `CODE_SQUID_PROVIDER` to `openrouter`. It still uses

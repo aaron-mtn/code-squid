@@ -35,6 +35,22 @@ from code_squid.console.ui.startup_application import (
 from code_squid.settings import VALID_PROVIDERS, load_settings
 
 
+class JsonResponse:
+    """Small urllib response used by startup discovery regression tests."""
+
+    def __init__(self, payload: object) -> None:
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return json.dumps(self.payload).encode("utf-8")
+
+
 class MenuAnimator(BinaryRainHeader):
     """Rain model connected to the real startup menu state seam."""
 
@@ -401,9 +417,34 @@ def test_provider_model_discovery_uses_optional_adapter_capability(
             list_models=lambda: ["z", "a", "a"],
         )
 
-    monkeypatch.setattr("code_squid.provider_setup.build_provider", build)
+    monkeypatch.setattr(
+        "code_squid.provider_setup.build_provider",
+        lambda settings, *, for_inference: build(settings),
+    )
     assert discover_provider_models(settings) == ["a", "z"]
     assert providers == ["lm_studio"]
+
+
+def test_model_menu_shows_public_openrouter_models_without_key(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    def urlopen(http_request, timeout):
+        assert http_request.get_header("Authorization") is None
+        return JsonResponse({"data": [{"id": "vendor/public-model"}]})
+
+    monkeypatch.setenv("CODE_SQUID_PROVIDER", "openrouter")
+    monkeypatch.delenv("CODE_SQUID_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr("squid_core.providers.openai_compatible.request.urlopen", urlopen)
+    menu = StartupMenu(tmp_path, load_settings(tmp_path))
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Model")
+    menu.activate()
+
+    assert "vendor/public-model" in "\n".join(
+        menu.panel_lines(startup_scene_layout(80))
+    )
 
 
 def test_safety_selection_uses_mapping_and_updates_panel(tmp_path) -> None:

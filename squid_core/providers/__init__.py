@@ -11,8 +11,12 @@ OPENAI_COMPATIBLE_PROVIDERS = frozenset(
 )
 
 
-def build_provider(settings: ProviderSettings) -> BaseProvider:
-    """Construct one of Core's built-in providers from effective settings."""
+def build_provider(
+    settings: ProviderSettings,
+    *,
+    for_inference: bool = True,
+) -> BaseProvider:
+    """Construct a built-in provider for inference or model discovery."""
 
     if settings.provider == "ollama":
         return OllamaProvider(
@@ -23,7 +27,7 @@ def build_provider(settings: ProviderSettings) -> BaseProvider:
     if settings.provider in OPENAI_COMPATIBLE_PROVIDERS:
         if settings.base_url is None:
             raise ValueError(f"base_url is required for provider {settings.provider!r}")
-        if settings.api_key is None:
+        if not settings.api_key and (for_inference or settings.provider != "openrouter"):
             raise ValueError(f"api_key is required for provider {settings.provider!r}")
         return OpenAICompatibleProvider(
             base_url=settings.base_url,

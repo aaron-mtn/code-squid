@@ -19,7 +19,7 @@ class OpenAICompatibleProvider(BaseProvider):
     def __init__(
         self,
         base_url: str,
-        api_key: str,
+        api_key: str | None,
         temperature: float | int | None = None,
         provider_name: str = "openai_compatible",
     ) -> None:
@@ -29,9 +29,14 @@ class OpenAICompatibleProvider(BaseProvider):
         self._api_key = api_key
         self.temperature = temperature
         self.provider_name = provider_name
-        self.client = OpenAI(
-            base_url=base_url,
-            api_key=api_key,
+        # OpenRouter's catalog is public, so discovery may construct this
+        # transport without a credential. The inference client stays absent in
+        # that case so a catalog request cannot accidentally weaken inference
+        # authentication.
+        self.client = (
+            OpenAI(base_url=base_url, api_key=api_key)
+            if api_key
+            else None
         )
 
     def supports_streaming(self) -> bool:
@@ -39,6 +44,8 @@ class OpenAICompatibleProvider(BaseProvider):
 
     def is_ready(self) -> bool:
         """Probe the backend using the most useful provider-native contract."""
+        if self.provider_name == "openrouter" and not self._api_key:
+            return False
         try:
             if self.provider_name == "squid_models":
                 return self._get_json(self._service_root() + "/health") is not None
@@ -62,7 +69,10 @@ class OpenAICompatibleProvider(BaseProvider):
                 if model.get("type") == "llm"
             )
 
-        payload = self._get_json(self.base_url.rstrip("/") + "/models")
+        payload = self._get_json(
+            self.base_url.rstrip("/") + "/models",
+            authenticated=self.provider_name != "openrouter",
+        )
         models = payload.get("data") if isinstance(payload, dict) else None
         if not isinstance(models, list):
             raise RuntimeError("Model discovery response did not include a model list")
@@ -108,7 +118,7 @@ class OpenAICompatibleProvider(BaseProvider):
             please_stop_contemplating_the_void=please_stop_contemplating_the_void,
         )
 
-        return self.client.chat.completions.create(**payload)
+        return self._inference_client().chat.completions.create(**payload)
 
     def stream_chat(
         self,
@@ -163,7 +173,7 @@ class OpenAICompatibleProvider(BaseProvider):
         )
 
         try:
-            for chunk in self.client.chat.completions.create(**payload):
+            for chunk in self._inference_client().chat.completions.create(**payload):
                 chunk_elapsed = time.perf_counter() - request_started_at
                 if trace_callback is not None:
                     raw_chunk_count += 1
@@ -406,6 +416,14 @@ class OpenAICompatibleProvider(BaseProvider):
             choices=[SimpleNamespace(message=message, finish_reason=finish_reason)],
             usage=usage,
         )
+
+    def _inference_client(self) -> OpenAI:
+        """Return the authenticated client used only for model inference."""
+        if self.client is None:
+            raise ValueError(
+                f"api_key is required for provider {self.provider_name!r} inference"
+            )
+        return self.client
 
 
 def _unique_ids(values) -> list[str]:

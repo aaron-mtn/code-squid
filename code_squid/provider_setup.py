@@ -98,12 +98,13 @@ def provider_ready(settings) -> bool:
 
 
 def discover_models(settings) -> list[str]:
-    """Return sorted real model IDs from the effective provider."""
-    provider = build_provider(settings.to_runtime_settings().provider)
-    if not provider.is_ready():
-        raise RuntimeError(
-            f"{friendly_provider_name(settings.model.provider)} is not connected"
-        )
+    """Return model IDs whenever the provider's discovery API is available."""
+    # Discovery is not an inference-readiness probe: OpenRouter's catalog is
+    # public, while local providers naturally fail here if their service is down.
+    provider = build_provider(
+        settings.to_runtime_settings().provider,
+        for_inference=False,
+    )
     return sorted(set(provider.list_models()))
 
 

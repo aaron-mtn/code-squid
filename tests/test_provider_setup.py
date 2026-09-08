@@ -11,6 +11,7 @@ from code_squid.provider_setup import (
     PROVIDER_PROFILES,
     discover_models,
     friendly_provider_name,
+    provider_ready,
     select_model,
     select_provider,
 )
@@ -136,7 +137,10 @@ def test_ollama_native_discovery(monkeypatch) -> None:
     assert all(item.full_url.endswith("/api/tags") for item in requests)
 
 
-def test_openrouter_discovery_auth_and_env_key_reach_construction(monkeypatch, tmp_path) -> None:
+def test_openrouter_public_discovery_omits_auth_and_env_key_reaches_inference(
+    monkeypatch,
+    tmp_path,
+) -> None:
     requests = []
 
     def urlopen(http_request, timeout):
@@ -150,7 +154,48 @@ def test_openrouter_discovery_auth_and_env_key_reach_construction(monkeypatch, t
     provider = build_provider(settings.to_runtime_settings().provider)
     assert provider._api_key == "environment-secret"
     assert provider.list_models() == ["vendor/model"]
-    assert requests[0].get_header("Authorization") == "Bearer environment-secret"
+    assert requests[0].get_header("Authorization") is None
+
+
+def test_openrouter_public_discovery_without_key_is_not_inference_ready(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    requests = []
+
+    def urlopen(http_request, timeout):
+        requests.append(http_request)
+        return JsonResponse({"data": [{"id": "vendor/public-model"}]})
+
+    monkeypatch.setattr("squid_core.providers.openai_compatible.request.urlopen", urlopen)
+    monkeypatch.setenv("CODE_SQUID_PROVIDER", "openrouter")
+    monkeypatch.delenv("CODE_SQUID_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    provider = OpenAICompatibleProvider(
+        "https://openrouter.ai/api/v1",
+        None,
+        provider_name="openrouter",
+    )
+
+    assert provider.list_models() == ["vendor/public-model"]
+    assert requests[0].get_header("Authorization") is None
+    assert provider.is_ready() is False
+    assert provider_ready(load_settings(tmp_path)) is False
+    with pytest.raises(ValueError, match="api_key is required.*inference"):
+        provider.create_response(model="vendor/public-model", messages=[], tools=[])
+
+
+def test_openrouter_inference_construction_still_requires_key() -> None:
+    settings = SimpleNamespace(
+        provider="openrouter",
+        model_name="vendor/model",
+        base_url="https://openrouter.ai/api/v1",
+        api_key=None,
+        temperature=None,
+    )
+
+    with pytest.raises(ValueError, match="api_key is required"):
+        build_provider(settings)
 
 
 def test_openrouter_saved_key_is_used_when_default_env_is_absent(tmp_path) -> None:
@@ -202,7 +247,13 @@ def test_provider_selection_failure_keeps_active_config(monkeypatch, tmp_path) -
 
 
 def test_discovery_uses_shared_provider_seam(monkeypatch, tmp_path) -> None:
-    fake = SimpleNamespace(is_ready=lambda: True, list_models=lambda: ["z", "a", "a"])
-    monkeypatch.setattr("code_squid.provider_setup.build_provider", lambda _settings: fake)
+    fake = SimpleNamespace(
+        is_ready=lambda: pytest.fail("discovery must not probe inference readiness"),
+        list_models=lambda: ["z", "a", "a"],
+    )
+    monkeypatch.setattr(
+        "code_squid.provider_setup.build_provider",
+        lambda _settings, *, for_inference: fake,
+    )
     assert discover_models(load_settings(tmp_path)) == ["a", "z"]
     assert friendly_provider_name("lm_studio") == "LM Studio"
