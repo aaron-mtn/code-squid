@@ -53,9 +53,13 @@ and application layer; `squid_core/` is the reusable agent runtime.
     into the generic `squid_core.spawner` seam. It is presentation-neutral and
     does not import the console frontend.
   - `app_paths.py` owns Code Squid application-home policy, repository-local
-    session/undo/error-log locations, the global session-index location, and
-    paths for loose resources and Mods. Reusable Core machinery receives these
-    paths explicitly.
+    session/undo/error-log locations, the global session-index and recent-
+    workspace locations, and paths for loose resources and Mods. The recent
+    workspace file is `~/.code-squid/recent-workspaces.json` (or the configured
+    application home): a newest-first JSON list of at most ten normalized
+    absolute paths. The same app-path module owns its tolerant loading,
+    deduplication, and update policy. Reusable Core machinery receives workspace
+    paths explicitly and has no knowledge of this product history.
   - `settings.py` reads `.code-squid/settings.json`, validates supported
     application input, applies product defaults and optional `CODE_SQUID_*`
     environment overrides, and translates the result to generic Core settings.
@@ -170,7 +174,25 @@ and application layer; `squid_core/` is the reusable agent runtime.
     row single-line; submenu titles then truncate before a stable
     right-aligned age column. Mod/Skill
     selection updates the presentation copy used by the active scene;
-    selection semantics remain owned by the CLI command handlers. Initial drop
+    selection semantics remain owned by the CLI command handlers.
+
+    The Workspace row uses the same fixed panel and keyboard-only interaction:
+    a five-row scrolling viewport is backed by at most ten recent paths plus
+    `Choose folder...`. Basenames are the primary labels, with a compact parent
+    hint only when basenames collide. Enter publishes a distinct workspace
+    handoff result; Esc changes nothing. Choosing a folder releases and joins
+    the one temporary startup Application before the ordinary prompt machinery
+    asks for a path. The CLI expands `~`, resolves the path, and requires an
+    existing directory. Invalid input prints a recoverable `Workspace
+    unchanged` message and rebuilds the current startup scene. A valid choice
+    is persisted, then `prompt_loop.py` rebuilds settings, display/header,
+    StartupMenu, and session discovery around the selected root. A real root
+    change clears the active session ID and title before the new scene opens,
+    so subsequent session lookup and run/session/undo paths receive only the
+    new invocation-level root. No mutable Core or process-global workspace is
+    introduced.
+
+    Initial drop
     heads are staggered through the full rain height so the first frame is
     populated above, beside, and below the panel; later resets continue to
     enter naturally from above.

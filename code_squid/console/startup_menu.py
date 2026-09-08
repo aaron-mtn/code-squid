@@ -5,10 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-import textwrap
 from typing import Callable, Sequence
 
-from code_squid.app_paths import code_squid_home
+from code_squid.app_paths import code_squid_home, load_recent_workspaces
 from code_squid.console.cli.runtime_commands import (
     SAFETY_MODES,
     apply_model,
@@ -41,6 +40,8 @@ from squid_core.providers import build_provider
 MAIN_ROWS = ("Provider", "Model", "Safety", "Mod", "Session", "Workspace")
 MODEL_FALLBACK = ("No model list available", "Use /model <name>")
 SESSION_VISIBLE_SAVED_LIMIT = 5
+WORKSPACE_VISIBLE_LIMIT = 5
+CHOOSE_FOLDER_LABEL = "Choose folder..."
 
 
 def discover_provider_models(settings: Settings) -> list[str] | None:
@@ -69,6 +70,7 @@ class StartupMenu:
     model_discovery: Callable[[Settings], list[str] | None] = discover_provider_models
     session_discovery: Callable[[Path], list[dict]] = discover_recent_sessions
     session_resolver: Callable[[Path, str], str | None] = resolve_session_id
+    workspace_discovery: Callable[[Path], list[Path]] = load_recent_workspaces
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
 
     def __post_init__(self) -> None:
@@ -77,6 +79,8 @@ class StartupMenu:
         self._options: tuple[str, ...] = ()
         self._model_message: tuple[str, ...] = ()
         self._session_metadata: tuple[dict, ...] = ()
+        self._workspace_paths: tuple[Path, ...] = ()
+        self._workspace_handoff: Path | str | None = None
         # Only an explicit saved-session choice arms the one-time CLI notice.
         # Initial ``--resume`` state and later follow-ups must remain silent.
         self._selected_session_notice: dict | None = None
@@ -158,6 +162,17 @@ class StartupMenu:
             message_count,
         )
 
+    def take_workspace_handoff(self) -> Path | str | None:
+        """Consume the selected recent path or the choose-folder label."""
+        selected = self._workspace_handoff
+        self._workspace_handoff = None
+        return selected
+
+    @property
+    def workspace_handoff_pending(self) -> bool:
+        """Return whether activation requested CLI workspace ownership."""
+        return self._workspace_handoff is not None
+
     def focus_from_composer(self) -> None:
         """Focus the bottom main-menu row without submitting input."""
         self.focused = True
@@ -199,7 +214,7 @@ class StartupMenu:
         if self.mode == "main":
             self._open_main_row()
             return False
-        if self.mode == "workspace" or not self._options:
+        if not self._options:
             return False
 
         selected = self._options[self.selected_index]
@@ -238,6 +253,14 @@ class StartupMenu:
                     # The startup renderer exits at this boundary; keep menu
                     # focus from leaking into a later fresh startup scene.
                     self.focused = False
+        elif self.mode == "workspace":
+            if self.selected_index == len(self._workspace_paths):
+                self._workspace_handoff = CHOOSE_FOLDER_LABEL
+            else:
+                self._workspace_handoff = self._workspace_paths[self.selected_index]
+            # Workspace ownership moves to the CLI; this menu must not mutate
+            # its root while other workspace-scoped objects still exist.
+            self.focused = False
         self.mode = "main"
         self.selected_index = self._main_selected_index
         return saved_session_activated
@@ -277,6 +300,13 @@ class StartupMenu:
             )
             if self.session_id in self._options:
                 self.selected_index = self._options.index(self.session_id)
+        elif self.mode == "workspace":
+            self._workspace_paths = tuple(self.workspace_discovery(self.repo_root))
+            self._options = tuple(str(path) for path in self._workspace_paths) + (
+                CHOOSE_FOLDER_LABEL,
+            )
+            if self.repo_root in self._workspace_paths:
+                self.selected_index = self._workspace_paths.index(self.repo_root)
         else:
             self._options = ()
 
@@ -333,24 +363,7 @@ class StartupMenu:
 
     def _submenu_panel_lines(self, layout: StartupSceneLayout) -> list[str]:
         if self.mode == "workspace":
-            path_width = max(layout.panel.width - 6, 1)
-            path_rows = textwrap.wrap(str(self.repo_root), width=path_width) or [
-                str(self.repo_root)
-            ]
-            # Keep the footer visible in the fixed-height panel even when a
-            # deeply nested workspace path needs more wrapped rows than fit.
-            available_path_rows = max(layout.panel.height - 8, 1)
-            path_rows = path_rows[:available_path_rows]
-            content = [
-                "Workspace",
-                "",
-                concise_workspace_name(self.repo_root),
-                "",
-                *path_rows,
-                "",
-                "Esc  back",
-            ]
-            return _framed_rows(content, layout)
+            return self._workspace_panel_lines(layout)
 
         title = self.mode.title()
         if self.mode == "model" and self._model_message:
@@ -386,6 +399,36 @@ class StartupMenu:
             *option_rows,
             "",
             "Esc  back".center(inner_width),
+        ]
+        return _framed_rows(content, layout)
+
+    def _workspace_panel_lines(self, layout: StartupSceneLayout) -> list[str]:
+        """Render a bounded recent-workspace viewport with concise labels."""
+        start = min(
+            max(self.selected_index - WORKSPACE_VISIBLE_LIMIT + 1, 0),
+            max(len(self._options) - WORKSPACE_VISIBLE_LIMIT, 0),
+        )
+        visible_indexes = range(
+            start,
+            min(start + WORKSPACE_VISIBLE_LIMIT, len(self._options)),
+        )
+        labels = _workspace_labels(self._workspace_paths)
+        option_labels = (*labels, CHOOSE_FOLDER_LABEL)
+        inner_width = max(layout.panel.width - 2, 0)
+        rows = [
+            _workspace_option_row(
+                option_labels[index],
+                selected=index == self.selected_index,
+                width=inner_width,
+            )
+            for index in visible_indexes
+        ]
+        content = [
+            "Workspace".center(inner_width),
+            "",
+            *rows,
+            "",
+            "↑↓ select   Enter   Esc".center(inner_width),
         ]
         return _framed_rows(content, layout)
 
@@ -439,6 +482,30 @@ def _session_title(metadata: dict) -> str:
         if title:
             return title
     return "Untitled session"
+
+
+def _workspace_labels(paths: Sequence[Path]) -> tuple[str, ...]:
+    """Use basenames, adding one compact parent hint only for collisions."""
+    basenames = [concise_workspace_name(path) for path in paths]
+    return tuple(
+        (
+            f"{name}  ({path.parent.name or path.parent})"
+            if basenames.count(name) > 1
+            else name
+        )
+        for name, path in zip(basenames, paths)
+    )
+
+
+def _workspace_option_row(label: str, *, selected: bool, width: int) -> str:
+    """Fit one recent workspace into the submenu's shared option column."""
+    inset = min(2, max(width // 8, 0))
+    row_width = max(width - (inset * 2), 0)
+    marker = "> " if selected else "  "
+    label_width = max(row_width - len(marker), 0)
+    if len(label) > label_width:
+        label = (label[: max(label_width - 3, 0)] + "...")[:label_width]
+    return f"{' ' * inset}{marker}{label:<{label_width}}{' ' * inset}"[:width]
 
 
 def _session_age(metadata: dict, now: datetime) -> str:

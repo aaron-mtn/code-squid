@@ -12,9 +12,11 @@ from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
 from code_squid.console.startup_menu import (
+    CHOOSE_FOLDER_LABEL,
     MAIN_ROWS,
     MODEL_FALLBACK,
     SESSION_VISIBLE_SAVED_LIMIT,
+    WORKSPACE_VISIBLE_LIMIT,
     StartupMenu,
     _session_title,
     discover_provider_models,
@@ -28,6 +30,7 @@ from code_squid.console.ui.prompt_input import (
 )
 from code_squid.console.ui.startup_application import (
     STARTUP_SESSION_SELECTED,
+    STARTUP_WORKSPACE_SELECTED,
     StartupApplication,
 )
 from code_squid.settings import VALID_PROVIDERS, load_settings
@@ -167,8 +170,8 @@ def test_each_main_row_replaces_panel_and_escape_restores_main(tmp_path) -> None
         if title == "Model":
             assert all(message in rendered for message in MODEL_FALLBACK)
         if title == "Workspace":
-            compact = "".join(line[1:-1].strip() for line in menu.panel_lines(layout))
-            assert str(tmp_path.resolve()) in compact
+            assert tmp_path.name in rendered
+            assert CHOOSE_FOLDER_LABEL in rendered
         menu.back()
         assert menu.mode == "main"
         restored = "\n".join(menu.panel_lines(layout))
@@ -288,7 +291,7 @@ def test_mod_selection_and_none_preserve_specialization_rules(monkeypatch, tmp_p
     assert (menu.mod_name, menu.skill_name) == (None, None)
 
 
-def test_workspace_view_is_read_only_and_shows_full_path(tmp_path) -> None:
+def test_workspace_view_selects_current_path_without_mutating_root(tmp_path) -> None:
     menu = StartupMenu(tmp_path, load_settings(tmp_path))
     original_root = menu.repo_root
     menu.focus_from_composer()
@@ -296,10 +299,11 @@ def test_workspace_view_is_read_only_and_shows_full_path(tmp_path) -> None:
     menu.activate()
 
     lines = menu.panel_lines(startup_scene_layout(80))
-    visible_content = "".join(line[1:-1].strip() for line in lines)
-    assert str(original_root) in visible_content
+    visible_content = "\n".join(lines)
+    assert f"> {original_root.name}" in visible_content
     menu.activate()
     assert menu.repo_root == original_root
+    assert menu.take_workspace_handoff() == original_root
 
 
 def test_workspace_view_keeps_centered_footer_for_long_paths(tmp_path) -> None:
@@ -310,9 +314,52 @@ def test_workspace_view_keeps_centered_footer_for_long_paths(tmp_path) -> None:
     menu.activate()
 
     inner = [line[1:-1] for line in menu.panel_lines(startup_scene_layout(80))]
-    footer = next(line for line in inner if line.strip() == "Esc  back")
+    footer = next(
+        line for line in inner if line.strip() == "↑↓ select   Enter   Esc"
+    )
 
-    assert footer == "Esc  back".center(len(footer))
+    assert footer == "↑↓ select   Enter   Esc".center(len(footer))
+
+
+def test_workspace_viewport_scrolls_and_escape_does_not_select(tmp_path) -> None:
+    workspaces = [tmp_path / f"workspace-{index}" for index in range(9)]
+    menu = StartupMenu(
+        workspaces[3],
+        load_settings(tmp_path),
+        workspace_discovery=lambda _: workspaces,
+    )
+    layout = startup_scene_layout(80)
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Workspace")
+    menu.activate()
+
+    assert menu.selected_index == 3
+    for _ in range(3):
+        menu.move(1)
+    rendered = "\n".join(menu.panel_lines(layout))
+    assert menu.selected_index == 6
+    assert "workspace-1" not in rendered
+    assert "workspace-6" in rendered
+    assert rendered.count("workspace-") <= WORKSPACE_VISIBLE_LIMIT
+
+    menu.back()
+    assert menu.take_workspace_handoff() is None
+
+
+def test_workspace_choose_folder_releases_startup(monkeypatch, tmp_path) -> None:
+    menu = StartupMenu(
+        tmp_path,
+        load_settings(tmp_path),
+        workspace_discovery=lambda root: [root],
+    )
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Workspace")
+    menu.activate()
+
+    result = _run_prompt(monkeypatch, menu, "\x1b[B\r")
+
+    assert result is STARTUP_WORKSPACE_SELECTED
+    assert menu.take_workspace_handoff() == CHOOSE_FOLDER_LABEL
 
 
 def test_submenu_centers_title_options_as_one_column_and_footer(tmp_path) -> None:

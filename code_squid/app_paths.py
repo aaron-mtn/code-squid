@@ -6,12 +6,14 @@ these helpers retain Code Squid's environment/default policy at the app boundary
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
 
 CODE_SQUID_HOME_ENV = "CODE_SQUID_HOME"
 CODE_SQUID_SESSION_INDEXES_ENV = "CODE_SQUID_SESSION_INDEXES"
+RECENT_WORKSPACE_LIMIT = 10
 
 
 def code_squid_home(app_home: Path | str | None = None) -> Path:
@@ -71,6 +73,63 @@ def session_indexes_path() -> Path:
     if configured_path:
         return Path(configured_path).expanduser()
     return code_squid_home() / "session-indexes.jsonl"
+
+
+def recent_workspaces_path() -> Path:
+    """Return the product-owned recent-workspace list location."""
+    return code_squid_home() / "recent-workspaces.json"
+
+
+def load_recent_workspaces(current: Path) -> list[Path]:
+    """Return normalized paths newest first, always including ``current``."""
+    current = current.resolve()
+    paths = _read_recent_workspaces()
+    if current not in paths:
+        # Presence is more useful than retaining the oldest persisted entry;
+        # opening the picker alone does not reorder global history.
+        paths = paths[: RECENT_WORKSPACE_LIMIT - 1] + [current]
+    return paths[:RECENT_WORKSPACE_LIMIT]
+
+
+def _read_recent_workspaces() -> list[Path]:
+    """Read and normalize the persisted list, ignoring malformed state."""
+    try:
+        raw = json.loads(recent_workspaces_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raw = []
+
+    paths: list[Path] = []
+    if isinstance(raw, list):
+        for value in raw:
+            if not isinstance(value, str):
+                continue
+            try:
+                candidate = Path(value).expanduser().resolve()
+            except (OSError, RuntimeError, ValueError):
+                continue
+            if candidate not in paths:
+                paths.append(candidate)
+            if len(paths) == RECENT_WORKSPACE_LIMIT:
+                break
+    return paths
+
+
+def remember_workspace(workspace: Path) -> None:
+    """Move a workspace to the front of the bounded global recent list."""
+    workspace = workspace.resolve()
+    recent = [workspace]
+    recent.extend(path for path in _read_recent_workspaces() if path != workspace)
+    recent = recent[:RECENT_WORKSPACE_LIMIT]
+    path = recent_workspaces_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps([str(item) for item in recent], indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        # Recent history is convenience state and must never block switching.
+        return
 
 
 def ensure_user_resource_dirs(app_home: Path | str | None = None) -> None:

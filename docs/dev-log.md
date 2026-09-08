@@ -1,3 +1,21 @@
+- 2026-09-07: Made the startup Workspace row interactive using the existing
+  fixed startup panel and single-Application handoff lifecycle. The submenu
+  shows a scrolling five-row view over up to ten recent absolute paths plus
+  `Choose folder...`; basename collisions gain a compact parent hint. Recent
+  paths persist newest-first as a deduplicated JSON list at the configured
+  Code Squid home's `recent-workspaces.json`. Folder input uses the ordinary
+  prompt after startup terminal ownership is released, expands `~`, resolves
+  the path, and quietly keeps the current root on invalid input. Valid
+  selection returns a distinct startup sentinel to `prompt_loop.py`, which
+  reconstructs workspace settings, display/header, menu, and discovery state
+  around the new root and clears any active session on a real root change.
+  Core globals and storage formats are unchanged. Focused startup/workspace,
+  prompt-input, app-path, interactive-session, and package-boundary
+  verification: 95 passed; broader console verification: 141 passed. The full
+  suite passed 917 tests and retained four unrelated prompt-policy assertion
+  failures already documented below. Compilation, affected imports, and
+  `git diff --check` passed. No live model inference ran.
+
 - 2026-09-07: Polished saved-session startup handoff without adding another
   renderer or fade. Saved-session selection now conditionally removes its
   unused empty composer from the existing StartupApplication, then the CLI

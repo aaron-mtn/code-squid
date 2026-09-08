@@ -11,10 +11,17 @@ from code_squid.console.cli.control_commands import (
     discover_recent_sessions,
     handle_control_command,
 )
-from code_squid.console.cli.prompt_loop import _resume_session, _run_interactive
+from code_squid.console.cli.prompt_loop import (
+    _resume_session,
+    _run_interactive,
+    _selected_workspace,
+)
 from code_squid.console.cli.runtime_commands import handle_runtime_command
-from code_squid.console.startup_menu import MAIN_ROWS
-from code_squid.console.ui.startup_application import STARTUP_SESSION_SELECTED
+from code_squid.console.startup_menu import MAIN_ROWS, StartupMenu
+from code_squid.console.ui.startup_application import (
+    STARTUP_SESSION_SELECTED,
+    STARTUP_WORKSPACE_SELECTED,
+)
 from code_squid.settings import load_settings
 from squid_core.storage import SessionStore
 
@@ -68,6 +75,29 @@ class QuietDisplay:
     def previous_session_loaded(self, title, age, message_count=None) -> None:
         self.loaded_sessions.append((title, age, message_count))
         self.loaded_session_scene_states.append(self.session_scene_active)
+
+
+def test_choose_folder_accepts_valid_path_and_rejects_invalid_path(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    home = tmp_path / "home"
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    menu = StartupMenu(tmp_path, load_settings(tmp_path))
+    menu._workspace_handoff = "Choose folder..."
+    prompts = iter([str(selected), str(tmp_path / "missing")])
+    monkeypatch.setenv("CODE_SQUID_HOME", str(home))
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._prompt_task",
+        lambda _label: next(prompts),
+    )
+
+    assert _selected_workspace(menu) == selected.resolve()
+    menu._workspace_handoff = "Choose folder..."
+    assert _selected_workspace(menu) is None
+    assert "Workspace unchanged" in capsys.readouterr().out
 
 
 def test_provider_status_lists_effective_and_supported_values(tmp_path, capsys) -> None:
@@ -468,3 +498,56 @@ def test_startup_session_selection_notices_once_and_uses_existing_follow_up_runn
     assert prompt_animators[0] is display.header
     assert prompt_animators[1:] == [None, None, None]
     assert forced_handoffs == 1
+
+
+def test_workspace_handoff_rebuilds_root_settings_and_clears_session(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    old_root = tmp_path / "old"
+    new_root = tmp_path / "new"
+    old_root.mkdir()
+    new_root.mkdir()
+    _write_settings(new_root, {"model": {"name": "new-workspace-model"}})
+    displays = []
+    menus = []
+    prompts = iter([STARTUP_WORKSPACE_SELECTED, "/exit"])
+
+    def build_display(repo_root, settings, skill_name=None):
+        display = QuietDisplay()
+        display.repo_root = repo_root
+        display.settings = settings
+
+        def set_startup_menu(menu):
+            menus.append(menu)
+
+        display.set_startup_menu = set_startup_menu
+        displays.append(display)
+        return display
+
+    def prompt(_label, animator=None):
+        result = next(prompts)
+        if result is STARTUP_WORKSPACE_SELECTED:
+            menu = menus[-1]
+            menu.focus_from_composer()
+            menu.selected_index = MAIN_ROWS.index("Workspace")
+            menu.activate()
+            menu._workspace_paths = (new_root.resolve(),)
+            menu._options = (str(new_root.resolve()), "Choose folder...")
+            menu.selected_index = 0
+            menu.activate()
+        return result
+
+    monkeypatch.setenv("CODE_SQUID_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._run_display",
+        build_display,
+    )
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", prompt)
+
+    assert _run_interactive(old_root, active_session_id="old-session") == 0
+    assert [display.repo_root for display in displays] == [old_root, new_root.resolve()]
+    assert displays[1].settings.model.name == "new-workspace-model"
+    assert menus[1].repo_root == new_root.resolve()
+    assert menus[1].session_id is None
+    assert menus[1].session_title is None

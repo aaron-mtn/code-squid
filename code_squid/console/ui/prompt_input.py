@@ -160,6 +160,14 @@ def multiline_key_bindings(
             )
             if release_startup is not None:
                 release_startup()
+        elif menu.workspace_handoff_pending:
+            release_startup = getattr(
+                event.app,
+                "code_squid_workspace_selected",
+                None,
+            )
+            if release_startup is not None:
+                release_startup()
         event.app.invalidate()
 
     @bindings.add("escape", filter=menu_focused, eager=True)

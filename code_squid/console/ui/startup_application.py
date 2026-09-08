@@ -37,10 +37,11 @@ from code_squid.console.ui.header_layout import STARTUP_SEPARATOR_ROWS
 COMPOSER_RIGHT_PADDING = 1
 
 
-# A saved-session choice ends the startup scene without pretending the user
-# submitted an empty task. The caller can then print status and open the normal
-# composer only after this Application has released the terminal.
+# Menu handoffs end the startup scene without pretending the user submitted an
+# empty task. The caller can print status, ask for a folder, or rebuild the
+# scene only after this Application has released the terminal.
 STARTUP_SESSION_SELECTED = object()
+STARTUP_WORKSPACE_SELECTED = object()
 
 
 _active_startups: dict[int, "StartupApplication"] = {}
@@ -73,11 +74,11 @@ class StartupApplication:
     """Own rain, panel, menu presentation, and composer until handoff.
 
     This Application is intentionally temporary and non-full-screen. Task
-    submission or saved-session selection releases the caller while this same
-    renderer briefly fades its rain. Ordinary run output can force and join
-    that renderer when needed; saved-session output instead joins the natural
-    fade. Keeping that boundary strict avoids recreating a persistent
-    transcript/composer UI.
+    submission or menu handoff releases the caller while this same renderer
+    briefly fades its rain. Ordinary run output can force and join that
+    renderer when needed; menu handoffs instead join the natural fade. Keeping
+    that boundary strict avoids recreating a persistent transcript/composer
+    UI.
     """
 
     def __init__(
@@ -93,7 +94,7 @@ class StartupApplication:
         self.prompt = prompt
         self._submitted = threading.Event()
         self._result: str | object = ""
-        self._saved_session_handoff = False
+        self._menu_handoff = False
         self._failure: BaseException | None = None
         self._thread: threading.Thread | None = None
         self.final_screen = None
@@ -126,7 +127,7 @@ class StartupApplication:
         )
         self.composer = ConditionalContainer(
             self._composer_container(),
-            filter=Condition(lambda: not self._saved_session_handoff),
+            filter=Condition(lambda: not self._menu_handoff),
         )
         root = HSplit(
             [
@@ -158,6 +159,9 @@ class StartupApplication:
         self.application.code_squid_submit = self.submit  # type: ignore[attr-defined]
         self.application.code_squid_session_selected = (  # type: ignore[attr-defined]
             self.select_saved_session
+        )
+        self.application.code_squid_workspace_selected = (  # type: ignore[attr-defined]
+            self.select_workspace
         )
         # `/new` constructs a new temporary Application around the same display
         # model, so reset drops here to make every session scene genuinely fresh.
@@ -194,7 +198,17 @@ class StartupApplication:
         self._result = STARTUP_SESSION_SELECTED
         # This buffer was never submitted, so retaining its empty frame would
         # leave a misleading composer in scrollback after the handoff.
-        self._saved_session_handoff = True
+        self._menu_handoff = True
+        self.rain.begin_fade()
+        self._submitted.set()
+        self.application.invalidate()
+
+    def select_workspace(self) -> None:
+        """Release startup so the CLI can rebuild around another root."""
+        if self._submitted.is_set():
+            return
+        self._result = STARTUP_WORKSPACE_SELECTED
+        self._menu_handoff = True
         self.rain.begin_fade()
         self._submitted.set()
         self.application.invalidate()

@@ -25,8 +25,12 @@ from code_squid.console.ui.approval import (
 )
 from code_squid.console.ui.display import INPUT_IDENTITY_LINE, TerminalDisplay
 from code_squid.console.ui.binary_header import BinaryRainHeader
-from code_squid.console.ui.startup_application import STARTUP_SESSION_SELECTED
-from code_squid.console.startup_menu import StartupMenu
+from code_squid.console.ui.startup_application import (
+    STARTUP_SESSION_SELECTED,
+    STARTUP_WORKSPACE_SELECTED,
+)
+from code_squid.console.startup_menu import CHOOSE_FOLDER_LABEL, StartupMenu
+from code_squid.app_paths import remember_workspace
 
 
 PROMPT_PREFIX = INPUT_PROMPT_PREFIX
@@ -111,8 +115,13 @@ def _composer_prompt(animator: BinaryRainHeader | None = None):
 
 
 def _prompt_task(label: str, animator: BinaryRainHeader | None = None) -> str | object:
+    prompt = _composer_prompt(animator)
+    if label != "Task":
+        # Non-task handoffs still use the ordinary boxed PromptSession, but
+        # identify the value being requested instead of showing the agent ID.
+        prompt = FormattedText([("", f"  {label}\n  "), (PROMPT_STYLE, PROMPT_PREFIX)])
     return prompt_multiline_input(
-        _composer_prompt(animator),
+        prompt,
         animator=animator,
         boxed=True,
     )
@@ -146,7 +155,7 @@ def _prompt_task_or_cancel(
     label: str,
     display: TerminalDisplay | None = None,
     menu: StartupMenu | None = None,
-) -> str | None:
+) -> str | object | None:
     try:
         if display is not None:
             animator = display.header if display.session_scene_active else None
@@ -161,6 +170,11 @@ def _prompt_task_or_cancel(
                 task = _prompt_task(label)
                 assert isinstance(task, str)
                 return task
+            if task is STARTUP_WORKSPACE_SELECTED:
+                # Workspace reconstruction must begin only after the sole
+                # startup renderer has relinquished the terminal.
+                _wait_for_startup_fade(display)
+                return task
             assert isinstance(task, str)
             return task
         task = _prompt_task(label)
@@ -169,6 +183,33 @@ def _prompt_task_or_cancel(
     except KeyboardInterrupt:
         print(CANCELLED_BEFORE_RUN_MESSAGE)
         return None
+
+
+def _selected_workspace(menu: StartupMenu) -> Path | None:
+    """Resolve and validate a menu handoff using ordinary prompt input."""
+    selection = menu.take_workspace_handoff()
+    if selection == CHOOSE_FOLDER_LABEL:
+        try:
+            entered = _prompt_task("Workspace folder")
+        except KeyboardInterrupt:
+            print(CANCELLED_BEFORE_RUN_MESSAGE)
+            return None
+        assert isinstance(entered, str)
+        selection = entered.strip()
+
+    if not selection:
+        print("Workspace unchanged: enter an existing directory path.")
+        return None
+    try:
+        candidate = Path(selection).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        print("Workspace unchanged: enter a valid directory path.")
+        return None
+    if not candidate.exists() or not candidate.is_dir():
+        print(f"Workspace unchanged: not an existing directory: {candidate}")
+        return None
+    remember_workspace(candidate)
+    return candidate
 
 
 def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
@@ -180,6 +221,12 @@ def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
     try:
         display.start()
         task = _prompt_task_or_cancel("Task", display, menu)
+        if task is STARTUP_WORKSPACE_SELECTED:
+            selected_root = _selected_workspace(menu) or repo_root
+            # Stop this root's display before recursively constructing the
+            # replacement; there is never more than one startup Application.
+            display.stop_header()
+            return _run_new_session(selected_root, skill_name)
         settings = menu.settings
         selected_session_id = menu.session_id
         if task is None:
@@ -256,6 +303,29 @@ def _run_interactive(
         display.start()
         while True:
             task = _prompt_task_or_cancel("Task", display, menu)
+            if task is STARTUP_WORKSPACE_SELECTED:
+                selected_root = _selected_workspace(menu) or repo_root
+                workspace_changed = selected_root != repo_root
+                display.stop_header()
+
+                repo_root = selected_root
+                settings = load_settings(repo_root)
+                if workspace_changed:
+                    # Session IDs, titles, discovery, runners, and undo paths
+                    # are all workspace-owned and must cross this boundary empty.
+                    active_session_id = None
+                display = _run_display(repo_root, settings, skill_name)
+                menu = StartupMenu(
+                    repo_root,
+                    settings,
+                    mod_name=mod_name,
+                    skill_name=skill_name,
+                    session_id=active_session_id,
+                )
+                if hasattr(display, "set_startup_menu"):
+                    display.set_startup_menu(menu)
+                display.start()
+                continue
             settings = menu.settings
             mod_name = menu.mod_name
             skill_name = menu.skill_name
