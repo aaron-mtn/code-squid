@@ -68,7 +68,7 @@ and application layer; `squid_core/` is the reusable agent runtime.
     dispatch; `prompt_loop.py` owns the one persistent interpreter used by
     fresh and resumed sessions; `runtime_commands.py` owns interactive
     provider, model, and safety changes; `control_commands.py` owns interactive
-    session, undo, and workspace-status commands; `session_runner.py`
+    session, undo, and workspace commands; `session_runner.py`
     constructs the terminal display, including startup information and
     trace/debug settings, and handles new/resumed session-backed runs; and
     `skill_commands.py` handles Skill status, listing, and selection.
@@ -177,20 +177,21 @@ and application layer; `squid_core/` is the reusable agent runtime.
     selection semantics remain owned by the CLI command handlers.
 
     The Workspace row uses the same fixed panel and keyboard-only interaction:
-    a five-row scrolling viewport is backed by at most ten recent paths plus
-    `Choose folder...`. Basenames are the primary labels, with a compact parent
-    hint only when basenames collide. Enter publishes a distinct workspace
-    handoff result; Esc changes nothing. Choosing a folder releases and joins
-    the one temporary startup Application before the ordinary prompt machinery
-    asks for a path. The CLI expands `~`, resolves the path, and requires an
-    existing directory. Invalid input prints a recoverable `Workspace
-    unchanged` message and rebuilds the current startup scene. A valid choice
-    is persisted, then `prompt_loop.py` rebuilds settings, display/header,
+    a five-row scrolling viewport is backed only by at most ten recent paths.
+    The current root is always included and initially selected. Basenames are
+    the primary labels, with a compact parent hint only when basenames collide.
+    Enter publishes the selected recent path as a distinct workspace handoff;
+    Esc changes nothing. Arbitrary paths are introduced only through
+    `/workspace <path>` in the main composer. `control_commands.py` parses the
+    unbroken command remainder, removes one matching outer quote pair, expands
+    `~`, resolves the path, requires an existing directory, and returns a
+    switch target without mutating workspace-scoped objects. Both the startup
+    handoff and command target converge on `prompt_loop.py`'s
+    `_rebuild_workspace_runtime`, which reconstructs settings, display/header,
     StartupMenu, and session discovery around the selected root. A real root
     change clears the active session ID and title before the new scene opens,
     so subsequent session lookup and run/session/undo paths receive only the
-    new invocation-level root. No mutable Core or process-global workspace is
-    introduced.
+    new root. No mutable Core or process-global workspace is introduced.
 
     Initial drop
     heads are staggered through the full rain height so the first frame is
@@ -814,7 +815,9 @@ Inside the interactive CLI:
 - `/resume latest` and `/resume <session_id>` switch the active session without
   leaving the persistent prompt.
 - `/undo` invokes the workspace's existing latest-run restore behavior.
-- `/cwd` reports the immutable invocation-level workspace root.
+- `/workspace` reports the current workspace; `/workspace <path>` validates,
+  remembers, and requests a full reconstruction around a new workspace root.
+- `/cwd` remains a compatible report-only alias for the current workspace root.
 
 Selections are process-local CLI state. Selecting a Mod clears a standalone
 Skill selection, and selecting a standalone Skill clears a Mod selection, so

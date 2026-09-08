@@ -2,7 +2,11 @@
 
 from pathlib import Path
 
-from code_squid.app_paths import workspace_sessions_dir, workspace_undo_dir
+from code_squid.app_paths import (
+    remember_workspace,
+    workspace_sessions_dir,
+    workspace_undo_dir,
+)
 from code_squid.console.ui.sessions import print_session, print_sessions
 from squid_core.storage import UndoStore
 from squid_core.storage.session_index import (
@@ -13,6 +17,51 @@ from squid_core.storage.session_index import (
 
 
 RECENT_SESSION_LIMIT = 20
+
+
+def request_workspace_switch(raw_path: Path | str) -> Path | None:
+    """Normalize, validate, and remember a requested workspace root."""
+
+    path_text = str(raw_path).strip()
+    if (
+        len(path_text) >= 2
+        and path_text[0] == path_text[-1]
+        and path_text[0] in {"'", '"'}
+    ):
+        # The composer already preserves spaces, so only the optional shell-like
+        # outer quotes need removal; inner quotes remain part of the path.
+        path_text = path_text[1:-1]
+    if not path_text:
+        print("Workspace unchanged: enter an existing directory path.")
+        return None
+
+    try:
+        candidate = Path(path_text).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        print("Workspace unchanged: enter a valid directory path.")
+        return None
+    if not candidate.exists() or not candidate.is_dir():
+        print(f"Workspace unchanged: not an existing directory: {candidate}")
+        return None
+
+    remember_workspace(candidate)
+    return candidate
+
+
+def handle_workspace_command(
+    repo_root: Path,
+    command: str,
+) -> tuple[bool, Path | None]:
+    """Handle ``/workspace`` and return a validated switch target to the CLI."""
+
+    parts = command.strip().split(maxsplit=1)
+    if not parts or parts[0] != "/workspace":
+        return False, None
+    if len(parts) == 1:
+        print(f"Workspace: {repo_root}")
+        return True, None
+
+    return True, request_workspace_switch(parts[1])
 
 
 def discover_recent_sessions(repo_root: Path) -> list[dict]:

@@ -12,7 +12,6 @@ from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
 from code_squid.console.startup_menu import (
-    CHOOSE_FOLDER_LABEL,
     MAIN_ROWS,
     MODEL_FALLBACK,
     SESSION_VISIBLE_SAVED_LIMIT,
@@ -171,7 +170,7 @@ def test_each_main_row_replaces_panel_and_escape_restores_main(tmp_path) -> None
             assert all(message in rendered for message in MODEL_FALLBACK)
         if title == "Workspace":
             assert tmp_path.name in rendered
-            assert CHOOSE_FOLDER_LABEL in rendered
+            assert "Choose folder..." not in rendered
         menu.back()
         assert menu.mode == "main"
         restored = "\n".join(menu.panel_lines(layout))
@@ -346,11 +345,12 @@ def test_workspace_viewport_scrolls_and_escape_does_not_select(tmp_path) -> None
     assert menu.take_workspace_handoff() is None
 
 
-def test_workspace_choose_folder_releases_startup(monkeypatch, tmp_path) -> None:
+def test_workspace_recent_selection_releases_startup(monkeypatch, tmp_path) -> None:
+    recent = tmp_path / "recent"
     menu = StartupMenu(
         tmp_path,
         load_settings(tmp_path),
-        workspace_discovery=lambda root: [root],
+        workspace_discovery=lambda root: [root, recent],
     )
     menu.focus_from_composer()
     menu.selected_index = MAIN_ROWS.index("Workspace")
@@ -359,7 +359,7 @@ def test_workspace_choose_folder_releases_startup(monkeypatch, tmp_path) -> None
     result = _run_prompt(monkeypatch, menu, "\x1b[B\r")
 
     assert result is STARTUP_WORKSPACE_SELECTED
-    assert menu.take_workspace_handoff() == CHOOSE_FOLDER_LABEL
+    assert menu.take_workspace_handoff() == recent
 
 
 def test_submenu_centers_title_options_as_one_column_and_footer(tmp_path) -> None:

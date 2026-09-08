@@ -41,7 +41,6 @@ MAIN_ROWS = ("Provider", "Model", "Safety", "Mod", "Session", "Workspace")
 MODEL_FALLBACK = ("No model list available", "Use /model <name>")
 SESSION_VISIBLE_SAVED_LIMIT = 5
 WORKSPACE_VISIBLE_LIMIT = 5
-CHOOSE_FOLDER_LABEL = "Choose folder..."
 
 
 def discover_provider_models(settings: Settings) -> list[str] | None:
@@ -80,7 +79,7 @@ class StartupMenu:
         self._model_message: tuple[str, ...] = ()
         self._session_metadata: tuple[dict, ...] = ()
         self._workspace_paths: tuple[Path, ...] = ()
-        self._workspace_handoff: Path | str | None = None
+        self._workspace_handoff: Path | None = None
         # Only an explicit saved-session choice arms the one-time CLI notice.
         # Initial ``--resume`` state and later follow-ups must remain silent.
         self._selected_session_notice: dict | None = None
@@ -162,8 +161,8 @@ class StartupMenu:
             message_count,
         )
 
-    def take_workspace_handoff(self) -> Path | str | None:
-        """Consume the selected recent path or the choose-folder label."""
+    def take_workspace_handoff(self) -> Path | None:
+        """Consume the selected recent workspace path."""
         selected = self._workspace_handoff
         self._workspace_handoff = None
         return selected
@@ -254,10 +253,7 @@ class StartupMenu:
                     # focus from leaking into a later fresh startup scene.
                     self.focused = False
         elif self.mode == "workspace":
-            if self.selected_index == len(self._workspace_paths):
-                self._workspace_handoff = CHOOSE_FOLDER_LABEL
-            else:
-                self._workspace_handoff = self._workspace_paths[self.selected_index]
+            self._workspace_handoff = self._workspace_paths[self.selected_index]
             # Workspace ownership moves to the CLI; this menu must not mutate
             # its root while other workspace-scoped objects still exist.
             self.focused = False
@@ -302,9 +298,7 @@ class StartupMenu:
                 self.selected_index = self._options.index(self.session_id)
         elif self.mode == "workspace":
             self._workspace_paths = tuple(self.workspace_discovery(self.repo_root))
-            self._options = tuple(str(path) for path in self._workspace_paths) + (
-                CHOOSE_FOLDER_LABEL,
-            )
+            self._options = tuple(str(path) for path in self._workspace_paths)
             if self.repo_root in self._workspace_paths:
                 self.selected_index = self._workspace_paths.index(self.repo_root)
         else:
@@ -413,11 +407,10 @@ class StartupMenu:
             min(start + WORKSPACE_VISIBLE_LIMIT, len(self._options)),
         )
         labels = _workspace_labels(self._workspace_paths)
-        option_labels = (*labels, CHOOSE_FOLDER_LABEL)
         inner_width = max(layout.panel.width - 2, 0)
         rows = [
             _workspace_option_row(
-                option_labels[index],
+                labels[index],
                 selected=index == self.selected_index,
                 width=inner_width,
             )

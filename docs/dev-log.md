@@ -1,3 +1,19 @@
+- 2026-09-07: Simplified workspace selection by making the startup Workspace
+  submenu recent-only and removing `Choose folder...` plus its boxed path
+  prompt. Added `/workspace` status and `/workspace <path>` switching with
+  quoted-space and `~` support, existing-directory validation, and recent-list
+  persistence. Command parsing returns a switch target to the outer prompt
+  loop; both command and startup selections use the same workspace-runtime
+  reconstruction seam, which reloads settings/display/menu/discovery state and
+  clears the active session on a real root change. `/cwd` remains compatible.
+  Focused workspace/CLI/startup/main verification passed 108 tests. Broader
+  console verification passed 310 tests with one unrelated TTY path-fragment
+  assertion failure in `test_terminal.py`. The full suite passed 918 tests with
+  that same unrelated failure plus the four pre-existing prompt-policy
+  assertion failures in `test_coding_agent.py` and `test_core_agent.py` already
+  documented below. Production compilation, affected imports, and
+  `git diff --check` passed. No live model inference ran.
+
 - 2026-09-07: Made the startup Workspace row interactive using the existing
   fixed startup panel and single-Application handoff lifecycle. The submenu
   shows a scrolling five-row view over up to ten recent absolute paths plus

@@ -10,14 +10,18 @@ from code_squid.console.cli.session_runner import (
     _run_follow_up_task,
     _run_new_session_task,
 )
-from code_squid.console.cli.control_commands import handle_control_command
+from code_squid.console.cli.control_commands import (
+    handle_control_command,
+    handle_workspace_command,
+    request_workspace_switch,
+)
 from code_squid.console.cli.mod_commands import _handle_mod_input, _is_mod_input
 from code_squid.console.cli.runtime_commands import handle_runtime_command
 from code_squid.console.cli.skill_commands import (
     _handle_skill_input,
     _is_skill_input,
 )
-from code_squid.settings import load_settings
+from code_squid.settings import Settings, load_settings
 from code_squid.console.ui.prompt_input import prompt_multiline_input
 from code_squid.console.ui.approval import (
     INPUT_PROMPT_PREFIX,
@@ -29,8 +33,7 @@ from code_squid.console.ui.startup_application import (
     STARTUP_SESSION_SELECTED,
     STARTUP_WORKSPACE_SELECTED,
 )
-from code_squid.console.startup_menu import CHOOSE_FOLDER_LABEL, StartupMenu
-from code_squid.app_paths import remember_workspace
+from code_squid.console.startup_menu import StartupMenu
 
 
 PROMPT_PREFIX = INPUT_PROMPT_PREFIX
@@ -79,7 +82,9 @@ Sessions and workspace:
   /show [current|latest|<session_id>] shows a saved session.
   /resume latest or /resume <session_id> switches the active session.
   /undo restores the existing latest-run undo buffer.
-  /cwd shows the immutable workspace root.
+  /workspace                 Show the current workspace.
+  /workspace <path>          Switch workspace.
+  /cwd                       Show the current workspace root.
 """
 
 
@@ -186,30 +191,41 @@ def _prompt_task_or_cancel(
 
 
 def _selected_workspace(menu: StartupMenu) -> Path | None:
-    """Resolve and validate a menu handoff using ordinary prompt input."""
+    """Return the recent workspace selected by the startup menu."""
     selection = menu.take_workspace_handoff()
-    if selection == CHOOSE_FOLDER_LABEL:
-        try:
-            entered = _prompt_task("Workspace folder")
-        except KeyboardInterrupt:
-            print(CANCELLED_BEFORE_RUN_MESSAGE)
-            return None
-        assert isinstance(entered, str)
-        selection = entered.strip()
+    return request_workspace_switch(selection) if selection is not None else None
 
-    if not selection:
-        print("Workspace unchanged: enter an existing directory path.")
-        return None
-    try:
-        candidate = Path(selection).expanduser().resolve()
-    except (OSError, RuntimeError, ValueError):
-        print("Workspace unchanged: enter a valid directory path.")
-        return None
-    if not candidate.exists() or not candidate.is_dir():
-        print(f"Workspace unchanged: not an existing directory: {candidate}")
-        return None
-    remember_workspace(candidate)
-    return candidate
+
+def _rebuild_workspace_runtime(
+    selected_root: Path,
+    current_root: Path,
+    display: TerminalDisplay,
+    *,
+    mod_name: str | None,
+    skill_name: str | None,
+    active_session_id: str | None,
+) -> tuple[Path, Settings, TerminalDisplay, StartupMenu, str | None]:
+    """Reconstruct every workspace-owned CLI object around ``selected_root``."""
+
+    workspace_changed = selected_root != current_root
+    display.stop_header()
+    settings = load_settings(selected_root)
+    if workspace_changed:
+        # Session IDs, titles, discovery, runners, and undo paths belong to one
+        # root and must never leak across this reconstruction boundary.
+        active_session_id = None
+    replacement = _run_display(selected_root, settings, skill_name)
+    menu = StartupMenu(
+        selected_root,
+        settings,
+        mod_name=mod_name,
+        skill_name=skill_name,
+        session_id=active_session_id,
+    )
+    if hasattr(replacement, "set_startup_menu"):
+        replacement.set_startup_menu(menu)
+    replacement.start()
+    return selected_root, settings, replacement, menu, active_session_id
 
 
 def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
@@ -305,26 +321,20 @@ def _run_interactive(
             task = _prompt_task_or_cancel("Task", display, menu)
             if task is STARTUP_WORKSPACE_SELECTED:
                 selected_root = _selected_workspace(menu) or repo_root
-                workspace_changed = selected_root != repo_root
-                display.stop_header()
-
-                repo_root = selected_root
-                settings = load_settings(repo_root)
-                if workspace_changed:
-                    # Session IDs, titles, discovery, runners, and undo paths
-                    # are all workspace-owned and must cross this boundary empty.
-                    active_session_id = None
-                display = _run_display(repo_root, settings, skill_name)
-                menu = StartupMenu(
+                (
                     repo_root,
                     settings,
+                    display,
+                    menu,
+                    active_session_id,
+                ) = _rebuild_workspace_runtime(
+                    selected_root,
+                    repo_root,
+                    display,
                     mod_name=mod_name,
                     skill_name=skill_name,
-                    session_id=active_session_id,
+                    active_session_id=active_session_id,
                 )
-                if hasattr(display, "set_startup_menu"):
-                    display.set_startup_menu(menu)
-                display.start()
                 continue
             settings = menu.settings
             mod_name = menu.mod_name
@@ -360,6 +370,24 @@ def _run_interactive(
             handled, settings = handle_runtime_command(repo_root, task, settings)
             if handled:
                 menu.sync(settings, mod_name=mod_name, skill_name=skill_name)
+                continue
+            handled, selected_root = handle_workspace_command(repo_root, task)
+            if handled:
+                if selected_root is not None:
+                    (
+                        repo_root,
+                        settings,
+                        display,
+                        menu,
+                        active_session_id,
+                    ) = _rebuild_workspace_runtime(
+                        selected_root,
+                        repo_root,
+                        display,
+                        mod_name=mod_name,
+                        skill_name=skill_name,
+                        active_session_id=active_session_id,
+                    )
                 continue
             handled, active_session_id = handle_control_command(
                 repo_root,

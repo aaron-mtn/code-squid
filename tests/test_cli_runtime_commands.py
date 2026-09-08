@@ -5,16 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from code_squid.app_paths import workspace_sessions_dir
+from code_squid.app_paths import recent_workspaces_path, workspace_sessions_dir
 from code_squid.console.cli.control_commands import (
     RECENT_SESSION_LIMIT,
     discover_recent_sessions,
     handle_control_command,
+    handle_workspace_command,
 )
 from code_squid.console.cli.prompt_loop import (
     _resume_session,
     _run_interactive,
-    _selected_workspace,
 )
 from code_squid.console.cli.runtime_commands import handle_runtime_command
 from code_squid.console.startup_menu import MAIN_ROWS, StartupMenu
@@ -77,27 +77,50 @@ class QuietDisplay:
         self.loaded_session_scene_states.append(self.session_scene_active)
 
 
-def test_choose_folder_accepts_valid_path_and_rejects_invalid_path(
+def test_workspace_command_shows_current_root_and_accepts_quoted_path(
     monkeypatch,
     tmp_path,
     capsys,
 ) -> None:
     home = tmp_path / "home"
-    selected = tmp_path / "selected"
+    selected = tmp_path / "selected workspace"
     selected.mkdir()
-    menu = StartupMenu(tmp_path, load_settings(tmp_path))
-    menu._workspace_handoff = "Choose folder..."
-    prompts = iter([str(selected), str(tmp_path / "missing")])
     monkeypatch.setenv("CODE_SQUID_HOME", str(home))
-    monkeypatch.setattr(
-        "code_squid.console.cli.prompt_loop._prompt_task",
-        lambda _label: next(prompts),
+
+    shown, no_target = handle_workspace_command(tmp_path, "/workspace")
+    switched, target = handle_workspace_command(
+        tmp_path, f'/workspace "{selected}"'
     )
 
-    assert _selected_workspace(menu) == selected.resolve()
-    menu._workspace_handoff = "Choose folder..."
-    assert _selected_workspace(menu) is None
-    assert "Workspace unchanged" in capsys.readouterr().out
+    assert (shown, no_target) == (True, None)
+    assert (switched, target) == (True, selected.resolve())
+    assert f"Workspace: {tmp_path}" in capsys.readouterr().out
+    persisted = json.loads(recent_workspaces_path().read_text(encoding="utf-8"))
+    assert persisted[0] == str(selected.resolve())
+
+
+def test_workspace_command_expands_home_and_rejects_missing_or_file_paths(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    home = tmp_path / "user-home"
+    workspace = home / "project"
+    workspace.mkdir(parents=True)
+    file_path = tmp_path / "file.txt"
+    file_path.write_text("not a directory", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("CODE_SQUID_HOME", str(tmp_path / "app-home"))
+
+    _, expanded = handle_workspace_command(tmp_path, "/workspace ~/project")
+    _, missing = handle_workspace_command(tmp_path, "/workspace ~/missing")
+    _, file_target = handle_workspace_command(tmp_path, f"/workspace {file_path}")
+
+    assert expanded == workspace.resolve()
+    assert missing is None
+    assert file_target is None
+    assert capsys.readouterr().out.count("Workspace unchanged:") == 2
 
 
 def test_provider_status_lists_effective_and_supported_values(tmp_path, capsys) -> None:
@@ -533,7 +556,7 @@ def test_workspace_handoff_rebuilds_root_settings_and_clears_session(
             menu.selected_index = MAIN_ROWS.index("Workspace")
             menu.activate()
             menu._workspace_paths = (new_root.resolve(),)
-            menu._options = (str(new_root.resolve()), "Choose folder...")
+            menu._options = (str(new_root.resolve()),)
             menu.selected_index = 0
             menu.activate()
         return result
@@ -551,3 +574,78 @@ def test_workspace_handoff_rebuilds_root_settings_and_clears_session(
     assert menus[1].repo_root == new_root.resolve()
     assert menus[1].session_id is None
     assert menus[1].session_title is None
+
+
+def test_workspace_command_rebuilds_state_and_routes_subsequent_runs_to_new_root(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    old_root = tmp_path / "old"
+    new_root = tmp_path / "new root"
+    old_root.mkdir()
+    new_root.mkdir()
+    _write_settings(new_root, {"model": {"name": "new-workspace-model"}})
+    saved = _saved_session(new_root, "new-root session")
+    displays = []
+    menus = []
+    runs = []
+    rebuilt_session_ids = []
+
+    def build_display(repo_root, settings, skill_name=None):
+        display = QuietDisplay()
+        display.repo_root = repo_root
+        display.settings = settings
+        display.set_startup_menu = menus.append
+        displays.append(display)
+        return display
+
+    def run_new(repo_root, task, settings, display, skill_name=None, mod_name=None):
+        runs.append(("new", repo_root, task, settings.model.name))
+        return 0, "new-session"
+
+    def run_follow_up(
+        repo_root,
+        session_id,
+        task,
+        settings,
+        display,
+        skill_name=None,
+        mod_name=None,
+    ):
+        runs.append(("follow-up", repo_root, task, settings.model.name))
+        return 0, session_id
+
+    responses = iter([f'/workspace "{new_root}"', "first", "second", "/exit"])
+
+    def prompt(_label, animator=None):
+        response = next(responses)
+        if response == "first":
+            # The replacement menu's discovery callback must be rooted in the
+            # reconstructed workspace before any subsequent task is run.
+            assert menus[-1].repo_root == new_root.resolve()
+            rebuilt_session_ids.append(menus[-1].session_id)
+            assert menus[-1].session_discovery(menus[-1].repo_root)[0][
+                "session_id"
+            ] == saved.session_id
+        return response
+
+    monkeypatch.setenv("CODE_SQUID_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._run_display", build_display
+    )
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", prompt)
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._run_new_session_task", run_new
+    )
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._run_follow_up_task", run_follow_up
+    )
+
+    assert _run_interactive(old_root, active_session_id="old-session") == 0
+    assert [display.repo_root for display in displays] == [old_root, new_root.resolve()]
+    assert displays[1].settings.model.name == "new-workspace-model"
+    assert rebuilt_session_ids == [None]
+    assert runs == [
+        ("new", new_root.resolve(), "first", "new-workspace-model"),
+        ("follow-up", new_root.resolve(), "second", "new-workspace-model"),
+    ]
