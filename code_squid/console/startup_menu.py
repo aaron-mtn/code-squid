@@ -39,6 +39,7 @@ from squid_core.providers import build_provider
 
 MAIN_ROWS = ("Provider", "Model", "Safety", "Mod", "Session", "Workspace")
 MODEL_FALLBACK = ("No model list available", "Use /model <name>")
+SUBMENU_FOOTER = "↑↓ select   Enter   Esc back"
 SESSION_VISIBLE_SAVED_LIMIT = 5
 WORKSPACE_VISIBLE_LIMIT = 5
 
@@ -361,7 +362,7 @@ class StartupMenu:
 
         title = self.mode.title()
         if self.mode == "model" and self._model_message:
-            content = [title, "", *self._model_message, "", "Esc  back"]
+            content = [title, "", *self._model_message, "", SUBMENU_FOOTER]
             return _framed_rows(content, layout)
 
         if self.mode == "session":
@@ -392,7 +393,7 @@ class StartupMenu:
             "",
             *option_rows,
             "",
-            "Esc  back".center(inner_width),
+            SUBMENU_FOOTER.center(inner_width),
         ]
         return _framed_rows(content, layout)
 
@@ -421,7 +422,7 @@ class StartupMenu:
             "",
             *rows,
             "",
-            "↑↓ select   Enter   Esc".center(inner_width),
+            SUBMENU_FOOTER.center(inner_width),
         ]
         return _framed_rows(content, layout)
 
@@ -458,11 +459,11 @@ class StartupMenu:
             for title, age, option_index in rows
         ]
         content = [
-            "Session".center(inner_width),
+            "Sessions for this workspace".center(inner_width),
             "",
             *option_rows,
             "",
-            "↑↓ select   Enter   Esc".center(inner_width),
+            SUBMENU_FOOTER.center(inner_width),
         ]
         return _framed_rows(content, layout)
 

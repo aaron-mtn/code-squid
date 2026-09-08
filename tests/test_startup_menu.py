@@ -164,8 +164,14 @@ def test_each_main_row_replaces_panel_and_escape_restores_main(tmp_path) -> None
         menu.focus_from_composer()
         menu.selected_index = index
         menu.activate()
-        rendered = "\n".join(menu.panel_lines(layout))
-        assert title in rendered
+        lines = menu.panel_lines(layout)
+        rendered = "\n".join(lines)
+        displayed_text = [line[1:-1].strip() for line in lines]
+        expected_title = (
+            "Sessions for this workspace" if title == "Session" else title
+        )
+        assert expected_title in displayed_text
+        assert displayed_text.count("↑↓ select   Enter   Esc back") == 1
         if title == "Model":
             assert all(message in rendered for message in MODEL_FALLBACK)
         if title == "Workspace":
@@ -314,10 +320,12 @@ def test_workspace_view_keeps_centered_footer_for_long_paths(tmp_path) -> None:
 
     inner = [line[1:-1] for line in menu.panel_lines(startup_scene_layout(80))]
     footer = next(
-        line for line in inner if line.strip() == "↑↓ select   Enter   Esc"
+        line
+        for line in inner
+        if line.strip() == "↑↓ select   Enter   Esc back"
     )
 
-    assert footer == "↑↓ select   Enter   Esc".center(len(footer))
+    assert footer == "↑↓ select   Enter   Esc back".center(len(footer))
 
 
 def test_workspace_viewport_scrolls_and_escape_does_not_select(tmp_path) -> None:
@@ -375,10 +383,14 @@ def test_submenu_centers_title_options_as_one_column_and_footer(tmp_path) -> Non
     title = next(line for line in inner if line.strip() == "Provider")
     selected = next(line for line in inner if "> a" in line)
     unselected = next(line for line in inner if "long-option" in line)
-    footer = next(line for line in inner if line.strip() == "Esc  back")
+    footer = next(
+        line
+        for line in inner
+        if line.strip() == "↑↓ select   Enter   Esc back"
+    )
 
     assert title == "Provider".center(len(title))
-    assert footer == "Esc  back".center(len(footer))
+    assert footer == "↑↓ select   Enter   Esc back".center(len(footer))
     assert selected.index("a") == unselected.index("long-option")
     assert selected.index(">") == unselected.index("long-option") - 2
 
@@ -420,9 +432,16 @@ def test_session_row_opens_with_new_first_and_recent_sessions_newest_first(
     menu.selected_index = MAIN_ROWS.index("Session")
     menu.activate()
 
-    rendered = "\n".join(menu.panel_lines(layout))
+    lines = menu.panel_lines(layout)
+    rendered = "\n".join(lines)
+    inner = [line[1:-1] for line in lines]
+    title = next(
+        line for line in inner if line.strip() == "Sessions for this workspace"
+    )
     assert menu.mode == "session"
     assert menu._options == ("", "session-0", "session-1", "session-2")
+    assert title == "Sessions for this workspace".center(len(title))
+    assert not any(line.strip() == "Session" for line in inner)
     assert rendered.index("New session") < rendered.index("Task 0")
     assert rendered.index("Task 0") < rendered.index("Task 1")
 
