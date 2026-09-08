@@ -152,7 +152,12 @@ and application layer; `squid_core/` is the reusable agent runtime.
     and arrows retain normal multiline behavior whenever the composer contains
     text. Every focus, movement, activation, and back action invalidates the
     owning Application, so the shared scene repaints immediately without a
-    second renderer or animation lifecycle. Every selectable submenu uses one
+    second renderer or animation lifecycle. Startup-menu selection paths never
+    write directly to stdout while that Application owns the terminal. The
+    provider picker applies the shared provider-selection result and silently
+    discards its optional informational explanation because the startup panel
+    has no message surface; `/provider use` retains its ordinary print-based
+    explanation after startup ownership ends. Every selectable submenu uses one
     fixed layout within that panel: its centered heading stays on the first
     inner row, options begin at the same upper-left anchor on the third panel
     row, and the centered `↑↓   Enter select   Esc back` footer stays on
@@ -812,9 +817,15 @@ Inside the interactive CLI:
 - `/skill <name>` sets the active skill for future tasks and follow-ups in the
   current CLI process.
 - `/skill none` clears the active skill.
-- `/provider` shows the effective provider and supported names;
-  `/provider <name>` saves a supported provider.
-- `/model` shows the effective model; `/model <name>` saves a model name.
+- `/provider` shows the friendly effective provider, readiness, and provider
+  list. `/provider use <name>` selects a connected provider through the same
+  operation as the startup menu. `/provider key <value>` and `/provider url
+  <value>` update the current connection, while `/provider status` reports the
+  effective transport, URL, key presence, readiness, model, and active env
+  overrides without printing a secret.
+- `/model` shows the exact effective model and a winning environment override;
+  `/model <name>` persists the supplied ID unchanged through the same operation
+  as the startup model menu.
 - `/safety` shows the friendly safety mode; `/safety strict`,
   `/safety balanced`, and `/safety yolo` persist the corresponding internal
   approval mode.
@@ -911,13 +922,12 @@ Code Squid reads settings from:
 .code-squid/settings.json
 ```
 
-Missing settings are allowed. Defaults keep the CLI usable with a local
-OpenAI-compatible server, especially LM Studio:
+Missing settings are allowed. Defaults keep the CLI usable with LM Studio:
 
 - model base URL: `http://127.0.0.1:1234/v1`
 - API key: `lm-studio`
 - model name: `qwen3.5-9b`
-- provider: `openai_compatible`
+- provider: `lm_studio`
 - temperature: `null`
 - display debug: `false`
 - approval mode: `never`
@@ -942,7 +952,13 @@ Supported settings sections and fields:
 - `compaction.trigger_input_tokens`
 - `compaction.keep_recent_turns`
 
-Supported provider values are `openai_compatible`, `openrouter`, and `ollama`.
+Supported provider values are `squid_models`, `lm_studio`, `ollama`,
+`openrouter`, and `openai_compatible`. Their shared Code Squid application
+profiles live in `code_squid/provider_setup.py`; that module owns friendly
+identity, product defaults, readiness/discovery orchestration, and the shared
+provider/model mutation operations. CLI presentation remains under
+`code_squid/console/`, and provider HTTP details remain in
+`squid_core/providers/`.
 Supported approval modes are `never`, `guarded`, and `always`.
 `runtime.max_tool_steps` is either `null` or a positive integer.
 `runtime.stream_assistant_text` is a boolean. When enabled with a streaming
@@ -966,7 +982,10 @@ inputs—not the normal user configuration UX. Current overrides are:
 - `CODE_SQUID_STREAM_ASSISTANT_TEXT`
 
 `CODE_SQUID_API_KEY` wins over `model.api_key_env`, which wins over
-`model.api_key`. `CODE_SQUID_STREAM_ASSISTANT_TEXT=1` enables assistant text
+`model.api_key`. OpenRouter defaults `model.api_key_env` to
+`OPENROUTER_API_KEY`. A provider env override uses that provider's profile and
+does not inherit a saved different provider's flat URL or credential.
+`CODE_SQUID_STREAM_ASSISTANT_TEXT=1` enables assistant text
 streaming and `0` disables it. There are no compaction environment overrides in
 the current code. Interactive provider and model writes never mutate those
 environment variables: the saved value is reported separately when
@@ -1031,9 +1050,30 @@ names map to settings values this way:
 
 ## Provider Model
 
-The default settings target LM Studio through the generic OpenAI-compatible
-path. `openai_compatible` uses `squid_core/providers/openai_compatible.py` and
-sends chat-completions requests through the OpenAI Python client.
+LM Studio, Squid Models, OpenRouter, and generic OpenAI Compatible all retain
+the existing `OpenAICompatibleProvider` chat-completions inference transport.
+Their identities remain distinct so setup probes can use the correct contract:
+
+- Squid Models defaults to `http://127.0.0.1:8080/v1` and key placeholder
+  `local`; readiness is a successful `GET http://127.0.0.1:8080/health`, and
+  discovery uses `GET /v1/models`.
+- LM Studio defaults to `http://127.0.0.1:1234/v1` and key placeholder
+  `lm-studio`; native `GET /api/v1/models` supplies discovery, and readiness
+  requires at least one LLM with a loaded instance. Inference remains
+  `/v1/chat/completions`.
+- Ollama defaults to `http://127.0.0.1:11434`; both lightweight readiness and
+  discovery use native `GET /api/tags`, while inference remains `/api/chat`.
+- OpenRouter defaults to `https://openrouter.ai/api/v1` and
+  `OPENROUTER_API_KEY`; authenticated `GET /models` supplies readiness and
+  discovery.
+- OpenAI Compatible defaults to `http://127.0.0.1:8000/v1` with key placeholder
+  `local`; generic authenticated `GET /models` supplies readiness and discovery.
+
+The selected model ID is never replaced by a provider profile. Startup model
+selection and `/model <name>` persist it verbatim; Core's spawner passes that
+same `ProviderSettings.model_name` into `ModelAdapter` and then provider
+inference. Provider switching preserves the configured ID and reports when the
+new connected provider does not expose it.
 
 OpenRouter is supported through the OpenAI-compatible provider path by setting
 `model.provider` or `CODE_SQUID_PROVIDER` to `openrouter`. It still uses
@@ -1501,9 +1541,12 @@ narration is encouraged by prompts.
 - No JSONL/file event sink is included.
 - `allowed-tools: none` is not a supported special case.
 - Run-context events are debug metadata, not model memory.
-- There are no live provider integration tests in the focused unit suite.
-- LM Studio uses the OpenAI-compatible `/v1` path; Code Squid does not implement
-  native `/api/v1/*` model load, unload, or download operations.
+- Provider setup tests use mocked HTTP boundaries; they do not require live
+  local or cloud inference.
+- LM Studio uses native `/api/v1/models` only for discovery/readiness. Code
+  Squid does not implement native model load, unload, or download operations.
+- Squid Models is treated only as an already-running service. Code Squid does
+  not own its process, executable discovery, GPU policy, startup, or shutdown.
 
 ## Practical Principles
 

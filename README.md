@@ -47,7 +47,8 @@ is sent. Code Squid rejects those replies and retries with a correction message.
 - Latest-only undo for `write_file`
 - Safety levels: `strict`, `balanced`, or `yolo`
 - Settings file with environment variable overrides
-- Provider support: `openai_compatible`, `openrouter`, and `ollama`
+- Provider setup for Squid Models, LM Studio, Ollama, OpenRouter, and generic
+  OpenAI-compatible servers
 - Transcript compaction
 - Output truncation and ranged reads
 - Final summary contract
@@ -108,7 +109,7 @@ like this:
 ```json
 {
   "model": {
-    "provider": "openai_compatible",
+    "provider": "lm_studio",
     "base_url": "http://127.0.0.1:1234/v1",
     "api_key": "lm-studio",
     "name": "qwen3.5-9b",
@@ -146,7 +147,7 @@ end of a run.
 
 ## Providers
 
-### LM Studio / Generic OpenAI-Compatible
+### LM Studio
 
 Use this for LM Studio or another local OpenAI-compatible chat completions
 server:
@@ -154,7 +155,7 @@ server:
 ```json
 {
   "model": {
-    "provider": "openai_compatible",
+    "provider": "lm_studio",
     "base_url": "http://127.0.0.1:1234/v1",
     "api_key": "lm-studio",
     "name": "qwen3.5-9b"

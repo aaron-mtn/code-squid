@@ -73,8 +73,12 @@ Specialization:
   /skill none clears the active standalone Skill.
 
 Runtime:
-  /provider shows or changes the effective provider.
-  /model shows or changes the effective model.
+  /provider shows the current provider and available providers.
+  /provider use <name> selects a ready provider.
+  /provider key <value> saves the current provider's API key.
+  /provider url <value> saves the current provider's base URL.
+  /provider status shows effective setup without exposing secrets.
+  /model shows the effective model; /model <name> selects its exact ID.
   /safety shows or changes the safety mode (strict, balanced, yolo).
 
 Sessions and workspace:

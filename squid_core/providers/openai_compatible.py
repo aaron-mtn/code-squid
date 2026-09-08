@@ -2,8 +2,11 @@
 
 """OpenAI-compatible chat-completions provider transport."""
 
+import json
 import time
 from types import SimpleNamespace
+from urllib import request
+from urllib.error import HTTPError, URLError
 
 from openai import OpenAI
 
@@ -21,6 +24,9 @@ class OpenAICompatibleProvider(BaseProvider):
         provider_name: str = "openai_compatible",
     ) -> None:
         self.base_url = base_url
+        # Keep the credential private to transport/setup requests. It must
+        # never appear in status output or diagnostic representations.
+        self._api_key = api_key
         self.temperature = temperature
         self.provider_name = provider_name
         self.client = OpenAI(
@@ -30,6 +36,61 @@ class OpenAICompatibleProvider(BaseProvider):
 
     def supports_streaming(self) -> bool:
         return True
+
+    def is_ready(self) -> bool:
+        """Probe the backend using the most useful provider-native contract."""
+        try:
+            if self.provider_name == "squid_models":
+                return self._get_json(self._service_root() + "/health") is not None
+            if self.provider_name == "lm_studio":
+                models = self._lm_studio_models()
+                # A running LM Studio server without a loaded LLM cannot serve
+                # the existing chat-completions inference path.
+                return any(model.get("loaded_instances") for model in models)
+            self.list_models()
+            return True
+        except (OSError, RuntimeError, ValueError, HTTPError, URLError):
+            return False
+
+    def list_models(self) -> list[str]:
+        """Discover exact model IDs without changing the inference transport."""
+        if self.provider_name == "lm_studio":
+            models = self._lm_studio_models()
+            return _unique_ids(
+                model.get("key")
+                for model in models
+                if model.get("type") == "llm"
+            )
+
+        payload = self._get_json(self.base_url.rstrip("/") + "/models")
+        models = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(models, list):
+            raise RuntimeError("Model discovery response did not include a model list")
+        return _unique_ids(
+            model.get("id") for model in models if isinstance(model, dict)
+        )
+
+    def _lm_studio_models(self) -> list[dict]:
+        payload = self._get_json(
+            self._service_root() + "/api/v1/models",
+            authenticated=False,
+        )
+        models = payload.get("models") if isinstance(payload, dict) else None
+        if not isinstance(models, list):
+            raise RuntimeError("LM Studio response did not include a model list")
+        return [model for model in models if isinstance(model, dict)]
+
+    def _service_root(self) -> str:
+        root = self.base_url.rstrip("/")
+        return root[:-3].rstrip("/") if root.endswith("/v1") else root
+
+    def _get_json(self, url: str, *, authenticated: bool = True) -> object:
+        headers = {"Accept": "application/json"}
+        if authenticated and self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        http_request = request.Request(url, headers=headers, method="GET")
+        with request.urlopen(http_request, timeout=0.5) as response:
+            return json.loads(response.read().decode("utf-8"))
 
     def create_response(
         self,
@@ -90,7 +151,11 @@ class OpenAICompatibleProvider(BaseProvider):
                 "type": "request_start",
                 "timestamp_unix": time.time(),
                 "monotonic": request_started_at,
-                "provider": "openai_compatible",
+                "provider": getattr(
+                    self,
+                    "provider_name",
+                    "openai_compatible",
+                ),
                 "model": model,
                 "base_url": getattr(self, "base_url", None),
                 "payload": payload,
@@ -341,4 +406,18 @@ class OpenAICompatibleProvider(BaseProvider):
             choices=[SimpleNamespace(message=message, finish_reason=finish_reason)],
             usage=usage,
         )
+
+
+def _unique_ids(values) -> list[str]:
+    """Deduplicate non-empty provider IDs while preserving provider order."""
+    seen: set[str] = set()
+    model_ids: list[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        value = value.strip()
+        if value and value not in seen:
+            seen.add(value)
+            model_ids.append(value)
+    return model_ids
 

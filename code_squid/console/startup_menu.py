@@ -11,8 +11,15 @@ from code_squid.app_paths import code_squid_home, load_recent_workspaces
 from code_squid.console.cli.runtime_commands import (
     SAFETY_MODES,
     apply_model,
-    apply_provider,
     apply_safety,
+)
+from code_squid.provider_setup import (
+    PROVIDER_PROFILES,
+    discover_models,
+    friendly_provider_name,
+    provider_ready,
+    select_provider,
+    settings_for_provider,
 )
 from code_squid.console.cli.control_commands import (
     discover_recent_sessions,
@@ -32,9 +39,8 @@ from code_squid.console.ui.banner import (
     concise_workspace_name,
 )
 from code_squid.console.ui.header_layout import StartupSceneLayout
-from code_squid.settings import Settings, VALID_PROVIDERS
+from code_squid.settings import Settings
 from squid_core.mods import discover_mods
-from squid_core.providers import build_provider
 
 
 MAIN_ROWS = ("Provider", "Model", "Safety", "Mod", "Session", "Workspace")
@@ -52,13 +58,8 @@ SUBMENU_FOOTER_BOTTOM_INSET = 1
 
 
 def discover_provider_models(settings: Settings) -> list[str] | None:
-    """Use an adapter's optional model-list capability without a parallel registry."""
-    provider = build_provider(settings.to_runtime_settings().provider)
-    list_models = getattr(provider, "list_models", None)
-    if list_models is None:
-        return None
-    models = list_models()
-    return sorted({str(model) for model in models if str(model)})
+    """Discover models through the shared application setup seam."""
+    return discover_models(settings)
 
 
 @dataclass
@@ -88,6 +89,7 @@ class StartupMenu:
         self._session_metadata: tuple[dict, ...] = ()
         self._workspace_paths: tuple[Path, ...] = ()
         self._workspace_handoff: Path | None = None
+        self._provider_statuses: dict[str, bool] = {}
         # Only an explicit saved-session choice arms the one-time CLI notice.
         # Initial ``--resume`` state and later follow-ups must remain silent.
         self._selected_session_notice: dict | None = None
@@ -99,7 +101,7 @@ class StartupMenu:
         """Return current effective values for the next animated frame."""
         return StartupInfo(
             directory=self.repo_root,
-            provider=self.settings.model.provider,
+            provider=friendly_provider_name(self.settings.model.provider),
             model=self.settings.model.name,
             approval_mode=FRIENDLY_APPROVAL_MODES[
                 self.settings.runtime.approval_mode
@@ -227,7 +229,11 @@ class StartupMenu:
         selected = self._options[self.selected_index]
         saved_session_activated = False
         if self.mode == "provider":
-            self.settings = apply_provider(self.repo_root, selected)
+            self.settings, _ = select_provider(self.repo_root, selected)
+            # The prompt-toolkit Application still owns stdout here. Provider
+            # explanations are informational, and this menu has no message
+            # surface, so leave them to the slash-command path instead of
+            # writing through the live renderer.
         elif self.mode == "model":
             self.settings = apply_model(self.repo_root, selected)
         elif self.mode == "safety":
@@ -275,7 +281,11 @@ class StartupMenu:
         self.selected_index = 0
         self._model_message = ()
         if self.mode == "provider":
-            self._options = tuple(sorted(VALID_PROVIDERS))
+            self._options = tuple(profile.provider_id for profile in PROVIDER_PROFILES)
+            self._provider_statuses = {}
+            for provider_id in self._options:
+                candidate = settings_for_provider(self.settings, provider_id)
+                self._provider_statuses[provider_id] = provider_ready(candidate)
             self._select_current(self.settings.model.provider)
         elif self.mode == "model":
             try:
@@ -385,7 +395,15 @@ class StartupMenu:
         option_rows = []
         for index, option in enumerate(visible):
             marker = "> " if start + index == self.selected_index else "  "
-            option_text = f"{marker}{option}"[:option_width].ljust(option_width)
+            label = option
+            if self.mode == "provider":
+                status = (
+                    "ready"
+                    if self._provider_statuses.get(option)
+                    else "not connected"
+                )
+                label = f"{friendly_provider_name(option):<18}{status}"
+            option_text = f"{marker}{label}"[:option_width].ljust(option_width)
             option_rows.append(option_text)
         return _submenu_rows(title, option_rows, layout)
 

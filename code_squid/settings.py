@@ -15,6 +15,7 @@ from squid_core.settings import (
     RuntimeSettings as CoreRuntimeSettings,
 )
 from squid_core.storage.atomic_json import atomic_write_json
+from code_squid.provider_setup import PROFILES_BY_ID, VALID_PROVIDERS
 
 
 # Defaults keep Code Squid usable with a local OpenAI-compatible server,
@@ -22,8 +23,7 @@ from squid_core.storage.atomic_json import atomic_write_json
 DEFAULT_BASE_URL = "http://127.0.0.1:1234/v1"
 DEFAULT_API_KEY = "lm-studio"
 DEFAULT_MODEL_NAME = "qwen3.5-9b"
-DEFAULT_PROVIDER = "openai_compatible"
-VALID_PROVIDERS = {"openai_compatible", "ollama", "openrouter"}
+DEFAULT_PROVIDER = "lm_studio"
 DEFAULT_DEBUG = False
 DEFAULT_TEMPERATURE = None
 
@@ -44,8 +44,8 @@ DEFAULT_COMPACTION_KEEP_RECENT_TURNS = 8
 
 @dataclass(frozen=True)
 class ModelSettings:
-    base_url: str = DEFAULT_BASE_URL
-    api_key: str = DEFAULT_API_KEY
+    base_url: str | None = DEFAULT_BASE_URL
+    api_key: str | None = DEFAULT_API_KEY
     api_key_env: str | None = None
     name: str = DEFAULT_MODEL_NAME
     provider: str = DEFAULT_PROVIDER
@@ -131,10 +131,16 @@ def _section(settings: dict[str, Any], name: str, settings_path: Path) -> dict[s
     return value
 
 
-def _resolve_api_key(model_settings: dict[str, Any], settings_path: Path) -> tuple[str, str | None]:
+def _resolve_api_key(
+    model_settings: dict[str, Any],
+    settings_path: Path,
+    *,
+    provider: str,
+) -> tuple[str | None, str | None]:
     # Resolve API keys without requiring secrets in .code-squid/settings.json.
     # CODE_SQUID_API_KEY wins over api_key_env, which wins over api_key.
-    api_key_env = model_settings.get("api_key_env")
+    profile = PROFILES_BY_ID[provider]
+    api_key_env = model_settings.get("api_key_env", profile.api_key_env)
     if api_key_env is not None and not isinstance(api_key_env, str):
         raise ValueError(
             f"Invalid settings JSON in {settings_path}: model.api_key_env must be a string or null"
@@ -146,13 +152,14 @@ def _resolve_api_key(model_settings: dict[str, Any], settings_path: Path) -> tup
 
     if api_key_env is not None:
         api_key = os.getenv(api_key_env)
-        if api_key is None:
+        if api_key is not None:
+            return api_key, api_key_env
+        if "api_key_env" in model_settings:
             raise ValueError(
                 f"Invalid settings JSON in {settings_path}: model.api_key_env names missing environment variable {api_key_env!r}"
             )
-        return api_key, api_key_env
 
-    return model_settings.get("api_key", DEFAULT_API_KEY), api_key_env
+    return model_settings.get("api_key", profile.api_key), api_key_env
 
 
 def _approval_mode(runtime_settings: dict[str, Any], settings_path: Path) -> str:
@@ -290,10 +297,22 @@ def load_settings(repo_root: Path) -> Settings:
     runtime_settings = _section(raw_settings, "runtime", settings_path)
     compaction_settings = _section(raw_settings, "compaction", settings_path)
 
-    base_url = os.getenv("CODE_SQUID_BASE_URL", model_settings.get("base_url", DEFAULT_BASE_URL))
-    api_key, api_key_env = _resolve_api_key(model_settings, settings_path)
-    model_name = os.getenv("CODE_SQUID_MODEL", model_settings.get("name", DEFAULT_MODEL_NAME))
     provider = _provider(model_settings, settings_path)
+    profile = PROFILES_BY_ID[provider]
+    saved_provider = model_settings.get("provider", DEFAULT_PROVIDER)
+    # A provider env override must not inherit the saved provider's flat URL or
+    # credential. Explicit CODE_SQUID connection overrides still win below.
+    connection_settings = model_settings if saved_provider == provider else {}
+    base_url = os.getenv(
+        "CODE_SQUID_BASE_URL",
+        connection_settings.get("base_url", profile.base_url),
+    )
+    api_key, api_key_env = _resolve_api_key(
+        connection_settings,
+        settings_path,
+        provider=provider,
+    )
+    model_name = os.getenv("CODE_SQUID_MODEL", model_settings.get("name", DEFAULT_MODEL_NAME))
     temperature = _temperature(model_settings, settings_path)
     debug = display_settings.get("debug", DEFAULT_DEBUG)
     approval_mode = _approval_mode(runtime_settings, settings_path)
@@ -346,7 +365,20 @@ def write_provider(repo_root: Path, provider: str) -> None:
         valid_providers = ", ".join(sorted(VALID_PROVIDERS))
         raise ValueError(f"provider must be one of {valid_providers}")
 
-    _write_model_value(repo_root, "provider", provider)
+    settings_path = repo_root / ".code-squid" / "settings.json"
+    raw_settings = _read_settings_file(settings_path)
+    model_settings = _section(raw_settings, "model", settings_path)
+    previous = model_settings.get("provider", DEFAULT_PROVIDER)
+    model_settings["provider"] = provider
+    if previous != provider:
+        # Flat connection values belong to the provider that created them.
+        # Removing them on a switch prevents LM Studio defaults or custom
+        # credentials from leaking into another backend.
+        for name in ("base_url", "api_key", "api_key_env"):
+            model_settings.pop(name, None)
+    raw_settings["model"] = model_settings
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(settings_path, raw_settings)
 
 
 def write_model_name(repo_root: Path, model_name: str) -> None:
@@ -358,7 +390,14 @@ def write_model_name(repo_root: Path, model_name: str) -> None:
     _write_model_value(repo_root, "name", model_name)
 
 
-def _write_model_value(repo_root: Path, name: str, value: str) -> None:
+def write_model_value(repo_root: Path, name: str, value: Any) -> None:
+    """Persist one supported connection value without exposing it."""
+    if name not in {"base_url", "api_key", "api_key_env"}:
+        raise ValueError(f"unsupported model setting: {name}")
+    _write_model_value(repo_root, name, value)
+
+
+def _write_model_value(repo_root: Path, name: str, value: Any) -> None:
     """Update one model field while preserving the user's complete settings file."""
 
     settings_path = repo_root / ".code-squid" / "settings.json"

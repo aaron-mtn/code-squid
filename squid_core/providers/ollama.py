@@ -28,6 +28,37 @@ class OllamaProvider(BaseProvider):
     def supports_streaming(self) -> bool:
         return True
 
+    def is_ready(self) -> bool:
+        """Use Ollama's lightweight model-list request as its readiness probe."""
+        try:
+            self.list_models()
+            return True
+        except (OSError, RuntimeError, ValueError, HTTPError, URLError):
+            return False
+
+    def list_models(self) -> list[str]:
+        """Return exact names from Ollama's native ``/api/tags`` API."""
+        http_request = request.Request(
+            f"{self.base_url}/api/tags",
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        with request.urlopen(http_request, timeout=0.5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        models = payload.get("models") if isinstance(payload, dict) else None
+        if not isinstance(models, list):
+            raise RuntimeError("Ollama response did not include a model list")
+        seen: set[str] = set()
+        model_ids: list[str] = []
+        for model in models:
+            if not isinstance(model, dict):
+                continue
+            model_id = model.get("name") or model.get("model")
+            if isinstance(model_id, str) and model_id and model_id not in seen:
+                seen.add(model_id)
+                model_ids.append(model_id)
+        return model_ids
+
     def create_response(
         self,
         model: str,

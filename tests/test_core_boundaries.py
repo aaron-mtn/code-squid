@@ -246,5 +246,6 @@ def test_code_squid_application_package_has_expected_layout() -> None:
         "console/ui/startup_application.py",
         "console/ui/streaming_narration.py",
         "console/ui/tool_display.py",
+        "provider_setup.py",
         "settings.py",
     ]

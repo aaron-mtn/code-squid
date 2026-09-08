@@ -549,7 +549,7 @@ def test_run_loop_returns_nonzero_for_failed_result(tmp_path) -> None:
 def _expected_startup_output(repo_root: Path) -> str:
     startup_info = StartupInfo(
         directory=repo_root,
-        provider="openai_compatible",
+        provider="LM Studio",
         model="qwen3.5-9b",
         approval_mode="yolo",
     )
@@ -1033,7 +1033,7 @@ def test_new_session_passes_trace_and_friendly_mode_to_terminal_display(
             "show_transcript": True,
             "startup_info": StartupInfo(
                 directory=tmp_path,
-                provider="openai_compatible",
+                    provider="LM Studio",
                 model="qwen3.5-9b",
                 approval_mode="balanced",
             ),
@@ -1380,7 +1380,7 @@ def test_new_session_passes_debug_without_trace_to_terminal_display(
             "show_transcript": False,
             "startup_info": StartupInfo(
                 directory=tmp_path,
-                provider="openai_compatible",
+                    provider="LM Studio",
                 model="qwen3.5-9b",
                 approval_mode="yolo",
             ),
@@ -1419,7 +1419,7 @@ def test_resume_session_passes_trace_to_terminal_display(
             "show_transcript": True,
             "startup_info": StartupInfo(
                 directory=tmp_path,
-                provider="openai_compatible",
+                    provider="LM Studio",
                 model="qwen3.5-9b",
                 approval_mode="yolo",
             ),

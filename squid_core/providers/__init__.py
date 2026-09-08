@@ -7,7 +7,7 @@ from squid_core.settings import ProviderSettings
 
 
 OPENAI_COMPATIBLE_PROVIDERS = frozenset(
-    {"openai_compatible", "openrouter", "squid_models"}
+    {"lm_studio", "openai_compatible", "openrouter", "squid_models"}
 )
 
 

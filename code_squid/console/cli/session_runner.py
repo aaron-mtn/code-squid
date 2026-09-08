@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 from code_squid.settings import Settings
+from code_squid.provider_setup import friendly_provider_name
 from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.model_adapter import ModelRequestError
 from code_squid.agent_setup import build_coding_task_run
@@ -43,7 +44,7 @@ def _run_display(
         show_transcript=trace,
         startup_info=StartupInfo(
             directory=repo_root,
-            provider=settings.model.provider,
+            provider=friendly_provider_name(settings.model.provider),
             model=settings.model.name,
             approval_mode=FRIENDLY_APPROVAL_MODES[settings.runtime.approval_mode],
             skill_name=skill_name,

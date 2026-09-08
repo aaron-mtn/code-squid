@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import threading
@@ -19,7 +20,7 @@ from code_squid.console.startup_menu import (
     _session_title,
     discover_provider_models,
 )
-from code_squid.console.ui.banner import startup_panel_lines
+from code_squid.console.ui.banner import PANEL_LABEL_WIDTH, startup_panel_lines
 from code_squid.console.ui.binary_header import BinaryRainHeader
 from code_squid.console.ui.header_layout import startup_scene_layout
 from code_squid.console.ui.prompt_input import (
@@ -205,8 +206,20 @@ def test_unfocused_main_panel_preserves_existing_composition(tmp_path) -> None:
 
 
 def test_provider_options_are_canonical_and_selection_updates_persisted_panel(
+    monkeypatch,
     tmp_path,
 ) -> None:
+    monkeypatch.setattr(
+        "code_squid.console.startup_menu.provider_ready",
+        lambda _settings: True,
+    )
+    monkeypatch.setattr(
+        "code_squid.provider_setup.build_provider",
+        lambda _settings: SimpleNamespace(
+            is_ready=lambda: True,
+            list_models=lambda: ["qwen3.5-9b"],
+        ),
+    )
     menu = StartupMenu(tmp_path, load_settings(tmp_path))
     menu.focus_from_composer()
     menu.selected_index = 0
@@ -219,7 +232,135 @@ def test_provider_options_are_canonical_and_selection_updates_persisted_panel(
     persisted = json.loads((tmp_path / ".code-squid" / "settings.json").read_text())
     assert persisted["model"]["provider"] == "ollama"
     assert menu.settings.model.provider == "ollama"
-    assert "ollama" in "\n".join(menu.panel_lines(startup_scene_layout(80)))
+    assert "Ollama" in "\n".join(menu.panel_lines(startup_scene_layout(80)))
+
+
+def test_provider_selection_without_explanation_returns_to_focused_main_menu(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    initial = load_settings(tmp_path)
+    selected = replace(
+        initial,
+        model=replace(initial.model, provider="ollama"),
+    )
+    monkeypatch.setattr(
+        "code_squid.console.startup_menu.provider_ready",
+        lambda _settings: True,
+    )
+    monkeypatch.setattr(
+        "code_squid.console.startup_menu.select_provider",
+        lambda _root, _provider: (selected, None),
+    )
+    menu = StartupMenu(tmp_path, initial)
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Provider")
+    menu.activate()
+    menu.selected_index = menu._options.index("ollama")
+
+    assert menu.activate() is False
+    assert menu.mode == "main"
+    assert menu.focused is True
+    assert menu.selected_index == MAIN_ROWS.index("Provider")
+    assert menu.settings.model.provider == "ollama"
+    assert menu.settings.model.name == initial.model.name
+
+    menu.move(1)
+    assert menu.selected_index == MAIN_ROWS.index("Model")
+
+
+def test_provider_menu_uses_friendly_names_and_only_two_status_labels(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(
+        "code_squid.console.startup_menu.provider_ready",
+        lambda settings: settings.model.provider in {"lm_studio", "ollama"},
+    )
+    menu = StartupMenu(tmp_path, load_settings(tmp_path))
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Provider")
+    menu.activate()
+    rendered = "\n".join(menu.panel_lines(startup_scene_layout(80)))
+    for label in (
+        "Squid Models",
+        "LM Studio",
+        "Ollama",
+        "OpenRouter",
+        "OpenAI Compatible",
+    ):
+        assert label in rendered
+    assert "ready" in rendered
+    assert "not connected" in rendered
+    assert "unavailable" not in rendered
+
+
+def test_startup_provider_explanation_is_suppressed_while_menu_keeps_focus(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    initial = load_settings(tmp_path)
+    selected = replace(
+        initial,
+        model=replace(initial.model, provider="ollama"),
+    )
+    monkeypatch.setattr(
+        "code_squid.console.startup_menu.provider_ready",
+        lambda _settings: False,
+    )
+    monkeypatch.setattr(
+        "code_squid.console.startup_menu.select_provider",
+        lambda _root, _provider: (
+            selected,
+            "Configured model is unavailable from Ollama.",
+        ),
+    )
+    menu = StartupMenu(tmp_path, load_settings(tmp_path))
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Provider")
+    menu.activate()
+    menu.selected_index = menu._options.index("ollama")
+
+    def unexpected_print(*_args, **_kwargs) -> None:
+        raise AssertionError("startup menu selection wrote through print()")
+
+    monkeypatch.setattr("builtins.print", unexpected_print)
+    menu.activate()
+    assert capsys.readouterr().out == ""
+    assert menu.settings.model.provider == "ollama"
+    assert menu.settings.model.name == initial.model.name
+    assert menu.mode == "main"
+    assert menu.focused is True
+
+    panel_lines = menu.panel_lines(startup_scene_layout(80))
+    assert len(panel_lines) == startup_scene_layout(80).panel.height
+    for row in MAIN_ROWS:
+        label = f"{row:<{PANEL_LABEL_WIDTH}}"
+        assert sum(label in line for line in panel_lines) == 1
+
+    menu.move(1)
+    assert menu.selected_index == MAIN_ROWS.index("Model")
+
+
+def test_model_viewport_shows_seven_real_ids_and_persists_exact_selection(tmp_path) -> None:
+    model_ids = [f"real-model-{index}" for index in range(10)]
+    menu = StartupMenu(
+        tmp_path,
+        load_settings(tmp_path),
+        model_discovery=lambda _settings: model_ids,
+    )
+    layout = startup_scene_layout(80)
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Model")
+    menu.activate()
+    initial = "\n".join(menu.panel_lines(layout))
+    assert initial.count("real-model-") == SUBMENU_VISIBLE_LIMIT
+    for _ in range(8):
+        menu.move(1)
+    assert "real-model-8" in "\n".join(menu.panel_lines(layout))
+    menu.activate()
+    assert menu.settings.model.name == "real-model-8"
 
 
 def test_model_discovery_uses_effective_provider_and_is_not_used_by_render(tmp_path) -> None:
@@ -237,13 +378,13 @@ def test_model_discovery_uses_effective_provider_and_is_not_used_by_render(tmp_p
     menu.focus_from_composer()
     menu.selected_index = 1
     menu.activate()
-    assert seen == ["openai_compatible"]
+    assert seen == ["lm_studio"]
     assert "model-a" in "\n".join(menu.panel_lines(layout))
 
     menu.selected_index = 0
     menu.activate()
     assert menu.settings.model.name == "model-a"
-    assert seen == ["openai_compatible"]
+    assert seen == ["lm_studio"]
 
 
 def test_provider_model_discovery_uses_optional_adapter_capability(
@@ -255,11 +396,14 @@ def test_provider_model_discovery_uses_optional_adapter_capability(
 
     def build(provider_settings):
         providers.append(provider_settings.provider)
-        return SimpleNamespace(list_models=lambda: ["z", "a", "a"])
+        return SimpleNamespace(
+            is_ready=lambda: True,
+            list_models=lambda: ["z", "a", "a"],
+        )
 
-    monkeypatch.setattr("code_squid.console.startup_menu.build_provider", build)
+    monkeypatch.setattr("code_squid.provider_setup.build_provider", build)
     assert discover_provider_models(settings) == ["a", "z"]
-    assert providers == ["openai_compatible"]
+    assert providers == ["lm_studio"]
 
 
 def test_safety_selection_uses_mapping_and_updates_panel(tmp_path) -> None:

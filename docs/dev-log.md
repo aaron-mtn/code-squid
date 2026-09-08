@@ -1,3 +1,37 @@
+- 2026-09-08: Fixed startup Provider selection corrupting the live
+  prompt-toolkit scene. The startup menu now applies the shared provider result
+  and suppresses its optional informational explanation because the menu has no
+  renderer-owned message surface; `/provider use` still prints that explanation
+  outside startup rendering. Audited every startup selection branch and found
+  no other direct stdout writes. Added regression coverage for both explanation
+  outcomes, retained focus/navigation, provider/model state, and the unchanged
+  slash-command output behavior. Focused verification: 57 passed. Full suite:
+  939 passed, with the same four prompt-policy assertion failures and one
+  Windows TTY path-fragment failure already documented by the preceding setup
+  pass. Compilation, affected imports, and `git diff --check` passed.
+
+- 2026-09-08: Implemented the Provider + Model setup pass. Added
+  `code_squid/provider_setup.py` as the non-UI application seam for five
+  friendly provider identities, connection defaults, readiness/discovery
+  orchestration, and shared provider/model mutations used by startup and slash
+  commands. Core retains inference transport ownership: LM Studio, Squid
+  Models, OpenRouter, and generic OpenAI Compatible use chat completions;
+  Ollama remains native. Setup probes use LM Studio `/api/v1/models`, Squid
+  Models `/health` plus `/v1/models`, Ollama `/api/tags`, and authenticated
+  OpenRouter/generic `/models`. Startup menus now show friendly names and only
+  `ready`/`not connected`, discover real IDs in a seven-row viewport, preserve
+  settings on failure, and persist exact model selections. Added the complete
+  generic `/provider` family, safe key handling, env-override diagnostics, and
+  two-ID Squid Models inference regression coverage. Focused verification: 230
+  passed. Full suite: 938 passed, 5 failed: the four pre-existing prompt-policy
+  assertion failures and one pre-existing Windows TTY path-fragment failure.
+  Compilation, import smoke checks, and `git diff --check` passed. Desktop was
+  audited, but migration is deferred: its settings import precedes the optional
+  Core bridge, and its managed local lifecycle still embeds fixed-model
+  translation, making a safe move span bootstrap, packaging, UI option shapes,
+  and lifecycle tests. The shared module is UI-neutral and is the intended
+  migration target.
+
 - 2026-09-07: Increased the shared startup submenu viewport to seven visible
   entries. Workspace now shows seven recent paths, and Session shows pinned
   `New session` plus six saved sessions before scrolling. Fixed heading,

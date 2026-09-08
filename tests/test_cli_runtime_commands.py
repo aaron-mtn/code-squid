@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -128,13 +129,24 @@ def test_provider_status_lists_effective_and_supported_values(tmp_path, capsys) 
 
     output = capsys.readouterr().out
     assert handled is True
-    assert settings.model.provider == "openai_compatible"
-    assert "Current provider: openai_compatible" in output
-    assert "ollama" in output
-    assert "openrouter" in output
+    assert settings.model.provider == "lm_studio"
+    assert "Provider: LM Studio" in output
+    assert "Ollama" in output
+    assert "OpenRouter" in output
 
 
-def test_provider_selection_persists_and_preserves_unrelated_settings(tmp_path, capsys) -> None:
+def test_provider_selection_persists_and_preserves_unrelated_settings(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "code_squid.provider_setup.build_provider",
+        lambda _settings: SimpleNamespace(
+            is_ready=lambda: True,
+            list_models=lambda: ["existing-model"],
+        ),
+    )
     settings_path = _write_settings(
         tmp_path,
         {"display": {"debug": True}, "model": {"name": "existing-model"}},
@@ -151,7 +163,7 @@ def test_provider_selection_persists_and_preserves_unrelated_settings(tmp_path, 
     assert settings.model.provider == "ollama"
     assert persisted["model"] == {"name": "existing-model", "provider": "ollama"}
     assert persisted["display"] == {"debug": True}
-    assert "Provider set to: ollama" in capsys.readouterr().out
+    assert "Provider set to: Ollama" in capsys.readouterr().out
 
 
 def test_invalid_provider_does_not_persist(tmp_path, capsys) -> None:
@@ -162,7 +174,7 @@ def test_invalid_provider_does_not_persist(tmp_path, capsys) -> None:
     )
 
     assert handled is True
-    assert settings.model.provider == "openai_compatible"
+    assert settings.model.provider == "lm_studio"
     assert not (tmp_path / ".code-squid" / "settings.json").exists()
     assert "Invalid provider" in capsys.readouterr().out
 
@@ -186,8 +198,66 @@ def test_provider_environment_override_is_reported_but_saved(
     )
     assert persisted["model"]["provider"] == "ollama"
     assert settings.model.provider == "openrouter"
-    assert "Saved provider: ollama" in output
-    assert "CODE_SQUID_PROVIDER overrides" in output
+    assert "Saved; CODE_SQUID_PROVIDER remains" in output
+
+
+def test_provider_use_accepts_friendly_name_and_uses_shared_selection(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    selected = []
+
+    def select(repo_root, provider):
+        selected.append((repo_root, provider))
+        return load_settings(tmp_path), "OpenRouter is not connected."
+
+    monkeypatch.setattr(
+        "code_squid.console.cli.runtime_commands.select_provider",
+        select,
+    )
+    handle_runtime_command(tmp_path, "/provider use OpenRouter", load_settings(tmp_path))
+    assert selected == [(tmp_path, "openrouter")]
+    assert "not connected" in capsys.readouterr().out
+
+
+def test_provider_key_is_persisted_but_never_echoed(tmp_path, capsys) -> None:
+    secret = "never-print-this-secret"
+    handle_runtime_command(
+        tmp_path,
+        f"/provider key {secret}",
+        load_settings(tmp_path),
+    )
+    output = capsys.readouterr().out
+    persisted = json.loads(
+        (tmp_path / ".code-squid" / "settings.json").read_text(encoding="utf-8")
+    )
+    assert persisted["model"]["api_key"] == secret
+    assert secret not in output
+    assert "API key saved" in output
+
+
+def test_provider_url_and_status_report_safe_effective_configuration(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "code_squid.console.cli.runtime_commands.provider_ready",
+        lambda _settings: True,
+    )
+    handle_runtime_command(
+        tmp_path,
+        "/provider url http://localhost:9000/v1/",
+        load_settings(tmp_path),
+    )
+    handle_runtime_command(tmp_path, "/provider status", load_settings(tmp_path))
+    output = capsys.readouterr().out
+    assert "http://localhost:9000/v1" in output
+    assert "Provider: LM Studio" in output
+    assert "API key set: yes" in output
+    assert "Readiness: ready" in output
+    assert "Environment overrides: none" in output
 
 
 def test_model_status_and_selection_persist_without_losing_settings(tmp_path, capsys) -> None:
@@ -262,6 +332,13 @@ def test_runtime_changes_are_used_by_subsequent_runs_without_restart(
     monkeypatch,
 ) -> None:
     run_settings = []
+    monkeypatch.setattr(
+        "code_squid.provider_setup.build_provider",
+        lambda _settings: SimpleNamespace(
+            is_ready=lambda: True,
+            list_models=lambda: ["qwen3.5-9b"],
+        ),
+    )
 
     def fake_new(repo_root, task, settings, display, skill_name=None, mod_name=None):
         run_settings.append(
