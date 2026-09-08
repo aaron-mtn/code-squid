@@ -1,3 +1,22 @@
+- 2026-09-07: Increased the shared startup submenu viewport to seven visible
+  entries. Workspace now shows seven recent paths, and Session shows pinned
+  `New session` plus six saved sessions before scrolling. Fixed heading,
+  option-start, and footer rows, keyboard behavior, panel dimensions, and
+  discovery limits are unchanged. Focused startup-menu/UI verification passed
+  71 tests; compilation and `git diff --check` also passed.
+
+- 2026-09-07: Unified the six selectable startup submenus around one fixed
+  panel layout. Provider, Model, Safety, Mod, Workspace, and `Sessions for this
+  workspace` now share a centered top heading, an upper-left option anchor, a
+  bounded non-recentering viewport, and a fixed centered
+  `↑↓   Enter select   Esc back` footer. Workspace disambiguation and
+  truncation, Session title/age fitting, existing scrolling behavior, keyboard
+  actions, panel dimensions, and startup lifecycle remain unchanged. The
+  startup-menu suite passed 29 tests. Broader startup/UI verification passed
+  238 tests with the previously documented unrelated Windows TTY path-fragment
+  assertion failure in `test_terminal.py`. Compilation, affected imports, and
+  `git diff --check` passed. No live model inference ran.
+
 - 2026-09-07: Simplified workspace selection by making the startup Workspace
   submenu recent-only and removing `Choose folder...` plus its boxed path
   prompt. Added `/workspace` status and `/workspace <path>` switching with

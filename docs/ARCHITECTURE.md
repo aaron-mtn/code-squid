@@ -152,9 +152,17 @@ and application layer; `squid_core/` is the reusable agent runtime.
     and arrows retain normal multiline behavior whenever the composer contains
     text. Every focus, movement, activation, and back action invalidates the
     owning Application, so the shared scene repaints immediately without a
-    second renderer or animation lifecycle. The Session row replaces that
-    same panel with pinned `New session` plus a viewport of five saved
-    sessions. The backing list is capped at 20; arrow movement scrolls it,
+    second renderer or animation lifecycle. Every selectable submenu uses one
+    fixed layout within that panel: its centered heading stays on the first
+    inner row, options begin at the same upper-left anchor on the third panel
+    row, and the centered `↑↓   Enter select   Esc back` footer stays on
+    the penultimate row. The bounded option area leaves unused rows above the
+    footer instead of vertically recentering short lists. Workspace and Session
+    retain specialized label, truncation, and age formatting within that shared
+    option column. The Session row replaces that same panel with pinned `New
+    session` plus six saved sessions in a shared seven-entry viewport under the
+    heading `Sessions for this workspace`. The backing list is capped at 20;
+    arrow movement scrolls it,
     Enter commits an ID through the same resolver as `/resume`, and Esc
     discards the submenu highlight. A saved-session activation returns a
     distinct result from that same startup Application and hides the unused
@@ -177,7 +185,7 @@ and application layer; `squid_core/` is the reusable agent runtime.
     selection semantics remain owned by the CLI command handlers.
 
     The Workspace row uses the same fixed panel and keyboard-only interaction:
-    a five-row scrolling viewport is backed only by at most ten recent paths.
+    a seven-row scrolling viewport is backed only by at most ten recent paths.
     The current root is always included and initially selected. Basenames are
     the primary labels, with a compact parent hint only when basenames collide.
     Enter publishes the selected recent path as a distinct workspace handoff;

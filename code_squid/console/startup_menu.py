@@ -39,9 +39,16 @@ from squid_core.providers import build_provider
 
 MAIN_ROWS = ("Provider", "Model", "Safety", "Mod", "Session", "Workspace")
 MODEL_FALLBACK = ("No model list available", "Use /model <name>")
-SUBMENU_FOOTER = "↑↓ select   Enter   Esc back"
-SESSION_VISIBLE_SAVED_LIMIT = 5
-WORKSPACE_VISIBLE_LIMIT = 5
+SUBMENU_FOOTER = "↑↓   Enter select   Esc back"
+SUBMENU_VISIBLE_LIMIT = 7
+
+# Submenus share panel-relative geometry. Keeping these positions independent
+# of content length prevents short option lists from pulling the whole view
+# toward the panel's vertical center.
+SUBMENU_HEADING_ROW = 1
+SUBMENU_OPTION_START_ROW = 3
+SUBMENU_OPTION_LEFT = 2
+SUBMENU_FOOTER_BOTTOM_INSET = 1
 
 
 def discover_provider_models(settings: Settings) -> list[str] | None:
@@ -362,79 +369,58 @@ class StartupMenu:
 
         title = self.mode.title()
         if self.mode == "model" and self._model_message:
-            content = [title, "", *self._model_message, "", SUBMENU_FOOTER]
-            return _framed_rows(content, layout)
+            return _submenu_rows(title, self._model_message, layout)
 
         if self.mode == "session":
             return self._session_panel_lines(layout)
 
         # Keep the selected option visible if discovered Mods exceed panel space.
-        visible_count = 5
+        visible_count = SUBMENU_VISIBLE_LIMIT
         start = min(
             max(self.selected_index - visible_count // 2, 0),
             max(len(self._options) - visible_count, 0),
         )
         visible = self._options[start : start + visible_count]
-        inner_width = max(layout.panel.width - 2, 0)
-        widest_option = max((len(option) for option in visible), default=0)
-        option_width = min(widest_option + 2, inner_width)
-        option_left = max((inner_width - option_width) // 2, 0)
+        option_width = _submenu_option_width(layout)
         option_rows = []
         for index, option in enumerate(visible):
             marker = "> " if start + index == self.selected_index else "  "
             option_text = f"{marker}{option}"[:option_width].ljust(option_width)
-            option_rows.append(
-                f"{' ' * option_left}{option_text}".ljust(inner_width)
-            )
-        # Titles and footers center on the panel, while every option shares one
-        # marker-aware text anchor based on the widest visible option.
-        content = [
-            title.center(inner_width),
-            "",
-            *option_rows,
-            "",
-            SUBMENU_FOOTER.center(inner_width),
-        ]
-        return _framed_rows(content, layout)
+            option_rows.append(option_text)
+        return _submenu_rows(title, option_rows, layout)
 
     def _workspace_panel_lines(self, layout: StartupSceneLayout) -> list[str]:
         """Render a bounded recent-workspace viewport with concise labels."""
         start = min(
-            max(self.selected_index - WORKSPACE_VISIBLE_LIMIT + 1, 0),
-            max(len(self._options) - WORKSPACE_VISIBLE_LIMIT, 0),
+            max(self.selected_index - SUBMENU_VISIBLE_LIMIT + 1, 0),
+            max(len(self._options) - SUBMENU_VISIBLE_LIMIT, 0),
         )
         visible_indexes = range(
             start,
-            min(start + WORKSPACE_VISIBLE_LIMIT, len(self._options)),
+            min(start + SUBMENU_VISIBLE_LIMIT, len(self._options)),
         )
         labels = _workspace_labels(self._workspace_paths)
-        inner_width = max(layout.panel.width - 2, 0)
+        option_width = _submenu_option_width(layout)
         rows = [
             _workspace_option_row(
                 labels[index],
                 selected=index == self.selected_index,
-                width=inner_width,
+                width=option_width,
             )
             for index in visible_indexes
         ]
-        content = [
-            "Workspace".center(inner_width),
-            "",
-            *rows,
-            "",
-            SUBMENU_FOOTER.center(inner_width),
-        ]
-        return _framed_rows(content, layout)
+        return _submenu_rows("Workspace", rows, layout)
 
     def _session_panel_lines(self, layout: StartupSceneLayout) -> list[str]:
         """Render a bounded session viewport while keeping selection visible."""
+        visible_saved_limit = SUBMENU_VISIBLE_LIMIT - 1
         saved_selected_index = max(self.selected_index - 1, 0)
         saved_start = min(
-            max(saved_selected_index - SESSION_VISIBLE_SAVED_LIMIT + 1, 0),
-            max(len(self._session_metadata) - SESSION_VISIBLE_SAVED_LIMIT, 0),
+            max(saved_selected_index - visible_saved_limit + 1, 0),
+            max(len(self._session_metadata) - visible_saved_limit, 0),
         )
         visible = self._session_metadata[
-            saved_start : saved_start + SESSION_VISIBLE_SAVED_LIMIT
+            saved_start : saved_start + visible_saved_limit
         ]
         rows: list[tuple[str, str, int]] = [
             ("New session", "now", 0),
@@ -448,24 +434,17 @@ class StartupMenu:
             for index, metadata in enumerate(visible)
         )
 
-        inner_width = max(layout.panel.width - 2, 0)
+        option_width = _submenu_option_width(layout)
         option_rows = [
             _session_option_row(
                 title,
                 age,
                 selected=option_index == self.selected_index,
-                width=inner_width,
+                width=option_width,
             )
             for title, age, option_index in rows
         ]
-        content = [
-            "Sessions for this workspace".center(inner_width),
-            "",
-            *option_rows,
-            "",
-            SUBMENU_FOOTER.center(inner_width),
-        ]
-        return _framed_rows(content, layout)
+        return _submenu_rows("Sessions for this workspace", option_rows, layout)
 
 
 def _session_title(metadata: dict) -> str:
@@ -493,13 +472,11 @@ def _workspace_labels(paths: Sequence[Path]) -> tuple[str, ...]:
 
 def _workspace_option_row(label: str, *, selected: bool, width: int) -> str:
     """Fit one recent workspace into the submenu's shared option column."""
-    inset = min(2, max(width // 8, 0))
-    row_width = max(width - (inset * 2), 0)
     marker = "> " if selected else "  "
-    label_width = max(row_width - len(marker), 0)
+    label_width = max(width - len(marker), 0)
     if len(label) > label_width:
         label = (label[: max(label_width - 3, 0)] + "...")[:label_width]
-    return f"{' ' * inset}{marker}{label:<{label_width}}{' ' * inset}"[:width]
+    return f"{marker}{label:<{label_width}}"[:width]
 
 
 def _session_age(metadata: dict, now: datetime) -> str:
@@ -533,14 +510,54 @@ def _session_option_row(
     width: int,
 ) -> str:
     """Fit a title and stable right-aligned age into one panel row."""
-    inset = min(2, max(width // 8, 0))
-    row_width = max(width - (inset * 2), 0)
     marker = "> " if selected else "  "
-    label_width = max(row_width - len(marker) - len(age) - 1, 0)
+    label_width = max(width - len(marker) - len(age) - 1, 0)
     if len(title) > label_width:
         title = (title[: max(label_width - 3, 0)] + "...")[:label_width]
-    body = f"{marker}{title:<{label_width}} {age}"[:row_width]
-    return f"{' ' * inset}{body.ljust(row_width)}{' ' * inset}"
+    return f"{marker}{title:<{label_width}} {age}"[:width].ljust(width)
+
+
+def _submenu_option_width(layout: StartupSceneLayout) -> int:
+    """Return the common option width after the fixed left/right inset."""
+    inner_width = max(layout.panel.width - 2, 0)
+    return max(inner_width - (SUBMENU_OPTION_LEFT * 2), 0)
+
+
+def _submenu_rows(
+    heading: str,
+    option_rows: Sequence[str],
+    layout: StartupSceneLayout,
+) -> list[str]:
+    """Place one selectable submenu into the shared fixed panel geometry."""
+    width = layout.panel.width
+    if width <= 0:
+        return [""] * layout.panel.height
+    if width == 1:
+        return [PANEL_VERTICAL] * layout.panel.height
+
+    inner_width = width - 2
+    rows = [" " * inner_width for _ in range(max(layout.panel.height - 2, 0))]
+    footer_row = layout.panel.height - 1 - SUBMENU_FOOTER_BOTTOM_INSET
+    # Reserve one blank row between the bounded viewport and fixed footer.
+    option_capacity = max(footer_row - SUBMENU_OPTION_START_ROW - 1, 0)
+
+    def set_centered(panel_row: int, value: str) -> None:
+        if 1 <= panel_row < layout.panel.height - 1:
+            rows[panel_row - 1] = value[:inner_width].center(inner_width)
+
+    set_centered(SUBMENU_HEADING_ROW, heading)
+    for offset, value in enumerate(option_rows[:option_capacity]):
+        panel_row = SUBMENU_OPTION_START_ROW + offset
+        option_width = _submenu_option_width(layout)
+        anchored = f"{' ' * SUBMENU_OPTION_LEFT}{value[:option_width].ljust(option_width)}"
+        rows[panel_row - 1] = anchored.ljust(inner_width)[:inner_width]
+    set_centered(footer_row, SUBMENU_FOOTER)
+
+    return [
+        f"{PANEL_TOP_LEFT}{PANEL_HORIZONTAL * inner_width}{PANEL_TOP_RIGHT}",
+        *[f"{PANEL_VERTICAL}{row}{PANEL_VERTICAL}" for row in rows],
+        f"{PANEL_BOTTOM_LEFT}{PANEL_HORIZONTAL * inner_width}{PANEL_BOTTOM_RIGHT}",
+    ]
 
 
 def _framed_rows(content: Sequence[str], layout: StartupSceneLayout) -> list[str]:

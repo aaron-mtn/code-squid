@@ -14,8 +14,7 @@ from prompt_toolkit.output import DummyOutput
 from code_squid.console.startup_menu import (
     MAIN_ROWS,
     MODEL_FALLBACK,
-    SESSION_VISIBLE_SAVED_LIMIT,
-    WORKSPACE_VISIBLE_LIMIT,
+    SUBMENU_VISIBLE_LIMIT,
     StartupMenu,
     _session_title,
     discover_provider_models,
@@ -171,7 +170,7 @@ def test_each_main_row_replaces_panel_and_escape_restores_main(tmp_path) -> None
             "Sessions for this workspace" if title == "Session" else title
         )
         assert expected_title in displayed_text
-        assert displayed_text.count("↑↓ select   Enter   Esc back") == 1
+        assert displayed_text.count("↑↓   Enter select   Esc back") == 1
         if title == "Model":
             assert all(message in rendered for message in MODEL_FALLBACK)
         if title == "Workspace":
@@ -322,16 +321,16 @@ def test_workspace_view_keeps_centered_footer_for_long_paths(tmp_path) -> None:
     footer = next(
         line
         for line in inner
-        if line.strip() == "↑↓ select   Enter   Esc back"
+        if line.strip() == "↑↓   Enter select   Esc back"
     )
 
-    assert footer == "↑↓ select   Enter   Esc back".center(len(footer))
+    assert footer == "↑↓   Enter select   Esc back".center(len(footer))
 
 
 def test_workspace_viewport_scrolls_and_escape_does_not_select(tmp_path) -> None:
     workspaces = [tmp_path / f"workspace-{index}" for index in range(9)]
     menu = StartupMenu(
-        workspaces[3],
+        workspaces[0],
         load_settings(tmp_path),
         workspace_discovery=lambda _: workspaces,
     )
@@ -340,14 +339,24 @@ def test_workspace_viewport_scrolls_and_escape_does_not_select(tmp_path) -> None
     menu.selected_index = MAIN_ROWS.index("Workspace")
     menu.activate()
 
-    assert menu.selected_index == 3
-    for _ in range(3):
+    initial = menu.panel_lines(layout)
+    initial_rendered = "\n".join(initial)
+    assert initial_rendered.count("workspace-") == SUBMENU_VISIBLE_LIMIT
+    assert "workspace-6" in initial_rendered
+    assert "workspace-7" not in initial_rendered
+    assert initial[1][1:-1].strip() == "Workspace"
+    assert initial[11][1:-1].strip() == "↑↓   Enter select   Esc back"
+
+    for _ in range(SUBMENU_VISIBLE_LIMIT):
         menu.move(1)
-    rendered = "\n".join(menu.panel_lines(layout))
-    assert menu.selected_index == 6
-    assert "workspace-1" not in rendered
-    assert "workspace-6" in rendered
-    assert rendered.count("workspace-") <= WORKSPACE_VISIBLE_LIMIT
+    scrolled = menu.panel_lines(layout)
+    rendered = "\n".join(scrolled)
+    assert menu.selected_index == SUBMENU_VISIBLE_LIMIT
+    assert "workspace-0" not in rendered
+    assert "workspace-7" in rendered
+    assert rendered.count("workspace-") == SUBMENU_VISIBLE_LIMIT
+    assert scrolled[1][1:-1].strip() == "Workspace"
+    assert scrolled[11][1:-1].strip() == "↑↓   Enter select   Esc back"
 
     menu.back()
     assert menu.take_workspace_handoff() is None
@@ -370,7 +379,7 @@ def test_workspace_recent_selection_releases_startup(monkeypatch, tmp_path) -> N
     assert menu.take_workspace_handoff() == recent
 
 
-def test_submenu_centers_title_options_as_one_column_and_footer(tmp_path) -> None:
+def test_submenu_centers_title_and_footer_but_left_aligns_options(tmp_path) -> None:
     menu = StartupMenu(tmp_path, load_settings(tmp_path))
     menu.focus_from_composer()
     menu.selected_index = 0
@@ -386,13 +395,97 @@ def test_submenu_centers_title_options_as_one_column_and_footer(tmp_path) -> Non
     footer = next(
         line
         for line in inner
-        if line.strip() == "↑↓ select   Enter   Esc back"
+        if line.strip() == "↑↓   Enter select   Esc back"
     )
 
     assert title == "Provider".center(len(title))
-    assert footer == "↑↓ select   Enter   Esc back".center(len(footer))
+    assert footer == "↑↓   Enter select   Esc back".center(len(footer))
     assert selected.index("a") == unselected.index("long-option")
     assert selected.index(">") == unselected.index("long-option") - 2
+
+
+def test_all_selectable_submenus_share_fixed_geometry(tmp_path) -> None:
+    now = datetime(2026, 9, 7, 12, tzinfo=timezone.utc)
+    layout = startup_scene_layout(80)
+    menu = StartupMenu(tmp_path, load_settings(tmp_path), now=lambda: now)
+    workspace = tmp_path / "recent-workspace"
+    session = {
+        "session_id": "saved-session",
+        "task": "Saved task",
+        "updated_at": (now - timedelta(minutes=4)).isoformat(),
+    }
+    scenarios = (
+        ("provider", "Provider", ("provider-option",), "provider-option"),
+        ("model", "Model", ("model-option",), "model-option"),
+        ("safety", "Safety", ("safety-option",), "safety-option"),
+        ("mod", "Mod", ("mod-option",), "mod-option"),
+        ("workspace", "Workspace", (str(workspace),), "recent-workspace"),
+        (
+            "session",
+            "Sessions for this workspace",
+            ("", "saved-session"),
+            "New session",
+        ),
+    )
+
+    for mode, heading, options, first_label in scenarios:
+        menu.mode = mode
+        menu.selected_index = 0
+        menu._options = options
+        menu._workspace_paths = (workspace,) if mode == "workspace" else ()
+        menu._session_metadata = (session,) if mode == "session" else ()
+        lines = menu.panel_lines(layout)
+        inner = [line[1:-1] for line in lines]
+
+        assert inner[1].strip() == heading
+        assert first_label in inner[3]
+        assert inner[3].index(">") == 2
+        assert inner[11].strip() == "↑↓   Enter select   Esc back"
+        assert len(lines) == layout.panel.height
+        assert {len(line) for line in lines} == {layout.panel.width}
+
+
+def test_submenu_option_count_does_not_change_fixed_rows_or_recenter(tmp_path) -> None:
+    layout = startup_scene_layout(80)
+    menu = StartupMenu(tmp_path, load_settings(tmp_path))
+    menu.mode = "provider"
+
+    for count in (1, 3, 12):
+        menu._options = tuple(f"option-{index}" for index in range(count))
+        menu.selected_index = count - 1
+        lines = menu.panel_lines(layout)
+        inner = [line[1:-1] for line in lines]
+
+        assert inner[1].strip() == "Provider"
+        assert "option-" in inner[3]
+        assert inner[11].strip() == "↑↓   Enter select   Esc back"
+        assert any("> option-" in line for line in inner[3:10])
+        # Even a one-item list leaves the lower viewport rows unused.
+        if count == 1:
+            assert all(not line.strip() for line in inner[4:11])
+
+
+def test_workspace_labels_still_disambiguate_and_truncate_in_shared_column(
+    tmp_path,
+) -> None:
+    duplicate_a = tmp_path / "parent-a" / "shared"
+    duplicate_b = tmp_path / "parent-b" / "shared"
+    long_path = tmp_path / ("long-workspace-name-" * 4)
+    paths = (duplicate_a, duplicate_b, long_path)
+    menu = StartupMenu(
+        duplicate_a,
+        load_settings(tmp_path),
+        workspace_discovery=lambda _: list(paths),
+    )
+    menu.mode = "workspace"
+    menu._workspace_paths = paths
+    menu._options = tuple(str(path) for path in paths)
+
+    rendered = "\n".join(menu.panel_lines(startup_scene_layout(80)))
+
+    assert "shared  (parent-a)" in rendered
+    assert "shared  (parent-b)" in rendered
+    assert "..." in rendered
 
 
 def _recent_sessions(count: int, now: datetime) -> list[dict]:
@@ -446,7 +539,7 @@ def test_session_row_opens_with_new_first_and_recent_sessions_newest_first(
     assert rendered.index("Task 0") < rendered.index("Task 1")
 
 
-def test_session_viewport_scrolls_after_five_saved_sessions(tmp_path) -> None:
+def test_session_viewport_shows_seven_entries_then_scrolls(tmp_path) -> None:
     now = datetime(2026, 9, 7, 12, tzinfo=timezone.utc)
     recent = _recent_sessions(9, now)
     menu = StartupMenu(
@@ -460,18 +553,29 @@ def test_session_viewport_scrolls_after_five_saved_sessions(tmp_path) -> None:
     menu.selected_index = MAIN_ROWS.index("Session")
     menu.activate()
 
-    initial = "\n".join(menu.panel_lines(layout))
-    assert initial.count("Task ") == SESSION_VISIBLE_SAVED_LIMIT
-    assert "New session" in initial
-    assert "Task 5" not in initial
+    initial_lines = menu.panel_lines(layout)
+    initial = "\n".join(initial_lines)
+    assert initial.count("Task ") + initial.count("New session") == (
+        SUBMENU_VISIBLE_LIMIT
+    )
+    assert "Task 5" in initial
+    assert "Task 6" not in initial
+    assert initial_lines[1][1:-1].strip() == "Sessions for this workspace"
+    assert initial_lines[11][1:-1].strip() == "↑↓   Enter select   Esc back"
 
-    for _ in range(SESSION_VISIBLE_SAVED_LIMIT + 1):
+    for _ in range(SUBMENU_VISIBLE_LIMIT):
         menu.move(1)
-    scrolled = "\n".join(menu.panel_lines(layout))
-    assert menu.selected_index == SESSION_VISIBLE_SAVED_LIMIT + 1
+    scrolled_lines = menu.panel_lines(layout)
+    scrolled = "\n".join(scrolled_lines)
+    assert menu.selected_index == SUBMENU_VISIBLE_LIMIT
     assert "New session" in scrolled
     assert "Task 0" not in scrolled
-    assert "Task 5" in scrolled
+    assert "Task 6" in scrolled
+    assert scrolled.count("Task ") + scrolled.count("New session") == (
+        SUBMENU_VISIBLE_LIMIT
+    )
+    assert scrolled_lines[1][1:-1].strip() == "Sessions for this workspace"
+    assert scrolled_lines[11][1:-1].strip() == "↑↓   Enter select   Esc back"
 
 
 def test_session_escape_does_not_change_selection_and_enter_uses_resume_seam(
