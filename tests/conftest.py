@@ -73,8 +73,16 @@ except ModuleNotFoundError:
 
 
 @pytest.fixture(autouse=True)
-def isolated_session_indexes(monkeypatch, tmp_path_factory) -> Path:
-    """Route every test's global session registry into pytest's temp root."""
+def isolated_application_home(monkeypatch, tmp_path_factory) -> Path:
+    """Route every test's application-wide state into pytest's temp root."""
+    app_home = tmp_path_factory.mktemp("code-squid-home")
+    monkeypatch.setenv("CODE_SQUID_HOME", str(app_home))
     index_path = tmp_path_factory.getbasetemp() / "session-indexes.jsonl"
     monkeypatch.setenv("CODE_SQUID_SESSION_INDEXES", str(index_path))
-    return index_path
+    return app_home
+
+
+@pytest.fixture
+def isolated_session_indexes(isolated_application_home: Path) -> Path:
+    """Expose the autouse fixture's isolated session-index path to tests."""
+    return isolated_application_home.parent / "session-indexes.jsonl"

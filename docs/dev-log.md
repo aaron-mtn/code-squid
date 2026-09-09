@@ -1,3 +1,22 @@
+- 2026-09-08: Moved provider, model, safety, streaming, compaction, and display
+  preferences from workspace-local ownership to the Code Squid application
+  home (`~/.code-squid/settings.json`, or `<CODE_SQUID_HOME>/settings.json`).
+  `code_squid.app_paths` remains the canonical path-policy owner, while
+  `squid_core` continues to receive only effective runtime settings. When the
+  global file is absent, settings loading adopts the current workspace's
+  legacy `.code-squid/settings.json` best-effort without deleting it; an
+  existing global file is authoritative and workspaces are never merged.
+  Provider-scoped persistence and environment-only override precedence remain
+  unchanged. Workspace rebuilds now explicitly retain application settings
+  while clearing workspace-owned active-session state and rerooting session,
+  undo, display, and discovery objects. Added path, migration, restart,
+  workspace-switch, and slash-command write-target regressions. Focused
+  settings/provider/workspace/runtime/startup coverage: 218 passed. Full suite:
+  964 passed, with the same four pre-existing prompt-policy assertion failures
+  and one pre-existing Windows TTY path-fragment failure documented by the
+  preceding provider work. Production compilation, affected imports, and
+  `git diff --check` passed. No live model inference ran.
+
 - 2026-09-08: Scoped persisted connection settings by provider. The selected
   provider and exact model ID remain under `model`, while explicitly saved URL,
   key, and key-environment fields now live in a sparse `providers.<id>` mapping.

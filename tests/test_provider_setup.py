@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from code_squid.app_paths import settings_path
 from code_squid.provider_setup import (
     PROVIDER_PROFILES,
     discover_models,
@@ -241,9 +242,7 @@ def test_disconnected_provider_selection_persists_for_configuration(
     )
     settings, explanation = select_provider(tmp_path, "ollama")
 
-    persisted = json.loads(
-        (tmp_path / ".code-squid" / "settings.json").read_text(encoding="utf-8")
-    )
+    persisted = json.loads(settings_path().read_text(encoding="utf-8"))
     assert settings.model.provider == "ollama"
     assert persisted["model"]["provider"] == "ollama"
     assert explanation == "Ollama is not connected."

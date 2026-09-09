@@ -1,4 +1,4 @@
-"""Load local Code Squid settings with environment variable overrides."""
+"""Load application-wide Code Squid settings with environment overrides."""
 
 from __future__ import annotations
 
@@ -9,13 +9,15 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
 
+from code_squid.app_paths import settings_path as app_settings_path
+from code_squid.app_paths import workspace_state_dir
+from code_squid.provider_setup import PROFILES_BY_ID, VALID_PROVIDERS
 from squid_core.settings import (
     CompactionSettings as CoreCompactionSettings,
     ProviderSettings,
     RuntimeSettings as CoreRuntimeSettings,
 )
 from squid_core.storage.atomic_json import atomic_write_json
-from code_squid.provider_setup import PROFILES_BY_ID, VALID_PROVIDERS
 
 
 # Defaults keep Code Squid usable with a local OpenAI-compatible server,
@@ -126,6 +128,29 @@ def _read_settings_file(settings_path: Path) -> dict[str, Any]:
     return settings
 
 
+def _read_application_settings(repo_root: Path) -> tuple[Path, dict[str, Any]]:
+    """Read global settings, adopting this workspace's legacy file once.
+
+    ``repo_root`` remains an input only so an existing installation can seed the
+    application-wide file. Once that file exists, workspace data is ignored.
+    """
+    settings_path = app_settings_path()
+    if settings_path.exists():
+        return settings_path, _read_settings_file(settings_path)
+
+    legacy_path = workspace_state_dir(repo_root) / "settings.json"
+    raw_settings = _read_settings_file(legacy_path)
+    if legacy_path.exists():
+        try:
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_json(settings_path, raw_settings)
+        except OSError:
+            # Adoption is best effort. The current process can still honor the
+            # legacy configuration, while all future writes target app home.
+            pass
+    return settings_path, raw_settings
+
+
 def _section(settings: dict[str, Any], name: str, settings_path: Path) -> dict[str, Any]:
     value = settings.get(name, {})
     if not isinstance(value, dict):
@@ -141,7 +166,7 @@ def _resolve_api_key(
     provider: str,
     field_prefix: str,
 ) -> tuple[str | None, str | None]:
-    # Resolve API keys without requiring secrets in .code-squid/settings.json.
+    # Resolve API keys without requiring secrets in the app settings file.
     # CODE_SQUID_API_KEY wins over api_key_env, which wins over api_key.
     profile = PROFILES_BY_ID[provider]
     api_key_env = connection_settings.get("api_key_env", profile.api_key_env)
@@ -347,8 +372,7 @@ def _provider_connections(
 
 
 def load_settings(repo_root: Path) -> Settings:
-    settings_path = repo_root / ".code-squid" / "settings.json"
-    raw_settings = _read_settings_file(settings_path)
+    settings_path, raw_settings = _read_application_settings(repo_root)
     model_settings = _section(raw_settings, "model", settings_path)
     display_settings = _section(raw_settings, "display", settings_path)
     runtime_settings = _section(raw_settings, "runtime", settings_path)
@@ -405,8 +429,7 @@ def write_approval_mode(repo_root: Path, approval_mode: str) -> None:
         valid_modes = ", ".join(sorted(VALID_APPROVAL_MODES))
         raise ValueError(f"approval_mode must be one of {valid_modes}")
 
-    settings_path = repo_root / ".code-squid" / "settings.json"
-    raw_settings = _read_settings_file(settings_path)
+    settings_path, raw_settings = _read_application_settings(repo_root)
     runtime_settings = _section(raw_settings, "runtime", settings_path)
     runtime_settings["approval_mode"] = approval_mode
     raw_settings["runtime"] = runtime_settings
@@ -422,8 +445,7 @@ def write_provider(repo_root: Path, provider: str) -> None:
         valid_providers = ", ".join(sorted(VALID_PROVIDERS))
         raise ValueError(f"provider must be one of {valid_providers}")
 
-    settings_path = repo_root / ".code-squid" / "settings.json"
-    raw_settings = _read_settings_file(settings_path)
+    settings_path, raw_settings = _read_application_settings(repo_root)
     model_settings = _section(raw_settings, "model", settings_path)
     _migrate_flat_provider_connection(raw_settings, model_settings, settings_path)
     model_settings["provider"] = provider
@@ -445,8 +467,7 @@ def write_model_value(repo_root: Path, name: str, value: Any) -> None:
     """Persist one connection value for the saved provider without exposing it."""
     if name not in {"base_url", "api_key", "api_key_env"}:
         raise ValueError(f"unsupported model setting: {name}")
-    settings_path = repo_root / ".code-squid" / "settings.json"
-    raw_settings = _read_settings_file(settings_path)
+    settings_path, raw_settings = _read_application_settings(repo_root)
     model_settings = _section(raw_settings, "model", settings_path)
     provider = model_settings.get("provider", DEFAULT_PROVIDER)
     if provider not in VALID_PROVIDERS:
@@ -497,8 +518,7 @@ def _migrate_flat_provider_connection(
 def _write_model_value(repo_root: Path, name: str, value: Any) -> None:
     """Update one model field while preserving the user's complete settings file."""
 
-    settings_path = repo_root / ".code-squid" / "settings.json"
-    raw_settings = _read_settings_file(settings_path)
+    settings_path, raw_settings = _read_application_settings(repo_root)
     model_settings = _section(raw_settings, "model", settings_path)
     model_settings[name] = value
     raw_settings["model"] = model_settings

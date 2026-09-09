@@ -47,6 +47,11 @@ def user_mods_dir(app_home: Path | str | None = None) -> Path:
     return code_squid_home(app_home) / "mods"
 
 
+def settings_path(app_home: Path | str | None = None) -> Path:
+    """Return the application-wide Code Squid settings location."""
+    return code_squid_home(app_home) / "settings.json"
+
+
 def workspace_state_dir(repo_root: Path | str) -> Path:
     """Return Code Squid's repository-local state directory."""
     return Path(repo_root).resolve() / ".code-squid"

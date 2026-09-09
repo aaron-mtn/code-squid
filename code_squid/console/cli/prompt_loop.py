@@ -209,10 +209,12 @@ def _rebuild_workspace_runtime(
     skill_name: str | None,
     active_session_id: str | None,
 ) -> tuple[Path, Settings, TerminalDisplay, StartupMenu, str | None]:
-    """Reconstruct every workspace-owned CLI object around ``selected_root``."""
+    """Reconstruct workspace-bound CLI objects around ``selected_root``."""
 
     workspace_changed = selected_root != current_root
     display.stop_header()
+    # Settings are application-wide; reloading refreshes environment overrides
+    # without allowing the selected repository to replace user preferences.
     settings = load_settings(selected_root)
     if workspace_changed:
         # Session IDs, titles, discovery, runners, and undo paths belong to one

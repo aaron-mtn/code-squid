@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
+from code_squid.app_paths import settings_path
 from code_squid.console.startup_menu import (
     MAIN_ROWS,
     MODEL_FALLBACK,
@@ -245,7 +246,7 @@ def test_provider_options_are_canonical_and_selection_updates_persisted_panel(
     menu.selected_index = menu._options.index("ollama")
     menu.activate()
 
-    persisted = json.loads((tmp_path / ".code-squid" / "settings.json").read_text())
+    persisted = json.loads(settings_path().read_text())
     assert persisted["model"]["provider"] == "ollama"
     assert menu.settings.model.provider == "ollama"
     assert "Ollama" in "\n".join(menu.panel_lines(startup_scene_layout(80)))
@@ -274,9 +275,7 @@ def test_startup_selection_accepts_a_disconnected_provider(
     menu.selected_index = menu._options.index("ollama")
     menu.activate()
 
-    persisted = json.loads(
-        (tmp_path / ".code-squid" / "settings.json").read_text(encoding="utf-8")
-    )
+    persisted = json.loads(settings_path().read_text(encoding="utf-8"))
     assert menu.settings.model.provider == "ollama"
     assert persisted["model"]["provider"] == "ollama"
     assert menu.mode == "main"

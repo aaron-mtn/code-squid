@@ -133,7 +133,7 @@ def _handle_model(repo_root: Path, args: list[str]) -> None:
         print(f"Saved model: {model_name}")
         print(
             "Effective model remains "
-            f"{effective_model} because CODE_SQUID_MODEL overrides workspace settings."
+            f"{effective_model} because CODE_SQUID_MODEL overrides saved settings."
         )
     else:
         print(f"Model set to: {effective_model}")

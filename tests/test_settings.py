@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from code_squid.app_paths import settings_path
 from code_squid.settings import load_settings, write_approval_mode, write_provider
 
 
@@ -51,6 +52,61 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert runtime_settings.provider.model_name == "qwen3.5-9b"
     assert runtime_settings.provider.api_key == "lm-studio"
     assert runtime_settings.approval_mode == "never"
+
+
+def test_application_settings_survive_workspace_change_and_process_reload(
+    tmp_path: Path,
+) -> None:
+    workspace_a = tmp_path / "workspace-a"
+    workspace_b = tmp_path / "workspace-b"
+    workspace_a.mkdir()
+    workspace_b.mkdir()
+    persisted = {
+        "model": {"provider": "lm_studio", "name": "chosen-model"},
+        "providers": {
+            "lm_studio": {"base_url": "http://lan-host:4321/v1"},
+            "openrouter": {"api_key": "saved-router-key", "api_key_env": None},
+        },
+        "runtime": {"approval_mode": "never"},
+    }
+    write_settings(workspace_a, persisted)
+
+    first_process = load_settings(workspace_a)
+    assert json.loads(settings_path().read_text(encoding="utf-8")) == persisted
+    assert (workspace_a / ".code-squid" / "settings.json").exists()
+    write_settings(workspace_b, {"model": {"name": "workspace-owned-model"}})
+    after_switch = load_settings(workspace_b)
+    after_restart = load_settings(workspace_b)
+
+    for settings in (first_process, after_switch, after_restart):
+        assert settings.model.provider == "lm_studio"
+        assert settings.model.name == "chosen-model"
+        assert settings.model.base_url == "http://lan-host:4321/v1"
+        assert settings.providers["openrouter"] == {
+            "api_key": "saved-router-key",
+            "api_key_env": None,
+        }
+        assert settings.runtime.approval_mode == "never"
+
+
+def test_existing_application_settings_are_authoritative_over_legacy_workspace(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    write_settings(workspace, {"model": {"name": "legacy-model"}})
+    settings_path().write_text(
+        json.dumps({"model": {"provider": "ollama", "name": "global-model"}}),
+        encoding="utf-8",
+    )
+
+    settings = load_settings(workspace)
+
+    assert settings.model.provider == "ollama"
+    assert settings.model.name == "global-model"
+    assert json.loads(
+        (workspace / ".code-squid" / "settings.json").read_text(encoding="utf-8")
+    )["model"]["name"] == "legacy-model"
 
 
 def test_ollama_product_default_is_the_native_endpoint(tmp_path: Path) -> None:
@@ -161,9 +217,7 @@ def test_legacy_flat_connection_loads_and_migrates_on_provider_switch(
     assert legacy.model.name == "exact-model-id"
 
     write_provider(tmp_path, "ollama")
-    persisted = json.loads(
-        (tmp_path / ".code-squid" / "settings.json").read_text(encoding="utf-8")
-    )
+    persisted = json.loads(settings_path().read_text(encoding="utf-8"))
     assert persisted == {
         "model": {"provider": "ollama", "name": "exact-model-id"},
         "providers": {
@@ -492,8 +546,8 @@ def test_write_approval_mode_preserves_settings_and_json_format(tmp_path: Path) 
 
     write_approval_mode(tmp_path, "guarded")
 
-    settings_path = tmp_path / ".code-squid" / "settings.json"
-    assert settings_path.read_text(encoding="utf-8") == (
+    persisted_path = settings_path()
+    assert persisted_path.read_text(encoding="utf-8") == (
         '{\n  "model": {\n    "name": "local-model"\n  },\n'
         '  "runtime": {\n    "approval_mode": "guarded"\n  }\n}\n'
     )

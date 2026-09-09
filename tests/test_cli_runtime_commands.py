@@ -6,7 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from code_squid.app_paths import recent_workspaces_path, workspace_sessions_dir
+from code_squid.app_paths import (
+    recent_workspaces_path,
+    settings_path,
+    workspace_sessions_dir,
+)
 from code_squid.console.cli.control_commands import (
     RECENT_SESSION_LIMIT,
     discover_recent_sessions,
@@ -34,10 +38,10 @@ def clean_runtime_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _write_settings(repo_root: Path, settings: dict) -> Path:
-    settings_path = repo_root / ".code-squid" / "settings.json"
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(json.dumps(settings), encoding="utf-8")
-    return settings_path
+    path = settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(settings), encoding="utf-8")
+    return path
 
 
 def _prompt_sequence(responses: list[str]):
@@ -176,6 +180,7 @@ def test_invalid_provider_does_not_persist(tmp_path, capsys) -> None:
     assert handled is True
     assert settings.model.provider == "lm_studio"
     assert not (tmp_path / ".code-squid" / "settings.json").exists()
+    assert not settings_path().exists()
     assert "Invalid provider" in capsys.readouterr().out
 
 
@@ -193,9 +198,7 @@ def test_provider_environment_override_is_reported_but_saved(
     )
 
     output = capsys.readouterr().out
-    persisted = json.loads(
-        (tmp_path / ".code-squid" / "settings.json").read_text(encoding="utf-8")
-    )
+    persisted = json.loads(settings_path().read_text(encoding="utf-8"))
     assert persisted["model"]["provider"] == "ollama"
     assert settings.model.provider == "openrouter"
     assert "Saved; CODE_SQUID_PROVIDER remains" in output
@@ -250,9 +253,7 @@ def test_disconnected_lm_studio_can_be_selected_then_configured(
     handle_runtime_command(tmp_path, "/provider status", configured)
 
     output = capsys.readouterr().out
-    persisted = json.loads(
-        (tmp_path / ".code-squid" / "settings.json").read_text(encoding="utf-8")
-    )
+    persisted = json.loads(settings_path().read_text(encoding="utf-8"))
     assert selected.model.provider == "lm_studio"
     assert selected.model.base_url == "http://127.0.0.1:1234/v1"
     assert configured.model.provider == "lm_studio"
@@ -276,12 +277,36 @@ def test_provider_key_is_persisted_but_never_echoed(tmp_path, capsys) -> None:
         load_settings(tmp_path),
     )
     output = capsys.readouterr().out
-    persisted = json.loads(
-        (tmp_path / ".code-squid" / "settings.json").read_text(encoding="utf-8")
-    )
+    persisted = json.loads(settings_path().read_text(encoding="utf-8"))
     assert persisted["providers"]["lm_studio"]["api_key"] == secret
     assert secret not in output
     assert "API key saved" in output
+
+
+def test_runtime_commands_write_only_application_settings(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "code_squid.provider_setup.build_provider",
+        lambda _settings: SimpleNamespace(is_ready=lambda: False),
+    )
+
+    commands = (
+        "/provider url http://lan-host:4321/v1",
+        "/provider key app-secret",
+        "/model app-model",
+        "/safety balanced",
+    )
+    current = load_settings(tmp_path)
+    for command in commands:
+        _, current = handle_runtime_command(tmp_path, command, current)
+
+    persisted = json.loads(settings_path().read_text(encoding="utf-8"))
+    assert persisted["providers"]["lm_studio"]["base_url"] == (
+        "http://lan-host:4321/v1"
+    )
+    assert persisted["providers"]["lm_studio"]["api_key"] == "app-secret"
+    assert persisted["model"]["name"] == "app-model"
+    assert persisted["runtime"]["approval_mode"] == "guarded"
+    assert not (tmp_path / ".code-squid" / "settings.json").exists()
 
 
 def test_provider_connections_survive_switching_and_mutate_only_the_active_provider(
@@ -347,9 +372,7 @@ def test_provider_connections_survive_switching_and_mutate_only_the_active_provi
     assert openrouter.model.api_key == "router-secret"
     assert openrouter.model.api_key_env is None
 
-    persisted = json.loads(
-        (tmp_path / ".code-squid" / "settings.json").read_text(encoding="utf-8")
-    )
+    persisted = json.loads(settings_path().read_text(encoding="utf-8"))
     assert persisted["model"] == {
         "provider": "openrouter",
     }
@@ -448,9 +471,7 @@ def test_safety_status_and_selection_mapping(
         load_settings(tmp_path),
     )
 
-    persisted = json.loads(
-        (tmp_path / ".code-squid" / "settings.json").read_text(encoding="utf-8")
-    )
+    persisted = json.loads(settings_path().read_text(encoding="utf-8"))
     assert "Current safety mode:" in capsys.readouterr().out
     assert settings.runtime.approval_mode == approval_mode
     assert persisted["runtime"]["approval_mode"] == approval_mode
@@ -730,7 +751,7 @@ def test_startup_session_selection_notices_once_and_uses_existing_follow_up_runn
     assert forced_handoffs == 1
 
 
-def test_workspace_handoff_rebuilds_root_settings_and_clears_session(
+def test_workspace_handoff_preserves_app_settings_and_clears_session(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -738,7 +759,17 @@ def test_workspace_handoff_rebuilds_root_settings_and_clears_session(
     new_root = tmp_path / "new"
     old_root.mkdir()
     new_root.mkdir()
-    _write_settings(new_root, {"model": {"name": "new-workspace-model"}})
+    _write_settings(
+        new_root,
+        {
+            "model": {"provider": "lm_studio", "name": "app-model"},
+            "providers": {
+                "lm_studio": {"base_url": "http://lan-host:4321/v1"},
+                "openrouter": {"api_key": "router-key", "api_key_env": None},
+            },
+            "runtime": {"approval_mode": "guarded"},
+        },
+    )
     displays = []
     menus = []
     prompts = iter([STARTUP_WORKSPACE_SELECTED, "/exit"])
@@ -768,7 +799,6 @@ def test_workspace_handoff_rebuilds_root_settings_and_clears_session(
             menu.activate()
         return result
 
-    monkeypatch.setenv("CODE_SQUID_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(
         "code_squid.console.cli.prompt_loop._run_display",
         build_display,
@@ -777,7 +807,15 @@ def test_workspace_handoff_rebuilds_root_settings_and_clears_session(
 
     assert _run_interactive(old_root, active_session_id="old-session") == 0
     assert [display.repo_root for display in displays] == [old_root, new_root.resolve()]
-    assert displays[1].settings.model.name == "new-workspace-model"
+    rebuilt = displays[1].settings
+    assert rebuilt.model.provider == "lm_studio"
+    assert rebuilt.model.name == "app-model"
+    assert rebuilt.model.base_url == "http://lan-host:4321/v1"
+    assert rebuilt.providers["openrouter"] == {
+        "api_key": "router-key",
+        "api_key_env": None,
+    }
+    assert rebuilt.runtime.approval_mode == "guarded"
     assert menus[1].repo_root == new_root.resolve()
     assert menus[1].session_id is None
     assert menus[1].session_title is None
@@ -836,7 +874,6 @@ def test_workspace_command_rebuilds_state_and_routes_subsequent_runs_to_new_root
             ] == saved.session_id
         return response
 
-    monkeypatch.setenv("CODE_SQUID_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(
         "code_squid.console.cli.prompt_loop._run_display", build_display
     )

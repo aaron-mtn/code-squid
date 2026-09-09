@@ -7,6 +7,7 @@ from code_squid.app_paths import (
     ensure_user_resource_dirs,
     recent_workspaces_path,
     session_indexes_path,
+    settings_path,
     user_hooks_dir,
     user_mods_dir,
     user_skills_dir,
@@ -39,6 +40,7 @@ def test_resource_paths_use_configured_home(monkeypatch, tmp_path: Path) -> None
     assert user_tools_dir() == home / "tools"
     assert user_mods_dir() == home / "mods"
     assert recent_workspaces_path() == home / "recent-workspaces.json"
+    assert settings_path() == home / "settings.json"
     assert not home.exists()
 
 

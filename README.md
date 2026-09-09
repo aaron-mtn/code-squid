@@ -97,11 +97,15 @@ prompt.
 
 ## Configuration
 
-Code Squid reads local settings from:
+Code Squid reads application-wide settings from:
 
 ```text
-.code-squid/settings.json
+~/.code-squid/settings.json
 ```
+
+Set `CODE_SQUID_HOME` to use `<CODE_SQUID_HOME>/settings.json`. On first use,
+Code Squid adopts the current workspace's legacy `.code-squid/settings.json`
+when no application-wide file exists; it leaves the legacy file in place.
 
 Missing settings are allowed. A practical LM Studio-oriented configuration looks
 like this:
@@ -312,16 +316,17 @@ containment boundary.
 
 ## Local state and privacy
 
-Code Squid stores local runtime state under:
+Code Squid stores workspace runtime state under:
 
 ```text
 .code-squid/
 ```
 
-That directory may contain settings, sessions, logs, undo snapshots,
-transcripts, prompts, file contents, command output, local paths, and other
-repo-specific data. It is ignored by this repository and should stay ignored.
-Do not publish, upload, or share `.code-squid/` without reviewing it first.
+That directory may contain sessions, logs, undo snapshots, transcripts, prompts,
+file contents, command output, local paths, and other repo-specific data. It is
+ignored by this repository and should stay ignored. Application preferences,
+including provider credentials saved directly in settings, live under the Code
+Squid home. Review either location before publishing, uploading, or sharing it.
 
 ## Sessions and undo
 

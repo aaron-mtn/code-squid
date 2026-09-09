@@ -25,7 +25,8 @@ settings -> provider -> model adapter -> Core Agent -> action preflight -> appro
 `AgentLoop -> on_event callback` is an optional observer path for compact
 machine-readable runtime facts.
 
-`.code-squid/` is local runtime state and should be gitignored.
+Repository-local `.code-squid/` directories hold workspace runtime state and
+should be gitignored. Application preferences live in the Code Squid home.
 
 The dependency direction is one-way: Code Squid supplies application defaults
 and runtime wiring to reusable Squid Core components. Those reusable components
@@ -52,7 +53,8 @@ and application layer; `squid_core/` is the reusable agent runtime.
     resolution, hooks, platform context, Agent configuration, and translation
     into the generic `squid_core.spawner` seam. It is presentation-neutral and
     does not import the console frontend.
-  - `app_paths.py` owns Code Squid application-home policy, repository-local
+  - `app_paths.py` owns Code Squid application-home policy, the application-wide
+    settings path, repository-local
     session/undo/error-log locations, the global session-index and recent-
     workspace locations, and paths for loose resources and Mods. The recent
     workspace file is `~/.code-squid/recent-workspaces.json` (or the configured
@@ -60,10 +62,11 @@ and application layer; `squid_core/` is the reusable agent runtime.
     absolute paths. The same app-path module owns its tolerant loading,
     deduplication, and update policy. Reusable Core machinery receives workspace
     paths explicitly and has no knowledge of this product history.
-  - `settings.py` reads `.code-squid/settings.json`, validates supported
-    application input, owns sparse provider-scoped connection persistence,
-    applies product defaults and optional `CODE_SQUID_*` environment overrides,
-    and translates the result to generic Core settings.
+  - `settings.py` reads the application-home `settings.json`, validates
+    supported application input, owns sparse provider-scoped connection
+    persistence and one-time adoption of the current workspace's legacy
+    settings, applies product defaults and optional `CODE_SQUID_*` environment
+    overrides, and translates the result to generic Core settings.
   - `console/cli/` owns terminal workflow and control. `cli_options.py` handles
     CLI options and workspace resolution; `cli_commands.py` handles launch-time
     dispatch; `prompt_loop.py` owns the one persistent interpreter used by
@@ -201,8 +204,9 @@ and application layer; `squid_core/` is the reusable agent runtime.
     `~`, resolves the path, requires an existing directory, and returns a
     switch target without mutating workspace-scoped objects. Both the startup
     handoff and command target converge on `prompt_loop.py`'s
-    `_rebuild_workspace_runtime`, which reconstructs settings, display/header,
-    StartupMenu, and session discovery around the selected root. A real root
+    `_rebuild_workspace_runtime`, which reloads application settings and
+    reconstructs the workspace-bound display/header, StartupMenu, and session
+    discovery around the selected root. A real root
     change clears the active session ID and title before the new scene opens,
     so subsequent session lookup and run/session/undo paths receive only the
     new root. No mutable Core or process-global workspace is introduced.
@@ -892,6 +896,8 @@ applications may instead pass an explicit root. Core resource machinery uses
 that supplied root and does not define a universal Squid Core home. Its paths
 are:
 
+- `settings.json` stores application-wide provider, model, runtime, compaction,
+  and display preferences.
 - `skills/` stores user skills such as
   `~/.code-squid/skills/<skill-name>/SKILL.md`.
 - `hooks/` stores user hook packages loaded by `squid_core.hooks` when callers
@@ -911,17 +917,25 @@ selection.
 ## Settings
 
 Settings have two explicit ownership layers. `code_squid/settings.py` owns the
-human-facing Code Squid shape, `.code-squid/settings.json`, product defaults,
-saved selection, persistence, and optional environment overrides. It translates
-those values into `squid_core.settings.RuntimeSettings`. Core owns only the
-effective provider values and runtime validation semantics used by the spawner,
-loop, approval policy, and compactor.
+human-facing Code Squid shape, application-wide persistence, product defaults,
+saved selection, and optional environment overrides. `code_squid.app_paths`
+owns the location policy. The application translates those values into
+`squid_core.settings.RuntimeSettings`; Core owns only the effective provider
+values and runtime validation semantics used by the spawner, loop, approval
+policy, and compactor.
 
-Code Squid reads settings from:
+Code Squid reads settings from its application home:
 
 ```text
-.code-squid/settings.json
+~/.code-squid/settings.json
 ```
+
+When `CODE_SQUID_HOME` is set, the path is
+`<CODE_SQUID_HOME>/settings.json`. If that file does not exist, the current
+workspace's legacy `.code-squid/settings.json` is adopted best-effort and left
+in place. An existing application-wide file is always authoritative; settings
+from multiple workspaces are never merged. All subsequent writes target only
+the application-wide file.
 
 Missing settings are allowed. Defaults keep the CLI usable with LM Studio:
 
@@ -1010,7 +1024,8 @@ environment variables: the saved value is reported separately when
 The interactive loop reloads settings after `/provider`, `/model`, and
 `/safety`, so the next new or follow-up run in the same process receives the
 new effective settings. The small field-specific writers preserve unrelated
-JSON settings.
+JSON settings. Workspace switching reloads that same application file while
+rebuilding only workspace-bound session, undo, display, and discovery state.
 
 Invalid settings JSON, invalid section shapes, invalid provider names, unknown
 approval modes, missing configured API-key environment variables, invalid
@@ -1499,10 +1514,11 @@ not own Code Squid identity or coding workflow policy.
 defaults and baseline coding discipline. `code_squid/agent/coding.py` exports
 the product-owned `CodingAgent` name as an alias of the generic Core Agent.
 
-`code_squid/settings.py` owns local settings parsing, persistence, Code Squid
-defaults and selection, and optional environment overrides. It produces
-`squid_core.settings.RuntimeSettings`; Core owns validation of generic runtime
-semantics and enforcement.
+`code_squid/settings.py` owns application-wide settings parsing, persistence,
+Code Squid defaults and selection, legacy workspace adoption, and optional
+environment overrides. `code_squid.app_paths` owns the settings path policy.
+The settings module produces `squid_core.settings.RuntimeSettings`; Core owns
+validation of generic runtime semantics and enforcement.
 
 `squid_core/agent_loop/loop.py` owns generic turn flow. It is the sequencing
 layer, not the place for provider transport, terminal rendering, tool

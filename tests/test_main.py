@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from code_squid.app_paths import settings_path
 from code_squid.console.cli.cli_options import _resolve_workspace_root
 from code_squid.console.cli.cli_commands import SHELL_HELP, _safety, run_cli
 from code_squid.console.cli.prompt_loop import (
@@ -91,11 +92,9 @@ class FakeSessionStore:
 
 
 def _write_settings(repo_root: Path, settings: dict) -> Path:
-    settings_dir = repo_root / ".code-squid"
-    settings_dir.mkdir()
-    settings_path = settings_dir / "settings.json"
-    settings_path.write_text(json.dumps(settings), encoding="utf-8")
-    return settings_path
+    path = settings_path()
+    path.write_text(json.dumps(settings), encoding="utf-8")
+    return path
 
 
 def _read_entries(session_store: SessionStore) -> list[dict]:
@@ -351,11 +350,11 @@ def test_safety_balanced_writes_approval_guarded(tmp_path, capsys) -> None:
 
 
 def test_safety_strict_creates_minimal_settings_file(tmp_path, capsys) -> None:
-    settings_path = tmp_path / ".code-squid" / "settings.json"
+    persisted_path = settings_path()
 
     assert _safety(tmp_path, ["strict"]) == 0
 
-    assert json.loads(settings_path.read_text(encoding="utf-8")) == {
+    assert json.loads(persisted_path.read_text(encoding="utf-8")) == {
         "runtime": {"approval_mode": "always"}
     }
     capsys.readouterr()
