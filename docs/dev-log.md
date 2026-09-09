@@ -1,3 +1,16 @@
+- 2026-09-09: Added Core's conservative `RedundantReadNudge` and enabled it in
+  Code Squid's default Hook runner alongside `RepeatedFailureNudge`. The Hook
+  retains bounded run-local actual line coverage from successful `read_file`
+  results, invalidates only reliably identified successful `write_file` and
+  `apply_patch` targets, and emits one-turn `additional_context` only after two
+  consecutive small covered rereads of the same unchanged file. It does not
+  block or rewrite Tools/results, and the generic runner/loop seams required no
+  feature-specific changes. Focused Hook, runner-wiring, and Mod coverage passed
+  63 tests. The full suite passed 995 tests and retained five pre-existing
+  failures: four stale prompt-policy phrase assertions and one Windows TTY
+  path-fragment assertion. Production/test compilation and `git diff --check`
+  passed. No live model inference ran.
+
 - 2026-09-09: Consolidated all lifecycle Hook return values into the frozen
   `HookResponse` dataclass while retaining event-specific input contexts and
   the existing runner/loop ownership boundary. `before_model_turn` now uses the

@@ -20,7 +20,12 @@ from code_squid.app_paths import (
     workspace_sessions_dir,
     workspace_undo_dir,
 )
-from squid_core.hooks import HookRunner, RepeatedFailureNudge, load_user_hooks
+from squid_core.hooks import (
+    HookRunner,
+    RedundantReadNudge,
+    RepeatedFailureNudge,
+    load_user_hooks,
+)
 from squid_core.mods import ResolvedMod, resolve_mod
 from squid_core.platform_context import PlatformContext, detect_platform_context
 from squid_core.session import Session
@@ -284,6 +289,7 @@ def build_hook_runner(
     include_user_hooks: bool = False,
     app_home: Path | str | None = None,
 ) -> HookRunner:
+    redundant_read_hook = RedundantReadNudge(source="Code Squid")
     no_progress_hook = RepeatedFailureNudge(
         NO_PROGRESS_GUIDANCE,
         source="Code Squid",
@@ -291,13 +297,15 @@ def build_hook_runner(
     if hook_runner is not None:
         # Application policy remains active when callers replace the optional
         # Hook collection for tests or embedding.
-        return HookRunner([*hook_runner.hooks, no_progress_hook])
+        return HookRunner(
+            [*hook_runner.hooks, redundant_read_hook, no_progress_hook]
+        )
 
     combined_hooks = list(hooks or [])
     if include_user_hooks:
         combined_hooks.extend(load_user_hooks(app_home=code_squid_home(app_home)))
 
-    combined_hooks.append(no_progress_hook)
+    combined_hooks.extend((redundant_read_hook, no_progress_hook))
 
     return HookRunner(combined_hooks)
 
