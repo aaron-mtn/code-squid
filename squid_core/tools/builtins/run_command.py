@@ -1,5 +1,3 @@
-# squid_core/tools/builtins/run_command.py
-
 """Owns the run_command tool schema and execution behavior; must not own agent policy, prompt guidance, or session updates."""
 
 import subprocess
@@ -21,9 +19,7 @@ def tool_definition() -> dict:
         "function": {
             "name": TOOL_NAME,
             "description": (
-                "Use this for discovery, verification, tests, scripts, or shell behavior. Before calling this "
-                "tool, write a brief action note saying what result you need from the command and how it "
-                "reduces risk."
+                "Run one shell command from the repository root and return its combined output and exit status."
             ),
             "parameters": {
                 "type": "object",

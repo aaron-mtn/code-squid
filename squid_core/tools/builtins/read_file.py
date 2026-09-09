@@ -1,5 +1,3 @@
-# squid_core/tools/builtins/read_file.py
-
 """Owns the read_file tool schema and file-reading behavior; must not own agent policy, loop control, or message formatting."""
 
 from pathlib import Path
@@ -17,8 +15,7 @@ def tool_definition() -> dict:
         "function": {
             "name": TOOL_NAME,
             "description": (
-                "Use this to inspect a known file. Before calling this tool, write a brief action note saying "
-                "what you need to learn from this file and why it is the smallest useful next read."
+                "Read a UTF-8 file at an absolute path. Optionally return a 1-based inclusive line range."
             ),
             "parameters": {
                 "type": "object",

@@ -1,3 +1,19 @@
+- 2026-09-08: Improved built-in Tool reliability without changing mutation or
+  runtime policy. The four built-in schemas now describe only mechanical
+  purpose and constraints; narration guidance remains in Agent prompts.
+  `apply_patch` still requires exactly one UTF-8 text match and never
+  fuzzy-edits, but missing matches can now report one conservative same-sized
+  closest line window and duplicate matches report at most three bounded
+  contexts with exact line ranges. Successful patches report affected line
+  ranges and retain `chars_before` / `chars_after` for compatibility.
+  ToolExecutor undo ownership, AgentLoop behavior, and approval semantics are
+  unchanged. Focused built-in Tool, apply-patch, ToolExecutor/undo, and Tool
+  result verification passed 45 tests. The full suite passed 952 tests with
+  the four pre-existing prompt-policy assertion failures and one pre-existing
+  Windows TTY path-fragment failure documented by the preceding setup work.
+  Tool-package compilation, affected import smoke checks, and
+  `git diff --check` passed.
+
 - 2026-09-08: Separated model discovery capability from inference readiness.
   OpenRouter model discovery now uses its public unauthenticated `GET /models`
   catalog, including in the startup Model menu when no API key is configured.

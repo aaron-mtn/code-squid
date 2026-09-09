@@ -1,9 +1,22 @@
+"""Tests for Code Squid coding-run construction and execution wiring."""
+
 from pathlib import Path
 
+import pytest
+
 from code_squid.app_paths import session_indexes_path
+from code_squid.settings import (
+    CompactionSettings,
+    DisplaySettings,
+    ModelSettings,
+    RuntimeSettings,
+    Settings,
+)
 from squid_core.agent_loop import RunResult
 from code_squid.agent_setup import build_coding_task_run, run_coding_task
 from squid_core.platform_context import PlatformContext
+from squid_core.providers.ollama import OllamaProvider
+from squid_core.providers.openai_compatible import OpenAICompatibleProvider
 from squid_core.spawner import NullDisplay
 
 
@@ -15,6 +28,63 @@ class FakeDisplay:
 
     def run_started(self) -> None:
         self.run_starts += 1
+
+
+def _provider_settings(provider: str) -> Settings:
+    """Return application settings suitable for provider construction tests."""
+
+    is_ollama = provider == "ollama"
+    return Settings(
+        model=ModelSettings(
+            provider=provider,
+            name="test-model",
+            base_url=(
+                "http://127.0.0.1:11434"
+                if is_ollama
+                else "http://127.0.0.1:1234/v1"
+            ),
+            api_key=None if is_ollama else "test-key",
+        ),
+        display=DisplaySettings(),
+        runtime=RuntimeSettings(),
+        compaction=CompactionSettings(enabled=False),
+    )
+
+
+def test_coding_run_uses_native_ollama_provider_from_application_settings(
+    tmp_path: Path,
+) -> None:
+    """Pin the complete Code Squid settings-to-ModelAdapter construction path."""
+
+    run = build_coding_task_run(
+        tmp_path,
+        "Use the selected provider",
+        settings=_provider_settings("ollama"),
+    )
+
+    assert isinstance(run.loop.model_adapter.provider, OllamaProvider)
+    assert run.loop.model_adapter.provider_name == "ollama"
+
+
+@pytest.mark.parametrize(
+    "provider_name",
+    ["lm_studio", "openrouter", "squid_models", "openai_compatible"],
+)
+def test_coding_run_preserves_openai_compatible_provider_identity(
+    tmp_path: Path,
+    provider_name: str,
+) -> None:
+    """Keep each OpenAI-compatible identity intact through actual run wiring."""
+
+    run = build_coding_task_run(
+        tmp_path,
+        "Use the selected provider",
+        settings=_provider_settings(provider_name),
+    )
+
+    provider = run.loop.model_adapter.provider
+    assert isinstance(provider, OpenAICompatibleProvider)
+    assert provider.provider_name == provider_name
 
 
 def test_run_construction_uses_core_null_display_when_omitted(tmp_path: Path) -> None:

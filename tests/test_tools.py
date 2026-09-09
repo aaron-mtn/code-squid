@@ -9,6 +9,7 @@ import pytest
 from squid_core.tools.builtins.read_file import execute as read_file
 from squid_core.tools.builtins.read_file import tool_definition as read_file_definition
 from squid_core.tools.builtins._truncation import truncate_head_tail
+from squid_core.tools.builtins import TOOLS
 from squid_core.tools.builtins.run_command import execute as run_command
 from squid_core.tools.builtins.apply_patch import execute as apply_patch
 from squid_core.tools.builtins.write_file import execute as write_file
@@ -226,6 +227,9 @@ def test_apply_patch_replaces_one_exact_occurrence_and_is_compact(tmp_path: Path
         "tool": "apply_patch",
         "path": str(file_path),
         "replacements": 1,
+        "start_line": 1,
+        "end_line_before": 1,
+        "end_line_after": 1,
         "chars_before": 19,
         "chars_after": 19,
     }
@@ -255,14 +259,118 @@ def test_apply_patch_fails_when_old_text_is_not_unique_and_does_not_modify_file(
 
     result = apply_patch(tmp_path, str(file_path), "same", "changed")
 
-    assert result == {
-        "ok": False,
-        "tool": "apply_patch",
-        "path": str(file_path),
-        "error": "old_text_not_unique",
-        "occurrences": 2,
-    }
+    assert result["ok"] is False
+    assert result["tool"] == "apply_patch"
+    assert result["path"] == str(file_path)
+    assert result["error"] == "old_text_not_unique"
+    assert result["occurrences"] == 2
+    assert len(result["matches"]) == 2
     assert file_path.read_text(encoding="utf-8") == "same different same"
+
+
+def test_apply_patch_missing_text_returns_closest_same_sized_window(tmp_path: Path) -> None:
+    file_path = tmp_path / "input.txt"
+    original = "header\nalpha = 1\nbeta = 20\ngamma = 3\nfooter\n"
+    file_path.write_text(original, encoding="utf-8")
+
+    result = apply_patch(
+        tmp_path,
+        str(file_path),
+        "alpha = 1\nbeta = 2\ngamma = 3",
+        "replacement",
+    )
+
+    assert result["error"] == "old_text_not_found"
+    assert result["closest_match"] == {
+        "start_line": 2,
+        "end_line": 4,
+        "similarity": pytest.approx(0.982, abs=0.001),
+        "content": "alpha = 1\nbeta = 20\ngamma = 3\n",
+    }
+    assert file_path.read_text(encoding="utf-8") == original
+
+
+def test_apply_patch_missing_text_omits_low_confidence_context(tmp_path: Path) -> None:
+    file_path = tmp_path / "input.txt"
+    original = "one\ntwo\nthree\n"
+    file_path.write_text(original, encoding="utf-8")
+
+    result = apply_patch(tmp_path, str(file_path), "completely\nunrelated", "replacement")
+
+    assert result["error"] == "old_text_not_found"
+    assert "closest_match" not in result
+    assert file_path.read_text(encoding="utf-8") == original
+
+
+def test_apply_patch_duplicate_diagnostics_have_exact_bounded_ranges(tmp_path: Path) -> None:
+    file_path = tmp_path / "input.txt"
+    original = "\n".join(
+        [
+            "line 1",
+            "target",
+            "value",
+            "line 4",
+            "line 5",
+            "target",
+            "value",
+            "line 8",
+            "target",
+            "value",
+            "line 11",
+            "line 12",
+            "target",
+            "value",
+        ]
+    )
+    file_path.write_text(original, encoding="utf-8")
+
+    result = apply_patch(tmp_path, str(file_path), "target\nvalue", "changed")
+
+    assert result["error"] == "old_text_not_unique"
+    assert result["occurrences"] == 4
+    assert len(result["matches"]) == 3
+    assert [
+        (match["start_line"], match["end_line"]) for match in result["matches"]
+    ] == [(2, 3), (6, 7), (9, 10)]
+    assert result["matches"][0] == {
+        "start_line": 2,
+        "end_line": 3,
+        "context_start_line": 1,
+        "context_end_line": 5,
+        "context": "line 1\ntarget\nvalue\nline 4\nline 5\n",
+    }
+    assert all(
+        match["context_end_line"] - match["context_start_line"] + 1 <= 6
+        for match in result["matches"]
+    )
+    assert file_path.read_text(encoding="utf-8") == original
+
+
+def test_apply_patch_success_reports_affected_multiline_ranges(tmp_path: Path) -> None:
+    file_path = tmp_path / "input.txt"
+    file_path.write_text("before\nold one\nold two\nafter\n", encoding="utf-8")
+
+    result = apply_patch(
+        tmp_path,
+        str(file_path),
+        "old one\nold two",
+        "new one\nnew two\nnew three",
+    )
+
+    assert result["start_line"] == 2
+    assert result["end_line_before"] == 3
+    assert result["end_line_after"] == 4
+    assert file_path.read_text(encoding="utf-8") == (
+        "before\nnew one\nnew two\nnew three\nafter\n"
+    )
+
+
+def test_builtin_tool_descriptions_contain_only_mechanical_guidance() -> None:
+    descriptions = [entry["definition"]()["function"]["description"] for entry in TOOLS.values()]
+
+    assert len(descriptions) == 4
+    assert all("action note" not in description.lower() for description in descriptions)
+    assert all("before calling" not in description.lower() for description in descriptions)
 
 
 def test_apply_patch_requires_absolute_path(tmp_path: Path) -> None:

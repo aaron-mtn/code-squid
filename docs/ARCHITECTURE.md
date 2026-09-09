@@ -1415,11 +1415,20 @@ The protected built-in Tool surface is:
 - performs exactly one exact text replacement
 - requires `old_text` to occur exactly once in the current file
 - fails without modifying the file when `old_text` is missing or not unique
-- returns compact replacement and character-count metadata
+- reports up to three bounded line-context records when `old_text` is not
+  unique
+- searches same-sized line windows with a conservative similarity threshold
+  when `old_text` is missing; this diagnostic never changes mutation semantics
+- returns affected before/after line ranges plus the existing compact
+  character-count metadata after a successful replacement
 - is preferred for small localized edits to existing files
 - is checked against the workspace boundary before execution unless trusted
   outside-workspace access is configured or approved
 - is snapshotted by `ToolExecutor` before mutation when undo storage is wired
+
+Built-in Tool schema descriptions contain only mechanical purpose, appropriate
+use, and argument/behavior constraints. Agent narration and workflow guidance
+remain owned by the Agent prompt rather than the Tool subsystem.
 
 `run_command`:
 

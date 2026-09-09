@@ -1,5 +1,3 @@
-# squid_core/tools/builtins/write_file.py
-
 """Owns the write_file tool schema and file-writing behavior; must not own agent policy, loop control, or message formatting."""
 
 from pathlib import Path
@@ -15,12 +13,8 @@ def tool_definition() -> dict:
         "function": {
             "name": TOOL_NAME,
             "description": (
-                "Use this to create a new file or replace an entire file when full-file writing is genuinely "
-                "appropriate. For existing files, prefer apply_patch unless the file is small, the intended "
-                "change affects most of the file, or you have read the full current file and full replacement "
-                "is clearer. Before calling this tool, write a brief action note saying whether the file is "
-                "new or why full-file replacement is safer or clearer than apply_patch. Do not use write_file "
-                "merely to avoid making a precise patch."
+                "Write complete UTF-8 content to an absolute path, creating or replacing the file. "
+                "Use this when a full-file write is mechanically appropriate."
             ),
             "parameters": {
                 "type": "object",
