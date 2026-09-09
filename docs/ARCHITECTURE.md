@@ -1449,10 +1449,13 @@ The protected built-in Tool surface is:
 - reads UTF-8 text
 - supports optional 1-based inclusive `start_line` and `end_line`
 - supports ranged reads for focused inspection
-- truncates whole-file reads with shared head/tail truncation when content is
-  large
+- returns whole-file reads unchanged through 1,000 lines
+- for larger whole-file reads, returns 500 head lines and 500 tail lines with
+  explicit `returned_line_ranges` and model-facing `truncation_guidance`
 - does not truncate ranged reads
-- returns content plus truncation, range, and line-count metadata
+- preserves the existing content, character-count, truncation, requested-range,
+  and total-line metadata; the character counts describe the original and
+  returned content but do not impose a second read limit
 - is checked against the workspace boundary before execution unless trusted
   outside-workspace access is configured or approved
 
@@ -1498,7 +1501,8 @@ remain owned by the Agent prompt rather than the Tool subsystem.
 - times out after 15 seconds
 - returns `ok` based on process return code
 - returns a normalized timeout failure with `timed_out: True`
-- truncates large output with shared head/tail truncation
+- truncates large output with the unchanged shared 12,000-character head/tail
+  truncation
 - is used for discovery, verification, and shell behavior
 - is not undo-protected, even if it mutates files
 

@@ -1,3 +1,17 @@
+- 2026-09-08: Changed full-file `read_file` truncation from the shared
+  12,000-character helper to a dedicated 1,000-line limit. Files through the
+  limit are returned unchanged; larger files return 500 head and 500 tail lines
+  plus exact `returned_line_ranges` and guidance to inspect omitted content with
+  `start_line` / `end_line`. Ranged reads remain untruncated, existing response
+  fields remain available, and `run_command` retains shared character-based
+  truncation. Also strengthened Code Squid's generic verification prompt to
+  compare behavior with the user's request instead of treating syntax or build
+  checks as behavioral proof. All 15 focused behavior tests passed. The full
+  suite passed 980 tests and retained five pre-existing failures: four stale
+  prompt-policy phrase assertions and one Windows TTY path-fragment assertion.
+  Compilation/import checks and `git diff --check` passed. No live model
+  inference ran.
+
 - 2026-09-08: Added a conservative runtime no-progress nudge. Squid Core now
   provides a small Hook that recognizes three consecutive failed Tool actions
   only when Tool name, complete JSON arguments, and scalar error category are

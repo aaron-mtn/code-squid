@@ -35,6 +35,7 @@ BASELINE_CODING_POLICY = """
 - Prefer the appropriate file or editing tool for the job.
 - Prefer repository-specific evidence and conventions over assumptions based only on the programming language or framework.
 - Run the strongest practical verification supported by the repository and available environment, using the repository's canonical verification command when one is found.
+- Before finishing, compare the final implementation against the user's requested behavior. A syntax or build check alone does not verify behavioral correctness.
 - Do not claim verification that was not actually performed.
 - For browser or UI work, accurately state what was and was not actually run or manually verified.
 - When the coding task is complete, stop working and report the result concisely and precisely.
@@ -49,8 +50,8 @@ TOOL_USAGE_GUIDANCE = """
 
 - Prefer read_file for reading known files.
 - For normal-sized files, read the whole file first when the full context is useful.
-- If read_file returns content_truncated true, do not immediately repeat the full-file read.
-- When content is truncated, use the returned line information with start_line and end_line to inspect the relevant section.
+- If a full-file read returns content_truncated true, use returned_line_ranges to see which head and tail lines were returned instead of immediately repeating the full-file read.
+- Follow the returned truncation_guidance and use start_line and end_line to inspect the missing relevant section.
 - For obviously large files, prefer a focused line range once the relevant area is known.
 - Prefer information already present in the conversation over re-reading the same unchanged file or line range.
 - Re-read content when the previous read was truncated or insufficient, when the file may have changed, or when exact current text is required for an edit.

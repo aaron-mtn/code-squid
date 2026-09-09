@@ -117,31 +117,95 @@ def test_read_file_supports_end_line_without_start_line(tmp_path: Path) -> None:
     assert result["content_returned_chars"] == len(result["content"])
 
 
-def test_read_file_truncates_large_full_read_with_shared_helper(tmp_path: Path) -> None:
-    file_path = tmp_path / "large.txt"
-    original_content = "a" * 7000 + "\nmiddle\n" + "z" * 7000
+@pytest.mark.parametrize("line_count", [999, 1000])
+def test_read_file_returns_full_content_at_or_under_line_limit(
+    tmp_path: Path, line_count: int
+) -> None:
+    file_path = tmp_path / f"{line_count}-lines.txt"
+    # Exceed the old shared character limit so this also proves that line count
+    # is now the only limit on full-file reads.
+    original_content = "".join(
+        f"line {number}: {'x' * 20}\n" for number in range(1, line_count + 1)
+    )
     file_path.write_text(original_content, encoding="utf-8")
 
     result = read_file(tmp_path, str(file_path))
-    expected_content, expected_metadata = truncate_head_tail(original_content)
+
+    assert result["content"] == original_content
+    assert result["content_truncated"] is False
+    assert result["content_original_chars"] == len(original_content)
+    assert result["content_returned_chars"] == len(original_content)
+    assert "returned_line_ranges" not in result
+    assert "truncation_guidance" not in result
+
+
+def test_read_file_truncates_large_full_read_by_lines_and_reports_ranges(
+    tmp_path: Path,
+) -> None:
+    file_path = tmp_path / "1001-lines.txt"
+    lines = [f"line {number}\n" for number in range(1, 1002)]
+    original_content = "".join(lines)
+    expected_content = "".join((*lines[:500], *lines[-500:]))
+    file_path.write_text(original_content, encoding="utf-8")
+
+    result = read_file(tmp_path, str(file_path))
 
     assert result["content"] == expected_content
+    assert len(result["content"].splitlines()) == 1000
     assert result["content_truncated"] is True
-    assert result["content_original_chars"] == expected_metadata["original_chars"]
-    assert result["content_returned_chars"] == expected_metadata["returned_chars"]
+    assert result["content_original_chars"] == len(original_content)
+    assert result["content_returned_chars"] == len(expected_content)
+    assert result["start_line"] == 1
+    assert result["end_line"] == 1001
+    assert result["total_lines"] == 1001
+    assert result["returned_line_ranges"] == [
+        {"start_line": 1, "end_line": 500},
+        {"start_line": 502, "end_line": 1001},
+    ]
+    assert result["truncation_guidance"] == (
+        "Full-file read truncated to 1000 of 1001 lines; returned lines 1-500 and "
+        "502-1001. Use start_line and end_line to inspect the missing relevant section."
+    )
 
 
 def test_read_file_does_not_truncate_large_ranged_read(tmp_path: Path) -> None:
     file_path = tmp_path / "large-range.txt"
-    ranged_content = "x" * 13000 + "\n"
-    file_path.write_text(f"before\n{ranged_content}after\n", encoding="utf-8")
+    lines = [f"line {number}\n" for number in range(1, 1201)]
+    original_content = "".join(lines)
+    file_path.write_text(original_content, encoding="utf-8")
 
-    result = read_file(tmp_path, str(file_path), start_line=2, end_line=2)
+    result = read_file(tmp_path, str(file_path), start_line=1, end_line=1200)
 
-    assert result["content"] == ranged_content
+    assert result["content"] == original_content
     assert result["content_truncated"] is False
-    assert result["content_original_chars"] == len(ranged_content)
-    assert result["content_returned_chars"] == len(ranged_content)
+    assert result["content_original_chars"] == len(original_content)
+    assert result["content_returned_chars"] == len(original_content)
+    assert "returned_line_ranges" not in result
+    assert "truncation_guidance" not in result
+
+
+def test_run_command_keeps_shared_character_truncation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output = "x" * 12001
+
+    class Completed:
+        returncode = 0
+        stdout = output
+
+    monkeypatch.setattr(
+        run_command_module.subprocess,
+        "run",
+        lambda *args, **kwargs: Completed(),
+    )
+
+    result = run_command(tmp_path, "generate lots of output")
+    expected_output, expected_metadata = truncate_head_tail(output)
+
+    assert result["output"] == expected_output
+    assert result["output_truncated"] is True
+    assert result["output_original_chars"] == expected_metadata["original_chars"]
+    assert result["output_returned_chars"] == expected_metadata["returned_chars"]
 
 
 @pytest.mark.parametrize(

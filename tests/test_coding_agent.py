@@ -321,6 +321,14 @@ def test_baseline_policy_uses_corrective_failures_and_changes_stalled_approaches
     )
 
 
+def test_baseline_policy_requires_behavioral_verification_against_the_request() -> None:
+    assert (
+        "Before finishing, compare the final implementation against the user's requested "
+        "behavior. A syntax or build check alone does not verify behavioral correctness."
+        in BASELINE_CODING_POLICY
+    )
+
+
 def test_apply_patch_guidance_prefers_diagnostics_over_unconditional_rereads() -> None:
     assert "returned exact match locations and surrounding context" in TOOL_USAGE_GUIDANCE
     assert "Re-read the file only when the returned diagnostic context is insufficient." in (

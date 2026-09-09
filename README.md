@@ -287,6 +287,10 @@ Code Squid exposes four local tools to the model:
 workspace root require approval in strict mode and are allowed without prompts
 in yolo mode.
 
+Full-file `read_file` results are limited to 1,000 lines, returning a 500-line
+head and tail with the actual ranges when needed. Explicit `start_line` /
+`end_line` reads remain untruncated.
+
 `run_command` runs a shell command from the current/configured repo root by
 default. It uses the local shell, has a timeout, and can mutate files or perform
 other local side effects.

@@ -2,10 +2,8 @@
 
 from pathlib import Path
 
-from ._truncation import truncate_head_tail
-
-
 TOOL_NAME = "read_file"
+MAX_FULL_FILE_LINES = 1000
 
 
 # Return the tool definition shown to the model.
@@ -15,7 +13,8 @@ def tool_definition() -> dict:
         "function": {
             "name": TOOL_NAME,
             "description": (
-                "Read a UTF-8 file at an absolute path. Optionally return a 1-based inclusive line range."
+                "Read a UTF-8 file at an absolute path. Full-file reads return at most "
+                "1000 lines; optional 1-based inclusive line ranges are not truncated."
             ),
             "parameters": {
                 "type": "object",
@@ -83,9 +82,27 @@ def execute(_repo_root: Path, path: str, start_line: int | None = None, end_line
             "returned_chars": len(content),
         }
     else:
-        content, content_metadata = truncate_head_tail(content)
+        original_chars = len(content)
+        if total_lines <= MAX_FULL_FILE_LINES:
+            content_metadata = {
+                "truncated": False,
+                "original_chars": original_chars,
+                "returned_chars": original_chars,
+            }
+        else:
+            # Keep both ends symmetrical so the omitted interval is easy to
+            # inspect with a follow-up ranged read.
+            head_lines = MAX_FULL_FILE_LINES // 2
+            tail_lines = MAX_FULL_FILE_LINES - head_lines
+            tail_start = total_lines - tail_lines + 1
+            content = "".join((*lines[:head_lines], *lines[-tail_lines:]))
+            content_metadata = {
+                "truncated": True,
+                "original_chars": original_chars,
+                "returned_chars": len(content),
+            }
 
-    return {
+    result = {
         "ok": True,
         "tool": TOOL_NAME,
         "path": path,
@@ -98,6 +115,17 @@ def execute(_repo_root: Path, path: str, start_line: int | None = None, end_line
         "total_lines": total_lines,
         "ranged": ranged,
     }
+    if content_metadata["truncated"]:
+        result["returned_line_ranges"] = [
+            {"start_line": 1, "end_line": head_lines},
+            {"start_line": tail_start, "end_line": total_lines},
+        ]
+        result["truncation_guidance"] = (
+            f"Full-file read truncated to {MAX_FULL_FILE_LINES} of {total_lines} lines; "
+            f"returned lines 1-{head_lines} and {tail_start}-{total_lines}. Use "
+            "start_line and end_line to inspect the missing relevant section."
+        )
+    return result
 
 
 # Validate caller-supplied 1-based inclusive line ranges before reading.
