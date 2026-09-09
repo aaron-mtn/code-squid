@@ -282,6 +282,45 @@ def test_startup_selection_accepts_a_disconnected_provider(
     assert menu.mode == "main"
 
 
+def test_startup_provider_selection_restores_provider_scoped_connection(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    settings_dir = tmp_path / ".code-squid"
+    settings_dir.mkdir()
+    (settings_dir / "settings.json").write_text(
+        json.dumps(
+            {
+                "model": {"provider": "lm_studio", "name": "exact-model-id"},
+                "providers": {
+                    "lm_studio": {"base_url": "http://lan-host:1234/v1"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "code_squid.console.startup_menu.provider_ready",
+        lambda _settings: False,
+    )
+    monkeypatch.setattr(
+        "code_squid.provider_setup.build_provider",
+        lambda _settings: SimpleNamespace(is_ready=lambda: False),
+    )
+    menu = StartupMenu(tmp_path, load_settings(tmp_path))
+
+    for provider_id in ("ollama", "lm_studio"):
+        menu.focus_from_composer()
+        menu.selected_index = MAIN_ROWS.index("Provider")
+        menu.activate()
+        menu.selected_index = menu._options.index(provider_id)
+        menu.activate()
+
+    assert menu.settings.model.provider == "lm_studio"
+    assert menu.settings.model.base_url == "http://lan-host:1234/v1"
+    assert menu.settings.model.name == "exact-model-id"
+
+
 def test_provider_selection_without_explanation_returns_to_focused_main_menu(
     monkeypatch,
     tmp_path,

@@ -61,8 +61,9 @@ and application layer; `squid_core/` is the reusable agent runtime.
     deduplication, and update policy. Reusable Core machinery receives workspace
     paths explicitly and has no knowledge of this product history.
   - `settings.py` reads `.code-squid/settings.json`, validates supported
-    application input, applies product defaults and optional `CODE_SQUID_*`
-    environment overrides, and translates the result to generic Core settings.
+    application input, owns sparse provider-scoped connection persistence,
+    applies product defaults and optional `CODE_SQUID_*` environment overrides,
+    and translates the result to generic Core settings.
   - `console/cli/` owns terminal workflow and control. `cli_options.py` handles
     CLI options and workspace resolution; `cli_commands.py` handles launch-time
     dispatch; `prompt_loop.py` owns the one persistent interpreter used by
@@ -938,12 +939,12 @@ Missing settings are allowed. Defaults keep the CLI usable with LM Studio:
 
 Supported settings sections and fields:
 
-- `model.base_url`
-- `model.api_key`
-- `model.api_key_env`
 - `model.name`
 - `model.provider`
 - `model.temperature`
+- `providers.<provider_id>.base_url`
+- `providers.<provider_id>.api_key`
+- `providers.<provider_id>.api_key_env`
 - `display.debug`
 - `runtime.approval_mode`
 - `runtime.max_tool_steps`
@@ -951,6 +952,18 @@ Supported settings sections and fields:
 - `compaction.enabled`
 - `compaction.trigger_input_tokens`
 - `compaction.keep_recent_turns`
+
+The `providers` mapping is sparse: it contains only connection values a user
+explicitly saved. Switching `model.provider` changes which provider-scoped
+connection is resolved and never removes another provider's entry. Missing
+providers and missing fields inherit the corresponding application-owned
+`ProviderProfile` defaults without writing those defaults to disk. Existing
+flat `model.base_url`, `model.api_key`, and `model.api_key_env` fields remain a
+supported input shape: they are interpreted as belonging to the saved
+`model.provider`, then moved into that provider's scoped entry on the next
+provider selection or connection mutation. A scoped field wins if both shapes
+are present during a partial migration. Model selection remains one exact,
+provider-independent `model.name`.
 
 Supported provider values are `squid_models`, `lm_studio`, `ollama`,
 `openrouter`, and `openai_compatible`. Their shared Code Squid application
@@ -981,10 +994,13 @@ inputs—not the normal user configuration UX. Current overrides are:
 - `CODE_SQUID_DEBUG`
 - `CODE_SQUID_STREAM_ASSISTANT_TEXT`
 
-`CODE_SQUID_API_KEY` wins over `model.api_key_env`, which wins over
-`model.api_key`. OpenRouter defaults `model.api_key_env` to
-`OPENROUTER_API_KEY`. A provider env override uses that provider's profile and
-does not inherit a saved different provider's flat URL or credential.
+`CODE_SQUID_API_KEY` wins over the active provider's saved `api_key_env`, which
+wins over its saved `api_key`; absent saved fields fall back to the profile.
+OpenRouter's profile defaults `api_key_env` to `OPENROUTER_API_KEY`. A provider
+environment override resolves that provider's own saved connection or profile
+defaults and does not inherit another provider's URL or credential. Environment
+values affect only the process's effective settings and are never copied into
+the sparse persisted mapping by loading.
 `CODE_SQUID_STREAM_ASSISTANT_TEXT=1` enables assistant text
 streaming and `0` disables it. There are no compaction environment overrides in
 the current code. Interactive provider and model writes never mutate those

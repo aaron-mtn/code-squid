@@ -1,3 +1,19 @@
+- 2026-09-08: Scoped persisted connection settings by provider. The selected
+  provider and exact model ID remain under `model`, while explicitly saved URL,
+  key, and key-environment fields now live in a sparse `providers.<id>` mapping.
+  Switching through slash commands or the startup picker restores that
+  provider's saved connection without overwriting any other provider; absent
+  fields still use `ProviderProfile` defaults. Legacy flat model connection
+  fields load as the saved provider's values without an eager disk rewrite and
+  migrate naturally on the next provider selection or connection edit.
+  Environment precedence, model selection, disconnected-provider selection,
+  readiness, discovery, inference enforcement, and the Core boundary remain
+  unchanged. Added settings, CLI, and startup regressions. Focused verification:
+  129 passed. Full suite: 961 passed, with the same four pre-existing prompt-
+  policy assertion failures and one pre-existing Windows TTY path-fragment
+  failure documented by the preceding provider work. Production compilation,
+  affected imports, and `git diff --check` passed. No live model inference ran.
+
 - 2026-09-08: Separated provider selection from provider readiness. The shared
   `select_provider` operation now persists the requested provider and applies
   its defaults before probing/reporting readiness, allowing both `/provider

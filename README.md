@@ -110,10 +110,14 @@ like this:
 {
   "model": {
     "provider": "lm_studio",
-    "base_url": "http://127.0.0.1:1234/v1",
-    "api_key": "lm-studio",
     "name": "qwen3.5-9b",
     "temperature": 0
+  },
+  "providers": {
+    "lm_studio": {
+      "base_url": "http://127.0.0.1:1234/v1",
+      "api_key": "lm-studio"
+    }
   },
   "runtime": {
     "approval_mode": "never",
@@ -130,8 +134,11 @@ like this:
 }
 ```
 
-`model.api_key_env` can name an environment variable that contains the API key.
-`CODE_SQUID_API_KEY` overrides both `model.api_key_env` and `model.api_key`.
+Each entry under `providers` contains only that provider's saved connection
+overrides. Missing entries and fields use the built-in provider defaults.
+`providers.<provider>.api_key_env` can name an environment variable containing
+the API key. `CODE_SQUID_API_KEY` overrides both that variable and the saved
+`api_key`.
 
 Supported environment overrides:
 
@@ -156,9 +163,13 @@ server:
 {
   "model": {
     "provider": "lm_studio",
-    "base_url": "http://127.0.0.1:1234/v1",
-    "api_key": "lm-studio",
     "name": "qwen3.5-9b"
+  },
+  "providers": {
+    "lm_studio": {
+      "base_url": "http://127.0.0.1:1234/v1",
+      "api_key": "lm-studio"
+    }
   }
 }
 ```
@@ -166,15 +177,20 @@ server:
 ### OpenRouter
 
 Set `provider` to `openrouter`, use the OpenRouter base URL, and provide an API
-key through `model.api_key`, `model.api_key_env`, or `CODE_SQUID_API_KEY`.
+key through its provider-scoped `api_key`, `api_key_env`, or
+`CODE_SQUID_API_KEY`.
 
 ```json
 {
   "model": {
     "provider": "openrouter",
-    "base_url": "https://openrouter.ai/api/v1",
-    "api_key_env": "OPENROUTER_API_KEY",
     "name": "your-model-name"
+  },
+  "providers": {
+    "openrouter": {
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY"
+    }
   }
 }
 ```
@@ -190,8 +206,12 @@ Set `provider` to `ollama` to use the native Ollama provider:
 {
   "model": {
     "provider": "ollama",
-    "base_url": "http://127.0.0.1:11434",
     "name": "your-tool-capable-model"
+  },
+  "providers": {
+    "ollama": {
+      "base_url": "http://127.0.0.1:11434"
+    }
   }
 }
 ```

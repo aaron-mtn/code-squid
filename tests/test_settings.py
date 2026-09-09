@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from code_squid.settings import load_settings, write_approval_mode
+from code_squid.settings import load_settings, write_approval_mode, write_provider
 
 
 ENV_VARS = [
@@ -59,6 +59,127 @@ def test_ollama_product_default_is_the_native_endpoint(tmp_path: Path) -> None:
     runtime_settings = load_settings(tmp_path).to_runtime_settings()
 
     assert runtime_settings.provider.base_url == "http://127.0.0.1:11434"
+
+
+def test_provider_scoped_settings_fall_back_field_by_field_to_profile_defaults(
+    tmp_path: Path,
+) -> None:
+    write_settings(
+        tmp_path,
+        {
+            "model": {"provider": "lm_studio"},
+            "providers": {
+                "lm_studio": {"base_url": "http://lan-host:1234/v1"},
+            },
+        },
+    )
+
+    settings = load_settings(tmp_path)
+
+    assert settings.model.base_url == "http://lan-host:1234/v1"
+    assert settings.model.api_key == "lm-studio"
+    assert settings.providers == {
+        "lm_studio": {"base_url": "http://lan-host:1234/v1"},
+    }
+
+
+def test_environment_connection_overrides_do_not_mutate_scoped_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    persisted = {
+        "model": {"provider": "openrouter"},
+        "providers": {
+            "openrouter": {
+                "base_url": "https://saved.example/v1",
+                "api_key": "saved-secret",
+                "api_key_env": None,
+            },
+        },
+    }
+    write_settings(tmp_path, persisted)
+    settings_path = tmp_path / ".code-squid" / "settings.json"
+    before = settings_path.read_text(encoding="utf-8")
+    monkeypatch.setenv("CODE_SQUID_BASE_URL", "https://environment.example/v1")
+    monkeypatch.setenv("CODE_SQUID_API_KEY", "environment-secret")
+
+    settings = load_settings(tmp_path)
+
+    assert settings.model.base_url == "https://environment.example/v1"
+    assert settings.model.api_key == "environment-secret"
+    assert settings.providers == persisted["providers"]
+    assert settings_path.read_text(encoding="utf-8") == before
+
+
+def test_provider_environment_override_uses_that_providers_saved_connection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    persisted = {
+        "model": {"provider": "lm_studio"},
+        "providers": {
+            "lm_studio": {"base_url": "http://lm-host:1234/v1"},
+            "openrouter": {
+                "base_url": "https://saved-router.example/v1",
+                "api_key": "saved-router-key",
+            },
+        },
+    }
+    write_settings(tmp_path, persisted)
+    settings_path = tmp_path / ".code-squid" / "settings.json"
+    before = settings_path.read_text(encoding="utf-8")
+    monkeypatch.setenv("CODE_SQUID_PROVIDER", "openrouter")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "router-environment-key")
+
+    settings = load_settings(tmp_path)
+
+    assert settings.model.provider == "openrouter"
+    assert settings.model.base_url == "https://saved-router.example/v1"
+    assert settings.model.api_key == "router-environment-key"
+    assert settings_path.read_text(encoding="utf-8") == before
+
+
+def test_legacy_flat_connection_loads_and_migrates_on_provider_switch(
+    tmp_path: Path,
+) -> None:
+    write_settings(
+        tmp_path,
+        {
+            "model": {
+                "provider": "lm_studio",
+                "name": "exact-model-id",
+                "base_url": "http://legacy-lan:1234/v1",
+                "api_key": "legacy-key",
+                "api_key_env": None,
+            },
+        },
+    )
+
+    legacy = load_settings(tmp_path)
+    assert legacy.model.base_url == "http://legacy-lan:1234/v1"
+    assert legacy.model.api_key == "legacy-key"
+    assert legacy.model.name == "exact-model-id"
+
+    write_provider(tmp_path, "ollama")
+    persisted = json.loads(
+        (tmp_path / ".code-squid" / "settings.json").read_text(encoding="utf-8")
+    )
+    assert persisted == {
+        "model": {"provider": "ollama", "name": "exact-model-id"},
+        "providers": {
+            "lm_studio": {
+                "base_url": "http://legacy-lan:1234/v1",
+                "api_key": "legacy-key",
+                "api_key_env": None,
+            },
+        },
+    }
+
+    write_provider(tmp_path, "lm_studio")
+    restored = load_settings(tmp_path)
+    assert restored.model.base_url == "http://legacy-lan:1234/v1"
+    assert restored.model.api_key == "legacy-key"
+    assert restored.model.name == "exact-model-id"
 
 
 def test_settings_file_overrides_defaults(tmp_path: Path) -> None:

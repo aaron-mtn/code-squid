@@ -111,18 +111,25 @@ def discover_models(settings) -> list[str]:
 def settings_for_provider(settings, provider_id: str):
     """Build a candidate configuration while preserving the exact model ID."""
     profile = PROFILES_BY_ID[provider_id]
+    connection = settings.providers.get(provider_id, {})
+    if (
+        provider_id == settings.model.provider
+        and provider_id not in settings.providers
+    ):
+        # Keep this helper useful for callers that construct Settings directly;
+        # loaded settings always carry their explicit persisted overrides.
+        connection = {
+            "base_url": settings.model.base_url,
+            "api_key": settings.model.api_key,
+            "api_key_env": settings.model.api_key_env,
+        }
     api_key = os.getenv("CODE_SQUID_API_KEY")
-    if api_key is None and provider_id == settings.model.provider:
-        api_key = settings.model.api_key
-    if api_key is None and profile.api_key_env:
-        api_key = os.getenv(profile.api_key_env)
+    api_key_env = connection.get("api_key_env", profile.api_key_env)
+    if api_key is None and api_key_env:
+        api_key = os.getenv(api_key_env)
     if api_key is None:
-        api_key = profile.api_key
-    configured_base_url = (
-        settings.model.base_url
-        if provider_id == settings.model.provider
-        else profile.base_url
-    )
+        api_key = connection.get("api_key", profile.api_key)
+    configured_base_url = connection.get("base_url", profile.base_url)
     base_url = os.getenv("CODE_SQUID_BASE_URL", configured_base_url)
     return replace(
         settings,
@@ -131,7 +138,7 @@ def settings_for_provider(settings, provider_id: str):
             provider=provider_id,
             base_url=base_url,
             api_key=api_key,
-            api_key_env=profile.api_key_env,
+            api_key_env=api_key_env,
         ),
     )
 

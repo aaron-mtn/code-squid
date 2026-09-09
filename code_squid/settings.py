@@ -79,6 +79,9 @@ class Settings:
     display: DisplaySettings
     runtime: RuntimeSettings
     compaction: CompactionSettings = field(default_factory=CompactionSettings)
+    # Only explicitly saved connection fields live here. Missing providers and
+    # fields continue to inherit ProviderProfile defaults at resolution time.
+    providers: dict[str, dict[str, str | None]] = field(default_factory=dict)
 
     def to_runtime_settings(self) -> CoreRuntimeSettings:
         """Translate application configuration into effective Core settings."""
@@ -132,18 +135,20 @@ def _section(settings: dict[str, Any], name: str, settings_path: Path) -> dict[s
 
 
 def _resolve_api_key(
-    model_settings: dict[str, Any],
+    connection_settings: dict[str, Any],
     settings_path: Path,
     *,
     provider: str,
+    field_prefix: str,
 ) -> tuple[str | None, str | None]:
     # Resolve API keys without requiring secrets in .code-squid/settings.json.
     # CODE_SQUID_API_KEY wins over api_key_env, which wins over api_key.
     profile = PROFILES_BY_ID[provider]
-    api_key_env = model_settings.get("api_key_env", profile.api_key_env)
+    api_key_env = connection_settings.get("api_key_env", profile.api_key_env)
     if api_key_env is not None and not isinstance(api_key_env, str):
         raise ValueError(
-            f"Invalid settings JSON in {settings_path}: model.api_key_env must be a string or null"
+            f"Invalid settings JSON in {settings_path}: {field_prefix}.api_key_env "
+            "must be a string or null"
         )
 
     env_api_key = os.getenv("CODE_SQUID_API_KEY")
@@ -154,12 +159,13 @@ def _resolve_api_key(
         api_key = os.getenv(api_key_env)
         if api_key is not None:
             return api_key, api_key_env
-        if "api_key_env" in model_settings:
+        if "api_key_env" in connection_settings:
             raise ValueError(
-                f"Invalid settings JSON in {settings_path}: model.api_key_env names missing environment variable {api_key_env!r}"
+                f"Invalid settings JSON in {settings_path}: {field_prefix}.api_key_env "
+                f"names missing environment variable {api_key_env!r}"
             )
 
-    return model_settings.get("api_key", profile.api_key), api_key_env
+    return connection_settings.get("api_key", profile.api_key), api_key_env
 
 
 def _approval_mode(runtime_settings: dict[str, Any], settings_path: Path) -> str:
@@ -289,6 +295,57 @@ def _provider(model_settings: dict[str, Any], settings_path: Path) -> str:
     return provider
 
 
+_CONNECTION_FIELDS = ("base_url", "api_key", "api_key_env")
+
+
+def _provider_connections(
+    raw_settings: dict[str, Any],
+    model_settings: dict[str, Any],
+    settings_path: Path,
+) -> dict[str, dict[str, str | None]]:
+    """Read scoped connections and interpret legacy flat fields in memory."""
+    raw_providers = _section(raw_settings, "providers", settings_path)
+    providers: dict[str, dict[str, str | None]] = {}
+    for provider_id, value in raw_providers.items():
+        if provider_id not in VALID_PROVIDERS:
+            valid_providers = ", ".join(sorted(VALID_PROVIDERS))
+            raise ValueError(
+                f"Invalid settings JSON in {settings_path}: providers contains "
+                f"unsupported provider {provider_id!r}; expected one of {valid_providers}"
+            )
+        if not isinstance(value, dict):
+            raise ValueError(
+                f"Invalid settings JSON in {settings_path}: providers.{provider_id} "
+                "must be an object"
+            )
+        connection: dict[str, str | None] = {}
+        for name in _CONNECTION_FIELDS:
+            if name not in value:
+                continue
+            field_value = value[name]
+            if field_value is not None and not isinstance(field_value, str):
+                raise ValueError(
+                    f"Invalid settings JSON in {settings_path}: "
+                    f"providers.{provider_id}.{name} must be a string or null"
+                )
+            connection[name] = field_value
+        providers[provider_id] = connection
+
+    saved_provider = model_settings.get("provider", DEFAULT_PROVIDER)
+    if saved_provider in VALID_PROVIDERS:
+        legacy = {
+            name: model_settings[name]
+            for name in _CONNECTION_FIELDS
+            if name in model_settings
+        }
+        if legacy:
+            # Scoped values win field-by-field if a partially migrated file has
+            # both shapes. Loading alone intentionally does not rewrite disk.
+            providers.setdefault(saved_provider, {})
+            providers[saved_provider] = legacy | providers[saved_provider]
+    return providers
+
+
 def load_settings(repo_root: Path) -> Settings:
     settings_path = repo_root / ".code-squid" / "settings.json"
     raw_settings = _read_settings_file(settings_path)
@@ -299,10 +356,8 @@ def load_settings(repo_root: Path) -> Settings:
 
     provider = _provider(model_settings, settings_path)
     profile = PROFILES_BY_ID[provider]
-    saved_provider = model_settings.get("provider", DEFAULT_PROVIDER)
-    # A provider env override must not inherit the saved provider's flat URL or
-    # credential. Explicit CODE_SQUID connection overrides still win below.
-    connection_settings = model_settings if saved_provider == provider else {}
+    providers = _provider_connections(raw_settings, model_settings, settings_path)
+    connection_settings = providers.get(provider, {})
     base_url = os.getenv(
         "CODE_SQUID_BASE_URL",
         connection_settings.get("base_url", profile.base_url),
@@ -311,6 +366,7 @@ def load_settings(repo_root: Path) -> Settings:
         connection_settings,
         settings_path,
         provider=provider,
+        field_prefix=f"providers.{provider}",
     )
     model_name = os.getenv("CODE_SQUID_MODEL", model_settings.get("name", DEFAULT_MODEL_NAME))
     temperature = _temperature(model_settings, settings_path)
@@ -340,6 +396,7 @@ def load_settings(repo_root: Path) -> Settings:
             stream_assistant_text=stream_assistant_text,
         ),
         compaction=compaction,
+        providers=providers,
     )
 
 
@@ -368,14 +425,8 @@ def write_provider(repo_root: Path, provider: str) -> None:
     settings_path = repo_root / ".code-squid" / "settings.json"
     raw_settings = _read_settings_file(settings_path)
     model_settings = _section(raw_settings, "model", settings_path)
-    previous = model_settings.get("provider", DEFAULT_PROVIDER)
+    _migrate_flat_provider_connection(raw_settings, model_settings, settings_path)
     model_settings["provider"] = provider
-    if previous != provider:
-        # Flat connection values belong to the provider that created them.
-        # Removing them on a switch prevents LM Studio defaults or custom
-        # credentials from leaking into another backend.
-        for name in ("base_url", "api_key", "api_key_env"):
-            model_settings.pop(name, None)
     raw_settings["model"] = model_settings
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_json(settings_path, raw_settings)
@@ -391,10 +442,56 @@ def write_model_name(repo_root: Path, model_name: str) -> None:
 
 
 def write_model_value(repo_root: Path, name: str, value: Any) -> None:
-    """Persist one supported connection value without exposing it."""
+    """Persist one connection value for the saved provider without exposing it."""
     if name not in {"base_url", "api_key", "api_key_env"}:
         raise ValueError(f"unsupported model setting: {name}")
-    _write_model_value(repo_root, name, value)
+    settings_path = repo_root / ".code-squid" / "settings.json"
+    raw_settings = _read_settings_file(settings_path)
+    model_settings = _section(raw_settings, "model", settings_path)
+    provider = model_settings.get("provider", DEFAULT_PROVIDER)
+    if provider not in VALID_PROVIDERS:
+        valid_providers = ", ".join(sorted(VALID_PROVIDERS))
+        raise ValueError(f"provider must be one of {valid_providers}")
+
+    providers = _migrate_flat_provider_connection(
+        raw_settings,
+        model_settings,
+        settings_path,
+    )
+    connection = providers.setdefault(provider, {})
+    connection[name] = value
+    raw_settings["providers"] = providers
+    raw_settings["model"] = model_settings
+
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(settings_path, raw_settings)
+
+
+def _migrate_flat_provider_connection(
+    raw_settings: dict[str, Any],
+    model_settings: dict[str, Any],
+    settings_path: Path,
+) -> dict[str, Any]:
+    """Move legacy flat connection fields under their saved provider."""
+    providers = _section(raw_settings, "providers", settings_path)
+    provider = model_settings.get("provider", DEFAULT_PROVIDER)
+    legacy = {
+        name: model_settings.pop(name)
+        for name in _CONNECTION_FIELDS
+        if name in model_settings
+    }
+    if legacy and provider in VALID_PROVIDERS:
+        existing = providers.get(provider, {})
+        if not isinstance(existing, dict):
+            raise ValueError(
+                f"Invalid settings JSON in {settings_path}: providers.{provider} "
+                "must be an object"
+            )
+        # A scoped field is authoritative in a partially migrated settings file.
+        providers[provider] = legacy | existing
+    if providers:
+        raw_settings["providers"] = providers
+    return providers
 
 
 def _write_model_value(repo_root: Path, name: str, value: Any) -> None:

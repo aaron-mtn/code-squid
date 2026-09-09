@@ -258,7 +258,9 @@ def test_disconnected_lm_studio_can_be_selected_then_configured(
     assert configured.model.provider == "lm_studio"
     assert configured.model.base_url == "http://localhost:4321/v1"
     assert persisted["model"]["provider"] == "lm_studio"
-    assert persisted["model"]["base_url"] == "http://localhost:4321/v1"
+    assert persisted["providers"]["lm_studio"]["base_url"] == (
+        "http://localhost:4321/v1"
+    )
     assert "LM Studio is not connected." in output
     assert "Provider set to: LM Studio" in output
     assert "Provider: LM Studio" in output
@@ -277,9 +279,92 @@ def test_provider_key_is_persisted_but_never_echoed(tmp_path, capsys) -> None:
     persisted = json.loads(
         (tmp_path / ".code-squid" / "settings.json").read_text(encoding="utf-8")
     )
-    assert persisted["model"]["api_key"] == secret
+    assert persisted["providers"]["lm_studio"]["api_key"] == secret
     assert secret not in output
     assert "API key saved" in output
+
+
+def test_provider_connections_survive_switching_and_mutate_only_the_active_provider(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "code_squid.provider_setup.build_provider",
+        lambda _settings: SimpleNamespace(is_ready=lambda: False),
+    )
+
+    handle_runtime_command(
+        tmp_path,
+        "/provider url http://192.168.0.24:1234/v1",
+        load_settings(tmp_path),
+    )
+    handle_runtime_command(
+        tmp_path,
+        "/provider key lm-secret",
+        load_settings(tmp_path),
+    )
+    handle_runtime_command(
+        tmp_path,
+        "/provider use OpenRouter",
+        load_settings(tmp_path),
+    )
+    handle_runtime_command(
+        tmp_path,
+        "/provider key router-secret",
+        load_settings(tmp_path),
+    )
+    handle_runtime_command(
+        tmp_path,
+        "/provider url https://router.example/v1",
+        load_settings(tmp_path),
+    )
+    handle_runtime_command(
+        tmp_path,
+        "/provider use Ollama",
+        load_settings(tmp_path),
+    )
+
+    ollama = load_settings(tmp_path)
+    assert ollama.model.base_url == "http://127.0.0.1:11434"
+    assert ollama.model.api_key is None
+
+    handle_runtime_command(
+        tmp_path,
+        "/provider use LM Studio",
+        ollama,
+    )
+    lm_studio = load_settings(tmp_path)
+    assert lm_studio.model.base_url == "http://192.168.0.24:1234/v1"
+    assert lm_studio.model.api_key == "lm-secret"
+
+    handle_runtime_command(
+        tmp_path,
+        "/provider use OpenRouter",
+        lm_studio,
+    )
+    openrouter = load_settings(tmp_path)
+    assert openrouter.model.base_url == "https://router.example/v1"
+    assert openrouter.model.api_key == "router-secret"
+    assert openrouter.model.api_key_env is None
+
+    persisted = json.loads(
+        (tmp_path / ".code-squid" / "settings.json").read_text(encoding="utf-8")
+    )
+    assert persisted["model"] == {
+        "provider": "openrouter",
+    }
+    assert persisted["providers"] == {
+        "lm_studio": {
+            "base_url": "http://192.168.0.24:1234/v1",
+            "api_key": "lm-secret",
+            "api_key_env": None,
+        },
+        "openrouter": {
+            "api_key": "router-secret",
+            "api_key_env": None,
+            "base_url": "https://router.example/v1",
+        },
+    }
 
 
 def test_provider_url_and_status_report_safe_effective_configuration(
