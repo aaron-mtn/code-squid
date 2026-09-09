@@ -190,6 +190,58 @@ def test_candidate_selection_ignores_redundant_patch_text(tmp_path: Path) -> Non
     assert target.read_text(encoding="utf-8") == "stored replacement different same"
 
 
+@pytest.mark.parametrize("match_id", ["unknown", ""])
+def test_unusable_candidate_id_with_complete_normal_args_uses_exact_patch(
+    tmp_path: Path,
+    match_id: str,
+) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("before", encoding="utf-8")
+    undo_store = FakeUndoStore()
+    executor = ToolExecutor(
+        tmp_path,
+        Session(repo_root=tmp_path),
+        undo_store=undo_store,
+    )
+
+    result = executor.execute(
+        {
+            "tool": "apply_patch",
+            "args": {
+                "match_id": match_id,
+                "path": str(target),
+                "old_text": "before",
+                "new_text": "after",
+            },
+        }
+    )
+
+    assert result["ok"] is True
+    assert "match_id" not in result
+    assert target.read_text(encoding="utf-8") == "after"
+    assert undo_store.paths == [str(target)]
+    assert undo_store.contents == ["before"]
+
+
+@pytest.mark.parametrize("match_id", ["unknown", ""])
+def test_unusable_candidate_id_without_complete_normal_args_is_unavailable(
+    tmp_path: Path,
+    match_id: str,
+) -> None:
+    executor = ToolExecutor(tmp_path, Session(repo_root=tmp_path))
+
+    result = executor.execute(
+        {"tool": "apply_patch", "args": {"match_id": match_id}}
+    )
+
+    assert result == {
+        "ok": False,
+        "tool": "apply_patch",
+        "error": "patch_candidate_unavailable",
+        "match_id": match_id,
+    }
+
+
 def test_candidate_selection_rejects_conflicting_redundant_path(tmp_path: Path) -> None:
     target = tmp_path / "target.txt"
     other = tmp_path / "other.txt"

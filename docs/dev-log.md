@@ -1,3 +1,11 @@
+- 2026-09-09: Refined `apply_patch` argument precedence so a known stored
+  `match_id` remains authoritative, while an empty or unknown string ID is
+  ignored when complete normal patch arguments are present. Incomplete calls
+  with unusable IDs retain `patch_candidate_unavailable`; exact matching,
+  candidate revalidation, path conflicts, invalidation, diagnostics, and undo
+  behavior are unchanged. Focused executor tests, affected-module compilation,
+  and `git diff --check` passed.
+
 - 2026-09-09: Added the thin interactive `/compact-at <tokens>` command over
   the existing application compaction setting. Plain integers and exact `k`
   shorthand, including decimals such as `28.5k`, normalize to a positive

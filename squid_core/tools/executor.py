@@ -1,3 +1,5 @@
+"""Dispatch built-in tools with workspace and undo lifecycle safeguards."""
+
 from pathlib import Path
 
 from squid_core.platform_context import PlatformContext
@@ -50,10 +52,21 @@ class ToolExecutor:
             }
 
         boundary_action = action
-        if (
+        normal_patch_args_complete = all(
+            isinstance(args.get(name), str)
+            for name in ("path", "old_text", "new_text")
+        )
+        stored_patch_candidate = (
             tool["execute"] is BUILTIN_APPLY_PATCH
             and isinstance(args.get("match_id"), str)
-        ):
+            and self.patch_candidates.get(args["match_id"]) is not None
+        )
+        candidate_selection = stored_patch_candidate or (
+            tool["execute"] is BUILTIN_APPLY_PATCH
+            and isinstance(args.get("match_id"), str)
+            and not normal_patch_args_complete
+        )
+        if candidate_selection:
             # Candidate selection is pathless semantically. A redundant caller path
             # is checked against the stored target by apply_patch, not trusted here.
             boundary_action = {**action, "args": {"match_id": args["match_id"]}}
@@ -71,10 +84,7 @@ class ToolExecutor:
         provisional_snapshot_path = None
         try:
             if self.undo_store is not None and tool_name in {"write_file", "apply_patch"}:
-                if (
-                    tool["execute"] is BUILTIN_APPLY_PATCH
-                    and isinstance(args.get("match_id"), str)
-                ):
+                if candidate_selection:
                     # The retained candidate stays authoritative even when the model
                     # redundantly supplies a path in the selection call.
                     path = self.patch_candidates.path_for(args["match_id"])

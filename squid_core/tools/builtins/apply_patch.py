@@ -137,16 +137,23 @@ def execute(
     if match_id is not None:
         if not isinstance(match_id, str):
             return _invalid_arguments("match_id must be a string.")
-        return _apply_candidate(match_id, path, candidate_store)
+        candidate = None if candidate_store is None else candidate_store.get(match_id)
+        if candidate is not None:
+            return _apply_candidate(match_id, path, candidate_store)
 
     supplied_normal_fields = (
         path is not None,
         old_text is not None,
         new_text is not None,
     )
-    if not all(supplied_normal_fields) or not all(
+    valid_normal_fields = all(supplied_normal_fields) and all(
         isinstance(value, str) for value in (path, old_text, new_text)
-    ):
+    )
+    if not valid_normal_fields:
+        # An unusable string ID retains the stable candidate error unless the
+        # request is independently valid as an ordinary exact patch.
+        if isinstance(match_id, str):
+            return _apply_candidate(match_id, path, candidate_store)
         return _invalid_arguments(
             "Provide path, old_text, and new_text together, or provide match_id alone."
         )

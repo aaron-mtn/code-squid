@@ -40,6 +40,7 @@ BASELINE_CODING_POLICY = """
 - For browser or UI work, accurately state what was and was not actually run or manually verified.
 - When the coding task is complete, stop working and report the result concisely and precisely.
 - For coding tasks, identify the changed files, summarize the change, and state the verification performed and any concrete limitations.
+- For existing files, focused edits must use apply_patch. Treat write_file as full-file replacement, not as an alternate patching method.
 """.strip()
 
 
@@ -84,10 +85,14 @@ TOOL_USAGE_GUIDANCE = """
 
 ### Writing files
 
-- Use write_file for new files or deliberate full-file replacement.
-- Do not fall back to full-file write_file merely because apply_patch failed.
-- Only replace an existing file in full when that is appropriate for the task and you have read enough current content to avoid unintentionally discarding unrelated code.
-- Do not use run_command to work around a dedicated file-editing tool failure unless shell behavior is genuinely required by the task.
+- Use write_file primarily for creating new files.
+- For an existing file, prefer apply_patch for any focused or partial edit.
+- write_file replaces the entire file contents. It does not merge with the existing file.
+- Never use write_file to modify only part of an existing file.
+- Never reconstruct an existing file from a read_file result, especially if the read was truncated.
+- A truncated read is not sufficient context for full-file replacement.
+- Do not switch to write_file because apply_patch is difficult or failed.
+- Only use write_file on an existing file when the task intentionally requires replacing the complete file and you have the complete current contents or the old contents are intentionally being discarded.
 
 ### Commands and project discovery
 

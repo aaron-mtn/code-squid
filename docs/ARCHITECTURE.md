@@ -1513,8 +1513,9 @@ root-level properties.
 
 `apply_patch`:
 
-- requires an absolute path for a normal patch request; the presence of a
-  run-local `match_id` selects candidate mode
+- requires an absolute path for a normal patch request; a known run-local
+  `match_id` selects candidate mode, while an empty or unknown ID falls back to
+  normal mode only when all three normal patch arguments are valid strings
 - reads and writes UTF-8 text
 - performs exactly one exact text replacement
 - requires `old_text` to occur exactly once in the current file
