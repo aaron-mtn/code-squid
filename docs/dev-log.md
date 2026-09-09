@@ -1,3 +1,12 @@
+- 2026-09-09: Added the thin interactive `/compact-at <tokens>` command over
+  the existing application compaction setting. Plain integers and exact `k`
+  shorthand, including decimals such as `28.5k`, normalize to a positive
+  integer `compaction.trigger_input_tokens`; invalid input prints concise
+  guidance without writing settings. No model context-limit discovery or
+  automatic compaction behavior changed. The focused runtime-command suite
+  passed 34 tests; settings/help checks passed 56 tests; affected-module
+  compilation and `git diff --check` also passed.
+
 - 2026-09-09: Made `apply_patch` candidate recovery tolerate redundant normal
   fields whenever `match_id` is present. Stored candidate text and replacement
   remain authoritative, a redundant path must identify the same target, and

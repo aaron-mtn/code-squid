@@ -309,6 +309,71 @@ def test_runtime_commands_write_only_application_settings(tmp_path, monkeypatch)
     assert not (tmp_path / ".code-squid" / "settings.json").exists()
 
 
+@pytest.mark.parametrize(
+    ("value", "expected_tokens", "expected_confirmation"),
+    (
+        ("30000", 30_000, "Compaction trigger set to 30k tokens."),
+        ("30k", 30_000, "Compaction trigger set to 30k tokens."),
+        ("28.5k", 28_500, "Compaction trigger set to 28.5k tokens."),
+    ),
+)
+def test_compact_at_normalizes_persists_and_confirms(
+    tmp_path,
+    capsys,
+    value,
+    expected_tokens,
+    expected_confirmation,
+) -> None:
+    settings_path = _write_settings(
+        tmp_path,
+        {
+            "display": {"debug": True},
+            "compaction": {"enabled": False, "keep_recent_turns": 4},
+        },
+    )
+
+    handled, settings = handle_runtime_command(
+        tmp_path,
+        f"/compact-at {value}",
+        load_settings(tmp_path),
+    )
+
+    persisted = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert handled is True
+    assert settings.compaction.trigger_input_tokens == expected_tokens
+    assert persisted["compaction"] == {
+        "enabled": False,
+        "keep_recent_turns": 4,
+        "trigger_input_tokens": expected_tokens,
+    }
+    assert persisted["display"] == {"debug": True}
+    assert expected_confirmation in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "command",
+    ("/compact-at", "/compact-at banana", "/compact-at -5k", "/compact-at 0"),
+)
+def test_compact_at_rejects_missing_malformed_and_non_positive_values(
+    tmp_path,
+    capsys,
+    command,
+) -> None:
+    current = load_settings(tmp_path)
+
+    handled, settings = handle_runtime_command(tmp_path, command, current)
+
+    assert handled is True
+    assert (
+        settings.compaction.trigger_input_tokens
+        == current.compaction.trigger_input_tokens
+    )
+    assert not settings_path().exists()
+    output = capsys.readouterr().out
+    assert ("Usage: /compact-at" in output) == (command == "/compact-at")
+    assert ("Invalid token count" in output) == (command != "/compact-at")
+
+
 def test_provider_connections_survive_switching_and_mutate_only_the_active_provider(
     tmp_path,
     monkeypatch,

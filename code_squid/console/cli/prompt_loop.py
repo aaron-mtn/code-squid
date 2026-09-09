@@ -80,6 +80,7 @@ Runtime:
   /provider status shows effective setup without exposing secrets.
   /model shows the effective model; /model <name> selects its exact ID.
   /safety shows or changes the safety mode (strict, balanced, yolo).
+  /compact-at <tokens> sets the automatic compaction trigger (for example, 30k).
 
 Sessions and workspace:
   /sessions lists saved sessions for this workspace.

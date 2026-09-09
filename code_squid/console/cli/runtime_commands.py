@@ -1,7 +1,9 @@
-"""Interactive provider, model, and safety commands for Code Squid."""
+"""Interactive runtime settings commands for Code Squid."""
 
+from decimal import Decimal, InvalidOperation
 import os
 from pathlib import Path
+import re
 
 from code_squid.console.ui.banner import FRIENDLY_APPROVAL_MODES
 from code_squid.provider_setup import (
@@ -19,8 +21,10 @@ from code_squid.settings import (
     Settings,
     load_settings,
     write_approval_mode,
+    write_compaction_trigger_input_tokens,
     write_provider,
 )
+from squid_core.compaction.compaction_status import format_token_count
 
 
 SAFETY_MODES = {
@@ -55,19 +59,63 @@ def handle_runtime_command(
     """Handle one runtime settings command and return current effective settings."""
 
     parts = command.strip().split()
-    if not parts or parts[0] not in {"/provider", "/model", "/safety"}:
+    if not parts or parts[0] not in {
+        "/provider",
+        "/model",
+        "/safety",
+        "/compact-at",
+    }:
         return False, settings
 
     if parts[0] == "/provider":
         _handle_provider(repo_root, parts[1:])
     elif parts[0] == "/model":
         _handle_model(repo_root, parts[1:])
-    else:
+    elif parts[0] == "/safety":
         _handle_safety(repo_root, parts[1:])
+    else:
+        _handle_compact_at(repo_root, parts[1:])
 
     # Reloading keeps later runs current without adding mutable settings state
     # or a settings-manager lifecycle to this deliberately small CLI.
     return True, load_settings(repo_root)
+
+
+def _handle_compact_at(repo_root: Path, args: list[str]) -> None:
+    """Parse and persist the input-token threshold for automatic compaction."""
+
+    if len(args) != 1:
+        print("Usage: /compact-at <tokens> (for example: 30000, 30k, or 28.5k)")
+        return
+
+    tokens = _parse_token_count(args[0])
+    if tokens is None:
+        print(
+            "Invalid token count. Use a positive value such as "
+            "30000, 30k, or 28.5k."
+        )
+        return
+
+    write_compaction_trigger_input_tokens(repo_root, tokens)
+    print(f"Compaction trigger set to {format_token_count(tokens)} tokens.")
+
+
+def _parse_token_count(value: str) -> int | None:
+    """Return an integer token count from digits or exact ``k`` shorthand."""
+
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)(k)?", value, flags=re.IGNORECASE)
+    if match is None or ("." in match.group(1) and match.group(2) is None):
+        return None
+
+    try:
+        tokens = Decimal(match.group(1))
+        if match.group(2) is not None:
+            tokens *= 1000
+        if tokens != tokens.to_integral_value() or tokens <= 0:
+            return None
+        return int(tokens)
+    except (InvalidOperation, ValueError):
+        return None
 
 
 def _handle_provider(repo_root: Path, args: list[str]) -> None:

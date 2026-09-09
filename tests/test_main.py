@@ -382,6 +382,7 @@ def test_help_text_lists_current_interactive_commands() -> None:
         "/provider",
         "/model",
         "/safety",
+        "/compact-at",
         "/sessions",
         "/show",
         "/resume",

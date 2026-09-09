@@ -438,6 +438,19 @@ def write_approval_mode(repo_root: Path, approval_mode: str) -> None:
     atomic_write_json(settings_path, raw_settings)
 
 
+def write_compaction_trigger_input_tokens(repo_root: Path, tokens: int) -> None:
+    """Persist the automatic compaction trigger without replacing its peers."""
+
+    settings_path, raw_settings = _read_application_settings(repo_root)
+    tokens = _positive_int(tokens, "compaction.trigger_input_tokens", settings_path)
+    compaction_settings = _section(raw_settings, "compaction", settings_path)
+    compaction_settings["trigger_input_tokens"] = tokens
+    raw_settings["compaction"] = compaction_settings
+
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(settings_path, raw_settings)
+
+
 def write_provider(repo_root: Path, provider: str) -> None:
     """Persist one supported provider without replacing unrelated settings."""
 

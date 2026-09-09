@@ -886,6 +886,10 @@ Inside the interactive CLI:
 - `/safety` shows the friendly safety mode; `/safety strict`,
   `/safety balanced`, and `/safety yolo` persist the corresponding internal
   approval mode.
+- `/compact-at <tokens>` accepts a positive integer or `k` shorthand, persists
+  the normalized integer as `compaction.trigger_input_tokens`, and reloads the
+  same settings object used to construct later Core runs. It does not discover
+  or validate model context limits.
 - `/sessions` lists workspace sessions, while `/show`, `/show current`,
   `/show latest`, and `/show <session_id>` reuse the saved-session renderer.
 - `/resume latest` and `/resume <session_id>` switch the active session without
@@ -1073,11 +1077,12 @@ the current code. Interactive provider and model writes never mutate those
 environment variables: the saved value is reported separately when
 `CODE_SQUID_PROVIDER` or `CODE_SQUID_MODEL` remains the effective override.
 
-The interactive loop reloads settings after `/provider`, `/model`, and
-`/safety`, so the next new or follow-up run in the same process receives the
-new effective settings. The small field-specific writers preserve unrelated
-JSON settings. Workspace switching reloads that same application file while
-rebuilding only workspace-bound session, undo, display, and discovery state.
+The interactive loop reloads settings after `/provider`, `/model`, `/safety`,
+and `/compact-at`, so the next new or follow-up run in the same process receives
+the new effective settings. The small field-specific writers preserve
+unrelated JSON settings. Workspace switching reloads that same application
+file while rebuilding only workspace-bound session, undo, display, and
+discovery state.
 
 Invalid settings JSON, invalid section shapes, invalid provider names, unknown
 approval modes, missing configured API-key environment variables, invalid
