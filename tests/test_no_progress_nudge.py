@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from squid_core.hooks import RepeatedFailureNudge
+from squid_core.hooks import HookResponse, RepeatedFailureNudge
 
 
 GUIDANCE = "Choose a materially different next action."
@@ -19,8 +19,8 @@ def _failure(
     *,
     args: dict | None = None,
     error: str = "not_found",
-) -> None:
-    hook.tool_result(
+) -> HookResponse | None:
+    return hook.tool_result(
         _Context(
             action={"tool": "edit", "args": args or {"path": "a.py", "old": "x"}},
             result={"ok": False, "error": error},
@@ -28,28 +28,18 @@ def _failure(
     )
 
 
-def _next_nudge(hook: RepeatedFailureNudge):
-    return hook.before_model_turn(_Context())
-
-
 def test_one_failure_does_not_trigger_a_nudge() -> None:
     hook = RepeatedFailureNudge(GUIDANCE)
 
-    _failure(hook)
-
-    assert _next_nudge(hook) is None
+    assert _failure(hook) is None
 
 
 def test_three_equivalent_failures_trigger_one_transient_nudge() -> None:
     hook = RepeatedFailureNudge(GUIDANCE)
 
-    for _ in range(3):
-        _failure(hook)
-
-    nudge = _next_nudge(hook)
-    assert nudge is not None
-    assert nudge.body == GUIDANCE
-    assert _next_nudge(hook) is None
+    assert _failure(hook) is None
+    assert _failure(hook) is None
+    assert _failure(hook) == HookResponse(additional_context=GUIDANCE)
 
 
 def test_materially_changed_retry_breaks_the_repetition_pattern() -> None:
@@ -59,7 +49,7 @@ def test_materially_changed_retry_breaks_the_repetition_pattern() -> None:
     _failure(hook, args={"path": "a.py", "old": "more specific x"})
     _failure(hook)
 
-    assert _next_nudge(hook) is None
+    assert _failure(hook) is None
 
 
 def test_different_inspections_and_successful_verification_do_not_trigger() -> None:
@@ -73,7 +63,12 @@ def test_different_inspections_and_successful_verification_do_not_trigger() -> N
             )
         )
 
-    assert _next_nudge(hook) is None
+    assert hook.tool_result(
+        _Context(
+            action={"tool": "read", "args": {"path": "a.py", "start": 60}},
+            result={"ok": True, "output": "current content"},
+        )
+    ) is None
 
 
 def test_successful_progress_resets_a_failure_streak() -> None:
@@ -89,7 +84,7 @@ def test_successful_progress_resets_a_failure_streak() -> None:
     )
     _failure(hook)
 
-    assert _next_nudge(hook) is None
+    assert _failure(hook) is None
 
 
 def test_changed_failure_category_breaks_the_repetition_pattern() -> None:
@@ -99,14 +94,15 @@ def test_changed_failure_category_breaks_the_repetition_pattern() -> None:
     _failure(hook, error="permission_denied")
     _failure(hook)
 
-    assert _next_nudge(hook) is None
+    assert _failure(hook) is None
 
 
 def test_a_nudge_requires_a_fresh_threshold_before_repeating() -> None:
     hook = RepeatedFailureNudge(GUIDANCE)
-    for _ in range(3):
-        _failure(hook)
-    assert _next_nudge(hook) is not None
+    assert _failure(hook) is None
+    assert _failure(hook) is None
+    assert _failure(hook) is not None
 
-    _failure(hook)
-    assert _next_nudge(hook) is None
+    assert _failure(hook) is None
+    assert _failure(hook) is None
+    assert _failure(hook) is not None

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .runner import PromptContextBlock
+from .runner import HookResponse
 
 
 DEFAULT_REPEATED_FAILURE_THRESHOLD = 3
@@ -24,7 +24,6 @@ class RepeatedFailureNudge:
         guidance: str,
         *,
         threshold: int = DEFAULT_REPEATED_FAILURE_THRESHOLD,
-        title: str = "No-progress guidance",
         source: str = "runtime",
     ) -> None:
         if threshold < 2:
@@ -32,17 +31,17 @@ class RepeatedFailureNudge:
 
         self.guidance = guidance
         self.threshold = threshold
-        self.title = title
+        # Hosts inspect Hook sources as configuration metadata. It no longer
+        # participates in prompt rendering now that nudges are plain guidance.
         self.source = source
         self._fingerprint: tuple[str, str, str] | None = None
         self._repeat_count = 0
-        self._nudge_pending = False
 
     def before_run(self, _ctx) -> None:
         """Start each run with an empty, run-local repetition history."""
         self._reset()
 
-    def tool_result(self, ctx) -> None:
+    def tool_result(self, ctx) -> HookResponse | None:
         """Observe the final result that will be exposed to the model."""
         fingerprint = _failed_action_fingerprint(ctx.action, ctx.result)
         if fingerprint is None:
@@ -56,23 +55,16 @@ class RepeatedFailureNudge:
             self._repeat_count = 1
 
         if self._repeat_count >= self.threshold:
-            self._nudge_pending = True
+            # A nudge is an opportunity to recover, not a latched warning.
+            # Another nudge requires a complete new threshold of failures.
+            self._reset()
+            return HookResponse(additional_context=self.guidance)
 
-    def before_model_turn(self, _ctx) -> PromptContextBlock | None:
-        """Return one transient nudge, then allow a fresh recovery window."""
-        if not self._nudge_pending:
-            return None
-
-        block = PromptContextBlock(self.title, self.guidance, self.source)
-        # A nudge is an opportunity to recover, not a permanently latched warning.
-        # Another nudge requires a complete new threshold of repeated failures.
-        self._reset()
-        return block
+        return None
 
     def _reset(self) -> None:
         self._fingerprint = None
         self._repeat_count = 0
-        self._nudge_pending = False
 
 
 def _failed_action_fingerprint(

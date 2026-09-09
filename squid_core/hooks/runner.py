@@ -79,32 +79,18 @@ class RunFinishedContext:
 
 
 @dataclass(frozen=True)
-class RunHookDecision:
+class HookResponse:
+    """Describe effects requested by a hook at any lifecycle seam."""
+
     block: bool = False
     reason: str = ""
     guidance: str = ""
     context_blocks: tuple[PromptContextBlock, ...] = ()
-
-
-@dataclass(frozen=True)
-class ToolHookDecision:
-    block: bool = False
-    reason: str = ""
-    guidance: str = ""
     action: dict[str, Any] | None = None
     approval_reason: str = ""
-
-
-@dataclass(frozen=True)
-class FinalHookDecision:
-    block: bool = False
-    reason: str = ""
-    guidance: str = ""
+    updated_tool_output: dict[str, Any] | None = None
+    additional_context: str = ""
     report_note: str = ""
-
-
-@dataclass(frozen=True)
-class RunFinishedDecision:
     follow_up_requests: tuple[FollowUpRunRequest, ...] = ()
     notes: tuple[str, ...] = ()
 
@@ -113,7 +99,7 @@ class HookRunner:
     def __init__(self, hooks: list[object] | None = None) -> None:
         self.hooks = hooks or []
 
-    def before_run(self, ctx: BeforeRunContext) -> RunHookDecision:
+    def before_run(self, ctx: BeforeRunContext) -> HookResponse:
         context_blocks: list[PromptContextBlock] = []
 
         for hook in self.hooks:
@@ -127,16 +113,16 @@ class HookRunner:
 
             context_blocks.extend(decision.context_blocks)
             if decision.block:
-                return RunHookDecision(
+                return HookResponse(
                     block=True,
                     reason=decision.reason,
                     guidance=decision.guidance,
                     context_blocks=tuple(context_blocks),
                 )
 
-        return RunHookDecision(context_blocks=tuple(context_blocks))
+        return HookResponse(context_blocks=tuple(context_blocks))
 
-    def before_model_turn(self, ctx: BeforeModelTurnContext) -> list[PromptContextBlock]:
+    def before_model_turn(self, ctx: BeforeModelTurnContext) -> HookResponse:
         context_blocks: list[PromptContextBlock] = []
 
         for hook in self.hooks:
@@ -144,15 +130,15 @@ class HookRunner:
             if handler is None:
                 continue
 
-            result = handler(ctx)
-            if result is None:
+            response = handler(ctx)
+            if response is None:
                 continue
 
-            context_blocks.extend(_prompt_context_blocks(result))
+            context_blocks.extend(response.context_blocks)
 
-        return context_blocks
+        return HookResponse(context_blocks=tuple(context_blocks))
 
-    def before_tool_execute(self, ctx: BeforeToolExecuteContext) -> ToolHookDecision:
+    def before_tool_execute(self, ctx: BeforeToolExecuteContext) -> HookResponse:
         action = ctx.action
         approval_reasons: list[str] = []
 
@@ -175,7 +161,7 @@ class HookRunner:
             if decision.approval_reason:
                 approval_reasons.append(decision.approval_reason)
             if decision.block:
-                return ToolHookDecision(
+                return HookResponse(
                     block=True,
                     reason=decision.reason,
                     guidance=decision.guidance,
@@ -189,20 +175,21 @@ class HookRunner:
             if decision.action is not None:
                 action = _preserve_tool_call_id(action, decision.action)
 
-        return ToolHookDecision(
+        return HookResponse(
             action=action,
             approval_reason="; ".join(approval_reasons),
         )
 
-    def tool_result(self, ctx: ToolResultContext) -> dict[str, Any]:
+    def tool_result(self, ctx: ToolResultContext) -> HookResponse:
         result = ctx.result
+        additional_context: list[str] = []
 
         for hook in self.hooks:
             handler = getattr(hook, "tool_result", None)
             if handler is None:
                 continue
 
-            hook_result = handler(
+            response = handler(
                 ToolResultContext(
                     session_id=ctx.session_id,
                     repo_root=ctx.repo_root,
@@ -210,14 +197,20 @@ class HookRunner:
                     result=result,
                 )
             )
-            if hook_result is None:
+            if response is None:
                 continue
 
-            result = hook_result
+            if response.updated_tool_output is not None:
+                result = response.updated_tool_output
+            if response.additional_context:
+                additional_context.append(response.additional_context)
 
-        return result
+        return HookResponse(
+            updated_tool_output=result,
+            additional_context="\n\n".join(additional_context),
+        )
 
-    def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> FinalHookDecision:
+    def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> HookResponse:
         report_notes: list[str] = []
 
         for hook in self.hooks:
@@ -232,16 +225,16 @@ class HookRunner:
             if decision.report_note:
                 report_notes.append(decision.report_note)
             if decision.block:
-                return FinalHookDecision(
+                return HookResponse(
                     block=True,
                     reason=decision.reason,
                     guidance=decision.guidance,
                     report_note="\n\n".join(report_notes),
                 )
 
-        return FinalHookDecision(report_note="\n\n".join(report_notes))
+        return HookResponse(report_note="\n\n".join(report_notes))
 
-    def run_finished(self, ctx: RunFinishedContext) -> RunFinishedDecision:
+    def run_finished(self, ctx: RunFinishedContext) -> HookResponse:
         follow_up_requests: list[FollowUpRunRequest] = []
         notes: list[str] = []
 
@@ -257,21 +250,10 @@ class HookRunner:
             follow_up_requests.extend(decision.follow_up_requests)
             notes.extend(decision.notes)
 
-        return RunFinishedDecision(
+        return HookResponse(
             follow_up_requests=tuple(follow_up_requests),
             notes=tuple(notes),
         )
-
-
-def _prompt_context_blocks(value: object) -> tuple[PromptContextBlock, ...]:
-    if isinstance(value, PromptContextBlock):
-        return (value,)
-
-    if isinstance(value, (list, tuple)):
-        return tuple(value)
-
-    return ()
-
 
 def _preserve_tool_call_id(previous: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
     if "tool_call_id" not in previous:

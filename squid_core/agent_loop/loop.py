@@ -24,10 +24,10 @@ from squid_core.hooks import (
     BeforeRunContext,
     BeforeToolExecuteContext,
     FollowUpRunRequest,
+    HookResponse,
     HookRunner,
     PromptContextBlock,
     RunFinishedContext,
-    RunFinishedDecision,
     ToolResultContext,
 )
 from squid_core.safety import ActionPreflight, ApprovalPolicy, denied_result
@@ -117,7 +117,7 @@ class AgentLoop:
         reason: str = "",
         final_message: str = "",
         tool_steps_used: int = 0,
-    ) -> RunFinishedDecision:
+    ) -> HookResponse:
         return self.hook_runner.run_finished(
             RunFinishedContext(
                 session_id=self._session_id(),
@@ -135,7 +135,7 @@ class AgentLoop:
 
     def _hook_notes_from_decision(
         self,
-        decision: RunFinishedDecision,
+        decision: HookResponse,
     ) -> tuple[str, ...]:
         return tuple(
             note
@@ -331,7 +331,7 @@ class AgentLoop:
                 # Ask the model for the next assistant reply and any tool actions.
                 self.display.thinking()
                 self._check_cancelled()
-                turn_context_blocks = self.hook_runner.before_model_turn(
+                turn_context = self.hook_runner.before_model_turn(
                     BeforeModelTurnContext(
                         session_id=self._session_id(),
                         repo_root=str(self.session.repo_root),
@@ -343,7 +343,7 @@ class AgentLoop:
                 context_message = turn_context_message(
                     [
                         *self._run_context_blocks,
-                        *turn_context_blocks,
+                        *turn_context.context_blocks,
                     ]
                 )
                 extra_messages = [
@@ -561,7 +561,7 @@ class AgentLoop:
                             pending_tool_result = result
                             if decision.instruction.strip():
                                 approval_instructions.append(decision.instruction)
-                    result = self.hook_runner.tool_result(
+                    tool_result_response = self.hook_runner.tool_result(
                         ToolResultContext(
                             session_id=self._session_id(),
                             repo_root=str(self.session.repo_root),
@@ -569,6 +569,15 @@ class AgentLoop:
                             result=result,
                         )
                     )
+                    result = tool_result_response.updated_tool_output
+                    # Hook guidance uses the same one-request-only path as other
+                    # runtime corrections and never enters canonical history.
+                    if tool_result_response.additional_context:
+                        pending_runtime_messages.append(
+                            user_instruction_message(
+                                tool_result_response.additional_context
+                            )
+                        )
                     pending_tool_result = result
                     self.display.tool_result(approval_action, result)
                     self._check_cancelled()

@@ -4,15 +4,12 @@ from squid_core.hooks import (
     BeforeModelTurnContext,
     BeforeRunContext,
     BeforeToolExecuteContext,
-    FinalHookDecision,
     FollowUpRunRequest,
     HookRunner,
+    HookResponse,
     PromptContextBlock,
     RepeatedFailureNudge,
     RunFinishedContext,
-    RunFinishedDecision,
-    RunHookDecision,
-    ToolHookDecision,
     ToolResultContext,
 )
 from squid_core.session import Session
@@ -218,14 +215,52 @@ def test_hook_runner_noop_returns_empty_decisions() -> None:
         RunFinishedContext(session_id=None, repo_root="", status="complete")
     )
 
-    assert before_run == RunHookDecision()
-    assert before_model_turn == []
-    assert before_tool_execute == ToolHookDecision(
+    assert before_run == HookResponse()
+    assert before_model_turn == HookResponse()
+    assert before_tool_execute == HookResponse(
         action={"tool": "read_file"},
         approval_reason="",
     )
-    assert before_accept_final == FinalHookDecision()
-    assert run_finished == RunFinishedDecision()
+    assert before_accept_final == HookResponse()
+    assert run_finished == HookResponse()
+
+
+def test_before_run_aggregates_context_and_carries_it_into_a_block() -> None:
+    first = PromptContextBlock("First", "One")
+    second = PromptContextBlock("Second", "Two")
+    calls: list[str] = []
+
+    class FirstHook:
+        def before_run(self, ctx: BeforeRunContext) -> HookResponse:
+            calls.append("first")
+            return HookResponse(context_blocks=(first,))
+
+    class BlockingHook:
+        def before_run(self, ctx: BeforeRunContext) -> HookResponse:
+            calls.append("block")
+            return HookResponse(
+                block=True,
+                reason="stop",
+                guidance="change course",
+                context_blocks=(second,),
+            )
+
+    class LaterHook:
+        def before_run(self, ctx: BeforeRunContext) -> HookResponse:
+            calls.append("later")
+            return HookResponse()
+
+    response = HookRunner([FirstHook(), BlockingHook(), LaterHook()]).before_run(
+        BeforeRunContext(None, "", "")
+    )
+
+    assert calls == ["first", "block"]
+    assert response == HookResponse(
+        block=True,
+        reason="stop",
+        guidance="change course",
+        context_blocks=(first, second),
+    )
 
 
 def test_run_finished_aggregates_follow_ups_and_notes_in_hook_order() -> None:
@@ -236,8 +271,8 @@ def test_run_finished_aggregates_follow_ups_and_notes_in_hook_order() -> None:
     )
 
     class FirstHook:
-        def run_finished(self, ctx: RunFinishedContext) -> RunFinishedDecision:
-            return RunFinishedDecision(
+        def run_finished(self, ctx: RunFinishedContext) -> HookResponse:
+            return HookResponse(
                 follow_up_requests=(first_request,),
                 notes=("first note",),
             )
@@ -247,8 +282,8 @@ def test_run_finished_aggregates_follow_ups_and_notes_in_hook_order() -> None:
             return None
 
     class SecondHook:
-        def run_finished(self, ctx: RunFinishedContext) -> RunFinishedDecision:
-            return RunFinishedDecision(
+        def run_finished(self, ctx: RunFinishedContext) -> HookResponse:
+            return HookResponse(
                 follow_up_requests=(second_request,),
                 notes=("second note",),
             )
@@ -264,21 +299,27 @@ def test_run_finished_aggregates_follow_ups_and_notes_in_hook_order() -> None:
 def test_before_accept_final_block_stops_later_hooks() -> None:
     calls = []
 
+    class NoteHook:
+        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> HookResponse:
+            calls.append("note")
+            return HookResponse(report_note="first note")
+
     class BlockingHook:
-        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> FinalHookDecision:
+        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> HookResponse:
             calls.append("block")
-            return FinalHookDecision(
+            return HookResponse(
                 block=True,
                 reason="blocked",
-                report_note="first note",
+                guidance="continue",
+                report_note="second note",
             )
 
     class LaterHook:
-        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> FinalHookDecision:
+        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> HookResponse:
             calls.append("later")
-            return FinalHookDecision()
+            return HookResponse()
 
-    decision = HookRunner([BlockingHook(), LaterHook()]).before_accept_final(
+    decision = HookRunner([NoteHook(), BlockingHook(), LaterHook()]).before_accept_final(
         BeforeAcceptFinalContext(
             session_id=None,
             repo_root="",
@@ -287,11 +328,12 @@ def test_before_accept_final_block_stops_later_hooks() -> None:
         )
     )
 
-    assert calls == ["block"]
-    assert decision == FinalHookDecision(
+    assert calls == ["note", "block"]
+    assert decision == HookResponse(
         block=True,
         reason="blocked",
-        report_note="first note",
+        guidance="continue",
+        report_note="first note\n\nsecond note",
     )
 
 
@@ -299,8 +341,8 @@ def test_before_run_block_fails_without_calling_model() -> None:
     events = []
 
     class BlockingHook:
-        def before_run(self, ctx: BeforeRunContext) -> RunHookDecision:
-            return RunHookDecision(block=True, reason="blocked")
+        def before_run(self, ctx: BeforeRunContext) -> HookResponse:
+            return HookResponse(block=True, reason="blocked")
 
     loop, _, model_adapter, session_store, _ = build_loop(
         hook_runner=HookRunner([BlockingHook()]),
@@ -328,14 +370,14 @@ def test_run_finished_complete_receives_context_after_final_is_stored() -> None:
             self.contexts = []
             self.session_store = None
 
-        def run_finished(self, ctx: RunFinishedContext) -> RunFinishedDecision:
+        def run_finished(self, ctx: RunFinishedContext) -> HookResponse:
             self.contexts.append(ctx)
             assert self.session_store.statuses == []
             assert self.session_store.messages[-1] == {
                 "role": "assistant",
                 "content": "TASK COMPLETE",
             }
-            return RunFinishedDecision(follow_up_requests=(request,))
+            return HookResponse(follow_up_requests=(request,))
 
     hook = FinishedHook()
     loop, _, _, session_store, _ = build_loop(hook_runner=HookRunner([hook]))
@@ -359,7 +401,7 @@ def test_run_finished_failure_marks_otherwise_successful_run_failed() -> None:
         def __init__(self) -> None:
             self.calls = 0
 
-        def run_finished(self, ctx: RunFinishedContext) -> RunFinishedDecision:
+        def run_finished(self, ctx: RunFinishedContext) -> HookResponse:
             self.calls += 1
             assert ctx.status == "complete"
             raise RuntimeError("notification unavailable")
@@ -392,8 +434,8 @@ def test_run_finished_failure_marks_otherwise_successful_run_failed() -> None:
 
 def test_run_finished_notes_are_carried_on_run_result() -> None:
     class FinishedHook:
-        def run_finished(self, ctx: RunFinishedContext) -> RunFinishedDecision:
-            return RunFinishedDecision(notes=("first note", "", "  ", "second note"))
+        def run_finished(self, ctx: RunFinishedContext) -> HookResponse:
+            return HookResponse(notes=("first note", "", "  ", "second note"))
 
     loop, _, _, _, _ = build_loop(hook_runner=HookRunner([FinishedHook()]))
 
@@ -409,13 +451,13 @@ def test_run_finished_before_run_failure_receives_reason_and_returns_follow_up()
     request = FollowUpRunRequest(task="Ask user whether to continue.")
 
     class BlockingHook:
-        def before_run(self, ctx: BeforeRunContext) -> RunHookDecision:
-            return RunHookDecision(block=True, reason="blocked")
+        def before_run(self, ctx: BeforeRunContext) -> HookResponse:
+            return HookResponse(block=True, reason="blocked")
 
-        def run_finished(self, ctx: RunFinishedContext) -> RunFinishedDecision:
+        def run_finished(self, ctx: RunFinishedContext) -> HookResponse:
             assert ctx.status == "failed"
             assert ctx.reason == "blocked"
-            return RunFinishedDecision(follow_up_requests=(request,))
+            return HookResponse(follow_up_requests=(request,))
 
     loop, _, _, _, _ = build_loop(hook_runner=HookRunner([BlockingHook()]))
 
@@ -435,9 +477,9 @@ def test_run_finished_interrupted_returns_follow_up() -> None:
         def __init__(self) -> None:
             self.contexts = []
 
-        def run_finished(self, ctx: RunFinishedContext) -> RunFinishedDecision:
+        def run_finished(self, ctx: RunFinishedContext) -> HookResponse:
             self.contexts.append(ctx)
-            return RunFinishedDecision(follow_up_requests=(request,))
+            return HookResponse(follow_up_requests=(request,))
 
     hook = FinishedHook()
     loop, _, model_adapter, session_store, _ = build_loop(
@@ -465,15 +507,15 @@ def test_agent_loop_final_hook_blocks_and_retries_without_storing_final() -> Non
         def __init__(self) -> None:
             self.contents = []
 
-        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> FinalHookDecision:
+        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> HookResponse:
             self.contents.append(ctx.content)
             if ctx.content == "not enough yet":
-                return FinalHookDecision(
+                return HookResponse(
                     block=True,
                     reason="missing verification",
                     guidance="Run the verification before finalizing.",
                 )
-            return FinalHookDecision()
+            return HookResponse()
 
     hook = BlockingOnceHook()
     model_adapter = SequenceModelAdapter(
@@ -522,9 +564,9 @@ def test_agent_loop_final_hook_allows_existing_final_behavior() -> None:
     seen = []
 
     class AllowingHook:
-        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> FinalHookDecision:
+        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> HookResponse:
             seen.append(ctx)
-            return FinalHookDecision()
+            return HookResponse()
 
     loop, session, _, _, _ = build_loop(hook_runner=HookRunner([AllowingHook()]))
     session.mark_file_read("b.txt")
@@ -562,9 +604,9 @@ def test_before_accept_final_does_not_run_for_invalid_no_tool_reply() -> None:
         def __init__(self) -> None:
             self.contents = []
 
-        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> FinalHookDecision:
+        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> HookResponse:
             self.contents.append(ctx.content)
-            return FinalHookDecision()
+            return HookResponse()
 
     hook = RecordingHook()
     model_adapter = SequenceModelAdapter(
@@ -602,8 +644,8 @@ def test_before_accept_final_does_not_run_for_invalid_no_tool_reply() -> None:
 
 def test_before_accept_final_report_note_is_appended_once() -> None:
     class NoteHook:
-        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> FinalHookDecision:
-            return FinalHookDecision(report_note="Report note.")
+        def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> HookResponse:
+            return HookResponse(report_note="Report note.")
 
     loop, session, _, _, _ = build_loop(hook_runner=HookRunner([NoteHook()]))
 
@@ -621,8 +663,8 @@ def test_before_run_block_uses_guidance_when_reason_is_empty() -> None:
     events = []
 
     class BlockingHook:
-        def before_run(self, ctx: BeforeRunContext) -> RunHookDecision:
-            return RunHookDecision(block=True, guidance="Fix setup first.")
+        def before_run(self, ctx: BeforeRunContext) -> HookResponse:
+            return HookResponse(block=True, guidance="Fix setup first.")
 
     loop, _, _, _, _ = build_loop(
         hook_runner=HookRunner([BlockingHook()]),
@@ -637,9 +679,9 @@ def test_before_run_block_uses_guidance_when_reason_is_empty() -> None:
 
 def test_before_run_context_is_visible_to_model_but_not_persisted() -> None:
     class ContextHook:
-        def before_run(self, ctx: BeforeRunContext) -> RunHookDecision:
+        def before_run(self, ctx: BeforeRunContext) -> HookResponse:
             assert ctx.allowed_tools == ("read_file", "run_command")
-            return RunHookDecision(
+            return HookResponse(
                 context_blocks=(
                     PromptContextBlock("Run Hint", "Use the narrow path.", "test"),
                 )
@@ -668,9 +710,13 @@ def test_before_run_context_is_visible_to_model_but_not_persisted() -> None:
 
 def test_before_model_turn_context_is_visible_to_model_but_not_persisted() -> None:
     class TurnHook:
-        def before_model_turn(self, ctx: BeforeModelTurnContext) -> PromptContextBlock:
+        def before_model_turn(self, ctx: BeforeModelTurnContext) -> HookResponse:
             assert ctx.tool_steps_used == 0
-            return PromptContextBlock("Turn Hint", "Check the current transcript.")
+            return HookResponse(
+                context_blocks=(
+                    PromptContextBlock("Turn Hint", "Check the current transcript."),
+                )
+            )
 
     loop, session, model_adapter, session_store, _ = build_loop(
         hook_runner=HookRunner([TurnHook()])
@@ -690,28 +736,23 @@ def test_before_model_turn_context_is_visible_to_model_but_not_persisted() -> No
     assert model_messages[-1] not in session_store.messages
 
 
-def test_before_model_turn_ignores_context_blocks_attribute_shape() -> None:
-    class ContextCarrier:
-        context_blocks = (PromptContextBlock("Ignored", "Do not include this."),)
+def test_before_model_turn_aggregates_context_blocks_in_hook_order() -> None:
+    first = PromptContextBlock("First", "One")
+    second = PromptContextBlock("Second", "Two")
 
-    class TurnHook:
-        def before_model_turn(self, ctx: BeforeModelTurnContext) -> ContextCarrier:
-            return ContextCarrier()
+    class FirstHook:
+        def before_model_turn(self, ctx: BeforeModelTurnContext) -> HookResponse:
+            return HookResponse(context_blocks=(first,))
 
-    loop, session, model_adapter, _, _ = build_loop(
-        hook_runner=HookRunner([TurnHook()])
+    class SecondHook:
+        def before_model_turn(self, ctx: BeforeModelTurnContext) -> HookResponse:
+            return HookResponse(context_blocks=(second,))
+
+    response = HookRunner([FirstHook(), SecondHook()]).before_model_turn(
+        BeforeModelTurnContext(None, "", "", (), 0)
     )
 
-    result = loop.run()
-
-    assert result == RunResult(status="complete")
-    assert model_adapter.calls[0]["messages"] == [
-        {"role": "system", "content": "system"}
-    ]
-    assert session.messages == [
-        {"role": "system", "content": "system"},
-        {"role": "assistant", "content": "TASK COMPLETE"},
-    ]
+    assert response.context_blocks == (first, second)
 
 
 def test_no_hook_runner_keeps_basic_loop_behavior() -> None:
@@ -776,22 +817,27 @@ def test_repeated_failure_nudge_reaches_model_without_blocking_tool_calls() -> N
     assert result == RunResult(status="complete")
     assert executor.actions == [action, action, action]
     assert "Change course." in model_adapter.calls[3]["messages"][-1]["content"]
+    assert all(
+        "Change course." not in str(call["messages"])
+        for call in model_adapter.calls[:3]
+    )
+    assert all("Change course." not in str(message) for message in session.messages)
 
 
 def test_before_tool_execute_mutation_chains_to_later_hooks() -> None:
     seen = []
 
     class MutatingHook:
-        def before_tool_execute(self, ctx: BeforeToolExecuteContext) -> ToolHookDecision:
-            return ToolHookDecision(
+        def before_tool_execute(self, ctx: BeforeToolExecuteContext) -> HookResponse:
+            return HookResponse(
                 action={**ctx.action, "args": {"path": "changed.txt"}},
                 approval_reason="needs review",
             )
 
     class SeeingHook:
-        def before_tool_execute(self, ctx: BeforeToolExecuteContext) -> ToolHookDecision:
+        def before_tool_execute(self, ctx: BeforeToolExecuteContext) -> HookResponse:
             seen.append(ctx.action)
-            return ToolHookDecision(approval_reason="second reason")
+            return HookResponse(approval_reason="second reason")
 
     decision = HookRunner([MutatingHook(), SeeingHook()]).before_tool_execute(
         BeforeToolExecuteContext(
@@ -810,41 +856,61 @@ def test_before_tool_execute_mutation_chains_to_later_hooks() -> None:
 def test_before_tool_execute_block_stops_later_hooks() -> None:
     calls = []
 
+    class MutatingHook:
+        def before_tool_execute(self, ctx: BeforeToolExecuteContext) -> HookResponse:
+            calls.append("mutate")
+            return HookResponse(
+                action={"tool": "read_file", "args": {"path": "changed.txt"}},
+                approval_reason="first reason",
+            )
+
     class BlockingHook:
-        def before_tool_execute(self, ctx: BeforeToolExecuteContext) -> ToolHookDecision:
+        def before_tool_execute(self, ctx: BeforeToolExecuteContext) -> HookResponse:
             calls.append("block")
-            return ToolHookDecision(block=True, reason="blocked")
+            assert ctx.action["tool_call_id"] == "call_1"
+            return HookResponse(
+                block=True,
+                reason="blocked",
+                action={"tool": "read_file", "args": {"path": "blocked.txt"}},
+                approval_reason="second reason",
+            )
 
     class LaterHook:
-        def before_tool_execute(self, ctx: BeforeToolExecuteContext) -> ToolHookDecision:
+        def before_tool_execute(self, ctx: BeforeToolExecuteContext) -> HookResponse:
             calls.append("later")
-            return ToolHookDecision()
+            return HookResponse()
 
-    decision = HookRunner([BlockingHook(), LaterHook()]).before_tool_execute(
+    decision = HookRunner([MutatingHook(), BlockingHook(), LaterHook()]).before_tool_execute(
         BeforeToolExecuteContext(
             session_id=None,
             repo_root="",
-            action={"tool": "read_file"},
+            action={"tool": "read_file", "tool_call_id": "call_1"},
             tool_steps_used=0,
         )
     )
 
-    assert calls == ["block"]
+    assert calls == ["mutate", "block"]
     assert decision.block is True
     assert decision.reason == "blocked"
+    assert decision.action == {
+        "tool": "read_file",
+        "args": {"path": "blocked.txt"},
+        "tool_call_id": "call_1",
+    }
+    assert decision.approval_reason == "first reason; second reason"
 
 
 def test_tool_result_mutation_chains_to_later_hooks() -> None:
     seen = []
 
     class FirstHook:
-        def tool_result(self, ctx: ToolResultContext) -> dict:
-            return {**ctx.result, "first": True}
+        def tool_result(self, ctx: ToolResultContext) -> HookResponse:
+            return HookResponse(updated_tool_output={**ctx.result, "first": True})
 
     class SecondHook:
-        def tool_result(self, ctx: ToolResultContext) -> dict:
+        def tool_result(self, ctx: ToolResultContext) -> HookResponse:
             seen.append(ctx.result)
-            return {**ctx.result, "second": True}
+            return HookResponse(updated_tool_output={**ctx.result, "second": True})
 
     result = HookRunner([FirstHook(), SecondHook()]).tool_result(
         ToolResultContext(
@@ -856,15 +922,36 @@ def test_tool_result_mutation_chains_to_later_hooks() -> None:
     )
 
     assert seen == [{"ok": True, "first": True}]
-    assert result == {"ok": True, "first": True, "second": True}
+    assert result.updated_tool_output == {
+        "ok": True,
+        "first": True,
+        "second": True,
+    }
+
+
+def test_tool_result_aggregates_additional_context_in_hook_order() -> None:
+    class FirstHook:
+        def tool_result(self, ctx: ToolResultContext) -> HookResponse:
+            return HookResponse(additional_context="First hint.")
+
+    class SecondHook:
+        def tool_result(self, ctx: ToolResultContext) -> HookResponse:
+            return HookResponse(additional_context="Second hint.")
+
+    response = HookRunner([FirstHook(), SecondHook()]).tool_result(
+        ToolResultContext(None, "", {"tool": "read_file"}, {"ok": True})
+    )
+
+    assert response.updated_tool_output == {"ok": True}
+    assert response.additional_context == "First hint.\n\nSecond hint."
 
 
 def test_agent_loop_tool_started_uses_mutated_tool_action() -> None:
     events = []
 
     class MutatingHook:
-        def before_tool_execute(self, ctx: BeforeToolExecuteContext) -> ToolHookDecision:
-            return ToolHookDecision(
+        def before_tool_execute(self, ctx: BeforeToolExecuteContext) -> HookResponse:
+            return HookResponse(
                 action={
                     **ctx.action,
                     "args": {"path": "changed.txt"},
@@ -906,9 +993,9 @@ def test_agent_loop_tool_hook_blocks_execution() -> None:
     events = []
 
     class BlockingHook:
-        def before_tool_execute(self, ctx: BeforeToolExecuteContext) -> ToolHookDecision:
+        def before_tool_execute(self, ctx: BeforeToolExecuteContext) -> HookResponse:
             assert ctx.action == {"tool": "read_file", "tool_call_id": "call_1"}
-            return ToolHookDecision(block=True)
+            return HookResponse(block=True)
 
     loop, _, _, _, tool_executor = build_loop(
         hook_runner=HookRunner([BlockingHook()]),

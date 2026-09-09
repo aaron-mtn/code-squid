@@ -456,9 +456,17 @@ resolution. `AgentLoop` calls supported hook methods directly as the run
 progresses.
 
 Hooks are deliberately narrower than passing whole runtime objects around. They
-receive typed context dataclasses and return structured decisions or context.
-They should not receive `AgentLoop`, `SessionStore`, `ToolExecutor`, or
-`ModelAdapter` instances.
+receive event-specific context dataclasses and return `HookResponse | None` at
+every lifecycle seam. `HookResponse` is the single effect vocabulary for
+blocking, context, action/result transformations, report notes, and run-finished
+handoffs. They should not receive `AgentLoop`, `SessionStore`, `ToolExecutor`,
+or `ModelAdapter` instances.
+
+`HookRunner` invokes Hooks in registration order, applies chaining and
+aggregation rules, and returns one aggregate `HookResponse`. `AgentLoop` owns
+the actual runtime effects, including transcript/session persistence and where
+transient model context is inserted. Hooks never mutate canonical messages,
+session history, or the system prompt directly.
 
 Events:
 
@@ -491,16 +499,8 @@ Runs before each model request.
 Can add transient prompt/context blocks. This context is model-visible for that
 request, but is not appended to `session.messages` and is not persisted.
 
-Code Squid wires Core's small `RepeatedFailureNudge` Hook at this seam. The
-generic Hook keeps only an exact action fingerprint, failure category, repeat
-count, and pending flag. Three consecutive failures must have the same Tool,
-the same JSON arguments, and the same scalar `error`; success, an uncategorized
-failure, or any changed action/category resets the streak. Once triggered, its
-context appears on the next model request and the state resets, so another
-nudge requires three fresh equivalent failures. It never blocks, rewrites, or
-retries a Tool action. Squid Core owns this detection mechanism while
-`code_squid.agent_setup` owns the guidance wording and enables it for Code
-Squid runs.
+Hooks contribute prompt blocks through `HookResponse.context_blocks`; there is
+no separate return convention for this event.
 
 ### before_tool_execute
 
@@ -517,7 +517,26 @@ as tool actions.
 Runs after a tool result exists, including executed, denied, or blocked results,
 before display/events/transcript formatting.
 
-Can modify, redact, or summarize the result before the model sees it.
+Can modify, redact, or summarize the result explicitly through
+`HookResponse.updated_tool_output`. Transformations chain in registration order.
+Hooks may also return `additional_context`; the runner joins contributions in
+registration order and the loop injects them as a transient user-instruction
+message for exactly the next model request. That guidance is not appended to
+canonical `session.messages`, persisted, or added to the system prompt. The
+final transformed Tool result continues through normal display and transcript
+persistence.
+
+Code Squid wires Core's small `RepeatedFailureNudge` Hook at this seam. The
+generic Hook keeps only an exact action fingerprint, failure category, and
+repeat count. Three consecutive failures must have the same Tool, the same JSON
+arguments, and the same scalar `error`; success, an uncategorized failure, or
+any changed action/category resets the streak. At the threshold it returns the
+recovery wording directly as `HookResponse.additional_context` and immediately
+resets, so another nudge requires three fresh equivalent failures. It never
+blocks, rewrites, or retries a Tool action. Squid Core owns this detection
+mechanism while `code_squid.agent_setup` owns the guidance wording and enables
+it for Code Squid runs. Its `source` remains configuration metadata used by
+hosts; it no longer controls prompt rendering.
 
 ### before_accept_final
 

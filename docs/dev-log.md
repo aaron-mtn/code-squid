@@ -1,3 +1,21 @@
+- 2026-09-09: Consolidated all lifecycle Hook return values into the frozen
+  `HookResponse` dataclass while retaining event-specific input contexts and
+  the existing runner/loop ownership boundary. `before_model_turn` now uses the
+  same response contract as every other seam; Tool-result replacements are
+  explicit through `updated_tool_output`; and ordered `additional_context`
+  guidance uses the loop's existing one-request-only runtime-message path
+  without entering canonical or persisted transcript history. Migrated the
+  repeated-failure nudge to emit guidance directly from `tool_result`, removed
+  its pending cross-event bridge and unused title, and retained `source` only
+  because hosts use it as Hook configuration metadata. Added focused coverage
+  for every aggregation/chaining/blocking seam, explicit result replacement,
+  nudge reset behavior, and transient-versus-persisted loop behavior. Focused
+  Hook, agent-loop, runner-wiring, and Mod coverage passed 121 tests. Full-suite
+  verification passed 983 tests and retained five pre-existing failures: four
+  stale prompt-policy phrase assertions and one Windows TTY path-fragment
+  assertion. Production/test compilation and `git diff --check` passed. No
+  live model inference ran.
+
 - 2026-09-08: Changed full-file `read_file` truncation from the shared
   12,000-character helper to a dedicated 1,000-line limit. Files through the
   limit are returned unchanged; larger files return 500 head and 500 tail lines

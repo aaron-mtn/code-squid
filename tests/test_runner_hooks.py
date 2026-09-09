@@ -13,7 +13,7 @@ from squid_core.hooks import (
     BeforeRunContext,
     PromptContextBlock,
     RepeatedFailureNudge,
-    RunHookDecision,
+    HookResponse,
 )
 from code_squid.agent_setup import (
     NO_PROGRESS_GUIDANCE,
@@ -82,8 +82,8 @@ class ManualContextHook:
     def __init__(self, marker: str = "MANUAL_MARKER") -> None:
         self.marker = marker
 
-    def before_run(self, ctx: BeforeRunContext) -> RunHookDecision:
-        return RunHookDecision(
+    def before_run(self, ctx: BeforeRunContext) -> HookResponse:
+        return HookResponse(
             context_blocks=(
                 PromptContextBlock("Manual Hook", self.marker, "manual"),
             )
@@ -122,12 +122,12 @@ version: 1
     )
     (hook_dir / "hook.py").write_text(
         f"""
-from squid_core.hooks import PromptContextBlock, RunHookDecision
+from squid_core.hooks import PromptContextBlock, HookResponse
 
 
 class DiskContextHook:
     def before_run(self, ctx):
-        return RunHookDecision(
+        return HookResponse(
             context_blocks=(
                 PromptContextBlock("Disk Hook", {marker!r}, "user"),
             )

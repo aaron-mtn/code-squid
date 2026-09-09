@@ -8,7 +8,7 @@ from code_squid.agent.coding import CodingAgent
 from squid_core.safety import ActionPreflightDecision
 from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.safety import ApprovalDecision, ApprovalPolicy
-from squid_core.hooks import HookRunner
+from squid_core.hooks import HookResponse, HookRunner, ToolResultContext
 from squid_core.session import Session
 from squid_core.tools import ToolResults
 from squid_core.storage import SessionStore
@@ -1711,6 +1711,58 @@ def test_hook_preflight_execution_and_result_order_is_preserved(tmp_path) -> Non
         "execute:read_file",
         "tool_result",
     ]
+
+
+def test_tool_result_context_is_transient_and_updated_output_is_persisted(
+    tmp_path,
+) -> None:
+    guidance = "Use the new result to choose a different action."
+
+    class ResultHook:
+        def tool_result(self, context: ToolResultContext) -> HookResponse:
+            return HookResponse(
+                updated_tool_output={**context.result, "hook_updated": True},
+                additional_context=guidance,
+            )
+
+    session = Session(repo_root=tmp_path)
+    session_store = FakeSessionStore()
+    model_adapter = FakeModelAdapter(
+        [
+            tool_call_reply("call_1"),
+            reply("TASK COMPLETE"),
+        ]
+    )
+    loop = AgentLoop(
+        session=session,
+        model_adapter=model_adapter,
+        tool_executor=FakeToolExecutor(repo_root=tmp_path),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        session_store=session_store,
+        hook_runner=HookRunner([ResultHook()]),
+    )
+
+    result = loop.run()
+
+    assert result == RunResult(status="complete")
+    assert guidance not in str(model_adapter.message_requests[0])
+    assert model_adapter.message_requests[1][-1] == {
+        "role": "user",
+        "content": guidance,
+    }
+    assert guidance not in str(session.messages)
+    assert guidance not in str(session_store.messages)
+
+    tool_messages = [message for message in session.messages if message["role"] == "tool"]
+    assert len(tool_messages) == 1
+    assert json.loads(tool_messages[0]["content"]) == {
+        "ok": True,
+        "tool": "read_file",
+        "hook_updated": True,
+    }
+    assert tool_messages[0] in [entry["message"] for entry in session_store.messages]
 
 
 def test_always_still_asks_for_every_tool(tmp_path) -> None:
