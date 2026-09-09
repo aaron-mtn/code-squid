@@ -1471,8 +1471,14 @@ The protected built-in Tool surface is:
 
 - `read_file(path, start_line=None, end_line=None)`
 - `write_file(path, content)`
-- `apply_patch(path, old_text, new_text)`
+- `apply_patch(path, old_text, new_text)` or candidate selection with `match_id`
 - `run_command(command)`
+
+The `apply_patch` JSON schema declares all four arguments in the top-level
+object `properties`; its `anyOf` branches carry only the two alternative
+required-field sets. This permits candidate-selection retries to repeat normal
+fields while remaining acceptable to OpenAI-compatible providers that require
+root-level properties.
 
 `read_file`:
 
@@ -1502,15 +1508,27 @@ The protected built-in Tool surface is:
 
 `apply_patch`:
 
-- requires an absolute path
+- requires an absolute path for a normal patch request; the presence of a
+  run-local `match_id` selects candidate mode
 - reads and writes UTF-8 text
 - performs exactly one exact text replacement
 - requires `old_text` to occur exactly once in the current file
 - fails without modifying the file when `old_text` is missing or not unique
 - reports up to three bounded line-context records when `old_text` is not
-  unique
+  unique, with a distinct selectable candidate ID for each reported occurrence
 - searches same-sized line windows with a conservative similarity threshold
-  when `old_text` is missing; this diagnostic never changes mutation semantics
+  when `old_text` is missing; an above-threshold diagnostic is exposed as one
+  selectable candidate without changing the threshold or matching algorithm
+- retains candidate path, original request text, exact candidate text, and
+  original character offset only in the current run's `ToolExecutor`
+- resolves candidate selection by re-reading the file and requiring the stored
+  exact candidate text at its original offset; stale or unavailable IDs fail
+  without searching for a substitute
+- accepts a redundant path only when it identifies the stored target and ignores
+  redundant old and new text so stored candidate values remain authoritative
+- invalidates all outstanding candidates for a file after any successful
+  `write_file` or `apply_patch` mutation of that file, while other-file and
+  failed mutations leave them available
 - returns affected before/after line ranges plus the existing compact
   character-count metadata after a successful replacement
 - is preferred for small localized edits to existing files
@@ -1521,6 +1539,10 @@ The protected built-in Tool surface is:
 Built-in Tool schema descriptions contain only mechanical purpose, appropriate
 use, and argument/behavior constraints. Agent narration and workflow guidance
 remain owned by the Agent prompt rather than the Tool subsystem.
+
+Candidate selection resolves diagnostic ambiguity. Mutation remains exact and
+revalidated; line numbers, context, and similarity are never authoritative for
+editing.
 
 `run_command`:
 

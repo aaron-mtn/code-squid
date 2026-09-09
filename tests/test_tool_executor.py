@@ -1,6 +1,8 @@
 from pathlib import Path
 import sys
 
+import pytest
+
 from squid_core.session import Session
 import squid_core.tools.executor as tool_executor_module
 from squid_core.tools import ToolExecutor
@@ -35,6 +37,27 @@ class FakeUndoStore:
         if Path(path).read_text(encoding="utf-8") != self.contents[position]:
             return False
         return self.discard_snapshot(path)
+
+
+def _patch(executor: ToolExecutor, path: Path, old_text: str, new_text: str) -> dict:
+    """Issue a normal apply_patch action through the run-local executor."""
+    return executor.execute(
+        {
+            "tool": "apply_patch",
+            "args": {
+                "path": str(path),
+                "old_text": old_text,
+                "new_text": new_text,
+            },
+        }
+    )
+
+
+def _select(executor: ToolExecutor, match_id: str) -> dict:
+    """Select one diagnostic candidate without reconstructing the patch."""
+    return executor.execute(
+        {"tool": "apply_patch", "args": {"match_id": match_id}}
+    )
 
 
 def test_write_file_snapshots_target_before_write(tmp_path: Path) -> None:
@@ -83,6 +106,273 @@ def test_successful_apply_patch_snapshots_and_records_file_written(tmp_path: Pat
     assert session.files_written == {str(target)}
     assert undo_store.paths == [str(target)]
     assert undo_store.contents == ["before"]
+
+
+def test_unique_apply_patch_remains_backward_compatible(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("before middle after", encoding="utf-8")
+    executor = ToolExecutor(tmp_path, Session(repo_root=tmp_path))
+
+    result = _patch(executor, target, "middle", "center")
+
+    assert result["ok"] is True
+    assert "candidates" not in result
+    assert target.read_text(encoding="utf-8") == "before center after"
+
+
+@pytest.mark.parametrize(
+    ("candidate_index", "expected"),
+    [
+        (0, "changed different same"),
+        (1, "same different changed"),
+    ],
+)
+def test_duplicate_candidate_selection_edits_only_selected_occurrence(
+    tmp_path: Path,
+    candidate_index: int,
+    expected: str,
+) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("same different same", encoding="utf-8")
+    executor = ToolExecutor(tmp_path, Session(repo_root=tmp_path))
+
+    diagnostic = _patch(executor, target, "same", "changed")
+
+    assert diagnostic["error"] == "old_text_not_unique"
+    assert [candidate["match_id"] for candidate in diagnostic["candidates"]] == [
+        "m1",
+        "m2",
+    ]
+    result = _select(executor, diagnostic["candidates"][candidate_index]["match_id"])
+    assert result["ok"] is True
+    assert target.read_text(encoding="utf-8") == expected
+
+
+def test_candidate_selection_accepts_matching_redundant_path(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("same different same", encoding="utf-8")
+    executor = ToolExecutor(tmp_path, Session(repo_root=tmp_path))
+    diagnostic = _patch(executor, target, "same", "stored replacement")
+
+    result = executor.execute(
+        {
+            "tool": "apply_patch",
+            "args": {
+                "match_id": diagnostic["candidates"][0]["match_id"],
+                "path": str(target),
+            },
+        }
+    )
+
+    assert result["ok"] is True
+    assert target.read_text(encoding="utf-8") == "stored replacement different same"
+
+
+def test_candidate_selection_ignores_redundant_patch_text(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("same different same", encoding="utf-8")
+    executor = ToolExecutor(tmp_path, Session(repo_root=tmp_path))
+    diagnostic = _patch(executor, target, "same", "stored replacement")
+
+    result = executor.execute(
+        {
+            "tool": "apply_patch",
+            "args": {
+                "match_id": diagnostic["candidates"][0]["match_id"],
+                "path": str(target),
+                "old_text": "different",
+                "new_text": "caller replacement",
+            },
+        }
+    )
+
+    assert result["ok"] is True
+    assert target.read_text(encoding="utf-8") == "stored replacement different same"
+
+
+def test_candidate_selection_rejects_conflicting_redundant_path(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    other = tmp_path / "other.txt"
+    target.write_text("same different same", encoding="utf-8")
+    other.write_text("untouched", encoding="utf-8")
+    executor = ToolExecutor(tmp_path, Session(repo_root=tmp_path))
+    diagnostic = _patch(executor, target, "same", "stored replacement")
+
+    result = executor.execute(
+        {
+            "tool": "apply_patch",
+            "args": {
+                "match_id": diagnostic["candidates"][0]["match_id"],
+                "path": str(other),
+            },
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["error"] == "patch_candidate_path_conflict"
+    assert result["message"] == "Supplied path does not match the stored candidate target."
+    assert target.read_text(encoding="utf-8") == "same different same"
+    assert other.read_text(encoding="utf-8") == "untouched"
+
+
+def test_close_match_candidate_replaces_exact_current_text(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    original = "header\nalpha = 1\nbeta = 20\ngamma = 3\nfooter\n"
+    target.write_text(original, encoding="utf-8")
+    executor = ToolExecutor(tmp_path, Session(repo_root=tmp_path))
+
+    diagnostic = _patch(
+        executor,
+        target,
+        "alpha = 1\nbeta = 2\ngamma = 3",
+        "replacement\n",
+    )
+
+    assert diagnostic["error"] == "old_text_not_found"
+    assert diagnostic["candidates"] == [
+        {
+            "match_id": "m1",
+            "start_line": 2,
+            "end_line": 4,
+            "text": "alpha = 1\nbeta = 20\ngamma = 3\n",
+            "similarity": pytest.approx(0.982, abs=0.001),
+        }
+    ]
+    result = _select(executor, "m1")
+    assert result["ok"] is True
+    assert target.read_text(encoding="utf-8") == "header\nreplacement\nfooter\n"
+
+
+def test_low_confidence_close_match_does_not_create_candidate(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("one\ntwo\nthree\n", encoding="utf-8")
+    executor = ToolExecutor(tmp_path, Session(repo_root=tmp_path))
+
+    result = _patch(executor, target, "completely\nunrelated", "replacement")
+
+    assert result["error"] == "old_text_not_found"
+    assert "candidates" not in result
+    assert _select(executor, "m1")["error"] == "patch_candidate_unavailable"
+
+
+def test_unknown_and_other_run_candidate_ids_are_unavailable(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("same different same", encoding="utf-8")
+    first_run = ToolExecutor(tmp_path, Session(repo_root=tmp_path))
+    second_run = ToolExecutor(tmp_path, Session(repo_root=tmp_path))
+    diagnostic = _patch(first_run, target, "same", "changed")
+
+    assert _select(first_run, "unknown")["error"] == "patch_candidate_unavailable"
+    assert diagnostic["candidates"][0]["match_id"] == "m1"
+    assert _select(second_run, "m1")["error"] == "patch_candidate_unavailable"
+    assert target.read_text(encoding="utf-8") == "same different same"
+
+
+def test_successful_same_file_mutation_invalidates_candidates(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("same middle same", encoding="utf-8")
+    executor = ToolExecutor(tmp_path, Session(repo_root=tmp_path))
+    diagnostic = _patch(executor, target, "same", "changed")
+
+    successful = _patch(executor, target, "middle", "center")
+
+    assert successful["ok"] is True
+    assert _select(executor, diagnostic["candidates"][0]["match_id"])["error"] == (
+        "patch_candidate_unavailable"
+    )
+
+
+def test_successful_same_file_write_invalidates_candidates(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("same different same", encoding="utf-8")
+    executor = ToolExecutor(tmp_path, Session(repo_root=tmp_path))
+    diagnostic = _patch(executor, target, "same", "changed")
+
+    written = executor.execute(
+        {"tool": "write_file", "args": {"path": str(target), "content": "replaced"}}
+    )
+
+    assert written["ok"] is True
+    assert _select(executor, diagnostic["candidates"][0]["match_id"])["error"] == (
+        "patch_candidate_unavailable"
+    )
+
+
+def test_different_file_mutation_preserves_candidates(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    other = tmp_path / "other.txt"
+    target.write_text("same different same", encoding="utf-8")
+    other.write_text("before", encoding="utf-8")
+    executor = ToolExecutor(tmp_path, Session(repo_root=tmp_path))
+    diagnostic = _patch(executor, target, "same", "changed")
+
+    other_result = executor.execute(
+        {"tool": "write_file", "args": {"path": str(other), "content": "after"}}
+    )
+    selected = _select(executor, diagnostic["candidates"][1]["match_id"])
+
+    assert other_result["ok"] is True
+    assert selected["ok"] is True
+    assert target.read_text(encoding="utf-8") == "same different changed"
+
+
+def test_stale_candidate_is_rejected_at_original_location(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("same different same", encoding="utf-8")
+    executor = ToolExecutor(tmp_path, Session(repo_root=tmp_path))
+    diagnostic = _patch(executor, target, "same", "changed")
+    target.write_text("prefix same different same", encoding="utf-8")
+
+    result = _select(executor, diagnostic["candidates"][0]["match_id"])
+
+    assert result["error"] == "patch_candidate_stale"
+    assert target.read_text(encoding="utf-8") == "prefix same different same"
+
+
+def test_candidate_is_stale_if_target_disappears(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("same different same", encoding="utf-8")
+    executor = ToolExecutor(tmp_path, Session(repo_root=tmp_path))
+    diagnostic = _patch(executor, target, "same", "changed")
+    target.unlink()
+
+    result = _select(executor, diagnostic["candidates"][0]["match_id"])
+
+    assert result["error"] == "patch_candidate_stale"
+
+
+def test_failed_mutation_does_not_invalidate_unrelated_candidate(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    other = tmp_path / "other.txt"
+    target.write_text("same different same", encoding="utf-8")
+    other.write_text("untouched", encoding="utf-8")
+    executor = ToolExecutor(tmp_path, Session(repo_root=tmp_path))
+    diagnostic = _patch(executor, target, "same", "changed")
+
+    failed = _patch(executor, other, "missing", "replacement")
+    selected = _select(executor, diagnostic["candidates"][0]["match_id"])
+
+    assert failed["ok"] is False
+    assert selected["ok"] is True
+    assert target.read_text(encoding="utf-8") == "changed different same"
+
+
+def test_candidate_selection_snapshots_original_target(tmp_path: Path) -> None:
+    target = tmp_path / "target.txt"
+    target.write_text("same different same", encoding="utf-8")
+    undo_store = FakeUndoStore()
+    executor = ToolExecutor(
+        tmp_path,
+        Session(repo_root=tmp_path),
+        undo_store=undo_store,
+    )
+    diagnostic = _patch(executor, target, "same", "changed")
+
+    result = _select(executor, diagnostic["candidates"][0]["match_id"])
+
+    assert result["ok"] is True
+    assert undo_store.paths == [str(target)]
+    assert undo_store.contents == ["same different same"]
 
 
 def test_successful_write_file_produces_usable_undo_state(tmp_path: Path) -> None:

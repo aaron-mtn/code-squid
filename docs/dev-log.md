@@ -1,3 +1,39 @@
+- 2026-09-09: Made `apply_patch` candidate recovery tolerate redundant normal
+  fields whenever `match_id` is present. Stored candidate text and replacement
+  remain authoritative, a redundant path must identify the same target, and
+  exact offset revalidation and candidate invalidation are unchanged. Switched
+  the schema alternatives from `oneOf` to `anyOf` so compatible providers can
+  emit the tolerated form. Focused Tool, executor, and adapter verification
+  passed 90 tests; affected-module compilation and `git diff --check` also
+  passed.
+
+- 2026-09-09: Moved all `apply_patch` argument declarations into the Tool
+  schema's top-level `properties`, leaving `oneOf` responsible only for the
+  normal and candidate-selection required-field alternatives. This preserves
+  runtime and recovery behavior while making the definition acceptable to LM
+  Studio and stricter OpenAI-compatible providers. Confirmed the existing
+  `ModelAdapter` required-variant extraction against this layout with focused
+  schema and adapter validation tests: 58 tests passed. Compilation of the
+  affected modules and tests and `git diff --check` also passed.
+
+- 2026-09-09: Extended `apply_patch` diagnostic recovery with short-lived,
+  selectable candidate IDs. Duplicate exact matches expose one ID per reported
+  occurrence, and the existing above-threshold closest line window exposes one
+  ID without changing its matcher or threshold. A path-less selection call
+  retrieves the original request from run-local `ToolExecutor` memory,
+  revalidates the stored exact candidate text at its original character
+  offset, and applies the original replacement; it never fuzzy-mutates or
+  searches for a substitute. Successful mutation invalidates candidates only
+  for that target file, and a fresh executor/run starts empty. Updated the Tool
+  schema, shallow model-action validation for alternative required argument
+  forms, application guidance, undo snapshot integration, and focused
+  regressions. Focused Tool, executor, adapter, schema, and prompt verification
+  passed 88 tests. The full suite passed 1,014 tests and retained five
+  pre-existing failures: four stale prompt-policy phrase assertions and one
+  Windows TTY path-fragment assertion. Production/test compilation, affected
+  import smoke checks, and `git diff --check` passed. No live model inference
+  ran.
+
 - 2026-09-09: Added Core's conservative `RedundantReadNudge` and enabled it in
   Code Squid's default Hook runner alongside `RepeatedFailureNudge`. The Hook
   retains bounded run-local actual line coverage from successful `read_file`

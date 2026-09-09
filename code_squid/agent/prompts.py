@@ -60,25 +60,23 @@ TOOL_USAGE_GUIDANCE = """
 ### Applying patches
 
 - Prefer apply_patch for small or focused edits to existing files after reading the relevant current content.
-- Only use apply_patch when you can provide exact old_text from the current file.
-- Before calling apply_patch, make sure old_text exactly matches the file and identifies the intended location.
+- For a normal apply_patch call, provide exact old_text from the current file.
+- Before a normal apply_patch call, make sure old_text exactly matches the file and identifies the intended location.
 - If similar code appears more than once, include enough surrounding unique context in old_text to distinguish the intended location.
 - Useful unique context can include a function declaration, class declaration, nearby unique statement, comment, selector, or surrounding block.
 - Keep patches focused, but make old_text large enough to be uniquely identifiable.
 - Never call apply_patch when old_text and new_text are identical.
-- Treat diagnostic locations, context, and closest matches as informational; mutation still requires exact old_text from the current file.
+- Diagnostic candidates are selectable by match_id, but mutation remains exact and revalidated against current file text.
 
 - If apply_patch reports that old_text was not unique:
   - Do not retry the same old_text.
-  - Prefer the returned exact match locations and surrounding context when constructing a more specific exact patch.
-  - Re-read the file only when the returned diagnostic context is insufficient.
-  - Retry only with a meaningfully different and more specific old_text.
+  - Choose the intended returned candidate from its location and context, then retry apply_patch with only that match_id.
+  - Re-read the file only when the returned candidate context is insufficient to choose safely.
 
 - If apply_patch reports that old_text was not found:
   - Do not retry the same old_text.
-  - If a closest current match is returned, prefer its exact diagnostic content when correcting the patch.
-  - Re-read the file only when the diagnostic does not contain enough exact current text.
-  - Build the next old_text from current file content returned by the diagnostic or read_file, never by reconstructing it from memory.
+  - If a selectable closest current match is returned and it is the intended text, retry apply_patch with only that match_id.
+  - Re-read the file only when the diagnostic does not contain enough information to confirm the candidate.
 
 - If apply_patch fails for another reason, inspect the exact tool error and address that cause before retrying.
 - Do not repeatedly attempt small variations of a failing patch without first obtaining the information needed to correct it.
@@ -125,7 +123,7 @@ TOOL_USAGE_GUIDANCE = """
 - If the same approach is not making progress, change the approach.
 - Do not continue searching merely to increase confidence when the current evidence is already sufficient for a safe next step.
 - Prefer direct, focused tool use over elaborate shell commands when a dedicated tool already provides the needed operation.
-- Always use absolute paths with read_file, write_file, and apply_patch.
+- Always use absolute paths with read_file, write_file, and normal apply_patch calls. Candidate-selection apply_patch calls use only match_id.
 """.strip()
 
 

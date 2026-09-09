@@ -141,8 +141,14 @@ class ModelAdapter:
         for definition in tool_definitions:
             function = definition["function"]
             parameters = function.get("parameters", {})
+            variants = parameters.get("oneOf", parameters.get("anyOf"))
+            required_variants = (
+                [variant.get("required", []) for variant in variants]
+                if isinstance(variants, list)
+                else [parameters.get("required", [])]
+            )
             metadata[function["name"]] = {
-                "required": parameters.get("required", []),
+                "required_variants": required_variants,
             }
         return metadata
 
@@ -374,7 +380,7 @@ class ModelAdapter:
         return parsed
 
     # Validate that a normalized tool action refers to a known tool and
-    # includes all required arguments from that tool's definition.
+    # includes one complete required-argument form from that tool's definition.
     #
     # This is intentionally shallow for now:
     # - known tool name
@@ -386,8 +392,16 @@ class ModelAdapter:
         if tool_name not in tool_metadata:
             raise ValueError(f"Unknown tool: {tool_name}")
 
-        required_args = tool_metadata[tool_name]["required"]
-        missing_args = [name for name in required_args if name not in args]
-        if missing_args:
+        required_variants = tool_metadata[tool_name]["required_variants"]
+        if any(all(name in args for name in required) for required in required_variants):
+            return
+
+        if len(required_variants) == 1:
+            missing_args = [name for name in required_variants[0] if name not in args]
             missing = ", ".join(missing_args)
             raise ValueError(f"Missing required arguments for {tool_name}: {missing}")
+
+        expected = " or ".join(
+            f"({', '.join(required)})" for required in required_variants
+        )
+        raise ValueError(f"Arguments for {tool_name} must include one of: {expected}")

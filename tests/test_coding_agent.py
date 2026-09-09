@@ -330,14 +330,13 @@ def test_baseline_policy_requires_behavioral_verification_against_the_request() 
 
 
 def test_apply_patch_guidance_prefers_diagnostics_over_unconditional_rereads() -> None:
-    assert "returned exact match locations and surrounding context" in TOOL_USAGE_GUIDANCE
-    assert "Re-read the file only when the returned diagnostic context is insufficient." in (
+    assert "Choose the intended returned candidate" in TOOL_USAGE_GUIDANCE
+    assert "retry apply_patch with only that match_id" in TOOL_USAGE_GUIDANCE
+    assert "returned candidate context is insufficient" in (
         TOOL_USAGE_GUIDANCE
     )
-    assert "prefer its exact diagnostic content" in TOOL_USAGE_GUIDANCE
-    assert "diagnostic does not contain enough exact current text" in TOOL_USAGE_GUIDANCE
-    assert "never by reconstructing it from memory" in TOOL_USAGE_GUIDANCE
-    assert "mutation still requires exact old_text from the current file" in (
+    assert "selectable closest current match" in TOOL_USAGE_GUIDANCE
+    assert "mutation remains exact and revalidated" in (
         TOOL_USAGE_GUIDANCE
     )
 

@@ -448,6 +448,50 @@ def test_apply_patch_requires_absolute_path(tmp_path: Path) -> None:
     }
 
 
+def test_apply_patch_schema_distinguishes_normal_and_candidate_calls() -> None:
+    parameters = TOOLS["apply_patch"]["definition"]()["function"]["parameters"]
+
+    assert parameters["properties"] == {
+        "path": {
+            "type": "string",
+            "description": "Absolute path to the file",
+        },
+        "old_text": {
+            "type": "string",
+            "description": "Exact text currently in the file",
+        },
+        "new_text": {
+            "type": "string",
+            "description": "Replacement text",
+        },
+        "match_id": {
+            "type": "string",
+            "description": "Run-local candidate ID returned by a failed patch",
+        },
+    }
+    assert parameters["anyOf"] == [
+        {"required": ["path", "old_text", "new_text"]},
+        {"required": ["match_id"]},
+    ]
+    assert parameters["additionalProperties"] is False
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"path": "x", "old_text": "old"},
+    ],
+)
+def test_apply_patch_rejects_malformed_request_forms(
+    tmp_path: Path,
+    kwargs: dict,
+) -> None:
+    result = apply_patch(tmp_path, **kwargs)
+
+    assert result["ok"] is False
+    assert result["error"] == "invalid_arguments"
+
+
 def test_run_command_timeout_returns_normal_failure_result(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     def raise_timeout(*args, **kwargs):
         raise TimeoutExpired(cmd="sleep 1", timeout=0.01, output="partial output")

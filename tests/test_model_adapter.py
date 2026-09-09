@@ -1,6 +1,7 @@
 import pytest
 
 from squid_core.model_adapter import ModelAdapter, ModelRequestError
+from squid_core.tools.builtins.apply_patch import tool_definition as apply_patch_definition
 
 
 class FakeFunction:
@@ -186,6 +187,40 @@ def test_missing_required_args_are_rejected_from_passed_definitions() -> None:
 
     assert reply["actions"] == []
     assert reply["format_error"] == "Missing required arguments for local_tool: content"
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        '{"path": "/tmp/input.txt", "old_text": "old", "new_text": "new"}',
+        '{"match_id": "m1"}',
+        (
+            '{"path": "/tmp/input.txt", "old_text": "old", '
+            '"new_text": "new", "match_id": "m1"}'
+        ),
+    ],
+)
+def test_tool_call_accepts_each_required_argument_variant(arguments: str) -> None:
+    reply = adapter_response(
+        FakeToolCall("call_1", "apply_patch", arguments),
+        [apply_patch_definition()],
+    )
+
+    assert reply["format_error"] == ""
+    assert len(reply["actions"]) == 1
+
+
+def test_tool_call_rejects_arguments_missing_every_required_variant() -> None:
+    reply = adapter_response(
+        FakeToolCall("call_1", "apply_patch", '{"path": "/tmp/input.txt"}'),
+        [apply_patch_definition()],
+    )
+
+    assert reply["actions"] == []
+    assert reply["format_error"] == (
+        "Arguments for apply_patch must include one of: "
+        "(path, old_text, new_text) or (match_id)"
+    )
 
 
 def test_malformed_tool_arguments_preserve_raw_reply_and_available_metadata() -> None:
