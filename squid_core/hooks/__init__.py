@@ -8,6 +8,10 @@ from .loader import (
     load_user_hooks,
     read_hook_info,
 )
+from .no_progress import (
+    DEFAULT_REPEATED_FAILURE_THRESHOLD,
+    RepeatedFailureNudge,
+)
 from .runner import (
     BeforeAcceptFinalContext,
     BeforeModelTurnContext,
@@ -35,6 +39,8 @@ __all__ = [
     "HookLoadError",
     "HookRunner",
     "PromptContextBlock",
+    "DEFAULT_REPEATED_FAILURE_THRESHOLD",
+    "RepeatedFailureNudge",
     "RunFinishedContext",
     "RunFinishedDecision",
     "RunHookDecision",

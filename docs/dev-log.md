@@ -1,3 +1,33 @@
+- 2026-09-08: Added a conservative runtime no-progress nudge. Squid Core now
+  provides a small Hook that recognizes three consecutive failed Tool actions
+  only when Tool name, complete JSON arguments, and scalar error category are
+  identical. Success or any material fingerprint/category change resets the
+  streak; injection also resets it, requiring a fresh threshold before another
+  nudge. Code Squid owns and wires the short recovery wording, delivered as
+  transient `before_model_turn` context without persisting it or changing,
+  blocking, or retrying Tool calls. Added focused detector, Hook-loop, and
+  application-wiring regressions. Focused Hook, runner-wiring, and Mod tests
+  passed (49 tests); compilation of `squid_core`, `code_squid`, and `tests`,
+  plus `git diff --check`, passed. The full suite passed 976 tests and retained
+  five pre-existing failures: four stale prompt-policy phrase assertions and
+  one Windows TTY path-fragment assertion. No live model inference ran.
+
+- 2026-09-08: Updated Code Squid's application-owned coding prompt to recover
+  directly from `apply_patch` diagnostics. Non-unique matches now steer the
+  model toward returned locations and context, while missing matches steer it
+  toward exact closest-match content; both paths re-read only when diagnostics
+  are insufficient and require a meaningfully corrected exact `old_text`.
+  Added concise baseline guidance to act on exact corrective Tool information
+  and abandon repeated no-progress approaches, plus Tool discipline against
+  shell editing workarounds when shell behavior is not genuinely required.
+  Mutation semantics, runtime repetition handling, the one-Tool turn contract,
+  finalization, and generic Squid Core policy remain unchanged. Three focused
+  prompt regressions passed. The full suite passed 967 tests with the same four
+  pre-existing prompt-policy assertion failures and one pre-existing Windows
+  TTY path-fragment failure documented by preceding work. Production prompt
+  compilation, affected imports, and `git diff --check` passed. No live model
+  inference ran.
+
 - 2026-09-08: Moved provider, model, safety, streaming, compaction, and display
   preferences from workspace-local ownership to the Code Squid application
   home (`~/.code-squid/settings.json`, or `<CODE_SQUID_HOME>/settings.json`).

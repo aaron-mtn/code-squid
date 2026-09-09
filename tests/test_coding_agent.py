@@ -3,6 +3,7 @@ from pathlib import Path
 from code_squid.agent.coding import CodingAgent
 from squid_core.platform_context import PlatformContext
 from code_squid.agent.prompts import (
+    BASELINE_CODING_POLICY,
     CODE_SQUID_PROMPT_DEFAULTS,
     SYSTEM_PROMPT,
     TOOL_USAGE_GUIDANCE,
@@ -305,6 +306,45 @@ def test_initial_prompt_includes_selected_skill_instructions() -> None:
 
 def test_default_tool_usage_guidance_is_used_without_skill() -> None:
     assert TOOL_USAGE_GUIDANCE in system_prompt()
+
+
+def test_baseline_policy_uses_corrective_failures_and_changes_stalled_approaches() -> None:
+    assert (
+        "When a tool failure returns exact corrective information, use it directly "
+        "before doing more discovery."
+        in BASELINE_CODING_POLICY
+    )
+    assert (
+        "If repeated actions fail for the same underlying reason, stop repeating that "
+        "approach and choose a materially different next step."
+        in BASELINE_CODING_POLICY
+    )
+
+
+def test_apply_patch_guidance_prefers_diagnostics_over_unconditional_rereads() -> None:
+    assert "returned exact match locations and surrounding context" in TOOL_USAGE_GUIDANCE
+    assert "Re-read the file only when the returned diagnostic context is insufficient." in (
+        TOOL_USAGE_GUIDANCE
+    )
+    assert "prefer its exact diagnostic content" in TOOL_USAGE_GUIDANCE
+    assert "diagnostic does not contain enough exact current text" in TOOL_USAGE_GUIDANCE
+    assert "never by reconstructing it from memory" in TOOL_USAGE_GUIDANCE
+    assert "mutation still requires exact old_text from the current file" in (
+        TOOL_USAGE_GUIDANCE
+    )
+
+
+def test_tool_guidance_prevents_shell_workarounds_for_editing_tool_failures() -> None:
+    assert (
+        "Do not use run_command to work around a dedicated file-editing tool failure "
+        "unless shell behavior is genuinely required by the task."
+        in TOOL_USAGE_GUIDANCE
+    )
+    assert (
+        "Use run_command for repository discovery, toolchain discovery, verification, "
+        "and shell behavior."
+        in TOOL_USAGE_GUIDANCE
+    )
 
 
 def test_system_prompt_without_platform_context_preserves_compatibility() -> None:

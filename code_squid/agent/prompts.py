@@ -24,8 +24,9 @@ BASELINE_CODING_POLICY = """
 - Inspect enough relevant code, tests, repository guidance, and project configuration to identify the correct implementation path and verification workflow.
 - Do not perform broad exploration once the relevant code and next action are understood.
 - Use each tool result as new information that should affect the next action.
+- When a tool failure returns exact corrective information, use it directly before doing more discovery.
 - Do not repeat the same tool call with the same arguments after receiving the same failure or unhelpful result.
-- If an approach fails, correct the specific cause of the failure or choose a meaningfully different approach.
+- If repeated actions fail for the same underlying reason, stop repeating that approach and choose a materially different next step.
 - After a failed tool call, do not retry until the next attempt meaningfully differs in a way that addresses the failure.
 - Do not repeatedly inspect unchanged information that is already available in the conversation unless there is a concrete reason to do so.
 - Once enough information is available for a safe focused change, make the change instead of continuing unnecessary exploration.
@@ -64,17 +65,19 @@ TOOL_USAGE_GUIDANCE = """
 - Useful unique context can include a function declaration, class declaration, nearby unique statement, comment, selector, or surrounding block.
 - Keep patches focused, but make old_text large enough to be uniquely identifiable.
 - Never call apply_patch when old_text and new_text are identical.
+- Treat diagnostic locations, context, and closest matches as informational; mutation still requires exact old_text from the current file.
 
 - If apply_patch reports that old_text was not unique:
   - Do not retry the same old_text.
-  - Read the narrow relevant file section again.
-  - Include additional unique surrounding context.
+  - Prefer the returned exact match locations and surrounding context when constructing a more specific exact patch.
+  - Re-read the file only when the returned diagnostic context is insufficient.
   - Retry only with a meaningfully different and more specific old_text.
 
 - If apply_patch reports that old_text was not found:
   - Do not retry the same old_text.
-  - Read the narrow relevant file section again because the current file differs from the attempted patch context.
-  - Build the next old_text directly from the current content returned by read_file.
+  - If a closest current match is returned, prefer its exact diagnostic content when correcting the patch.
+  - Re-read the file only when the diagnostic does not contain enough exact current text.
+  - Build the next old_text from current file content returned by the diagnostic or read_file, never by reconstructing it from memory.
 
 - If apply_patch fails for another reason, inspect the exact tool error and address that cause before retrying.
 - Do not repeatedly attempt small variations of a failing patch without first obtaining the information needed to correct it.
@@ -85,7 +88,7 @@ TOOL_USAGE_GUIDANCE = """
 - Use write_file for new files or deliberate full-file replacement.
 - Do not fall back to full-file write_file merely because apply_patch failed.
 - Only replace an existing file in full when that is appropriate for the task and you have read enough current content to avoid unintentionally discarding unrelated code.
-- Do not use run_command for simple file writes unless the user specifically asks for shell behavior.
+- Do not use run_command to work around a dedicated file-editing tool failure unless shell behavior is genuinely required by the task.
 
 ### Commands and project discovery
 

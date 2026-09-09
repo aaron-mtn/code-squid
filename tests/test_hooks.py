@@ -8,6 +8,7 @@ from squid_core.hooks import (
     FollowUpRunRequest,
     HookRunner,
     PromptContextBlock,
+    RepeatedFailureNudge,
     RunFinishedContext,
     RunFinishedDecision,
     RunHookDecision,
@@ -726,6 +727,55 @@ def test_no_hook_runner_keeps_basic_loop_behavior() -> None:
         {"role": "system", "content": "system"},
         {"role": "assistant", "content": "TASK COMPLETE"},
     ]
+
+
+def test_repeated_failure_nudge_reaches_model_without_blocking_tool_calls() -> None:
+    class CompletingAgent(FakeAgent):
+        def should_stop(self, session: Session) -> bool:
+            return any(
+                message.get("role") == "assistant"
+                and message.get("content") == "TASK COMPLETE"
+                for message in session.messages
+            )
+
+    class FailingExecutor(FakeToolExecutor):
+        def execute(self, action: dict) -> dict:
+            self.actions.append(action)
+            return {"ok": False, "tool": action["tool"], "error": "same_failure"}
+
+    action = {"tool": "read_file", "args": {"path": "same.py"}}
+    model_adapter = SequenceModelAdapter(
+        [
+            *[
+                {
+                    "message": {"role": "assistant", "content": "Trying."},
+                    "actions": [action],
+                }
+                for _ in range(3)
+            ],
+            {
+                "message": {"role": "assistant", "content": "TASK COMPLETE"},
+                "actions": [],
+            },
+        ]
+    )
+    session = Session(repo_root=None)
+    executor = FailingExecutor()
+    loop = AgentLoop(
+        session=session,
+        model_adapter=model_adapter,
+        tool_executor=executor,
+        tool_results=FakeToolResults(),
+        agent=CompletingAgent(),
+        display=NullDisplay(),
+        hook_runner=HookRunner([RepeatedFailureNudge("Change course.")]),
+    )
+
+    result = loop.run()
+
+    assert result == RunResult(status="complete")
+    assert executor.actions == [action, action, action]
+    assert "Change course." in model_adapter.calls[3]["messages"][-1]["content"]
 
 
 def test_before_tool_execute_mutation_chains_to_later_hooks() -> None:

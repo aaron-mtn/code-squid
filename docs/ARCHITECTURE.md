@@ -491,6 +491,17 @@ Runs before each model request.
 Can add transient prompt/context blocks. This context is model-visible for that
 request, but is not appended to `session.messages` and is not persisted.
 
+Code Squid wires Core's small `RepeatedFailureNudge` Hook at this seam. The
+generic Hook keeps only an exact action fingerprint, failure category, repeat
+count, and pending flag. Three consecutive failures must have the same Tool,
+the same JSON arguments, and the same scalar `error`; success, an uncategorized
+failure, or any changed action/category resets the streak. Once triggered, its
+context appears on the next model request and the state resets, so another
+nudge requires three fresh equivalent failures. It never blocks, rewrites, or
+retries a Tool action. Squid Core owns this detection mechanism while
+`code_squid.agent_setup` owns the guidance wording and enables it for Code
+Squid runs.
+
 ### before_tool_execute
 
 Runs after the model response has been normalized and validated as a real tool
@@ -543,8 +554,10 @@ model request
 `squid_core/hooks/` owns the hook context and decision dataclasses, `HookRunner`,
 and Hook metadata/loading. `squid_core/agent_loop/loop.py` owns where hook calls
 happen in the loop.
-`code_squid/agent_setup.py` wires optional `hooks`, optionally loads standalone hooks from
-the supplied application home's `hooks/`, or accepts an explicit `hook_runner`.
+`code_squid/agent_setup.py` wires the application-owned no-progress guidance
+Hook plus optional `hooks`, optionally loads standalone hooks from the supplied
+application home's `hooks/`, or composes an explicit `hook_runner` with the
+required application Hook.
 Selected Mod Hooks arrive through `ResolvedMod`. `squid_core/events.py`
 remains observer-only.
 
@@ -799,7 +812,15 @@ guidance, and final-summary shape. They cannot override the Core one-tool-call
 contract, final-response/no-tool mechanics, narration guidance, response
 examples, active-Skill/environment insertion, or correction mechanics. They
 also cannot remove Code Squid's baseline coding discipline, because that policy
-is outside the replaceable sections.
+is outside the replaceable sections. That baseline directs agents to use exact
+corrective Tool diagnostics before further discovery and to change approaches
+when repeated actions fail for the same reason. Default Tool guidance treats
+`apply_patch` match locations, contexts, and closest current matches as
+informational exact-text recovery aids; it recommends re-reading only when those
+diagnostics are insufficient and forbids shell editing as a workaround for a
+dedicated editing-Tool failure unless the task genuinely requires shell
+behavior. Those prompt-level policies do not change Tool mutation semantics;
+the separate runtime nudge described under Hooks only adds transient guidance.
 
 New sessions persist one assembled system message followed by the raw authored
 task as `role=user`; resumed runs append the raw authored follow-up in the same

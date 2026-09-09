@@ -9,8 +9,17 @@ from code_squid.settings import (
 )
 from squid_core.agent_loop import RunResult
 from code_squid.app_paths import CODE_SQUID_HOME_ENV
-from squid_core.hooks import BeforeRunContext, PromptContextBlock, RunHookDecision
-from code_squid.agent_setup import build_coding_task_run
+from squid_core.hooks import (
+    BeforeRunContext,
+    PromptContextBlock,
+    RepeatedFailureNudge,
+    RunHookDecision,
+)
+from code_squid.agent_setup import (
+    NO_PROGRESS_GUIDANCE,
+    build_coding_task_run,
+    build_hook_runner,
+)
 
 
 class FakeDisplay:
@@ -165,6 +174,13 @@ def test_default_runner_behavior_does_not_load_user_hooks(
     )
 
     assert "DISK_DEFAULT_MARKER" not in _message_text(messages)
+
+
+def test_code_squid_always_wires_product_owned_no_progress_guidance() -> None:
+    runner = build_hook_runner()
+
+    assert isinstance(runner.hooks[-1], RepeatedFailureNudge)
+    assert runner.hooks[-1].guidance == NO_PROGRESS_GUIDANCE
 
 
 def test_include_user_hooks_loads_disk_hooks(
