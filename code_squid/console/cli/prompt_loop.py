@@ -74,7 +74,7 @@ Specialization:
 
 Runtime:
   /provider shows the current provider and available providers.
-  /provider use <name> selects a ready provider.
+  /provider use <name> selects a provider for configuration and use.
   /provider key <value> saves the current provider's API key.
   /provider url <value> saves the current provider's base URL.
   /provider status shows effective setup without exposing secrets.

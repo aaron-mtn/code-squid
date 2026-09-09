@@ -818,7 +818,7 @@ Inside the interactive CLI:
   current CLI process.
 - `/skill none` clears the active skill.
 - `/provider` shows the friendly effective provider, readiness, and provider
-  list. `/provider use <name>` selects a connected provider through the same
+  list. `/provider use <name>` selects a provider through the same
   operation as the startup menu. `/provider key <value>` and `/provider url
   <value>` update the current connection, while `/provider status` reports the
   effective transport, URL, key presence, readiness, model, and active env
@@ -1069,6 +1069,12 @@ Their identities remain distinct so setup probes can use the correct contract:
   separate and requires an API key.
 - OpenAI Compatible defaults to `http://127.0.0.1:8000/v1` with key placeholder
   `local`; generic authenticated `GET /models` supplies readiness and discovery.
+
+Provider selection persists the requested identity and applies its normal
+connection defaults before readiness is probed. A failed readiness probe is
+reported as `not connected` but does not undo selection, so the shared slash-
+command/startup operation can bootstrap provider-specific URL or credential
+configuration. Readiness still gates inference and remains visible in status.
 
 The selected model ID is never replaced by a provider profile. Startup model
 selection and `/model <name>` persist it verbatim; Core's spawner passes that

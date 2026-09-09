@@ -137,24 +137,31 @@ def settings_for_provider(settings, provider_id: str):
 
 
 def select_provider(repo_root: Path, provider_id: str):
-    """Select one ready provider, returning settings and an optional explanation."""
+    """Select a provider, returning settings and an optional status explanation."""
     from code_squid.settings import load_settings, write_provider
 
     current = load_settings(repo_root)
-    candidate = settings_for_provider(current, provider_id)
-    unavailable_model = False
-    if os.getenv("CODE_SQUID_PROVIDER") is None:
-        try:
-            provider = build_provider(candidate.to_runtime_settings().provider)
-            if not provider.is_ready():
-                return current, f"{friendly_provider_name(provider_id)} is not connected."
-            unavailable_model = current.model.name not in provider.list_models()
-        except (OSError, RuntimeError, ValueError):
-            return current, f"{friendly_provider_name(provider_id)} is not connected."
     write_provider(repo_root, provider_id)
     effective = load_settings(repo_root)
     if os.getenv("CODE_SQUID_PROVIDER") is not None:
         return effective, "Saved; CODE_SQUID_PROVIDER remains the effective override."
+
+    # Selection is the bootstrap seam for provider-specific configuration.
+    # Readiness is therefore reported only after persistence and must never
+    # roll back a provider that still needs its URL or credential configured.
+    try:
+        provider = build_provider(effective.to_runtime_settings().provider)
+        if not provider.is_ready():
+            return effective, f"{friendly_provider_name(provider_id)} is not connected."
+    except (OSError, RuntimeError, ValueError):
+        return effective, f"{friendly_provider_name(provider_id)} is not connected."
+
+    try:
+        unavailable_model = current.model.name not in provider.list_models()
+    except (OSError, RuntimeError, ValueError):
+        # Model discovery is advisory during selection. Its own command/menu
+        # paths retain their existing failure semantics.
+        unavailable_model = False
     if unavailable_model:
         return (
             effective,

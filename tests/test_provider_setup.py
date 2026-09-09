@@ -231,19 +231,37 @@ def test_exact_squid_model_selection_reaches_inference(tmp_path, model_id) -> No
     assert provider.models == [model_id]
 
 
-def test_provider_selection_failure_keeps_active_config(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("code_squid.provider_setup.provider_ready", lambda _settings: False)
-    # select_provider constructs directly, so make the candidate provider fail
-    # through the same Core readiness method used in production.
+def test_disconnected_provider_selection_persists_for_configuration(
+    monkeypatch,
+    tmp_path,
+) -> None:
     monkeypatch.setattr(
         "code_squid.provider_setup.build_provider",
         lambda _settings: SimpleNamespace(is_ready=lambda: False),
     )
-    original = load_settings(tmp_path)
     settings, explanation = select_provider(tmp_path, "ollama")
-    assert settings == original
+
+    persisted = json.loads(
+        (tmp_path / ".code-squid" / "settings.json").read_text(encoding="utf-8")
+    )
+    assert settings.model.provider == "ollama"
+    assert persisted["model"]["provider"] == "ollama"
     assert explanation == "Ollama is not connected."
-    assert not (tmp_path / ".code-squid" / "settings.json").exists()
+
+
+def test_disconnected_openrouter_selection_does_not_weaken_inference_checks(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.delenv("CODE_SQUID_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    settings, explanation = select_provider(tmp_path, "openrouter")
+
+    assert settings.model.provider == "openrouter"
+    assert explanation == "OpenRouter is not connected."
+    with pytest.raises(ValueError, match="api_key is required"):
+        build_provider(settings.to_runtime_settings().provider)
 
 
 def test_discovery_uses_shared_provider_seam(monkeypatch, tmp_path) -> None:

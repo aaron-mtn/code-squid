@@ -1,3 +1,18 @@
+- 2026-09-08: Separated provider selection from provider readiness. The shared
+  `select_provider` operation now persists the requested provider and applies
+  its defaults before probing/reporting readiness, allowing both `/provider
+  use` and the startup picker to select a disconnected provider for subsequent
+  URL or key configuration. Readiness and inference credential enforcement
+  remain unchanged, and model discovery remains advisory during selection.
+  Added regressions for disconnected slash-command and startup selection,
+  follow-up URL configuration/status, preserved connected behavior, and
+  unusable inference configuration. Focused provider/runtime/startup coverage
+  passed 147 tests. The full suite passed 955 tests with the four pre-existing
+  prompt-policy assertion failures and one pre-existing Windows TTY path-
+  fragment failure documented by the preceding provider work. Production
+  compilation, affected imports, and `git diff --check` passed. No live model
+  inference ran.
+
 - 2026-09-08: Improved built-in Tool reliability without changing mutation or
   runtime policy. The four built-in schemas now describe only mechanical
   purpose and constraints; narration guidance remains in Agent prompts.

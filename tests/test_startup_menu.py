@@ -251,6 +251,37 @@ def test_provider_options_are_canonical_and_selection_updates_persisted_panel(
     assert "Ollama" in "\n".join(menu.panel_lines(startup_scene_layout(80)))
 
 
+def test_startup_selection_accepts_a_disconnected_provider(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(
+        "code_squid.console.startup_menu.provider_ready",
+        lambda _settings: False,
+    )
+    monkeypatch.setattr(
+        "code_squid.provider_setup.build_provider",
+        lambda _settings: SimpleNamespace(is_ready=lambda: False),
+    )
+    menu = StartupMenu(tmp_path, load_settings(tmp_path))
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Provider")
+    menu.activate()
+    rendered = "\n".join(menu.panel_lines(startup_scene_layout(80)))
+    assert "LM Studio" in rendered
+    assert "not connected" in rendered
+
+    menu.selected_index = menu._options.index("ollama")
+    menu.activate()
+
+    persisted = json.loads(
+        (tmp_path / ".code-squid" / "settings.json").read_text(encoding="utf-8")
+    )
+    assert menu.settings.model.provider == "ollama"
+    assert persisted["model"]["provider"] == "ollama"
+    assert menu.mode == "main"
+
+
 def test_provider_selection_without_explanation_returns_to_focused_main_menu(
     monkeypatch,
     tmp_path,

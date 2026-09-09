@@ -221,6 +221,51 @@ def test_provider_use_accepts_friendly_name_and_uses_shared_selection(
     assert "not connected" in capsys.readouterr().out
 
 
+def test_disconnected_lm_studio_can_be_selected_then_configured(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    _write_settings(tmp_path, {"model": {"provider": "ollama"}})
+    monkeypatch.setattr(
+        "code_squid.provider_setup.build_provider",
+        lambda _settings: SimpleNamespace(is_ready=lambda: False),
+    )
+
+    _, selected = handle_runtime_command(
+        tmp_path,
+        "/provider use LM Studio",
+        load_settings(tmp_path),
+    )
+    handle_runtime_command(tmp_path, "/provider status", selected)
+    _, configured = handle_runtime_command(
+        tmp_path,
+        "/provider url http://localhost:4321/v1/",
+        selected,
+    )
+    monkeypatch.setattr(
+        "code_squid.console.cli.runtime_commands.provider_ready",
+        lambda settings: settings.model.base_url == "http://localhost:4321/v1",
+    )
+    handle_runtime_command(tmp_path, "/provider status", configured)
+
+    output = capsys.readouterr().out
+    persisted = json.loads(
+        (tmp_path / ".code-squid" / "settings.json").read_text(encoding="utf-8")
+    )
+    assert selected.model.provider == "lm_studio"
+    assert selected.model.base_url == "http://127.0.0.1:1234/v1"
+    assert configured.model.provider == "lm_studio"
+    assert configured.model.base_url == "http://localhost:4321/v1"
+    assert persisted["model"]["provider"] == "lm_studio"
+    assert persisted["model"]["base_url"] == "http://localhost:4321/v1"
+    assert "LM Studio is not connected." in output
+    assert "Provider set to: LM Studio" in output
+    assert "Provider: LM Studio" in output
+    assert "Readiness: not connected" in output
+    assert "Readiness: ready" in output
+
+
 def test_provider_key_is_persisted_but_never_echoed(tmp_path, capsys) -> None:
     secret = "never-print-this-secret"
     handle_runtime_command(
