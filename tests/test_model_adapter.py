@@ -23,13 +23,14 @@ class FakeMessage:
 
 
 class FakeChoice:
-    def __init__(self, message: FakeMessage) -> None:
+    def __init__(self, message: FakeMessage, finish_reason=None) -> None:
         self.message = message
+        self.finish_reason = finish_reason
 
 
 class FakeResponse:
-    def __init__(self, message: FakeMessage, usage=None) -> None:
-        self.choices = [FakeChoice(message)]
+    def __init__(self, message: FakeMessage, usage=None, finish_reason=None) -> None:
+        self.choices = [FakeChoice(message, finish_reason)]
         self.usage = usage
 
 
@@ -449,6 +450,18 @@ def test_complete_text_includes_normalized_usage_when_provider_usage_exists() ->
         "output_tokens": 6,
         "total_tokens": 26,
     }
+
+
+def test_complete_text_exposes_normalized_reasoning_and_finish_reason() -> None:
+    message = FakeMessage(content="summary", tool_calls=[])
+    message.reasoning_content = "provider reasoning"
+    provider = FakeProvider(FakeResponse(message, finish_reason="stop"))
+    adapter = ModelAdapter(provider=provider, model_name="test-model")
+
+    reply = adapter.complete_text(messages=[{"role": "user", "content": "summarize"}])
+
+    assert reply["reasoning"] == "provider reasoning"
+    assert reply["finish_reason"] == "stop"
 
 
 def test_complete_text_streaming_forwards_deltas_returns_content_and_disables_tools() -> None:

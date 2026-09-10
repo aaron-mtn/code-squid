@@ -140,28 +140,18 @@ class SessionStore:
                 fields[name] = reply[name]
         return self._append_non_message_entry("reply_rejection", fields)
 
-    # Append one compaction event as a JSONL entry.
-    def append_compaction(self, metadata: dict) -> dict:
-        session_metadata = self._read_metadata()
-        previous_leaf_id = session_metadata["active_leaf_id"]
+    def append_compaction_event(self, event: dict) -> dict:
+        """Append one first-class compaction lifecycle event."""
+        event_type = event.get("type")
+        if not isinstance(event_type, str) or not event_type.startswith("compaction_"):
+            raise ValueError("compaction event type must start with 'compaction_'")
 
-        entry_id = f"e_{self._next_entry_number():06d}"
-        entry = {
-            "id": entry_id,
-            "parent_id": previous_leaf_id,
-            "type": "compaction",
-            "timestamp": _utc_now(),
-            "metadata": metadata,
-        }
-
-        with self.jsonl_path.open("a", encoding="utf-8") as file:
-            file.write(json.dumps(entry) + "\n")
-
-        session_metadata["active_leaf_id"] = entry_id
-        session_metadata["updated_at"] = _utc_now()
-        self._write_metadata(session_metadata)
-
-        return entry
+        # Keep lifecycle fields at the top level like other diagnostic events;
+        # this makes chronological JSONL inspection and filtering straightforward.
+        return self._append_non_message_entry(
+            event_type,
+            {name: value for name, value in event.items() if name != "type"},
+        )
 
     # Append one non-transcript run-context event as a JSONL entry.
     def append_run_context(

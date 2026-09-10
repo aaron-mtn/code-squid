@@ -1,3 +1,20 @@
+- 2026-09-09: Added first-class compaction observability to canonical session
+  JSONL. Each enabled check now records its token estimate and trigger decision;
+  actual compactions record start/request identity and size, optional normalized
+  reasoning, the exact returned summary before mutation, optional usage/finish
+  metadata, and final before/after counts. Failures record the active prepare,
+  model-request, response-parse, session-rebuild, or persistence stage without
+  swallowing the original exception. `ModelAdapter.complete_text()` now exposes
+  normalized reasoning and finish reason in addition to its existing content
+  and usage fields, and `SessionStore.append_compaction_event()` owns the linked
+  lifecycle-event persistence seam. Compaction thresholds, prompts, retention,
+  summary semantics, and reconstruction behavior are unchanged. Focused
+  compaction/session/adapter/loop verification passed 135 tests, and the
+  broader related Core subset passed 112 tests. The full suite reached 1,032
+  passes with six failures in untouched prompt-copy and Windows TTY display
+  areas outside this patch. Core compilation and
+  `git diff --check` passed.
+
 - 2026-09-09: Refined `apply_patch` argument precedence so a known stored
   `match_id` remains authoritative, while an empty or unknown string ID is
   ignored when complete normal patch arguments are present. Incomplete calls

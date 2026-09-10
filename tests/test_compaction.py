@@ -8,13 +8,20 @@ from squid_core.compaction import Compactor
 
 
 class FakeModelAdapter:
-    def __init__(self, content: str = "Earlier context summary.") -> None:
+    def __init__(
+        self,
+        content: str = "Earlier context summary.",
+        **response_metadata,
+    ) -> None:
         self.content = content
+        self.response_metadata = response_metadata
         self.requests = []
+        self.provider_name = "test-provider"
+        self.model_name = "test-model"
 
     def complete_text(self, messages: list[dict]) -> dict:
         self.requests.append(messages)
-        return {"content": self.content, "usage": None}
+        return {"content": self.content, "usage": None, **self.response_metadata}
 
 
 class FailingModelAdapter:
@@ -75,6 +82,28 @@ def test_below_threshold_returns_none_and_does_not_mutate_messages() -> None:
 
     assert result is None
     assert current_session.messages == original_messages
+
+
+def test_below_threshold_logs_compaction_check() -> None:
+    events = []
+    compactor = Compactor(settings(trigger_input_tokens=100_000), FakeModelAdapter())
+
+    result = compactor.maybe_compact(
+        session(compactable_messages()), event_callback=events.append
+    )
+
+    assert result is None
+    assert events[0]["estimated_tokens"] > 0
+    estimated_tokens = events[0]["estimated_tokens"]
+    assert events == [
+        {
+            "type": "compaction_check",
+            "estimated_tokens": estimated_tokens,
+            "trigger_input_tokens": 100_000,
+            "threshold_crossed": False,
+            "will_compact": False,
+        }
+    ]
 
 
 def test_above_threshold_replaces_older_chunks_with_one_compacted_context_message() -> None:
@@ -169,6 +198,82 @@ def test_returned_metadata_includes_token_message_counts_and_summary_chars() -> 
     assert result["messages_before"] == 6
     assert result["messages_after"] == len(current_session.messages)
     assert result["summary_chars"] == len("summary text")
+
+
+def test_successful_compaction_logs_complete_lifecycle_and_exact_model_data() -> None:
+    events = []
+    model_adapter = FakeModelAdapter(
+        "exact summary\nwith detail",
+        reasoning="careful compaction reasoning",
+        finish_reason="stop",
+        usage={"input_tokens": 220, "output_tokens": 30, "total_tokens": 250},
+    )
+    current_session = session(compactable_messages())
+
+    result = Compactor(settings(keep_recent_turns=2), model_adapter).maybe_compact(
+        current_session, event_callback=events.append
+    )
+
+    assert [event["type"] for event in events] == [
+        "compaction_check",
+        "compaction_started",
+        "compaction_request",
+        "compaction_reasoning",
+        "compaction_summary",
+        "compaction_response_meta",
+        "compaction_applied",
+    ]
+    assert events[0]["will_compact"] is True
+    assert events[1]["messages_before"] == 6
+    assert events[1]["keep_recent_turns"] == 2
+    assert events[2]["estimated_request_tokens"] > 0
+    assert events[2]["provider"] == "test-provider"
+    assert events[2]["model"] == "test-model"
+    assert events[3]["content"] == "careful compaction reasoning"
+    assert events[4]["content"] == "exact summary\nwith detail"
+    assert events[5] == {
+        "type": "compaction_response_meta",
+        "finish_reason": "stop",
+        "usage": {"input_tokens": 220, "output_tokens": 30, "total_tokens": 250},
+    }
+    assert events[6] == {"type": "compaction_applied", **result}
+
+
+def test_compaction_omits_reasoning_and_response_meta_when_absent() -> None:
+    events = []
+
+    Compactor(settings(), FakeModelAdapter()).maybe_compact(
+        session(compactable_messages()), event_callback=events.append
+    )
+
+    event_types = [event["type"] for event in events]
+    assert "compaction_reasoning" not in event_types
+    assert "compaction_response_meta" not in event_types
+
+
+def test_model_request_failure_logs_stage_and_reraises_original_exception() -> None:
+    events = []
+    error = RuntimeError("summary failed")
+
+    class ExactFailingModelAdapter:
+        provider_name = "test-provider"
+        model_name = "test-model"
+
+        def complete_text(self, messages: list[dict]) -> dict:
+            raise error
+
+    with pytest.raises(RuntimeError) as exc_info:
+        Compactor(settings(), ExactFailingModelAdapter()).maybe_compact(
+            session(compactable_messages()), event_callback=events.append
+        )
+
+    assert exc_info.value is error
+    assert events[-1] == {
+        "type": "compaction_failed",
+        "stage": "model_request",
+        "error_type": "RuntimeError",
+        "error": "summary failed",
+    }
 
 
 def test_summary_request_uses_compaction_prompt_with_json_context() -> None:

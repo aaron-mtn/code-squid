@@ -323,10 +323,16 @@ class AgentLoop:
 
                 if self.compactor is not None:
                     self._check_cancelled()
-                    compaction_metadata = self.compactor.maybe_compact(self.session)
+                    compaction_event_callback = (
+                        self.session_store.append_compaction_event
+                        if self.session_store is not None
+                        else None
+                    )
+                    self.compactor.maybe_compact(
+                        self.session,
+                        event_callback=compaction_event_callback,
+                    )
                     self._check_cancelled()
-                    if compaction_metadata is not None and self.session_store is not None:
-                        self.session_store.append_compaction(compaction_metadata)
 
                 # Ask the model for the next assistant reply and any tool actions.
                 self.display.thinking()

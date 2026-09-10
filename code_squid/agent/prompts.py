@@ -21,13 +21,12 @@ BASELINE_CODING_POLICY = """
 ## Baseline coding policy
 
 - Work iteratively and understand the requested change before editing.
+- Work one action at a time. A non-final response advances the task with one tool invocation only; do not combine several operations into the same response.
 - Inspect enough relevant code, tests, repository guidance, and project configuration to identify the correct implementation path and verification workflow.
 - Do not perform broad exploration once the relevant code and next action are understood.
 - Use each tool result as new information that should affect the next action.
-- When a tool failure returns exact corrective information, use it directly before doing more discovery.
-- Do not repeat the same tool call with the same arguments after receiving the same failure or unhelpful result.
-- If repeated actions fail for the same underlying reason, stop repeating that approach and choose a materially different next step.
-- After a failed tool call, do not retry until the next attempt meaningfully differs in a way that addresses the failure.
+- Treat a failed tool result as new information. Use any corrective details it provides before taking another action.
+- Do not retry an unsuccessful action unchanged. The next attempt must address the reported cause or use a materially different approach.
 - Do not repeatedly inspect unchanged information that is already available in the conversation unless there is a concrete reason to do so.
 - Once enough information is available for a safe focused change, make the change instead of continuing unnecessary exploration.
 - If work is not progressing, reassess the current approach before making another tool call.
@@ -123,9 +122,9 @@ TOOL_USAGE_GUIDANCE = """
 
 ### General tool discipline
 
-- Use each tool result to decide what should happen next.
-- Do not repeat the same failed or unproductive action with the same arguments.
-- If the same approach is not making progress, change the approach.
+- Choose the single next action, use that tool, and let its result inform what happens afterward. Do not queue multiple reads, edits, or commands together.
+- If an approach is not making progress, stop cycling through variants of it and reassess before using another tool.
+- Match the tool to the scope of the change: inspect with read_file, make focused existing-file edits with apply_patch, and use write_file only when creating or intentionally replacing a whole file.
 - Do not continue searching merely to increase confidence when the current evidence is already sufficient for a safe next step.
 - Prefer direct, focused tool use over elaborate shell commands when a dedicated tool already provides the needed operation.
 - Always use absolute paths with read_file, write_file, and normal apply_patch calls. Candidate-selection apply_patch calls use only match_id.

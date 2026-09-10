@@ -1,3 +1,5 @@
+"""Normalize model-provider requests and responses for Squid Core."""
+
 import json
 
 TOOL_CALL_CONTENT_MODES = {"omit", "empty", "null"}
@@ -91,11 +93,25 @@ class ModelAdapter:
         except Exception as exc:
             raise ModelRequestError("Model request failed") from exc
 
-        assistant_message = raw_response.choices[0].message
-        return {
-            "content": assistant_message.content or "",
-            "usage": self._usage_from_response(raw_response),
+        raw_reply = self._raw_reply_from_response(raw_response)
+        assistant = raw_reply["assistant"]
+        reply = {
+            "content": assistant.get("content") or "",
+            "usage": raw_reply.get("usage"),
         }
+
+        # Text-only callers historically received content and usage. Preserve
+        # those fields while exposing the same provider-neutral diagnostics
+        # already retained for ordinary turns in ``raw_reply``.
+        for name in ("reasoning", "reasoning_content", "thinking"):
+            reasoning = assistant.get(name)
+            if reasoning:
+                reply["reasoning"] = reasoning
+                break
+        if "finish_reason" in raw_reply:
+            reply["finish_reason"] = raw_reply["finish_reason"]
+
+        return reply
 
     def complete_text_streaming(
         self,

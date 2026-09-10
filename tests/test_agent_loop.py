@@ -141,8 +141,11 @@ class FakeSessionStore:
             self.events.append("append_message")
         self.messages.append({"message": message, "usage": usage})
 
-    def append_compaction(self, metadata: dict) -> None:
-        self.compactions.append(metadata)
+    def append_compaction_event(self, event: dict) -> None:
+        if event["type"] == "compaction_applied":
+            self.compactions.append(
+                {name: value for name, value in event.items() if name != "type"}
+            )
 
     def append_system_message_reconciliation(self, message: dict) -> None:
         self.system_reconciliations.append(message)
@@ -261,10 +264,12 @@ class FakeCompactor:
         self.events = events
         self.sessions = []
 
-    def maybe_compact(self, session: Session) -> dict | None:
+    def maybe_compact(self, session: Session, *, event_callback=None) -> dict | None:
         if self.events is not None:
             self.events.append("compact")
         self.sessions.append(session)
+        if self.metadata is not None and event_callback is not None:
+            event_callback({"type": "compaction_applied", **self.metadata})
         return self.metadata
 
 

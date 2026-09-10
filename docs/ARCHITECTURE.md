@@ -1356,9 +1356,29 @@ When triggered, compaction:
 - keeps recent chunks verbatim according to
   `settings.compaction.keep_recent_turns`
 
-If persistence is wired in, `AgentLoop` logs compaction metadata to
-`session.jsonl` through `SessionStore.append_compaction(...)`. `load_messages()`
-ignores compaction events and loads only transcript message entries.
+`AgentLoop` supplies the canonical `SessionStore.append_compaction_event(...)`
+callback to the compactor when persistence is wired in. The compactor writes a
+chronological diagnostic lifecycle beside normal transcript entries:
+
+- `compaction_check` records the estimate, configured trigger, threshold result,
+  and whether eligible older chunks make compaction possible
+- `compaction_started` records the pre-compaction message count and retention
+  setting
+- `compaction_request` records the estimated request size and configured
+  provider/model immediately before the model call
+- optional `compaction_reasoning`, exact `compaction_summary`, and optional
+  `compaction_response_meta` events preserve normalized response diagnostics
+- `compaction_applied` records before/after token estimates and message counts
+  only after the in-memory rebuild and event append succeed
+- `compaction_failed` records `prepare`, `model_request`, `response_parse`,
+  `session_rebuild`, or `persistence` plus a concise exception description,
+  then the original exception continues through the existing error path
+
+`ModelAdapter.complete_text(...)` retains its existing `content` and `usage`
+result fields and additionally exposes normalized `reasoning` and
+`finish_reason` when the provider supplies them. Compaction events are
+diagnostic, not transcript messages: `SessionStore.load_messages()` continues
+to ignore them and replay only message and system-reconciliation entries.
 
 Compaction is transcript compression for continuation context. It does not
 provide durable workspace memory.
