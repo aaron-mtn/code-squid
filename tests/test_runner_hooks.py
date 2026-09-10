@@ -12,8 +12,8 @@ from code_squid.app_paths import CODE_SQUID_HOME_ENV
 from squid_core.hooks import (
     BeforeRunContext,
     PromptContextBlock,
-    RedundantReadNudge,
     RepeatedFailureNudge,
+    RepeatedReadNudge,
     HookResponse,
 )
 from code_squid.agent_setup import (
@@ -181,7 +181,7 @@ def test_default_runner_behavior_does_not_load_user_hooks(
 def test_code_squid_always_wires_product_owned_no_progress_guidance() -> None:
     runner = build_hook_runner()
 
-    assert isinstance(runner.hooks[-2], RedundantReadNudge)
+    assert isinstance(runner.hooks[-2], RepeatedReadNudge)
     assert runner.hooks[-2].source == "Code Squid"
     assert isinstance(runner.hooks[-1], RepeatedFailureNudge)
     assert runner.hooks[-1].guidance == NO_PROGRESS_GUIDANCE

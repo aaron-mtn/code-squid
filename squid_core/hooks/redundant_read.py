@@ -1,48 +1,57 @@
-"""Conservative detection of repeated reads of recently returned file lines."""
+"""Detect repeated reads of substantially overlapping unchanged file ranges."""
 
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Sequence
 
 from .runner import HookResponse
 
 
-SMALL_READ_THRESHOLD = 100
-REDUNDANT_READ_THRESHOLD = 2
+DEFAULT_REPEATED_READ_THRESHOLD = 2
+SUBSTANTIAL_OVERLAP_RATIO = 0.7
 
 _MAX_TRACKED_FILES = 100
 _MAX_RANGES_PER_FILE = 64
-_MUTATION_TOOLS = {"write_file", "apply_patch"}
+_MUTATION_TOOLS = {"apply_patch", "write_file"}
 _GUIDANCE = (
-    "You've repeatedly read small regions of this unchanged file that were "
-    "already returned recently. Use the existing context unless a fresh read "
-    "is needed for a specific reason."
+    "You recently inspected most of this unchanged file range. Reuse the existing "
+    "result unless you need exact current text for an edit or a specific unresolved "
+    "detail."
 )
 
 
-class RedundantReadNudge:
-    """Offer transient guidance after repeated covered reads of one file.
+class RepeatedReadNudge:
+    """Offer transient guidance after repeated overlapping reads of one file.
 
-    Coverage is based only on successful tool-result metadata. It is bounded,
-    run-local, and invalidated only by successful built-in file mutations whose
-    target can be identified exactly.
+    Coverage comes only from successful ``read_file`` result metadata. Successful
+    built-in mutations invalidate the affected file, so no filesystem timestamp
+    checks are needed.
     """
 
-    def __init__(self, *, source: str = "runtime") -> None:
+    def __init__(
+        self,
+        *,
+        threshold: int = DEFAULT_REPEATED_READ_THRESHOLD,
+        source: str = "runtime",
+    ) -> None:
+        if threshold < 2:
+            raise ValueError("repeated-read threshold must be at least 2")
+
+        self.threshold = threshold
         # Hosts inspect Hook sources as configuration metadata.
         self.source = source
         self._coverage: dict[str, list[tuple[int, int]]] = {}
-        self._redundant_path: str | None = None
-        self._redundant_count = 0
+        self._redundant_counts: dict[str, int] = {}
 
     def before_run(self, _ctx) -> None:
         """Discard all observations from the preceding run."""
         self._coverage.clear()
-        self._reset_redundant_count()
+        self._redundant_counts.clear()
 
     def tool_result(self, ctx) -> HookResponse | None:
-        """Observe one final tool result and optionally emit a soft nudge."""
+        """Observe one final tool result and optionally emit an advisory nudge."""
         tool_name = ctx.action.get("tool")
         result = ctx.result
 
@@ -53,8 +62,7 @@ class RedundantReadNudge:
             path = _result_path(ctx.action, result)
             if path is not None:
                 self._coverage.pop(path, None)
-                if path == self._redundant_path:
-                    self._reset_redundant_count()
+                self._redundant_counts.pop(path, None)
 
         return None
 
@@ -64,40 +72,34 @@ class RedundantReadNudge:
         result: dict[str, Any],
     ) -> HookResponse | None:
         if result.get("ok") is not True:
-            self._reset_redundant_count()
             return None
 
         path = _result_path(action, result)
-        if path is None:
-            self._reset_redundant_count()
+        returned_ranges = _returned_ranges(result)
+        if path is None or not returned_ranges:
             return None
 
-        requested_range = _small_explicit_range(action, result)
-        was_covered = (
-            requested_range is not None
-            and _range_is_covered(self._coverage.get(path, ()), requested_range)
+        previous_coverage = self._coverage.get(path, ())
+        is_redundant = (
+            _overlap_ratio(previous_coverage, returned_ranges)
+            >= SUBSTANTIAL_OVERLAP_RATIO
         )
 
-        # Record only what the result says was actually returned, and do so
-        # after classification so a read cannot make itself redundant.
-        returned_ranges = _returned_ranges(result)
-        if returned_ranges:
-            self._record_coverage(path, returned_ranges)
+        # Classify before recording so a read cannot overlap with itself. The
+        # dedicated range list keeps truncated head and tail coverage separate.
+        self._record_coverage(path, returned_ranges)
 
-        if not was_covered:
-            self._reset_redundant_count()
+        if not is_redundant:
+            self._redundant_counts.pop(path, None)
             return None
 
-        if path != self._redundant_path:
-            self._redundant_path = path
-            self._redundant_count = 1
-        else:
-            self._redundant_count += 1
-
-        if self._redundant_count < REDUNDANT_READ_THRESHOLD:
+        count = self._redundant_counts.get(path, 0) + 1
+        if count < self.threshold:
+            self._redundant_counts[path] = count
             return None
 
-        self._reset_redundant_count()
+        # Guidance is one-request-only; a later warning needs a fresh streak.
+        self._redundant_counts.pop(path, None)
         return HookResponse(additional_context=_GUIDANCE)
 
     def _record_coverage(
@@ -108,54 +110,27 @@ class RedundantReadNudge:
         # Reinsertion keeps the dict ordered by recent use for simple eviction.
         existing = self._coverage.pop(path, [])
         if not existing and len(self._coverage) >= _MAX_TRACKED_FILES:
-            del self._coverage[next(iter(self._coverage))]
-        self._coverage[path] = (existing + returned_ranges)[-_MAX_RANGES_PER_FILE:]
-
-    def _reset_redundant_count(self) -> None:
-        self._redundant_path = None
-        self._redundant_count = 0
+            oldest_path = next(iter(self._coverage))
+            del self._coverage[oldest_path]
+            self._redundant_counts.pop(oldest_path, None)
+        self._coverage[path] = _merge_ranges(existing + returned_ranges)[
+            -_MAX_RANGES_PER_FILE:
+        ]
 
 
 def _result_path(action: dict[str, Any], result: dict[str, Any]) -> str | None:
-    """Return a stable key only when result or action exposes a real path."""
+    """Return a normalized absolute identity from result or action metadata."""
     path = result.get("path")
     if not isinstance(path, str) or not path:
         args = action.get("args")
         path = args.get("path") if isinstance(args, dict) else None
     if not isinstance(path, str) or not path:
         return None
-    return os.path.normcase(os.path.normpath(path))
-
-
-def _small_explicit_range(
-    action: dict[str, Any],
-    result: dict[str, Any],
-) -> tuple[int, int] | None:
-    """Return the requested range only when it is explicit, valid, and small."""
-    args = action.get("args")
-    if not isinstance(args, dict):
-        return None
-
-    raw_start = args.get("start_line")
-    raw_end = args.get("end_line")
-    if raw_start is None and raw_end is None:
-        return None
-    if raw_start is not None and not _is_line_number(raw_start):
-        return None
-    if raw_end is not None and not _is_line_number(raw_end):
-        return None
-
-    start = raw_start if raw_start is not None else 1
-    end = raw_end if raw_end is not None else result.get("end_line")
-    if not _is_line_number(start) or not _is_line_number(end) or end < start:
-        return None
-    if end - start + 1 > SMALL_READ_THRESHOLD:
-        return None
-    return start, end
+    return os.path.normcase(str(Path(path).expanduser().resolve()))
 
 
 def _returned_ranges(result: dict[str, Any]) -> list[tuple[int, int]]:
-    """Extract exact returned coverage, preferring the dedicated range list."""
+    """Extract actual returned coverage, preferring the dedicated range list."""
     if "returned_line_ranges" in result:
         raw_ranges = result.get("returned_line_ranges")
         if not isinstance(raw_ranges, list):
@@ -183,19 +158,34 @@ def _is_line_number(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
 
-def _range_is_covered(
-    coverage: Sequence[tuple[int, int]],
-    requested: tuple[int, int],
-) -> bool:
-    """Check complete union coverage without introducing an interval subsystem."""
-    requested_start, requested_end = requested
-    next_needed = requested_start
-    for start, end in sorted(coverage):
-        if end < next_needed:
+def _overlap_ratio(
+    previous: Sequence[tuple[int, int]],
+    current: Sequence[tuple[int, int]],
+) -> float:
+    """Return the fraction of current returned lines covered by earlier reads."""
+    merged_previous = _merge_ranges(previous)
+    merged_current = _merge_ranges(current)
+    current_lines = sum(end - start + 1 for start, end in merged_current)
+    if current_lines == 0:
+        return 0.0
+
+    overlap_lines = 0
+    for current_start, current_end in merged_current:
+        for previous_start, previous_end in merged_previous:
+            overlap_start = max(current_start, previous_start)
+            overlap_end = min(current_end, previous_end)
+            if overlap_start <= overlap_end:
+                overlap_lines += overlap_end - overlap_start + 1
+    return overlap_lines / current_lines
+
+
+def _merge_ranges(ranges: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Merge inclusive ranges so repeated coverage is never double-counted."""
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(ranges):
+        if not merged or start > merged[-1][1] + 1:
+            merged.append((start, end))
             continue
-        if start > next_needed:
-            return False
-        next_needed = end + 1
-        if next_needed > requested_end:
-            return True
-    return False
+        previous_start, previous_end = merged[-1]
+        merged[-1] = (previous_start, max(previous_end, end))
+    return merged

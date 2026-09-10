@@ -554,17 +554,18 @@ mechanisms while `code_squid.agent_setup` owns both guidance texts and enables
 them for Code Squid runs. Its `source` remains configuration metadata used by
 hosts; it no longer controls prompt rendering.
 
-Code Squid also wires Core's `RedundantReadNudge` immediately before the
+Code Squid also wires Core's `RepeatedReadNudge` immediately before the
 repeated-failure Hook. It keeps bounded, run-local line-range coverage from
-successful `read_file` results, preferring exact `returned_line_ranges` when a
-full-file read is truncated. A successful `write_file` or `apply_patch`
-invalidates only the identified target file. After two consecutive small,
-explicit ranged reads are fully covered for the same unchanged file, the Hook
-returns one-turn guidance through `HookResponse.additional_context` and resets
-its counter. Failed, large, full-file, partially covered, and useful reads do
-not produce guidance; non-redundant reads reset the counter. The Hook never
-blocks or transforms an action or result, and `AgentLoop` has no feature-specific
-logic for it.
+successful `read_file` result metadata under normalized absolute path keys,
+preferring the separate exact `returned_line_ranges` when a full-file read is
+truncated. A successful `write_file` or `apply_patch` invalidates only the
+identified target file. When at least 70% of a returned read is already covered
+for that unchanged file, it counts as redundant; the second redundant reread
+after the useful original returns advisory one-turn guidance through
+`HookResponse.additional_context`. Emission resets that file's repetition
+streak. Failed mutations do not invalidate coverage, and `before_run` clears
+all state. The Hook never blocks or transforms an action or result, and
+`AgentLoop` has no feature-specific logic for it.
 
 ### before_accept_final
 

@@ -1,3 +1,17 @@
+- 2026-09-10: Replaced the narrow small-range `RedundantReadNudge` behavior
+  with Core's `RepeatedReadNudge`. It now compares actual successful
+  `read_file` returned ranges by normalized absolute path, treats at least 70%
+  prior coverage as redundant, preserves disjoint `returned_line_ranges` for
+  truncated full-file reads, and advises through the existing transient
+  `tool_result` `additional_context` seam on the second redundant reread. A
+  successful `apply_patch` or `write_file` invalidates that file's run-local
+  coverage and streak; failures do not, emission resets the streak, and
+  `before_run` clears all tracking. Focused Hook and default-wiring tests passed
+  17 tests. The full suite passed 1,074 tests and retained nine failures in
+  untouched areas: eight stale prompt-copy expectations and one Windows TTY
+  path-rendering assertion. Production/test compilation and `git diff --check`
+  passed; no live model inference ran.
+
 - 2026-09-10: Added a small durable runtime lifecycle around ordinary model
   turns and run termination. `AgentLoop` now emits and persists compact
   `model_request_started`, `model_request_finished`, and
