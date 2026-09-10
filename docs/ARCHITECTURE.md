@@ -422,6 +422,9 @@ terminal output.
 Current loop-level event types include:
 
 - `run_started`
+- `model_request_started`
+- `model_request_finished`
+- `model_request_failed`
 - `assistant_message_started`
 - `assistant_delta`
 - `assistant_message`
@@ -431,7 +434,7 @@ Current loop-level event types include:
 - `reply_rejected`
 - `final_message`
 - `run_failed`
-- `run_cancelled`
+- `run_interrupted`
 - `run_finished`
 
 Assistant-text events identify their semantic phase without introducing a
@@ -443,7 +446,13 @@ user-visible mid-turn text that may be followed by tool activity.
 tool-call preparation and does not carry an assistant-text phase.
 
 Event payloads should stay compact. They must not include raw file contents,
-full command output, prompts, provider payloads, API keys, headers, or secrets.
+full command output, prompts, duplicated message bodies, provider payloads, API
+keys, headers, or secrets. Model-request lifecycle events retain
+only provider/model identity when available, message count, a rough request-token
+estimate, duration, and bounded error details. These events, plus `run_failed`
+and `run_interrupted`, are appended to the session's existing linked JSONL log
+before terminal status changes; they remain diagnostic entries and are never
+replayed as model transcript messages.
 
 Callback delivery is best-effort. Observer failures must not crash the run.
 
@@ -1738,14 +1747,15 @@ narration is encouraged by prompts.
 - Command and file access is not a hardened sandbox. Workspace checks and
   guarded command checks are approval/preflight mechanisms.
 - Compaction uses rough JSON/text length estimates, not exact tokenization.
-- Event callback support currently covers normal loop-level events. Outer
-  CLI-caught failures such as some model request errors or keyboard interrupts
-  may need explicit wrapper handling depending on the caller path.
+- Core records model request failures, unexpected run failures, requested
+  cancellation, and boundary-level interruptions before preserving the existing
+  exception or cancellation control flow for its host.
 - The console frontend supplies `TerminalDisplay`; Code Squid application and
   generic Core construction use Core's `NullDisplay` when a host omits
   presentation.
 - Resume support is CLI-owned under `code_squid/console/cli/`.
-- No JSONL/file event sink is included.
+- There is no general-purpose event sink; only the small durable lifecycle set
+  uses the existing session JSONL persistence spine.
 - `allowed-tools: none` is not a supported special case.
 - Run-context events are debug metadata, not model memory.
 - Provider setup tests use mocked HTTP boundaries; they do not require live

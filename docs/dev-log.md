@@ -1,3 +1,18 @@
+- 2026-09-10: Added a small durable runtime lifecycle around ordinary model
+  turns and run termination. `AgentLoop` now emits and persists compact
+  `model_request_started`, `model_request_finished`, and
+  `model_request_failed` records without prompt/message contents, including
+  readily available adapter identity, request size estimates, duration, and
+  bounded error details. Requested cancellation and boundary interruptions now
+  leave `run_interrupted`; unexpected exceptions and existing failed outcomes
+  leave `run_failed` with a known runtime stage before session status changes.
+  All records use the existing linked session JSONL path, remain outside model
+  transcript replay, and preserve original exceptions and host control flow.
+  Focused loop/storage/Hook/CLI verification passed 181 tests. The full suite passed
+  1,075 tests with nine unrelated baseline failures in prompt-copy and Windows
+  TTY path assertions. No
+  live model inference ran; no follow-up work is intentionally deferred.
+
 - 2026-09-10: Changed transcript compaction selection from a fixed
   `keep_recent_turns` split to deterministic oldest-first token-weight
   selection. Compaction now targets 80% of eligible chunk tokens by default,

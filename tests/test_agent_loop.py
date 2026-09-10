@@ -1,3 +1,5 @@
+"""Tests for the generic agent-loop runtime and its lifecycle boundaries."""
+
 import inspect
 import json
 
@@ -62,6 +64,8 @@ class FakeModelAdapter:
         self.deltas = deltas or []
         self.tool_preparing_events = tool_preparing_events or []
         self.message_requests = []
+        self.provider_name = "fake-provider"
+        self.model_name = "fake-model"
 
     def respond(self, messages: list[dict], tool_definitions: list[dict]) -> dict:
         self.message_requests.append([dict(message) for message in messages])
@@ -132,6 +136,7 @@ class FakeSessionStore:
         self.compactions = []
         self.model_replies = []
         self.reply_rejections = []
+        self.runtime_events = []
         self.statuses = []
         self.system_reconciliations = []
         self.events = events
@@ -146,6 +151,9 @@ class FakeSessionStore:
             self.compactions.append(
                 {name: value for name, value in event.items() if name != "type"}
             )
+
+    def append_runtime_event(self, event: dict) -> None:
+        self.runtime_events.append(dict(event))
 
     def append_system_message_reconciliation(self, message: dict) -> None:
         self.system_reconciliations.append(message)
@@ -177,6 +185,22 @@ class FakeSessionStore:
 
     def update_status(self, status: str) -> None:
         self.statuses.append(status)
+
+
+class TrackingSessionStore(SessionStore):
+    """Retain persistence call order while exercising the real JSONL store."""
+
+    def __init__(self, session_dir) -> None:
+        super().__init__(session_dir)
+        self.operations = []
+
+    def append_runtime_event(self, event: dict) -> dict:
+        self.operations.append(f"event:{event['type']}")
+        return super().append_runtime_event(event)
+
+    def update_status(self, status: str) -> None:
+        self.operations.append(f"status:{status}")
+        super().update_status(status)
 
 
 class NullDisplay:
@@ -441,9 +465,10 @@ def test_cancellation_before_model_call_returns_interrupted() -> None:
     assert result == RunResult(status="interrupted", reason="cancelled")
     assert model_adapter.index == 0
     assert session_store.statuses == ["interrupted"]
-    assert [event["type"] for event in events] == ["run_cancelled", "run_finished"]
+    assert [event["type"] for event in events] == ["run_interrupted", "run_finished"]
     assert events[0]["status"] == "interrupted"
     assert events[0]["reason"] == "cancelled"
+    assert events[0]["requested"] is True
     assert events[1]["status"] == "interrupted"
     assert not any(
         entry["message"].get("role") == "tool" for entry in session_store.messages
@@ -648,7 +673,7 @@ def test_cancellation_after_validated_model_reply_prevents_tool_turn() -> None:
         {"role": "system", "content": "system"}
     ]
     assert session_store.statuses == ["interrupted"]
-    assert event_types[-2:] == ["run_cancelled", "run_finished"]
+    assert event_types[-2:] == ["run_interrupted", "run_finished"]
 
 
 def test_repeated_invalid_replies_return_failed_run_result() -> None:
@@ -1127,39 +1152,43 @@ def test_loop_emits_basic_run_events(tmp_path) -> None:
     event_types = [event["type"] for event in events]
     assert event_types == [
         "run_started",
+        "model_request_started",
+        "model_request_finished",
         "assistant_message",
         "tool_started",
         "tool_finished",
+        "model_request_started",
+        "model_request_finished",
         "final_message",
         "run_finished",
     ]
     assert events[0]["repo_root"] == str(tmp_path)
     assert events[0]["task"] == ""
-    assert events[1]["message"] == "Reading file."
-    assert events[1]["text"] == "Reading file."
-    assert events[1]["phase"] == "narration"
-    assert {key: value for key, value in events[1].items() if key != "timestamp"} == {
+    assert events[3]["message"] == "Reading file."
+    assert events[3]["text"] == "Reading file."
+    assert events[3]["phase"] == "narration"
+    assert {key: value for key, value in events[3].items() if key != "timestamp"} == {
         "session_id": None,
         "type": "assistant_message",
         "phase": "narration",
         "message": "Reading file.",
         "text": "Reading file.",
     }
-    assert events[2]["tool"] == "read_file"
-    assert events[2]["path"] == str(target)
-    assert events[3]["ok"] is True
-    assert events[3]["path"] == str(target)
-    assert events[4]["message"] == "TASK COMPLETE"
-    assert events[4]["text"] == "TASK COMPLETE"
-    assert events[4]["phase"] == "final"
-    assert {key: value for key, value in events[4].items() if key != "timestamp"} == {
+    assert events[4]["tool"] == "read_file"
+    assert events[4]["path"] == str(target)
+    assert events[5]["ok"] is True
+    assert events[5]["path"] == str(target)
+    assert events[8]["message"] == "TASK COMPLETE"
+    assert events[8]["text"] == "TASK COMPLETE"
+    assert events[8]["phase"] == "final"
+    assert {key: value for key, value in events[8].items() if key != "timestamp"} == {
         "session_id": None,
         "type": "final_message",
         "phase": "final",
         "message": "TASK COMPLETE",
         "text": "TASK COMPLETE",
     }
-    assert events[5]["status"] == "complete"
+    assert events[9]["status"] == "complete"
     assert all("timestamp" in event for event in events)
 
 
@@ -1190,10 +1219,10 @@ def test_streaming_enabled_emits_started_deltas_and_full_assistant_message() -> 
     event_types = [event["type"] for event in events]
     assert event_types[:5] == [
         "run_started",
+        "model_request_started",
         "assistant_message_started",
         "assistant_delta",
         "assistant_delta",
-        "assistant_message",
     ]
     assert [event["delta"] for event in events if event["type"] == "assistant_delta"] == [
         "Reading ",
@@ -1277,11 +1306,13 @@ def test_streaming_enabled_emits_tool_preparing_before_message_and_tool_started(
     loop.run()
 
     event_types = [event["type"] for event in events]
-    assert event_types[:7] == [
+    assert event_types[:9] == [
         "run_started",
+        "model_request_started",
         "assistant_message_started",
         "assistant_delta",
         "tool_preparing",
+        "model_request_finished",
         "assistant_message",
         "tool_started",
         "tool_finished",
@@ -1794,6 +1825,112 @@ def test_tool_result_context_is_transient_and_updated_output_is_persisted(
     assert tool_messages[0] in [entry["message"] for entry in session_store.messages]
 
 
+def test_successful_model_request_lifecycle_is_persisted(tmp_path) -> None:
+    session_store = SessionStore.create(tmp_path, "successful request")
+    loop = AgentLoop(
+        session=Session(repo_root=tmp_path),
+        model_adapter=FakeModelAdapter([reply("TASK COMPLETE")]),
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        session_store=session_store,
+    )
+
+    assert loop.run() == RunResult(status="complete")
+
+    entries = [
+        json.loads(line)
+        for line in session_store.jsonl_path.read_text(encoding="utf-8").splitlines()
+    ]
+    lifecycle = [entry for entry in entries if entry["type"].startswith("model_request_")]
+    assert [entry["type"] for entry in lifecycle] == [
+        "model_request_started",
+        "model_request_finished",
+    ]
+    assert lifecycle[0]["provider"] == "fake-provider"
+    assert lifecycle[0]["model"] == "fake-model"
+    assert lifecycle[0]["message_count"] == 1
+    assert lifecycle[0]["estimated_request_tokens"] > 0
+    assert lifecycle[1]["duration_ms"] >= 0
+    assert all("content" not in entry for entry in lifecycle)
+
+
+def test_failed_model_request_leaves_durable_failure_events(tmp_path) -> None:
+    class FailingModelAdapter(FakeModelAdapter):
+        def respond(self, messages: list[dict], tool_definitions: list[dict]) -> dict:
+            raise RuntimeError("inference exploded")
+
+    session_store = TrackingSessionStore.create(tmp_path, "failed request")
+    loop = AgentLoop(
+        session=Session(repo_root=tmp_path),
+        model_adapter=FailingModelAdapter([]),
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        session_store=session_store,
+    )
+
+    with pytest.raises(RuntimeError, match="inference exploded"):
+        loop.run()
+
+    entries = [
+        json.loads(line)
+        for line in session_store.jsonl_path.read_text(encoding="utf-8").splitlines()
+    ]
+    failed_request = next(
+        entry for entry in entries if entry["type"] == "model_request_failed"
+    )
+    run_failed = next(entry for entry in entries if entry["type"] == "run_failed")
+    assert failed_request["error_type"] == "RuntimeError"
+    assert failed_request["error_message"] == "inference exploded"
+    assert failed_request["duration_ms"] >= 0
+    assert run_failed["stage"] == "model_request"
+    assert run_failed["error_type"] == "RuntimeError"
+    assert session_store.operations.index("event:run_failed") < (
+        session_store.operations.index("status:failed")
+    )
+    assert json.loads(session_store.metadata_path.read_text(encoding="utf-8"))["status"] == (
+        "failed"
+    )
+
+
+def test_keyboard_interrupt_leaves_durable_terminal_event_before_status(tmp_path) -> None:
+    class InterruptingModelAdapter(FakeModelAdapter):
+        def respond(self, messages: list[dict], tool_definitions: list[dict]) -> dict:
+            raise KeyboardInterrupt
+
+    session_store = TrackingSessionStore.create(tmp_path, "interrupted request")
+    loop = AgentLoop(
+        session=Session(repo_root=tmp_path),
+        model_adapter=InterruptingModelAdapter([]),
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        session_store=session_store,
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        loop.run()
+
+    entries = [
+        json.loads(line)
+        for line in session_store.jsonl_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert [entry["type"] for entry in entries][-2:] == [
+        "model_request_failed",
+        "run_interrupted",
+    ]
+    assert entries[-1]["interruption_type"] == "KeyboardInterrupt"
+    assert entries[-1]["stage"] == "model_request"
+    assert session_store.operations.index("event:run_interrupted") < (
+        session_store.operations.index("status:interrupted")
+    )
+    assert json.loads(session_store.metadata_path.read_text(encoding="utf-8"))["status"] == (
+        "interrupted"
+    )
 def test_always_still_asks_for_every_tool(tmp_path) -> None:
     target = tmp_path / "README.md"
     target.write_text("hello", encoding="utf-8")

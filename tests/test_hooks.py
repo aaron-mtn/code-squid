@@ -552,12 +552,16 @@ def test_agent_loop_final_hook_blocks_and_retries_without_storing_final() -> Non
     }
     assert [event["type"] for event in events] == [
         "run_started",
+        "model_request_started",
+        "model_request_finished",
         "reply_rejected",
+        "model_request_started",
+        "model_request_finished",
         "final_message",
         "run_finished",
     ]
-    assert events[1]["reason"] == "final_blocked_by_hook"
-    assert events[1]["detail"] == "Run the verification before finalizing."
+    assert events[3]["reason"] == "final_blocked_by_hook"
+    assert events[3]["detail"] == "Run the verification before finalizing."
 
 
 def test_agent_loop_final_hook_allows_existing_final_behavior() -> None:

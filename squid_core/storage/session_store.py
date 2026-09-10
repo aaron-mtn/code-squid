@@ -13,6 +13,13 @@ from squid_core.storage.atomic_json import atomic_write_json
 # Status values allowed in metadata.json.
 # Keep this list small until the app has real UX that needs more states.
 ALLOWED_STATUSES = {"active", "complete", "failed", "abandoned", "interrupted"}
+RUNTIME_LIFECYCLE_EVENTS = {
+    "model_request_started",
+    "model_request_finished",
+    "model_request_failed",
+    "run_failed",
+    "run_interrupted",
+}
 
 
 class SessionStore:
@@ -148,6 +155,19 @@ class SessionStore:
 
         # Keep lifecycle fields at the top level like other diagnostic events;
         # this makes chronological JSONL inspection and filtering straightforward.
+        return self._append_non_message_entry(
+            event_type,
+            {name: value for name, value in event.items() if name != "type"},
+        )
+
+    def append_runtime_event(self, event: dict) -> dict:
+        """Append one supported runtime lifecycle event to the session log."""
+        event_type = event.get("type")
+        if event_type not in RUNTIME_LIFECYCLE_EVENTS:
+            raise ValueError(f"unsupported runtime lifecycle event: {event_type!r}")
+
+        # These records use the same linked JSONL spine as transcript and
+        # compaction diagnostics, but load_messages() intentionally ignores them.
         return self._append_non_message_entry(
             event_type,
             {name: value for name, value in event.items() if name != "type"},

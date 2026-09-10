@@ -1,6 +1,7 @@
 """Generic AgentLoop state machine and public run result."""
 
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Callable, Literal
 
 from squid_core.agent_loop.event_emitter import (
@@ -17,6 +18,7 @@ from squid_core.agent_loop.transcript_recording import (
     turn_context_message,
     user_instruction_message,
 )
+from squid_core.compaction.token_estimate import estimate_messages_tokens
 from squid_core.events import EventCallback
 from squid_core.hooks import (
     BeforeAcceptFinalContext,
@@ -36,6 +38,7 @@ from squid_core.tool_result_trimming import render_messages_for_model
 
 MAX_CONSECUTIVE_INVALID_REPLIES = 3
 REJECTION_REASON_EVENT_MAX_CHARS = 500
+ERROR_EVENT_MAX_CHARS = 500
 
 
 class _CancellationRequested(Exception):
@@ -113,6 +116,13 @@ class AgentLoop:
         if self.session_store is not None:
             self.session_store.update_status(status)
 
+    def _update_status_preserving_error(self, status: str) -> None:
+        """Avoid replacing an in-flight runtime exception with a storage error."""
+        try:
+            self._update_status(status)
+        except Exception:
+            pass
+
     def _session_id(self) -> str | None:
         if self.session_store is None:
             return None
@@ -154,6 +164,27 @@ class AgentLoop:
     def _emit_event(self, event: dict) -> None:
         emit_agent_event(self.on_event, self._session_id(), event)
 
+    def _emit_runtime_event(self, event: dict) -> None:
+        """Persist a lifecycle fact before publishing it to optional observers."""
+        if self.session_store is not None:
+            append_runtime_event = getattr(
+                self.session_store,
+                "append_runtime_event",
+                None,
+            )
+            if callable(append_runtime_event):
+                append_runtime_event(event)
+        self._emit_event(event)
+
+    def _emit_runtime_event_preserving_error(self, event: dict) -> None:
+        """Record terminal evidence without masking the exception being handled."""
+        try:
+            self._emit_runtime_event(event)
+        except Exception:
+            # Preserve the original runtime exception if diagnostic persistence
+            # itself fails while the loop is already unwinding.
+            pass
+
     def _handle_compaction_event(self, event: dict) -> None:
         """Persist compaction diagnostics and publish its visible start seam."""
         # Persistence retains the complete lifecycle. Only the authoritative
@@ -175,38 +206,72 @@ class AgentLoop:
         if extra_messages:
             messages = [*messages, *extra_messages]
         messages = render_messages_for_model(messages, self.tool_result_trimming)
+        request_event = {
+            "provider": getattr(self.model_adapter, "provider_name", None),
+            "model": getattr(self.model_adapter, "model_name", None),
+            "message_count": len(messages),
+            "estimated_request_tokens": estimate_messages_tokens(messages),
+        }
+        request_event = {
+            name: value for name, value in request_event.items() if value is not None
+        }
+        self._emit_runtime_event({"type": "model_request_started", **request_event})
+        started_at = perf_counter()
 
-        if not self._should_stream_assistant_text():
-            return self.model_adapter.respond(
-                messages=messages,
-                tool_definitions=tool_definitions,
-            )
+        try:
+            if not self._should_stream_assistant_text():
+                reply = self.model_adapter.respond(
+                    messages=messages,
+                    tool_definitions=tool_definitions,
+                )
+            else:
+                self._emit_event(
+                    {
+                        "type": "assistant_message_started",
+                        "phase": "narration",
+                    }
+                )
 
-        self._emit_event(
-            {
-                "type": "assistant_message_started",
-                "phase": "narration",
-            }
-        )
+                def on_text_delta(delta: str) -> None:
+                    self._emit_event(
+                        {
+                            "type": "assistant_delta",
+                            "phase": "narration",
+                            "delta": delta,
+                        }
+                    )
 
-        def on_text_delta(delta: str) -> None:
-            self._emit_event(
+                def on_tool_preparing(tool_call: dict) -> None:
+                    self._emit_event(tool_preparing_event(tool_call))
+
+                reply = self.model_adapter.respond_streaming(
+                    messages=messages,
+                    tool_definitions=tool_definitions,
+                    on_text_delta=on_text_delta,
+                    on_tool_preparing=on_tool_preparing,
+                )
+        except BaseException as error:
+            self._emit_runtime_event_preserving_error(
                 {
-                    "type": "assistant_delta",
-                    "phase": "narration",
-                    "delta": delta,
+                    "type": "model_request_failed",
+                    **request_event,
+                    "duration_ms": round((perf_counter() - started_at) * 1000),
+                    "error_type": type(error).__name__,
+                    "error_message": compact_event_text(
+                        error or type(error).__name__, ERROR_EVENT_MAX_CHARS
+                    ),
                 }
             )
+            raise
 
-        def on_tool_preparing(tool_call: dict) -> None:
-            self._emit_event(tool_preparing_event(tool_call))
-
-        return self.model_adapter.respond_streaming(
-            messages=messages,
-            tool_definitions=tool_definitions,
-            on_text_delta=on_text_delta,
-            on_tool_preparing=on_tool_preparing,
+        self._emit_runtime_event(
+            {
+                "type": "model_request_finished",
+                **request_event,
+                "duration_ms": round((perf_counter() - started_at) * 1000),
+            }
         )
+        return reply
 
     # Seed a new transcript, or reconcile the one run-scoped message in an
     # existing transcript. A session may change specialization between runs,
@@ -266,6 +331,7 @@ class AgentLoop:
         # over the synthetic interrupted result.
         pending_tool_action = None
         pending_tool_result = None
+        run_stage = "startup"
 
         try:
             self._check_cancelled()
@@ -282,6 +348,7 @@ class AgentLoop:
                 }
             )
             tool_definitions = self.agent.tool_definitions()
+            run_stage = "before_run_hook"
             before_run = self.hook_runner.before_run(
                 BeforeRunContext(
                     session_id=self._session_id(),
@@ -297,14 +364,15 @@ class AgentLoop:
                     or before_run.guidance
                     or "blocked by before_run hook"
                 )
-                self._update_status("failed")
-                self._emit_event(
+                self._emit_runtime_event(
                     {
                         "type": "run_failed",
                         "status": "failed",
+                        "stage": run_stage,
                         "reason": reason,
                     }
                 )
+                self._update_status("failed")
                 run_finished = self._run_finished_decision(
                     status="failed",
                     reason=reason,
@@ -334,12 +402,13 @@ class AgentLoop:
                     and tool_steps_used >= self.max_tool_steps
                 ):
                     self.display.step_limit_reached(self.max_tool_steps)
-                    self._update_status("failed")
+                    run_stage = "tool_step_limit"
                     stopped_after_step_limit = True
                     failure_reason = f"reached tool step limit: {self.max_tool_steps}"
                     break
 
                 if self.compactor is not None:
+                    run_stage = "compaction"
                     self._check_cancelled()
                     self.compactor.maybe_compact(
                         self.session,
@@ -350,6 +419,7 @@ class AgentLoop:
                 # Ask the model for the next assistant reply and any tool actions.
                 self.display.thinking()
                 self._check_cancelled()
+                run_stage = "before_model_turn_hook"
                 turn_context = self.hook_runner.before_model_turn(
                     BeforeModelTurnContext(
                         session_id=self._session_id(),
@@ -369,7 +439,9 @@ class AgentLoop:
                     *([context_message] if context_message is not None else []),
                     *pending_runtime_messages,
                 ]
+                run_stage = "model_request"
                 reply = self._respond(tool_definitions, extra_messages=extra_messages)
+                run_stage = "reply_processing"
                 pending_runtime_messages = []
                 self._check_cancelled()
 
@@ -422,7 +494,6 @@ class AgentLoop:
                                 consecutive_invalid_replies,
                             )
                         )
-                        self._update_status("failed")
                         stopped_after_repeated_invalid_replies = True
                         failure_reason = validation["reason"]
                         break
@@ -524,6 +595,7 @@ class AgentLoop:
                 results = []
                 approval_instructions = []
                 for action in reply["actions"]:
+                    run_stage = "tool_execution"
                     self._check_cancelled()
                     tool_decision = self.hook_runner.before_tool_execute(
                         BeforeToolExecuteContext(
@@ -632,13 +704,15 @@ class AgentLoop:
                     tool_steps_used += 1
 
             if stopped_after_repeated_invalid_replies or stopped_after_step_limit:
-                self._emit_event(
+                self._emit_runtime_event(
                     {
                         "type": "run_failed",
                         "status": "failed",
+                        "stage": run_stage,
                         "reason": failure_reason,
                     }
                 )
+                self._update_status("failed")
                 run_finished = self._run_finished_decision(
                     status="failed",
                     reason=failure_reason,
@@ -653,6 +727,7 @@ class AgentLoop:
                 )
 
             self._check_cancelled()
+            run_stage = "run_finished_hook"
             try:
                 run_finished = self._run_finished_decision(
                     status="complete",
@@ -661,14 +736,15 @@ class AgentLoop:
                 )
             except Exception as error:
                 reason = f"run_finished hook failed: {error or type(error).__name__}"
-                self._update_status("failed")
-                self._emit_event(
+                self._emit_runtime_event(
                     {
                         "type": "run_failed",
                         "status": "failed",
+                        "stage": run_stage,
                         "reason": reason,
                     }
                 )
+                self._update_status("failed")
                 self._emit_event({"type": "run_finished", "status": "failed"})
                 return RunResult(status="failed", reason=reason)
 
@@ -687,14 +763,16 @@ class AgentLoop:
                 pending_tool_action,
                 pending_tool_result,
             )
-            self._update_status("interrupted")
-            self._emit_event(
+            self._emit_runtime_event(
                 {
-                    "type": "run_cancelled",
+                    "type": "run_interrupted",
                     "status": "interrupted",
                     "reason": "cancelled",
+                    "requested": True,
+                    "stage": run_stage,
                 }
             )
+            self._update_status("interrupted")
             run_finished = self._run_finished_decision(
                 status="interrupted",
                 reason="cancelled",
@@ -707,8 +785,8 @@ class AgentLoop:
                 hook_notes=self._hook_notes_from_decision(run_finished),
             )
         except KeyboardInterrupt:
-            # The CLI owns KeyboardInterrupt presentation and status handling.
-            # Repair any committed tool-call pair before preserving that flow.
+            # Repair any committed tool-call pair and leave durable evidence
+            # before preserving the CLI's KeyboardInterrupt control flow.
             record_pending_tool_result(
                 self.session,
                 self.session_store,
@@ -716,4 +794,38 @@ class AgentLoop:
                 pending_tool_action,
                 pending_tool_result,
             )
+            self._emit_runtime_event_preserving_error(
+                {
+                    "type": "run_interrupted",
+                    "status": "interrupted",
+                    "interruption_type": "KeyboardInterrupt",
+                    "stage": run_stage,
+                }
+            )
+            self._update_status_preserving_error("interrupted")
+            raise
+        except Exception as error:
+            self._emit_runtime_event_preserving_error(
+                {
+                    "type": "run_failed",
+                    "status": "failed",
+                    "stage": run_stage,
+                    "error_type": type(error).__name__,
+                    "error_message": compact_event_text(
+                        error or type(error).__name__, ERROR_EVENT_MAX_CHARS
+                    ),
+                }
+            )
+            self._update_status_preserving_error("failed")
+            raise
+        except BaseException as error:
+            self._emit_runtime_event_preserving_error(
+                {
+                    "type": "run_interrupted",
+                    "status": "interrupted",
+                    "interruption_type": type(error).__name__,
+                    "stage": run_stage,
+                }
+            )
+            self._update_status_preserving_error("interrupted")
             raise

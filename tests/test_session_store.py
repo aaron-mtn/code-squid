@@ -1,3 +1,5 @@
+"""Tests for durable Squid Core session storage."""
+
 import json
 import re
 from datetime import datetime
