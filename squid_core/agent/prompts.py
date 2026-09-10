@@ -126,13 +126,16 @@ def execution_environment_prompt(
         f"Path separator: {platform_context.path_separator}",
         f"Workspace: {workspace}",
         "",
-        "Use commands, quoting, and path syntax valid for this environment.",
+        "Use commands, quoting, separators, paths, and utilities that are valid for this environment.",
+        "Do not mix command syntax or utilities from a different operating system or shell.",
     ]
+
     if platform_context.is_windows:
         lines.extend(
             [
-                "Use PowerShell syntax for run_command.",
-                "Do not assume Unix commands such as ls, cat, grep, find, cp, mv, or rm are available.",
+                "run_command already executes in PowerShell. Write PowerShell commands directly; do not wrap them in `powershell -Command`.",
+                "Use PowerShell syntax and separators. Do not use Bash operators such as `&&` or `||`.",
+                "Do not assume Unix commands such as ls, cat, grep, find, cp, mv, rm, wc, or python3 are available.",
                 "Prefer Get-ChildItem for listing files and directories.",
                 "Prefer Get-Content for reading text files.",
                 "Prefer Select-String for searching text.",
@@ -141,7 +144,14 @@ def execution_environment_prompt(
             ]
         )
     else:
-        lines.append(f"Use commands compatible with {platform_context.shell_name}.")
+        lines.extend(
+            [
+                f"run_command executes using {platform_context.shell_name}. Write commands directly for that shell.",
+                f"Use commands and separators compatible with {platform_context.shell_name}.",
+                "Do not assume Windows PowerShell commands or Windows path syntax are available.",
+            ]
+        )
+
     return "\n".join(lines)
 
 

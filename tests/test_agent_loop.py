@@ -273,6 +273,14 @@ class FakeCompactor:
         return self.metadata
 
 
+class LifecycleCompactor:
+    """Emit a minimal lifecycle for testing the loop's compaction event seam."""
+
+    def maybe_compact(self, session: Session, *, event_callback=None) -> None:
+        event_callback({"type": "compaction_check", "will_compact": True})
+        event_callback({"type": "compaction_started", "messages_before": 4})
+
+
 class StopImmediatelyAgent(FakeAgent):
     def should_stop(self, session: Session) -> bool:
         return True
@@ -877,6 +885,22 @@ def test_compaction_without_metadata_is_not_persisted() -> None:
     )
 
     assert session_store.compactions == []
+
+
+def test_compaction_lifecycle_is_published_through_loop_events() -> None:
+    events = []
+
+    run_loop(
+        [reply("TASK COMPLETE")],
+        compactor=LifecycleCompactor(),
+        on_event=events.append,
+    )
+
+    compaction_events = [
+        event for event in events if event["type"].startswith("compaction_")
+    ]
+    assert [event["type"] for event in compaction_events] == ["compaction_started"]
+    assert compaction_events[0]["messages_before"] == 4
 
 
 def test_compactor_is_not_called_when_session_already_stopped() -> None:

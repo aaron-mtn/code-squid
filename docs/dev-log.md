@@ -1,3 +1,14 @@
+- 2026-09-09: Surfaced actual context compaction in normal CLI output as the
+  indented, dim `🌀 Compacting context...` notification. `AgentLoop` now
+  forwards the existing persisted `compaction_started` event through its
+  observer seam, so ordinary threshold checks remain silent. Neutral
+  previous-session and compaction notices share the same notification rendering
+  helper; assistant, tool, warning, compaction, and persistence semantics are
+  otherwise unchanged. Ten focused renderer/loop/compaction tests passed, as
+  did compilation and `git diff --check`. The full suite passed 1,034 tests with
+  seven pre-existing failures in untouched prompt-copy expectations and Windows
+  TTY debug path rendering.
+
 - 2026-09-09: Added first-class compaction observability to canonical session
   JSONL. Each enabled check now records its token estimate and trigger decision;
   actual compactions record start/request identity and size, optional normalized

@@ -387,8 +387,13 @@ class TerminalDisplay:
             print(f"format_error: {reply['format_error']}")
 
     def handle_event(self, event: dict) -> None:
-        """Translate Core's streamed-assistant events into CLI presentation."""
+        """Translate Core runtime events into CLI presentation."""
         event_type = event.get("type")
+        if event_type == "compaction_started":
+            self._finish_startup_before_output()
+            self._stop_spinner()
+            self._print_notification("🌀 Compacting context...")
+            return
         if event_type == "assistant_message_started":
             self._streaming_narration.begin()
             return
@@ -523,7 +528,7 @@ class TerminalDisplay:
         if age:
             details.append(age)
         line = f"↩ Previous session loaded · {' · '.join(details)}"
-        self._print_visible_line(line, dim=True)
+        self._print_notification(line)
 
     def _startup_info_panel(self, startup_info: StartupInfo) -> str:
         """Return startup details through the existing display test seam."""
@@ -546,6 +551,10 @@ class TerminalDisplay:
         print(styled_text(line, *(style, DIM_STYLE if dim else "")))
         self._needs_leading_blank = True
         self._has_run_output = True
+
+    def _print_notification(self, line: str) -> None:
+        """Print neutral system activity with the shared tool-detail treatment."""
+        self._print_visible_line(line, dim=True)
 
     def _run_event_line(self, line: str) -> str:
         return self._indented_run_line(line, RUN_EVENT_INDENT)

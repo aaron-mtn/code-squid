@@ -146,6 +146,15 @@ class AgentLoop:
     def _emit_event(self, event: dict) -> None:
         emit_agent_event(self.on_event, self._session_id(), event)
 
+    def _handle_compaction_event(self, event: dict) -> None:
+        """Persist compaction diagnostics and publish its visible start seam."""
+        # Persistence retains the complete lifecycle. Only the authoritative
+        # start belongs on the compact observer path used by presentation.
+        if self.session_store is not None:
+            self.session_store.append_compaction_event(event)
+        if event.get("type") == "compaction_started":
+            self._emit_event(event)
+
     def _should_stream_assistant_text(self) -> bool:
         if not self.stream_assistant_text:
             return False
@@ -323,14 +332,9 @@ class AgentLoop:
 
                 if self.compactor is not None:
                     self._check_cancelled()
-                    compaction_event_callback = (
-                        self.session_store.append_compaction_event
-                        if self.session_store is not None
-                        else None
-                    )
                     self.compactor.maybe_compact(
                         self.session,
-                        event_callback=compaction_event_callback,
+                        event_callback=self._handle_compaction_event,
                     )
                     self._check_cancelled()
 

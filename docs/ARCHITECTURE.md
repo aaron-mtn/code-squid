@@ -1356,9 +1356,11 @@ When triggered, compaction:
 - keeps recent chunks verbatim according to
   `settings.compaction.keep_recent_turns`
 
-`AgentLoop` supplies the canonical `SessionStore.append_compaction_event(...)`
-callback to the compactor when persistence is wired in. The compactor writes a
-chronological diagnostic lifecycle beside normal transcript entries:
+`AgentLoop` supplies one callback that persists each lifecycle event through
+`SessionStore.append_compaction_event(...)` when storage is wired in and also
+publishes the authoritative start event through the loop's existing observer
+seam. The compactor writes a chronological diagnostic lifecycle beside normal
+transcript entries:
 
 - `compaction_check` records the estimate, configured trigger, threshold result,
   and whether eligible older chunks make compaction possible
@@ -1379,6 +1381,9 @@ result fields and additionally exposes normalized `reasoning` and
 `finish_reason` when the provider supplies them. Compaction events are
 diagnostic, not transcript messages: `SessionStore.load_messages()` continues
 to ignore them and replay only message and system-reconciliation entries.
+The CLI reacts only to the authoritative `compaction_started` event, rendering
+`🌀 Compacting context...` through the same indented, dim notification path
+used by neutral tool/status activity. Checks that do not compact stay silent.
 
 Compaction is transcript compression for continuation context. It does not
 provide durable workspace memory.

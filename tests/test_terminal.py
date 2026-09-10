@@ -707,6 +707,29 @@ def test_previous_session_notice_is_one_indented_dim_neutral_line(
     )
 
 
+def test_compaction_started_is_one_indented_dim_notification(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    TerminalDisplay().handle_event({"type": "compaction_started"})
+
+    assert capsys.readouterr().out == (
+        f"{DIM_STYLE}{RUN_DETAIL_INDENT}🌀 Compacting context...{RESET_STYLE}\n"
+    )
+
+
+def test_compaction_check_does_not_print_notification(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    TerminalDisplay().handle_event(
+        {"type": "compaction_check", "will_compact": False}
+    )
+
+    assert capsys.readouterr().out == ""
+
+
 def test_previous_session_notice_truncates_title_but_keeps_age(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
