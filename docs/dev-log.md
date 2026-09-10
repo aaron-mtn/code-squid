@@ -1,3 +1,18 @@
+- 2026-09-10: Added a centralized request-only boundary for trimming old Tool
+  results before ordinary model turns. Complete Tool results still flow through
+  normal transcript and append-only session persistence; `AgentLoop` now asks
+  `tool_result_trimming.py` for a model-visible copy immediately before calling
+  the adapter. Core's frozen `ToolResultTrimmingSettings` exposes direct knobs
+  for the recent full-result count and old read, command, failed-patch, and
+  write payload limits. Trimming is deterministic, preserves Tool-call/result
+  IDs and operational metadata, leaves unknown Tools unchanged, and uses small
+  omission markers at zero limits. No built-in Tool, canonical event,
+  compaction behavior, semantic invalidation, or presets changed. Focused
+  rendering/settings/spawner/loop verification passed 98 tests. The full suite
+  passed 1,051 tests and retained nine failures in untouched areas: eight stale
+  prompt-copy expectations and one Windows TTY path-rendering assertion.
+  Production/test compilation passed; no live model inference ran.
+
 - 2026-09-09: Added deterministic `run_command` failure diagnostics and
   transient recovery after command flailing. Failed command executions now
   retain output while exposing a conservative `failure_class` plus shell and

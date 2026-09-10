@@ -31,6 +31,8 @@ from squid_core.hooks import (
     ToolResultContext,
 )
 from squid_core.safety import ActionPreflight, ApprovalPolicy, denied_result
+from squid_core.settings import ToolResultTrimmingSettings
+from squid_core.tool_result_trimming import render_messages_for_model
 
 MAX_CONSECUTIVE_INVALID_REPLIES = 3
 REJECTION_REASON_EVENT_MAX_CHARS = 500
@@ -75,6 +77,7 @@ class AgentLoop:
         should_cancel: Callable[[], bool] | None = None,
         hook_runner: HookRunner | None = None,
         action_preflight: ActionPreflight | None = None,
+        tool_result_trimming: ToolResultTrimmingSettings | None = None,
     ) -> None:
         self.session = session
         self.model_adapter = model_adapter
@@ -94,6 +97,11 @@ class AgentLoop:
         self.on_event = on_event
         self.should_cancel = should_cancel or (lambda: False)
         self.hook_runner = hook_runner if hook_runner is not None else HookRunner()
+        self.tool_result_trimming = (
+            tool_result_trimming
+            if tool_result_trimming is not None
+            else ToolResultTrimmingSettings()
+        )
         self._run_context_blocks: list[PromptContextBlock] = []
 
     def _check_cancelled(self) -> None:
@@ -166,6 +174,7 @@ class AgentLoop:
         messages = list(self.session.messages)
         if extra_messages:
             messages = [*messages, *extra_messages]
+        messages = render_messages_for_model(messages, self.tool_result_trimming)
 
         if not self._should_stream_assistant_text():
             return self.model_adapter.respond(

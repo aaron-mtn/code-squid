@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 VALID_APPROVAL_MODES = frozenset({"always", "guarded", "never"})
@@ -54,6 +54,33 @@ class CompactionSettings:
 
 
 @dataclass(frozen=True)
+class ToolResultTrimmingSettings:
+    """Tune the smaller view of older tool results sent to the model."""
+
+    enabled: bool = True
+    recent_full_results: int = 5
+    read_old_content_chars: int = 1000
+    command_old_output_chars: int = 1000
+    patch_old_diagnostic_chars: int = 800
+    write_old_content_chars: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ValueError("tool-result trimming enabled must be a boolean")
+        for name, value in (
+            ("recent_full_results", self.recent_full_results),
+            ("read_old_content_chars", self.read_old_content_chars),
+            ("command_old_output_chars", self.command_old_output_chars),
+            ("patch_old_diagnostic_chars", self.patch_old_diagnostic_chars),
+            ("write_old_content_chars", self.write_old_content_chars),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(
+                    f"tool-result trimming {name} must be a non-negative integer"
+                )
+
+
+@dataclass(frozen=True)
 class RuntimeSettings:
     """Effective settings that affect generic runtime behavior."""
 
@@ -62,6 +89,9 @@ class RuntimeSettings:
     max_tool_steps: int | None
     stream_assistant_text: bool
     compaction: CompactionSettings
+    tool_result_trimming: ToolResultTrimmingSettings = field(
+        default_factory=ToolResultTrimmingSettings
+    )
 
     def __post_init__(self) -> None:
         if self.approval_mode not in VALID_APPROVAL_MODES:

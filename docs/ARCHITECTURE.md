@@ -384,7 +384,9 @@ and application layer; `squid_core/` is the reusable agent runtime.
   - `events.py` owns observation; `generation.py` owns one-shot generation;
     `model_adapter.py` owns provider
     normalization; `settings.py` owns generic provider/runtime/compaction
-    semantics; `platform_context.py` describes the environment;
+    and tool-result trimming semantics; `tool_result_trimming.py` owns the
+    request-only rendering of older built-in Tool payloads;
+    `platform_context.py` describes the environment;
     `spawner.py` owns generic construction; `session.py` owns in-memory
     transcript state; and `skills.py` owns standalone Skills.
   - Resource modules accept explicit application homes or resource roots. They
@@ -938,6 +940,18 @@ model. `SessionStore.load_messages()` ignores it while applying system-message
 reconciliation events to the replayed transcript.
 `python main.py show <session_id>` displays compact `[run context]` blocks so
 tool exposure and prompt overrides can be inspected after a run.
+
+Immediately before an ordinary model turn, `AgentLoop` derives a model-visible
+history from the canonical transcript. The newest configured number of Tool
+results remain byte-for-byte unchanged. Older built-in results may retain a
+bounded deterministic view of source, command output, or failed-patch
+diagnostics while keeping status, path, line, return-code, failure, and
+candidate metadata. Unknown Tools remain unchanged. This rendering never
+mutates `session.messages` or append-only session storage, and assistant Tool
+calls retain their original `tool_call_id` pairing with Tool results. Core's
+`ToolResultTrimmingSettings` supplies direct harness-tuning variables and can
+disable the transformation; these experimental values are not persisted in
+Code Squid's application settings. Compaction remains a separate operation.
 
 Standalone Skills discovered from the Code Squid home directory have
 `source="user"` and `editable=true`. Mod-local Skills remain package-scoped and

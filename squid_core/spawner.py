@@ -284,4 +284,5 @@ def build_agent_loop(
         on_event=on_event,
         should_cancel=should_cancel,
         hook_runner=hook_runner,
+        tool_result_trimming=settings.tool_result_trimming,
     )
