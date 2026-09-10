@@ -28,6 +28,30 @@ def _failure(
     )
 
 
+def _command_result(
+    hook: RepeatedFailureNudge,
+    command: str,
+    *,
+    ok: bool = False,
+    failure_class: str = "process_failed",
+) -> HookResponse | None:
+    result = {"ok": ok, "tool": "run_command"}
+    if not ok:
+        result.update(
+            {
+                "failure_class": failure_class,
+                "platform": "Windows",
+                "shell": "PowerShell",
+            }
+        )
+    return hook.tool_result(
+        _Context(
+            action={"tool": "run_command", "args": {"command": command}},
+            result=result,
+        )
+    )
+
+
 def test_one_failure_does_not_trigger_a_nudge() -> None:
     hook = RepeatedFailureNudge(GUIDANCE)
 
@@ -102,6 +126,65 @@ def test_a_nudge_requires_a_fresh_threshold_before_repeating() -> None:
     assert _failure(hook) is None
     assert _failure(hook) is None
     assert _failure(hook) is not None
+
+
+def test_three_different_failed_commands_trigger_command_recovery_nudge() -> None:
+    hook = RepeatedFailureNudge(GUIDANCE, run_command_guidance="Reassess commands.")
+
+    assert _command_result(hook, "grep thing") is None
+    assert _command_result(
+        hook, "wc -l", failure_class="command_not_found"
+    ) is None
+    response = _command_result(
+        hook, "powershell -Command x", failure_class="shell_syntax_error"
+    )
+
+    assert response is not None
+    assert "Reassess commands." in response.additional_context
+    assert "Configured environment: Windows / PowerShell" in response.additional_context
+    assert (
+        "Recent failures: process_failed, command_not_found, shell_syntax_error"
+        in response.additional_context
+    )
+    assert response.block is False
+
+
+def test_successful_command_resets_command_failure_streak() -> None:
+    hook = RepeatedFailureNudge(GUIDANCE, run_command_guidance="Reassess commands.")
+    _command_result(hook, "first")
+    _command_result(hook, "second")
+
+    _command_result(hook, "success", ok=True)
+
+    assert _command_result(hook, "third") is None
+    assert _command_result(hook, "fourth") is None
+
+
+def test_unrelated_tool_calls_do_not_increment_or_reset_command_streak() -> None:
+    hook = RepeatedFailureNudge(GUIDANCE, run_command_guidance="Reassess commands.")
+    _command_result(hook, "first")
+    assert hook.tool_result(
+        _Context(
+            action={"tool": "read_file", "args": {"path": "a.py"}},
+            result={"ok": True, "tool": "read_file"},
+        )
+    ) is None
+    assert _command_result(hook, "second") is None
+
+    response = _command_result(hook, "third")
+
+    assert response is not None
+
+
+def test_command_nudge_resets_and_does_not_block_the_next_command() -> None:
+    hook = RepeatedFailureNudge(GUIDANCE, run_command_guidance="Reassess commands.")
+    _command_result(hook, "first")
+    _command_result(hook, "second")
+    response = _command_result(hook, "third")
+
+    assert response is not None
+    assert response.block is False
+    assert _command_result(hook, "fourth") is None
 
     assert _failure(hook) is None
     assert _failure(hook) is None

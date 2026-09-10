@@ -46,6 +46,14 @@ NO_PROGRESS_GUIDANCE = (
     "tool result and choose a materially different next action instead of "
     "retrying the same failure."
 )
+RUN_COMMAND_RECOVERY_GUIDANCE = (
+    "Several recent commands have failed.\n\n"
+    "Stop trying small variations of the same approach. Reassess the latest "
+    "errors and use a simple command that matches the configured operating "
+    "system and shell.\n\n"
+    "Do not assume commands, syntax, or utilities from a different environment "
+    "are available."
+)
 
 
 @dataclass(frozen=True)
@@ -292,6 +300,7 @@ def build_hook_runner(
     redundant_read_hook = RedundantReadNudge(source="Code Squid")
     no_progress_hook = RepeatedFailureNudge(
         NO_PROGRESS_GUIDANCE,
+        run_command_guidance=RUN_COMMAND_RECOVERY_GUIDANCE,
         source="Code Squid",
     )
     if hook_runner is not None:

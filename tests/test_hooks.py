@@ -824,6 +824,76 @@ def test_repeated_failure_nudge_reaches_model_without_blocking_tool_calls() -> N
     assert all("Change course." not in str(message) for message in session.messages)
 
 
+def test_command_failure_nudge_is_transient_and_next_command_still_runs() -> None:
+    class CompletingAgent(FakeAgent):
+        def should_stop(self, session: Session) -> bool:
+            return any(
+                message.get("role") == "assistant"
+                and message.get("content") == "TASK COMPLETE"
+                for message in session.messages
+            )
+
+    class FailingCommandExecutor(FakeToolExecutor):
+        def execute(self, action: dict) -> dict:
+            self.actions.append(action)
+            return {
+                "ok": False,
+                "tool": "run_command",
+                "failure_class": "command_not_found",
+                "platform": "Windows",
+                "shell": "PowerShell",
+            }
+
+    actions = [
+        {"tool": "run_command", "args": {"command": command}}
+        for command in ("grep x", "wc -l", "missing-tool", "Get-ChildItem")
+    ]
+    model_adapter = SequenceModelAdapter(
+        [
+            *[
+                {
+                    "message": {"role": "assistant", "content": "Trying."},
+                    "actions": [action],
+                }
+                for action in actions
+            ],
+            {
+                "message": {"role": "assistant", "content": "TASK COMPLETE"},
+                "actions": [],
+            },
+        ]
+    )
+    session = Session(repo_root=None)
+    executor = FailingCommandExecutor()
+    loop = AgentLoop(
+        session=session,
+        model_adapter=model_adapter,
+        tool_executor=executor,
+        tool_results=FakeToolResults(),
+        agent=CompletingAgent(),
+        display=NullDisplay(),
+        hook_runner=HookRunner(
+            [
+                RepeatedFailureNudge(
+                    "Change course.",
+                    run_command_guidance="Reassess commands.",
+                )
+            ]
+        ),
+    )
+
+    result = loop.run()
+
+    assert result == RunResult(status="complete")
+    assert executor.actions == actions
+    assert "Reassess commands." in model_adapter.calls[3]["messages"][-1]["content"]
+    assert all(
+        "Reassess commands." not in str(call["messages"])
+        for call in (*model_adapter.calls[:3], model_adapter.calls[4])
+    )
+    assert all("Reassess commands." not in str(message) for message in session.messages)
+
+
 def test_before_tool_execute_mutation_chains_to_later_hooks() -> None:
     seen = []
 

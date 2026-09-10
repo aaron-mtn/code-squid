@@ -504,6 +504,72 @@ def test_run_command_timeout_returns_normal_failure_result(monkeypatch: pytest.M
     assert result["timed_out"] is True
     assert result["tool"] == "run_command"
     assert result["command"] == "sleep 1"
+    assert result["failure_class"] == "timeout"
+
+
+def test_run_command_classifies_powershell_invalid_separator(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from squid_core.platform_context import PlatformContext
+
+    class Completed:
+        returncode = 1
+        stdout = (
+            "At line:1 char:10\n"
+            "+ Get-Date && Get-Date\n"
+            "+          ~~\n"
+            "The token '&&' is not a valid statement separator in this version.\n"
+        )
+
+    context = PlatformContext("Windows", "PowerShell", "powershell", "\\", True)
+    monkeypatch.setattr(run_command_module.subprocess, "run", lambda *args, **kwargs: Completed())
+
+    result = run_command(tmp_path, "Get-Date && Get-Date", platform_context=context)
+
+    assert result["failure_class"] == "shell_syntax_error"
+    assert result["shell"] == "PowerShell"
+    assert result["platform"] == "Windows"
+    assert result["output"] == Completed.stdout
+
+
+def test_run_command_classifies_recognizable_missing_executable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from squid_core.platform_context import PlatformContext
+
+    class Completed:
+        returncode = 1
+        stdout = (
+            "missing-tool : The term 'missing-tool' is not recognized as the name "
+            "of a cmdlet, function, script file, or operable program.\n"
+            "    + CategoryInfo : ObjectNotFound: (missing-tool:String) [], "
+            "CommandNotFoundException\n"
+        )
+
+    context = PlatformContext("Windows", "PowerShell", "powershell", "\\", True)
+    monkeypatch.setattr(run_command_module.subprocess, "run", lambda *args, **kwargs: Completed())
+
+    result = run_command(tmp_path, "missing-tool", platform_context=context)
+
+    assert result["failure_class"] == "command_not_found"
+
+
+def test_run_command_keeps_ordinary_project_failure_generic(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from squid_core.platform_context import PlatformContext
+
+    class Completed:
+        returncode = 1
+        stdout = "FAILED tests/test_widget.py - AssertionError: command not found in message\n"
+
+    context = PlatformContext("Linux", "bash", "/bin/bash", "/", False)
+    monkeypatch.setattr(run_command_module.subprocess, "run", lambda *args, **kwargs: Completed())
+
+    result = run_command(tmp_path, "pytest -q", platform_context=context)
+
+    assert result["failure_class"] == "process_failed"
+    assert result["output"] == Completed.stdout
 
 
 def test_run_command_uses_selected_powershell_on_windows(

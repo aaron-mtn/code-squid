@@ -1,3 +1,20 @@
+- 2026-09-09: Added deterministic `run_command` failure diagnostics and
+  transient recovery after command flailing. Failed command executions now
+  retain output while exposing a conservative `failure_class` plus shell and
+  platform facts; timeout, recognizable PowerShell parser/missing-command
+  diagnostics, selected path/permission signals, generic process failures, and
+  launch failures remain mechanically distinct. Core's existing
+  `RepeatedFailureNudge` now keeps a separate run-local count across different
+  failed command strings, ignores unrelated Tools, resets on command success,
+  and uses the existing one-request-only context path at three failures. Code
+  Squid continues to own the recovery wording. No polling, background process,
+  output-handle, retry, command rewrite, or general trimming behavior was
+  added. Focused Tool/Hook/loop/wiring verification passed 77 tests. The full
+  suite passed 1,040 tests and retained nine failures in untouched areas: eight
+  stale prompt-copy expectations and one Windows TTY path-rendering assertion.
+  Production/test compilation and `git diff --check` passed. No live model
+  inference ran.
+
 - 2026-09-09: Surfaced actual context compaction in normal CLI output as the
   indented, dim `🌀 Compacting context...` notification. `AgentLoop` now
   forwards the existing persisted `compaction_started` event through its

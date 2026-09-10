@@ -18,6 +18,7 @@ from squid_core.hooks import (
 )
 from code_squid.agent_setup import (
     NO_PROGRESS_GUIDANCE,
+    RUN_COMMAND_RECOVERY_GUIDANCE,
     build_coding_task_run,
     build_hook_runner,
 )
@@ -184,6 +185,7 @@ def test_code_squid_always_wires_product_owned_no_progress_guidance() -> None:
     assert runner.hooks[-2].source == "Code Squid"
     assert isinstance(runner.hooks[-1], RepeatedFailureNudge)
     assert runner.hooks[-1].guidance == NO_PROGRESS_GUIDANCE
+    assert runner.hooks[-1].run_command_guidance == RUN_COMMAND_RECOVERY_GUIDANCE
 
 
 def test_include_user_hooks_loads_disk_hooks(

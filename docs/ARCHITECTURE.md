@@ -527,15 +527,20 @@ final transformed Tool result continues through normal display and transcript
 persistence.
 
 Code Squid wires Core's small `RepeatedFailureNudge` Hook at this seam. The
-generic Hook keeps only an exact action fingerprint, failure category, and
-repeat count. Three consecutive failures must have the same Tool, the same JSON
-arguments, and the same scalar `error`; success, an uncategorized failure, or
-any changed action/category resets the streak. At the threshold it returns the
-recovery wording directly as `HookResponse.additional_context` and immediately
-resets, so another nudge requires three fresh equivalent failures. It never
-blocks, rewrites, or retries a Tool action. Squid Core owns this detection
-mechanism while `code_squid.agent_setup` owns the guidance wording and enables
-it for Code Squid runs. Its `source` remains configuration metadata used by
+generic Hook retains its exact-action detector: three consecutive failures must
+have the same Tool, JSON arguments, and scalar `error`; success, an
+uncategorized failure, or any changed action/category resets that streak. The
+same Hook also has an independently configured `run_command` detector. It
+counts actual classified command-process failures across different command
+strings, ignores unrelated Tool calls without incrementing or resetting the
+command count, and resets the count after a successful command. Approval,
+schema, and pre-execution failures have no `failure_class` and do not enter this
+counter. At either threshold the Hook returns recovery wording as transient
+`HookResponse.additional_context` and immediately resets the applicable
+counter, so another nudge requires three fresh failures. It never blocks,
+rewrites, or retries a Tool action. Squid Core owns these run-local detection
+mechanisms while `code_squid.agent_setup` owns both guidance texts and enables
+them for Code Squid runs. Its `source` remains configuration metadata used by
 hosts; it no longer controls prompt rendering.
 
 Code Squid also wires Core's `RedundantReadNudge` immediately before the
@@ -1584,7 +1589,17 @@ editing.
 - merges stderr into stdout
 - times out after 15 seconds
 - returns `ok` based on process return code
-- returns a normalized timeout failure with `timed_out: True`
+- attaches `failure_class` to every failed execution using only timeout state,
+  launch errors, return code, platform/shell identity, and narrowly recognized
+  shell diagnostics; uncertain completed failures use `process_failed`
+- classifies normalized timeouts as `timeout` while retaining `timed_out: True`
+- can classify strong signals as `command_not_found`, `shell_syntax_error`,
+  `path_not_found`, or `permission_denied`; unrecognized launch failures use
+  `unknown_failure`
+- includes the configured `platform` and `shell` on failures so runtime
+  recovery guidance can report factual environment context
+- preserves the command's useful combined output and does not rewrite or retry
+  commands
 - truncates large output with the unchanged shared 12,000-character head/tail
   truncation
 - is used for discovery, verification, and shell behavior
