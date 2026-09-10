@@ -23,8 +23,9 @@ def _settings(*, provider: str = "openai_compatible") -> RuntimeSettings:
         stream_assistant_text=False,
         compaction=CompactionSettings(
             enabled=False,
-            trigger_input_tokens=48_000,
-            keep_recent_turns=8,
+            trigger_input_tokens=25_000,
+            compact_fraction=0.8,
+            min_recent_chunks=2,
         ),
     )
 

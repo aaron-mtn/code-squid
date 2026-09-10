@@ -38,19 +38,38 @@ class ProviderSettings:
 class CompactionSettings:
     """Runtime transcript compaction semantics."""
 
-    enabled: bool
-    trigger_input_tokens: int
-    keep_recent_turns: int
+    enabled: bool = True
+    trigger_input_tokens: int = 25_000
+    compact_fraction: float = 0.80
+    min_recent_chunks: int = 2
 
     def __post_init__(self) -> None:
         if not isinstance(self.enabled, bool):
             raise ValueError("compaction enabled must be a boolean")
-        for name, value in (
-            ("trigger_input_tokens", self.trigger_input_tokens),
-            ("keep_recent_turns", self.keep_recent_turns),
+        if (
+            isinstance(self.trigger_input_tokens, bool)
+            or not isinstance(self.trigger_input_tokens, int)
+            or self.trigger_input_tokens < 1
         ):
-            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-                raise ValueError(f"compaction {name} must be a positive integer")
+            raise ValueError(
+                "compaction trigger_input_tokens must be a positive integer"
+            )
+        if (
+            isinstance(self.compact_fraction, bool)
+            or not isinstance(self.compact_fraction, int | float)
+            or not 0 < self.compact_fraction <= 1
+        ):
+            raise ValueError(
+                "compaction compact_fraction must be greater than 0 and at most 1"
+            )
+        if (
+            isinstance(self.min_recent_chunks, bool)
+            or not isinstance(self.min_recent_chunks, int)
+            or self.min_recent_chunks < 0
+        ):
+            raise ValueError(
+                "compaction min_recent_chunks must be a non-negative integer"
+            )
 
 
 @dataclass(frozen=True)

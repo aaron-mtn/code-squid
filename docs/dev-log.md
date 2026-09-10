@@ -1,3 +1,16 @@
+- 2026-09-10: Changed transcript compaction selection from a fixed
+  `keep_recent_turns` split to deterministic oldest-first token-weight
+  selection. Compaction now targets 80% of eligible chunk tokens by default,
+  preserves at least two newest chunks, excludes the protected system/original
+  task prefix from the fraction, and retains indivisible Tool-call/result
+  chunks. Added explicit fraction and recent-chunk settings, richer lifecycle
+  diagnostics, and repeated-summary coverage. Older `keep_recent_turns` JSON is
+  ignored and must be renamed when a customized retention value is desired.
+  Focused compaction/settings/status/loop/persistence verification passed 230
+  tests. The full suite passed 1,071 tests and retained the same nine unrelated
+  baseline failures (eight prompt-text expectations and one Windows TTY path
+  assertion); compilation and diff checks passed.
+
 - 2026-09-10: Added a centralized request-only boundary for trimming old Tool
   results before ordinary model turns. Complete Tool results still flow through
   normal transcript and append-only session persistence; `AgentLoop` now asks

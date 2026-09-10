@@ -10,12 +10,14 @@ from squid_core.compaction.token_estimate import estimate_messages_tokens
 def settings(
     enabled: bool = True,
     trigger_input_tokens: int | None = 100,
-    keep_recent_turns: int | None = 8,
+    compact_fraction: float | None = 0.8,
+    min_recent_chunks: int | None = 2,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         enabled=enabled,
         trigger_input_tokens=trigger_input_tokens,
-        keep_recent_turns=keep_recent_turns,
+        compact_fraction=compact_fraction,
+        min_recent_chunks=min_recent_chunks,
     )
 
 
@@ -39,7 +41,12 @@ def test_enabled_compaction_payload() -> None:
 
     status = build_context_status(
         messages,
-        settings(enabled=True, trigger_input_tokens=100, keep_recent_turns=4),
+        settings(
+            enabled=True,
+            trigger_input_tokens=100,
+            compact_fraction=0.7,
+            min_recent_chunks=4,
+        ),
     )
 
     assert status.to_dict() == {
@@ -49,7 +56,8 @@ def test_enabled_compaction_payload() -> None:
         "label": f"{format_token_count(estimated_tokens)} / 100",
         "compaction_enabled": True,
         "trigger_input_tokens": 100,
-        "keep_recent_turns": 4,
+        "compact_fraction": 0.7,
+        "min_recent_chunks": 4,
     }
 
 
@@ -59,7 +67,12 @@ def test_disabled_compaction_payload() -> None:
 
     status = build_context_status(
         messages,
-        settings(enabled=False, trigger_input_tokens=100, keep_recent_turns=4),
+        settings(
+            enabled=False,
+            trigger_input_tokens=100,
+            compact_fraction=0.7,
+            min_recent_chunks=4,
+        ),
     )
 
     assert status.to_dict() == {
@@ -69,7 +82,8 @@ def test_disabled_compaction_payload() -> None:
         "label": format_token_count(estimated_tokens),
         "compaction_enabled": False,
         "trigger_input_tokens": 100,
-        "keep_recent_turns": 4,
+        "compact_fraction": 0.7,
+        "min_recent_chunks": 4,
     }
 
 
@@ -87,13 +101,14 @@ def test_zero_trigger_safety() -> None:
 def test_missing_trigger_safety() -> None:
     status = build_context_status(
         [{"role": "user", "content": "hello"}],
-        SimpleNamespace(enabled=True, keep_recent_turns=3),
+        SimpleNamespace(enabled=True, compact_fraction=0.8, min_recent_chunks=3),
     )
 
     assert status.limit_tokens is None
     assert status.percent is None
     assert status.trigger_input_tokens is None
-    assert status.keep_recent_turns == 3
+    assert status.compact_fraction == 0.8
+    assert status.min_recent_chunks == 3
     assert status.label == format_token_count(status.estimated_tokens)
 
 

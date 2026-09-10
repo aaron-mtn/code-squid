@@ -44,14 +44,17 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert settings.runtime.max_tool_steps is None
     assert settings.runtime.stream_assistant_text is False
     assert settings.compaction.enabled is True
-    assert settings.compaction.trigger_input_tokens == 48000
-    assert settings.compaction.keep_recent_turns == 8
+    assert settings.compaction.trigger_input_tokens == 25_000
+    assert settings.compaction.compact_fraction == 0.8
+    assert settings.compaction.min_recent_chunks == 2
 
     runtime_settings = settings.to_runtime_settings()
     assert runtime_settings.provider.provider == "lm_studio"
     assert runtime_settings.provider.model_name == "qwen3.5-9b"
     assert runtime_settings.provider.api_key == "lm-studio"
     assert runtime_settings.approval_mode == "never"
+    assert runtime_settings.compaction.compact_fraction == 0.8
+    assert runtime_settings.compaction.min_recent_chunks == 2
 
 
 def test_application_settings_survive_workspace_change_and_process_reload(
@@ -258,7 +261,8 @@ def test_settings_file_overrides_defaults(tmp_path: Path) -> None:
             "compaction": {
                 "enabled": False,
                 "trigger_input_tokens": 24000,
-                "keep_recent_turns": 4,
+                "compact_fraction": 0.65,
+                "min_recent_chunks": 4,
             },
         },
     )
@@ -277,7 +281,21 @@ def test_settings_file_overrides_defaults(tmp_path: Path) -> None:
     assert settings.runtime.stream_assistant_text is True
     assert settings.compaction.enabled is False
     assert settings.compaction.trigger_input_tokens == 24000
-    assert settings.compaction.keep_recent_turns == 4
+    assert settings.compaction.compact_fraction == 0.65
+    assert settings.compaction.min_recent_chunks == 4
+
+    runtime_settings = settings.to_runtime_settings()
+    assert runtime_settings.compaction.compact_fraction == 0.65
+    assert runtime_settings.compaction.min_recent_chunks == 4
+
+
+def test_legacy_keep_recent_turns_is_ignored(tmp_path: Path) -> None:
+    write_settings(tmp_path, {"compaction": {"keep_recent_turns": 9}})
+
+    settings = load_settings(tmp_path)
+
+    assert settings.compaction.compact_fraction == 0.8
+    assert settings.compaction.min_recent_chunks == 2
 
 
 def test_settings_file_can_set_zero_temperature(tmp_path: Path) -> None:
@@ -471,14 +489,27 @@ def test_invalid_compaction_trigger_input_tokens_raises(
         load_settings(tmp_path)
 
 
-@pytest.mark.parametrize("keep_recent_turns", [0, -1, True, False, "8"])
-def test_invalid_compaction_keep_recent_turns_raises(
+@pytest.mark.parametrize("compact_fraction", [0, -0.1, 1.1, True, False, "0.8"])
+def test_invalid_compaction_compact_fraction_raises(
     tmp_path: Path,
-    keep_recent_turns: object,
+    compact_fraction: object,
 ) -> None:
-    write_settings(tmp_path, {"compaction": {"keep_recent_turns": keep_recent_turns}})
+    write_settings(tmp_path, {"compaction": {"compact_fraction": compact_fraction}})
 
-    with pytest.raises(ValueError, match="compaction\\.keep_recent_turns"):
+    with pytest.raises(ValueError, match="compaction\\.compact_fraction"):
+        load_settings(tmp_path)
+
+
+@pytest.mark.parametrize("min_recent_chunks", [-1, True, False, 2.0, "2"])
+def test_invalid_compaction_min_recent_chunks_raises(
+    tmp_path: Path,
+    min_recent_chunks: object,
+) -> None:
+    write_settings(
+        tmp_path, {"compaction": {"min_recent_chunks": min_recent_chunks}}
+    )
+
+    with pytest.raises(ValueError, match="compaction\\.min_recent_chunks"):
         load_settings(tmp_path)
 
 

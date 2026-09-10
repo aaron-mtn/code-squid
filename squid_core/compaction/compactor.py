@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Callable
 
 from squid_core.compaction.prompts import COMPACTION_SYSTEM_PROMPT, compaction_prompt
@@ -36,8 +37,11 @@ class Compactor:
                 session.messages
             )
             chunks = self._chunks(remaining_messages)
-            compacted_chunks = chunks[: -self.settings.keep_recent_turns]
-            recent_chunks = chunks[-self.settings.keep_recent_turns :]
+            (
+                compacted_chunks,
+                recent_chunks,
+                selection,
+            ) = self._select_compaction_chunks(chunks)
             will_compact = threshold_crossed and bool(compacted_chunks)
 
             stage = "persistence"
@@ -49,6 +53,7 @@ class Compactor:
                     "trigger_input_tokens": self.settings.trigger_input_tokens,
                     "threshold_crossed": threshold_crossed,
                     "will_compact": will_compact,
+                    **selection,
                 },
             )
             if not will_compact:
@@ -61,7 +66,7 @@ class Compactor:
                     "type": "compaction_started",
                     "estimated_tokens_before": estimated_tokens_before,
                     "messages_before": messages_before,
-                    "keep_recent_turns": self.settings.keep_recent_turns,
+                    **selection,
                 },
             )
 
@@ -207,6 +212,34 @@ class Compactor:
             chunks.append(chunk)
 
         return chunks
+
+    def _select_compaction_chunks(
+        self, chunks: list[list[dict]]
+    ) -> tuple[list[list[dict]], list[list[dict]], dict]:
+        """Select the oldest whole chunks by token weight, preserving a recent tail."""
+        chunk_tokens = [estimate_messages_tokens(chunk) for chunk in chunks]
+        eligible_tokens = sum(chunk_tokens)
+        target_tokens = math.ceil(eligible_tokens * self.settings.compact_fraction)
+        max_selected_chunks = max(0, len(chunks) - self.settings.min_recent_chunks)
+
+        selected_count = 0
+        selected_tokens = 0
+        for chunk_tokens_estimate in chunk_tokens[:max_selected_chunks]:
+            selected_count += 1
+            selected_tokens += chunk_tokens_estimate
+            if selected_tokens >= target_tokens:
+                break
+
+        selection = {
+            "eligible_token_estimate": eligible_tokens,
+            "target_compact_token_estimate": target_tokens,
+            "selected_compact_token_estimate": selected_tokens,
+            "selected_chunks": selected_count,
+            "preserved_chunks": len(chunks) - selected_count,
+            "compact_fraction": self.settings.compact_fraction,
+            "min_recent_chunks": self.settings.min_recent_chunks,
+        }
+        return chunks[:selected_count], chunks[selected_count:], selection
 
     def _flatten(self, chunks: list[list[dict]]) -> list[dict]:
         messages = []

@@ -328,7 +328,11 @@ def test_compact_at_normalizes_persists_and_confirms(
         tmp_path,
         {
             "display": {"debug": True},
-            "compaction": {"enabled": False, "keep_recent_turns": 4},
+            "compaction": {
+                "enabled": False,
+                "compact_fraction": 0.7,
+                "min_recent_chunks": 4,
+            },
         },
     )
 
@@ -343,7 +347,8 @@ def test_compact_at_normalizes_persists_and_confirms(
     assert settings.compaction.trigger_input_tokens == expected_tokens
     assert persisted["compaction"] == {
         "enabled": False,
-        "keep_recent_turns": 4,
+        "compact_fraction": 0.7,
+        "min_recent_chunks": 4,
         "trigger_input_tokens": expected_tokens,
     }
     assert persisted["display"] == {"debug": True}

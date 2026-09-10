@@ -5,6 +5,7 @@ import pytest
 
 import squid_core.compaction as compaction_module
 from squid_core.compaction import Compactor
+from squid_core.compaction.token_estimate import estimate_messages_tokens
 
 
 class FakeModelAdapter:
@@ -32,12 +33,14 @@ class FailingModelAdapter:
 def settings(
     enabled: bool = True,
     trigger_input_tokens: int = 1,
-    keep_recent_turns: int = 2,
+    compact_fraction: float = 0.8,
+    min_recent_chunks: int = 2,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         enabled=enabled,
         trigger_input_tokens=trigger_input_tokens,
-        keep_recent_turns=keep_recent_turns,
+        compact_fraction=compact_fraction,
+        min_recent_chunks=min_recent_chunks,
     )
 
 
@@ -95,20 +98,23 @@ def test_below_threshold_logs_compaction_check() -> None:
     assert result is None
     assert events[0]["estimated_tokens"] > 0
     estimated_tokens = events[0]["estimated_tokens"]
-    assert events == [
-        {
-            "type": "compaction_check",
-            "estimated_tokens": estimated_tokens,
-            "trigger_input_tokens": 100_000,
-            "threshold_crossed": False,
-            "will_compact": False,
-        }
-    ]
+    assert events[0]["type"] == "compaction_check"
+    assert events[0]["estimated_tokens"] == estimated_tokens
+    assert events[0]["trigger_input_tokens"] == 100_000
+    assert events[0]["threshold_crossed"] is False
+    assert events[0]["will_compact"] is False
+    assert events[0]["eligible_token_estimate"] > 0
+    assert events[0]["target_compact_token_estimate"] > 0
+    assert events[0]["selected_compact_token_estimate"] > 0
+    assert events[0]["selected_chunks"] == 2
+    assert events[0]["preserved_chunks"] == 2
+    assert events[0]["compact_fraction"] == 0.8
+    assert events[0]["min_recent_chunks"] == 2
 
 
 def test_above_threshold_replaces_older_chunks_with_one_compacted_context_message() -> None:
     current_session = session(compactable_messages())
-    compactor = Compactor(settings(keep_recent_turns=2), FakeModelAdapter("summary text"))
+    compactor = Compactor(settings(), FakeModelAdapter("summary text"))
 
     result = compactor.maybe_compact(current_session)
 
@@ -129,7 +135,7 @@ def test_above_threshold_replaces_older_chunks_with_one_compacted_context_messag
 def test_initial_system_and_user_messages_are_preserved() -> None:
     messages = compactable_messages()
     current_session = session(messages)
-    compactor = Compactor(settings(keep_recent_turns=2), FakeModelAdapter())
+    compactor = Compactor(settings(), FakeModelAdapter())
 
     compactor.maybe_compact(current_session)
 
@@ -139,7 +145,7 @@ def test_initial_system_and_user_messages_are_preserved() -> None:
 def test_recent_chunks_are_preserved() -> None:
     messages = compactable_messages()
     current_session = session(messages)
-    compactor = Compactor(settings(keep_recent_turns=2), FakeModelAdapter())
+    compactor = Compactor(settings(), FakeModelAdapter())
 
     compactor.maybe_compact(current_session)
 
@@ -167,18 +173,129 @@ def test_assistant_tool_call_and_following_tool_result_stay_together_when_kept_r
         tool_result,
     ]
     current_session = session(messages)
-    compactor = Compactor(settings(keep_recent_turns=1), FakeModelAdapter())
+    compactor = Compactor(settings(min_recent_chunks=1), FakeModelAdapter())
 
     compactor.maybe_compact(current_session)
 
     assert current_session.messages[-2:] == [tool_call, tool_result]
 
 
+def test_selects_oldest_chunks_until_eighty_percent_of_eligible_tokens() -> None:
+    protected = [
+        {"role": "system", "content": "s" * 40_000},
+        {"role": "user", "content": "u" * 40_000},
+    ]
+    chunks = [
+        {"role": "assistant", "content": f"chunk-{index}:" + "x" * chars}
+        for index, chars in enumerate([2_000, 12_000, 36_000, 10_000, 4_000, 8_000])
+    ]
+    events = []
+    model_adapter = FakeModelAdapter("weighted summary")
+    current_session = session([*protected, *chunks])
+
+    Compactor(settings(), model_adapter).maybe_compact(
+        current_session, event_callback=events.append
+    )
+
+    summarized_context = model_adapter.requests[0][1]["content"]
+    for index in range(4):
+        assert f"chunk-{index}:" in summarized_context
+    for index in range(4, 6):
+        assert f"chunk-{index}:" not in summarized_context
+    assert current_session.messages[:2] == protected
+    assert current_session.messages[-2:] == chunks[-2:]
+
+    selection = events[0]
+    eligible_tokens = estimate_messages_tokens(chunks)
+    selected_tokens = estimate_messages_tokens(chunks[:4])
+    assert selection["eligible_token_estimate"] == eligible_tokens
+    assert selection["target_compact_token_estimate"] == pytest.approx(
+        eligible_tokens * 0.8, abs=1
+    )
+    assert selection["selected_compact_token_estimate"] == selected_tokens
+    assert selection["selected_chunks"] == 4
+    assert selection["preserved_chunks"] == 2
+
+
+def test_large_chunk_may_overshoot_fraction_without_being_split() -> None:
+    chunks = [
+        {"role": "assistant", "content": "small-oldest" + "x" * 400},
+        {"role": "assistant", "content": "large-whole" + "x" * 40_000},
+        {"role": "assistant", "content": "recent-one" + "x" * 400},
+        {"role": "user", "content": "recent-two" + "x" * 400},
+    ]
+    events = []
+    model_adapter = FakeModelAdapter()
+
+    Compactor(settings(), model_adapter).maybe_compact(
+        session(
+            [
+                {"role": "system", "content": "system"},
+                {"role": "user", "content": "task"},
+                *chunks,
+            ]
+        ),
+        event_callback=events.append,
+    )
+
+    assert events[0]["selected_chunks"] == 2
+    assert (
+        events[0]["selected_compact_token_estimate"]
+        > events[0]["target_compact_token_estimate"]
+    )
+    summarized_context = model_adapter.requests[0][1]["content"]
+    assert "large-whole" in summarized_context
+    assert "recent-one" not in summarized_context
+
+
+def test_does_not_compact_when_minimum_recent_chunks_consume_history() -> None:
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "task"},
+        long_message("assistant", "one "),
+        long_message("user", "two "),
+    ]
+    events = []
+    model_adapter = FakeModelAdapter()
+
+    result = Compactor(settings(min_recent_chunks=2), model_adapter).maybe_compact(
+        session(messages), event_callback=events.append
+    )
+
+    assert result is None
+    assert model_adapter.requests == []
+    assert events[0]["will_compact"] is False
+    assert events[0]["selected_chunks"] == 0
+    assert events[0]["preserved_chunks"] == 2
+
+
+def test_fraction_and_recent_chunk_overrides_control_selection() -> None:
+    chunks = [long_message("assistant", str(index)) for index in range(5)]
+    model_adapter = FakeModelAdapter()
+    current_session = session(
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "task"},
+            *chunks,
+        ]
+    )
+
+    Compactor(
+        settings(compact_fraction=0.4, min_recent_chunks=1), model_adapter
+    ).maybe_compact(current_session)
+
+    summarized_context = model_adapter.requests[0][1]["content"]
+    assert chunks[0]["content"] in summarized_context
+    assert chunks[1]["content"] in summarized_context
+    assert chunks[2]["content"] not in summarized_context
+    assert current_session.messages[-3:] == chunks[-3:]
+
+
 def test_complete_text_failure_does_not_mutate_session_messages() -> None:
     messages = compactable_messages()
     original_messages = list(messages)
     current_session = session(messages)
-    compactor = Compactor(settings(keep_recent_turns=2), FailingModelAdapter())
+    compactor = Compactor(settings(), FailingModelAdapter())
 
     with pytest.raises(RuntimeError, match="summary failed"):
         compactor.maybe_compact(current_session)
@@ -188,7 +305,7 @@ def test_complete_text_failure_does_not_mutate_session_messages() -> None:
 
 def test_returned_metadata_includes_token_message_counts_and_summary_chars() -> None:
     current_session = session(compactable_messages())
-    compactor = Compactor(settings(keep_recent_turns=2), FakeModelAdapter("summary text"))
+    compactor = Compactor(settings(), FakeModelAdapter("summary text"))
 
     result = compactor.maybe_compact(current_session)
 
@@ -210,7 +327,7 @@ def test_successful_compaction_logs_complete_lifecycle_and_exact_model_data() ->
     )
     current_session = session(compactable_messages())
 
-    result = Compactor(settings(keep_recent_turns=2), model_adapter).maybe_compact(
+    result = Compactor(settings(), model_adapter).maybe_compact(
         current_session, event_callback=events.append
     )
 
@@ -225,7 +342,10 @@ def test_successful_compaction_logs_complete_lifecycle_and_exact_model_data() ->
     ]
     assert events[0]["will_compact"] is True
     assert events[1]["messages_before"] == 6
-    assert events[1]["keep_recent_turns"] == 2
+    assert events[1]["compact_fraction"] == 0.8
+    assert events[1]["min_recent_chunks"] == 2
+    assert events[1]["selected_chunks"] == 2
+    assert events[1]["preserved_chunks"] == 2
     assert events[2]["estimated_request_tokens"] > 0
     assert events[2]["provider"] == "test-provider"
     assert events[2]["model"] == "test-model"
@@ -279,7 +399,7 @@ def test_model_request_failure_logs_stage_and_reraises_original_exception() -> N
 def test_summary_request_uses_compaction_prompt_with_json_context() -> None:
     model_adapter = FakeModelAdapter()
     current_session = session(compactable_messages())
-    compactor = Compactor(settings(keep_recent_turns=2), model_adapter)
+    compactor = Compactor(settings(), model_adapter)
 
     compactor.maybe_compact(current_session)
 
@@ -289,6 +409,30 @@ def test_summary_request_uses_compaction_prompt_with_json_context() -> None:
     }
     assert model_adapter.requests[0][1]["role"] == "user"
     assert "Prior context:" in model_adapter.requests[0][1]["content"]
+
+
+def test_repeated_compaction_folds_prior_summary_into_later_history() -> None:
+    current_session = session(compactable_messages())
+    first_adapter = FakeModelAdapter("first compacted summary")
+    Compactor(settings(), first_adapter).maybe_compact(current_session)
+    current_session.messages.extend(
+        [
+            long_message("assistant", "new finding "),
+            long_message("user", "new direction "),
+            long_message("assistant", "new result "),
+        ]
+    )
+    newest_chunks = current_session.messages[-2:]
+    second_adapter = FakeModelAdapter("second compacted summary")
+
+    Compactor(settings(), second_adapter).maybe_compact(current_session)
+
+    second_prompt = second_adapter.requests[0][1]["content"]
+    assert "# Compacted Prior Context" in second_prompt
+    assert "first compacted summary" in second_prompt
+    assert current_session.messages[:2] == compactable_messages()[:2]
+    assert current_session.messages[-2:] == newest_chunks
+    assert current_session.messages[2]["content"].endswith("second compacted summary")
 
 
 def test_compaction_does_not_import_code_squid_application_prompts() -> None:
@@ -310,7 +454,7 @@ def test_generic_prompt_carries_task_tool_verification_and_failure_context() -> 
     ]
     current_session = session(messages)
 
-    Compactor(settings(keep_recent_turns=1), model_adapter).maybe_compact(
+    Compactor(settings(min_recent_chunks=1), model_adapter).maybe_compact(
         current_session
     )
 

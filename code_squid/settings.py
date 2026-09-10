@@ -40,8 +40,9 @@ DEFAULT_MAX_TOOL_STEPS = None
 DEFAULT_STREAM_ASSISTANT_TEXT = False
 
 DEFAULT_COMPACTION_ENABLED = True
-DEFAULT_COMPACTION_TRIGGER_INPUT_TOKENS = 48000
-DEFAULT_COMPACTION_KEEP_RECENT_TURNS = 8
+DEFAULT_COMPACTION_TRIGGER_INPUT_TOKENS = 25_000
+DEFAULT_COMPACTION_FRACTION = 0.80
+DEFAULT_COMPACTION_MIN_RECENT_CHUNKS = 2
 
 
 @dataclass(frozen=True)
@@ -70,7 +71,8 @@ class RuntimeSettings:
 class CompactionSettings:
     enabled: bool = DEFAULT_COMPACTION_ENABLED
     trigger_input_tokens: int = DEFAULT_COMPACTION_TRIGGER_INPUT_TOKENS
-    keep_recent_turns: int = DEFAULT_COMPACTION_KEEP_RECENT_TURNS
+    compact_fraction: float = DEFAULT_COMPACTION_FRACTION
+    min_recent_chunks: int = DEFAULT_COMPACTION_MIN_RECENT_CHUNKS
 
 
 @dataclass(frozen=True)
@@ -108,7 +110,8 @@ class Settings:
             compaction=CoreCompactionSettings(
                 enabled=self.compaction.enabled,
                 trigger_input_tokens=self.compaction.trigger_input_tokens,
-                keep_recent_turns=self.compaction.keep_recent_turns,
+                compact_fraction=self.compaction.compact_fraction,
+                min_recent_chunks=self.compaction.min_recent_chunks,
             ),
         )
 
@@ -245,6 +248,30 @@ def _positive_int(value: Any, field_path: str, settings_path: Path) -> int:
     return value
 
 
+def _fraction(value: Any, field_path: str, settings_path: Path) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not 0 < value <= 1
+    ):
+        raise ValueError(
+            f"Invalid settings JSON in {settings_path}: {field_path} must be "
+            "greater than 0 and at most 1"
+        )
+
+    return float(value)
+
+
+def _non_negative_int(value: Any, field_path: str, settings_path: Path) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(
+            f"Invalid settings JSON in {settings_path}: {field_path} must be a "
+            "non-negative integer"
+        )
+
+    return value
+
+
 def _compaction_settings(
     compaction_settings: dict[str, Any],
     settings_path: Path,
@@ -263,16 +290,24 @@ def _compaction_settings(
         "compaction.trigger_input_tokens",
         settings_path,
     )
-    keep_recent_turns = _positive_int(
-        compaction_settings.get("keep_recent_turns", DEFAULT_COMPACTION_KEEP_RECENT_TURNS),
-        "compaction.keep_recent_turns",
+    compact_fraction = _fraction(
+        compaction_settings.get("compact_fraction", DEFAULT_COMPACTION_FRACTION),
+        "compaction.compact_fraction",
+        settings_path,
+    )
+    min_recent_chunks = _non_negative_int(
+        compaction_settings.get(
+            "min_recent_chunks", DEFAULT_COMPACTION_MIN_RECENT_CHUNKS
+        ),
+        "compaction.min_recent_chunks",
         settings_path,
     )
 
     return CompactionSettings(
         enabled=enabled,
         trigger_input_tokens=trigger_input_tokens,
-        keep_recent_turns=keep_recent_turns,
+        compact_fraction=compact_fraction,
+        min_recent_chunks=min_recent_chunks,
     )
 
 

@@ -132,8 +132,9 @@ like this:
   },
   "compaction": {
     "enabled": true,
-    "trigger_input_tokens": 48000,
-    "keep_recent_turns": 8
+    "trigger_input_tokens": 25000,
+    "compact_fraction": 0.8,
+    "min_recent_chunks": 2
   }
 }
 ```
@@ -352,8 +353,11 @@ undo. `run_command` is not undo-protected and can mutate files directly.
 ## Compaction
 
 Compaction is enabled by default. Before model calls, Code Squid estimates the
-current transcript size. When it gets large, older context is summarized while
-recent turns are kept verbatim.
+current transcript size. When it reaches 25,000 estimated input tokens, Code
+Squid summarizes the oldest whole chunks representing about 80% of eligible
+history while preserving at least the newest two chunks verbatim. The initial
+system message and original user task remain protected and do not count toward
+that 80% target.
 
 Compaction uses rough token estimates. It is transcript management, not
 workspace memory.

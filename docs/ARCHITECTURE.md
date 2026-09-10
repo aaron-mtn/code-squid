@@ -1023,8 +1023,8 @@ Missing settings are allowed. Defaults keep the CLI usable with LM Studio:
 - approval mode: `never`
 - max tool steps: unlimited
 - assistant text streaming: disabled
-- compaction: enabled at an estimated 48,000 input tokens, keeping 8 recent
-  chunks verbatim
+- compaction: enabled at an estimated 25,000 input tokens, compacting about 80%
+  of eligible token weight while preserving at least 2 recent chunks verbatim
 
 Supported settings sections and fields:
 
@@ -1040,7 +1040,8 @@ Supported settings sections and fields:
 - `runtime.stream_assistant_text`
 - `compaction.enabled`
 - `compaction.trigger_input_tokens`
-- `compaction.keep_recent_turns`
+- `compaction.compact_fraction`
+- `compaction.min_recent_chunks`
 
 The `providers` mapping is sparse: it contains only connection values a user
 explicitly saved. Switching `model.provider` changes which provider-scoped
@@ -1361,7 +1362,7 @@ Compaction triggers when:
 - `settings.compaction.enabled` is true
 - estimated input tokens are at least
   `settings.compaction.trigger_input_tokens`
-- there are older chunks available beyond the configured recent chunks
+- there are eligible chunks available beyond the configured minimum recent tail
 
 When triggered, compaction:
 
@@ -1369,11 +1370,23 @@ When triggered, compaction:
 - chunks the remaining transcript
 - never splits an assistant message with `tool_calls` from its following
   `role: "tool"` result messages
+- estimates the token weight of the chunked history only, excluding the
+  protected prefix, and rounds the configured fraction target up to a whole
+  token
+- selects oldest whole chunks in order until their cumulative estimate reaches
+  that target or the minimum recent-chunk boundary prevents further selection
 - summarizes older chunks with `ModelAdapter.complete_text(...)`
 - replaces those older chunks with one user message headed
   `# Compacted Prior Context`
-- keeps recent chunks verbatim according to
-  `settings.compaction.keep_recent_turns`
+- keeps at least `settings.compaction.min_recent_chunks` newest chunks verbatim
+
+The application and Core defaults are `enabled=True`,
+`trigger_input_tokens=25_000`, `compact_fraction=0.80`, and
+`min_recent_chunks=2`. A prior `# Compacted Prior Context` message is an ordinary
+eligible chunk on a later pass, so repeated compaction naturally folds an older
+summary into the next summary without a separate memory mechanism. The removed
+`keep_recent_turns` JSON field is ignored if it remains in an older settings
+file; users who customized it must replace it with `min_recent_chunks`.
 
 `AgentLoop` supplies one callback that persists each lifecycle event through
 `SessionStore.append_compaction_event(...)` when storage is wired in and also
@@ -1382,9 +1395,9 @@ seam. The compactor writes a chronological diagnostic lifecycle beside normal
 transcript entries:
 
 - `compaction_check` records the estimate, configured trigger, threshold result,
-  and whether eligible older chunks make compaction possible
-- `compaction_started` records the pre-compaction message count and retention
-  setting
+  whether compaction is possible, and compactable-selection diagnostics
+- `compaction_started` records the pre-compaction message count plus eligible,
+  target, selected, and preserved token/chunk selection details
 - `compaction_request` records the estimated request size and configured
   provider/model immediately before the model call
 - optional `compaction_reasoning`, exact `compaction_summary`, and optional

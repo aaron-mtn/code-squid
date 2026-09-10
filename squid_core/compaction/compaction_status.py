@@ -16,7 +16,8 @@ class ContextStatus:
     label: str
     compaction_enabled: bool
     trigger_input_tokens: int | None
-    keep_recent_turns: int | None
+    compact_fraction: float | None
+    min_recent_chunks: int | None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -40,7 +41,8 @@ def build_context_status(
     estimated_tokens = estimate_messages_tokens(messages)
     compaction_enabled = bool(getattr(compaction_settings, "enabled", False))
     trigger_input_tokens = getattr(compaction_settings, "trigger_input_tokens", None)
-    keep_recent_turns = getattr(compaction_settings, "keep_recent_turns", None)
+    compact_fraction = getattr(compaction_settings, "compact_fraction", None)
+    min_recent_chunks = getattr(compaction_settings, "min_recent_chunks", None)
 
     has_trigger_limit = (
         compaction_enabled
@@ -68,5 +70,6 @@ def build_context_status(
         label=label,
         compaction_enabled=compaction_enabled,
         trigger_input_tokens=trigger_input_tokens,
-        keep_recent_turns=keep_recent_turns,
+        compact_fraction=compact_fraction,
+        min_recent_chunks=min_recent_chunks,
     )
