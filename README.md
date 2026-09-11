@@ -152,6 +152,7 @@ Supported environment overrides:
 - `CODE_SQUID_MODEL`
 - `CODE_SQUID_PROVIDER`
 - `CODE_SQUID_TEMPERATURE`
+- `CODE_SQUID_REASONING_MODE`
 - `CODE_SQUID_DEBUG`
 
 `CODE_SQUID_TRACE=1` enables debug output and prints the full transcript at the
@@ -189,7 +190,8 @@ key through its provider-scoped `api_key`, `api_key_env`, or
 {
   "model": {
     "provider": "openrouter",
-    "name": "your-model-name"
+    "name": "your-model-name",
+    "reasoning_mode": "medium"
   },
   "providers": {
     "openrouter": {
@@ -199,6 +201,11 @@ key through its provider-scoped `api_key`, `api_key_env`, or
   }
 }
 ```
+
+`model.reasoning_mode` is optional and accepts `off`, `low`, `medium`, or
+`high`. When omitted or `null`, Code Squid sends no persistent reasoning
+override. The normalized setting is currently translated only for OpenRouter;
+other providers retain their existing request behavior.
 
 Known issue: OpenRouter may emit multiple tool calls in one reply. Code Squid
 rejects those replies and retries.

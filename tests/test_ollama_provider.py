@@ -406,12 +406,14 @@ def test_provider_selection_uses_openai_compatible_for_openrouter() -> None:
         base_url="https://openrouter.ai/api/v1",
         api_key="key",
         temperature=0,
+        reasoning_mode="medium",
     )
 
     provider = build_provider(settings)
 
     assert isinstance(provider, OpenAICompatibleProvider)
     assert provider.temperature == 0
+    assert provider.reasoning_mode == "medium"
     assert provider.provider_name == "openrouter"
 
 

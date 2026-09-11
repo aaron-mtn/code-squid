@@ -13,6 +13,7 @@ ENV_VARS = [
     "CODE_SQUID_MODEL",
     "CODE_SQUID_PROVIDER",
     "CODE_SQUID_TEMPERATURE",
+    "CODE_SQUID_REASONING_MODE",
     "CODE_SQUID_DEBUG",
     "CODE_SQUID_STREAM_ASSISTANT_TEXT",
 ]
@@ -39,6 +40,7 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert settings.model.name == "qwen3.5-9b"
     assert settings.model.provider == "lm_studio"
     assert settings.model.temperature is None
+    assert settings.model.reasoning_mode is None
     assert settings.display.debug is False
     assert settings.runtime.approval_mode == "never"
     assert settings.runtime.max_tool_steps is None
@@ -52,6 +54,7 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert runtime_settings.provider.provider == "lm_studio"
     assert runtime_settings.provider.model_name == "qwen3.5-9b"
     assert runtime_settings.provider.api_key == "lm-studio"
+    assert runtime_settings.provider.reasoning_mode is None
     assert runtime_settings.approval_mode == "never"
     assert runtime_settings.compaction.compact_fraction == 0.8
     assert runtime_settings.compaction.min_recent_chunks == 2
@@ -314,6 +317,19 @@ def test_settings_file_can_set_decimal_temperature(tmp_path: Path) -> None:
     assert settings.model.temperature == 0.2
 
 
+@pytest.mark.parametrize("reasoning_mode", ["off", "low", "medium", "high"])
+def test_settings_file_accepts_reasoning_mode(
+    tmp_path: Path,
+    reasoning_mode: str,
+) -> None:
+    write_settings(tmp_path, {"model": {"reasoning_mode": reasoning_mode}})
+
+    settings = load_settings(tmp_path)
+
+    assert settings.model.reasoning_mode == reasoning_mode
+    assert settings.to_runtime_settings().provider.reasoning_mode == reasoning_mode
+
+
 def test_settings_file_allows_null_max_tool_steps(tmp_path: Path) -> None:
     write_settings(tmp_path, {"runtime": {"max_tool_steps": None}})
 
@@ -384,6 +400,47 @@ def test_null_temperature_preserves_none(tmp_path: Path) -> None:
     settings = load_settings(tmp_path)
 
     assert settings.model.temperature is None
+
+
+def test_empty_reasoning_mode_env_var_unsets_saved_value(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    write_settings(tmp_path, {"model": {"reasoning_mode": "high"}})
+    monkeypatch.setenv("CODE_SQUID_REASONING_MODE", "")
+
+    assert load_settings(tmp_path).model.reasoning_mode is None
+
+
+def test_reasoning_mode_env_var_overrides_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    write_settings(tmp_path, {"model": {"reasoning_mode": "low"}})
+    monkeypatch.setenv("CODE_SQUID_REASONING_MODE", "high")
+
+    assert load_settings(tmp_path).model.reasoning_mode == "high"
+
+
+def test_invalid_reasoning_mode_env_var_raises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CODE_SQUID_REASONING_MODE", "auto")
+
+    with pytest.raises(ValueError, match="CODE_SQUID_REASONING_MODE"):
+        load_settings(tmp_path)
+
+
+@pytest.mark.parametrize("reasoning_mode", ["auto", "max", "xhigh", "none", 1])
+def test_invalid_reasoning_mode_settings_raise(
+    tmp_path: Path,
+    reasoning_mode: object,
+) -> None:
+    write_settings(tmp_path, {"model": {"reasoning_mode": reasoning_mode}})
+
+    with pytest.raises(ValueError, match="model\\.reasoning_mode"):
+        load_settings(tmp_path)
 
 
 def test_invalid_temperature_env_var_raises(

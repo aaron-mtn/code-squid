@@ -1032,6 +1032,7 @@ Missing settings are allowed. Defaults keep the CLI usable with LM Studio:
 - model name: `qwen3.5-9b`
 - provider: `lm_studio`
 - temperature: `null`
+- reasoning mode: `null` (do not override provider/model behavior)
 - display debug: `false`
 - approval mode: `never`
 - max tool steps: unlimited
@@ -1044,6 +1045,7 @@ Supported settings sections and fields:
 - `model.name`
 - `model.provider`
 - `model.temperature`
+- `model.reasoning_mode`
 - `providers.<provider_id>.base_url`
 - `providers.<provider_id>.api_key`
 - `providers.<provider_id>.api_key_env`
@@ -1085,6 +1087,9 @@ validated. These events carry the `narration` or `final` phase described in
 Events And External Wrappers. Streamed deltas are UI events only; tool execution
 still waits for the full validated assistant response.
 `model.temperature` is `null` or a number from 0 through 2.
+`model.reasoning_mode` is `null`, `off`, `low`, `medium`, or `high`. `null`
+means the provider request receives no persistent reasoning-specific setting,
+preserving its existing model/provider default.
 
 Environment overrides are optional development, headless, and automation
 inputs—not the normal user configuration UX. Current overrides are:
@@ -1094,6 +1099,7 @@ inputs—not the normal user configuration UX. Current overrides are:
 - `CODE_SQUID_MODEL`
 - `CODE_SQUID_PROVIDER`
 - `CODE_SQUID_TEMPERATURE`
+- `CODE_SQUID_REASONING_MODE`
 - `CODE_SQUID_DEBUG`
 - `CODE_SQUID_STREAM_ASSISTANT_TEXT`
 
@@ -1217,6 +1223,15 @@ OpenRouter is supported through the OpenAI-compatible provider path by setting
 tool-call replay with `content: null` for assistant messages that have
 `tool_calls` and no content. This provider-specific behavior is handled before
 messages are sent to the provider.
+
+Reasoning configuration remains a single optional
+`ProviderSettings.reasoning_mode` value and travels through built-in provider
+construction to the concrete request builder. Only the explicit `openrouter`
+identity currently translates it: `off` becomes OpenRouter reasoning effort
+`none`, while `low`, `medium`, and `high` retain their names. `null` emits no
+reasoning field. LM Studio, Squid Models, Ollama, and generic OpenAI-compatible
+requests currently ignore the normalized setting because no provider mapping
+is defined for them; there is no capability registry or model-specific policy.
 
 The OpenAI-compatible provider sends `parallel_tool_calls: false` whenever tools
 are present. OpenRouter may still return multiple tool calls. Code Squid handles

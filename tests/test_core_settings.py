@@ -59,3 +59,42 @@ def test_core_rejects_invalid_temperature_semantics() -> None:
             api_key=None,
             temperature=3,
         )
+
+
+def test_core_reasoning_mode_defaults_to_none() -> None:
+    settings = ProviderSettings(
+        provider="custom",
+        model_name="model",
+        base_url=None,
+        api_key=None,
+    )
+
+    assert settings.reasoning_mode is None
+
+
+@pytest.mark.parametrize("reasoning_mode", ["off", "low", "medium", "high"])
+def test_core_accepts_normalized_reasoning_modes(reasoning_mode: str) -> None:
+    settings = ProviderSettings(
+        provider="custom",
+        model_name="model",
+        base_url=None,
+        api_key=None,
+        reasoning_mode=reasoning_mode,
+    )
+
+    assert settings.reasoning_mode == reasoning_mode
+
+
+@pytest.mark.parametrize(
+    "reasoning_mode",
+    ["auto", "max", "xhigh", "none", 1, ["high"]],
+)
+def test_core_rejects_invalid_reasoning_modes(reasoning_mode: object) -> None:
+    with pytest.raises(ValueError, match="reasoning_mode"):
+        ProviderSettings(
+            provider="custom",
+            model_name="model",
+            base_url=None,
+            api_key=None,
+            reasoning_mode=reasoning_mode,
+        )

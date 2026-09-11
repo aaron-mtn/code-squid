@@ -57,6 +57,7 @@ def test_friendly_profiles_map_to_existing_transports() -> None:
                 base_url=profile.base_url,
                 api_key=profile.api_key or "test-key",
                 temperature=None,
+                reasoning_mode=None,
             )
         )
         assert isinstance(provider, OpenAICompatibleProvider)
@@ -69,6 +70,7 @@ def test_friendly_profiles_map_to_existing_transports() -> None:
             base_url=ollama.base_url,
             api_key=None,
             temperature=None,
+            reasoning_mode=None,
         )
     )
     assert isinstance(provider, OllamaProvider)
@@ -149,11 +151,13 @@ def test_openrouter_public_discovery_omits_auth_and_env_key_reaches_inference(
         return JsonResponse({"data": [{"id": "vendor/model"}]})
 
     monkeypatch.setenv("CODE_SQUID_PROVIDER", "openrouter")
+    monkeypatch.setenv("CODE_SQUID_REASONING_MODE", "medium")
     monkeypatch.setenv("OPENROUTER_API_KEY", "environment-secret")
     monkeypatch.setattr("squid_core.providers.openai_compatible.request.urlopen", urlopen)
     settings = load_settings(tmp_path)
     provider = build_provider(settings.to_runtime_settings().provider)
     assert provider._api_key == "environment-secret"
+    assert provider.reasoning_mode == "medium"
     assert provider.list_models() == ["vendor/model"]
     assert requests[0].get_header("Authorization") is None
 
@@ -193,6 +197,7 @@ def test_openrouter_inference_construction_still_requires_key() -> None:
         base_url="https://openrouter.ai/api/v1",
         api_key=None,
         temperature=None,
+        reasoning_mode=None,
     )
 
     with pytest.raises(ValueError, match="api_key is required"):

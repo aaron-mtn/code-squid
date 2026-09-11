@@ -33,6 +33,7 @@ def build_provider(
             base_url=settings.base_url,
             api_key=settings.api_key,
             temperature=settings.temperature,
+            reasoning_mode=settings.reasoning_mode,
             provider_name=settings.provider,
         )
 

@@ -16,6 +16,7 @@ from squid_core.settings import (
     CompactionSettings as CoreCompactionSettings,
     ProviderSettings,
     RuntimeSettings as CoreRuntimeSettings,
+    VALID_REASONING_MODES,
 )
 from squid_core.storage.atomic_json import atomic_write_json
 
@@ -28,6 +29,7 @@ DEFAULT_MODEL_NAME = "qwen3.5-9b"
 DEFAULT_PROVIDER = "lm_studio"
 DEFAULT_DEBUG = False
 DEFAULT_TEMPERATURE = None
+DEFAULT_REASONING_MODE = None
 
 # Approval mode is parsed here, but enforcement belongs in the runtime/tool
 # execution path. "never" is the current trusted-local behavior.
@@ -53,6 +55,7 @@ class ModelSettings:
     name: str = DEFAULT_MODEL_NAME
     provider: str = DEFAULT_PROVIDER
     temperature: float | int | None = DEFAULT_TEMPERATURE
+    reasoning_mode: str | None = DEFAULT_REASONING_MODE
 
 
 @dataclass(frozen=True)
@@ -103,6 +106,7 @@ class Settings:
                 base_url=base_url,
                 api_key=self.model.api_key,
                 temperature=self.model.temperature,
+                reasoning_mode=self.model.reasoning_mode,
             ),
             approval_mode=self.runtime.approval_mode,
             max_tool_steps=self.runtime.max_tool_steps,
@@ -344,6 +348,30 @@ def _temperature(model_settings: dict[str, Any], settings_path: Path) -> float |
         ) from error
 
 
+def _validate_reasoning_mode(value: Any, source: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or value not in VALID_REASONING_MODES:
+        valid_modes = ", ".join(sorted(VALID_REASONING_MODES))
+        raise ValueError(
+            f"Invalid {source}: model.reasoning_mode must be null or one of {valid_modes}"
+        )
+    return value
+
+
+def _reasoning_mode(model_settings: dict[str, Any], settings_path: Path) -> str | None:
+    reasoning_mode = _validate_reasoning_mode(
+        model_settings.get("reasoning_mode", DEFAULT_REASONING_MODE),
+        f"settings JSON in {settings_path}",
+    )
+    reasoning_mode_env = os.getenv("CODE_SQUID_REASONING_MODE")
+    if reasoning_mode_env is None:
+        return reasoning_mode
+    if reasoning_mode_env == "":
+        return None
+    return _validate_reasoning_mode(reasoning_mode_env, "CODE_SQUID_REASONING_MODE")
+
+
 def _provider(model_settings: dict[str, Any], settings_path: Path) -> str:
     provider = os.getenv("CODE_SQUID_PROVIDER", model_settings.get("provider", DEFAULT_PROVIDER))
     if provider not in VALID_PROVIDERS:
@@ -429,6 +457,7 @@ def load_settings(repo_root: Path) -> Settings:
     )
     model_name = os.getenv("CODE_SQUID_MODEL", model_settings.get("name", DEFAULT_MODEL_NAME))
     temperature = _temperature(model_settings, settings_path)
+    reasoning_mode = _reasoning_mode(model_settings, settings_path)
     debug = display_settings.get("debug", DEFAULT_DEBUG)
     approval_mode = _approval_mode(runtime_settings, settings_path)
     max_tool_steps = _max_tool_steps(runtime_settings, settings_path)
@@ -447,6 +476,7 @@ def load_settings(repo_root: Path) -> Settings:
             name=model_name,
             provider=provider,
             temperature=temperature,
+            reasoning_mode=reasoning_mode,
         ),
         display=DisplaySettings(debug=bool(debug)),
         runtime=RuntimeSettings(

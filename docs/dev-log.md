@@ -1,3 +1,17 @@
+- 2026-09-10: Added a minimal normalized provider reasoning setting with
+  `off`, `low`, `medium`, and `high` values and a default of `null`. Code Squid
+  application settings now pass the value through Core's existing
+  `ProviderSettings` and provider-construction seam. At the concrete
+  OpenRouter request boundary, `off` maps to reasoning effort `none` and the
+  other values map directly; unset values and every provider without a known
+  mapping retain their prior request shape. No reasoning policy, budgets,
+  model registry, capability detection, prompt changes, or GUI controls were
+  added. Focused settings/provider tests passed 154 tests. The full suite
+  passed 1,105 tests and retained the same nine failures recorded by the prior
+  patch: eight stale prompt-copy expectations and one Windows TTY path-rendering
+  assertion. Production/test compilation and `git diff --check` passed; no live
+  model inference ran.
+
 - 2026-09-10: Tightened `RepeatedReadNudge` so its default threshold advises on
   the first read with at least 70% prior coverage while retaining configurable
   thresholds, including one. Successful `apply_patch` results now use their

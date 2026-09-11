@@ -21,6 +21,7 @@ class OpenAICompatibleProvider(BaseProvider):
         base_url: str,
         api_key: str | None,
         temperature: float | int | None = None,
+        reasoning_mode: str | None = None,
         provider_name: str = "openai_compatible",
     ) -> None:
         self.base_url = base_url
@@ -28,6 +29,7 @@ class OpenAICompatibleProvider(BaseProvider):
         # never appear in status output or diagnostic representations.
         self._api_key = api_key
         self.temperature = temperature
+        self.reasoning_mode = reasoning_mode
         self.provider_name = provider_name
         # OpenRouter's catalog is public, so discovery may construct this
         # transport without a credential. The inference client stays absent in
@@ -311,8 +313,14 @@ class OpenAICompatibleProvider(BaseProvider):
             payload["parallel_tool_calls"] = False
         if tool_choice is not None:
             payload["tool_choice"] = tool_choice
+        provider_name = getattr(self, "provider_name", "openai_compatible")
+        reasoning_mode = getattr(self, "reasoning_mode", None)
+        if provider_name == "openrouter" and reasoning_mode is not None:
+            # OpenRouter calls disabled reasoning "none" on the wire; Core's
+            # normalized user-facing value stays "off" across providers.
+            effort = "none" if reasoning_mode == "off" else reasoning_mode
+            payload["extra_body"] = {"reasoning": {"effort": effort}}
         if please_stop_contemplating_the_void:
-            provider_name = getattr(self, "provider_name", "openai_compatible")
             if provider_name == "squid_models":
                 payload["extra_body"] = {
                     "chat_template_kwargs": {"enable_thinking": False},

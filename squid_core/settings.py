@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 
 VALID_APPROVAL_MODES = frozenset({"always", "guarded", "never"})
+VALID_REASONING_MODES = frozenset({"off", "low", "medium", "high"})
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,7 @@ class ProviderSettings:
     base_url: str | None
     api_key: str | None
     temperature: float | int | None = None
+    reasoning_mode: str | None = None
 
     def __post_init__(self) -> None:
         if not self.provider:
@@ -32,6 +34,17 @@ class ProviderSettings:
             )
         ):
             raise ValueError("temperature must be null or a number from 0 through 2")
+        if (
+            self.reasoning_mode is not None
+            and (
+                not isinstance(self.reasoning_mode, str)
+                or self.reasoning_mode not in VALID_REASONING_MODES
+            )
+        ):
+            valid_modes = ", ".join(sorted(VALID_REASONING_MODES))
+            raise ValueError(
+                f"reasoning_mode must be null or one of {valid_modes}"
+            )
 
 
 @dataclass(frozen=True)

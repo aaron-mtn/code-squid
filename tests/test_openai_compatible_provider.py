@@ -25,10 +25,12 @@ class FakeClient:
 
 def provider_with_fake_client(
     temperature=None,
+    reasoning_mode=None,
     provider_name: str = "openai_compatible",
 ) -> tuple[OpenAICompatibleProvider, FakeClient]:
     provider = OpenAICompatibleProvider.__new__(OpenAICompatibleProvider)
     provider.temperature = temperature
+    provider.reasoning_mode = reasoning_mode
     provider.provider_name = provider_name
     provider.client = FakeClient()
     return provider, provider.client
@@ -137,6 +139,39 @@ def test_reasoning_controls_are_omitted_by_default() -> None:
         provider, client = provider_with_fake_client(provider_name=provider_name)
         provider.create_response(model="test-model", messages=[], tools=[])
         assert "extra_body" not in client.chat.completions.payloads[0]
+
+
+def test_openrouter_translates_normalized_reasoning_modes() -> None:
+    expected_efforts = {
+        "off": "none",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+    }
+    for reasoning_mode, effort in expected_efforts.items():
+        provider, client = provider_with_fake_client(
+            provider_name="openrouter",
+            reasoning_mode=reasoning_mode,
+        )
+
+        provider.create_response(model="test-model", messages=[], tools=[])
+
+        assert client.chat.completions.payloads[0]["extra_body"] == {
+            "reasoning": {"effort": effort},
+        }
+
+
+def test_generic_openai_compatible_ignores_normalized_reasoning_mode() -> None:
+    provider, client = provider_with_fake_client(
+        provider_name="openai_compatible",
+        reasoning_mode="high",
+    )
+
+    provider.create_response(model="test-model", messages=[], tools=[])
+
+    payload = client.chat.completions.payloads[0]
+    assert "extra_body" not in payload
+    assert "reasoning" not in payload
 
 
 def test_transport_does_not_print_request_summary(capsys) -> None:
