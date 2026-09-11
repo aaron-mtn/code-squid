@@ -1,3 +1,17 @@
+- 2026-09-10: Tightened `RepeatedReadNudge` so its default threshold advises on
+  the first read with at least 70% prior coverage while retaining configurable
+  thresholds, including one. Successful `apply_patch` results now use their
+  before/after line metadata to remove only changed coverage and shift known
+  later ranges by the line-count delta; `write_file` still clears the whole
+  file, and failed mutations leave coverage untouched. Added focused coverage
+  for overlap boundaries, truncated reads, mutation outcomes, forward/backward
+  shifts, split ranges, changed-line invalidation, threshold behavior, and run
+  reset. The focused Hook and wiring tests passed 23 tests. The full suite
+  passed 1,080 tests and retained nine failures in untouched areas: eight stale
+  prompt-copy expectations and one Windows TTY path-rendering assertion.
+  Production/test compilation and `git diff --check` passed; no live model
+  inference ran.
+
 - 2026-09-10: Replaced the narrow small-range `RedundantReadNudge` behavior
   with Core's `RepeatedReadNudge`. It now compares actual successful
   `read_file` returned ranges by normalized absolute path, treats at least 70%

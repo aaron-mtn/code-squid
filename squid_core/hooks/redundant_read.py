@@ -9,7 +9,7 @@ from typing import Any, Sequence
 from .runner import HookResponse
 
 
-DEFAULT_REPEATED_READ_THRESHOLD = 2
+DEFAULT_REPEATED_READ_THRESHOLD = 1
 SUBSTANTIAL_OVERLAP_RATIO = 0.7
 
 _MAX_TRACKED_FILES = 100
@@ -26,8 +26,8 @@ class RepeatedReadNudge:
     """Offer transient guidance after repeated overlapping reads of one file.
 
     Coverage comes only from successful ``read_file`` result metadata. Successful
-    built-in mutations invalidate the affected file, so no filesystem timestamp
-    checks are needed.
+    built-in mutations adjust or invalidate the affected file, so no filesystem
+    timestamp checks are needed.
     """
 
     def __init__(
@@ -36,8 +36,8 @@ class RepeatedReadNudge:
         threshold: int = DEFAULT_REPEATED_READ_THRESHOLD,
         source: str = "runtime",
     ) -> None:
-        if threshold < 2:
-            raise ValueError("repeated-read threshold must be at least 2")
+        if threshold < 1:
+            raise ValueError("repeated-read threshold must be at least 1")
 
         self.threshold = threshold
         # Hosts inspect Hook sources as configuration metadata.
@@ -61,8 +61,11 @@ class RepeatedReadNudge:
         if tool_name in _MUTATION_TOOLS and result.get("ok") is True:
             path = _result_path(ctx.action, result)
             if path is not None:
-                self._coverage.pop(path, None)
                 self._redundant_counts.pop(path, None)
+                if tool_name == "apply_patch":
+                    self._adjust_coverage_for_patch(path, result)
+                else:
+                    self._coverage.pop(path, None)
 
         return None
 
@@ -101,6 +104,44 @@ class RepeatedReadNudge:
         # Guidance is one-request-only; a later warning needs a fresh streak.
         self._redundant_counts.pop(path, None)
         return HookResponse(additional_context=_GUIDANCE)
+
+    def _adjust_coverage_for_patch(
+        self,
+        path: str,
+        result: dict[str, Any],
+    ) -> None:
+        """Discard changed lines while preserving and shifting known coverage."""
+        patch_range = _patch_range(result)
+        if patch_range is None:
+            # A successful mutation without trustworthy bounds cannot preserve
+            # coverage safely, so fall back to whole-file invalidation.
+            self._coverage.pop(path, None)
+            return
+
+        existing = self._coverage.get(path)
+        if not existing:
+            return
+
+        start_line, end_line_before, end_line_after = patch_range
+        delta = end_line_after - end_line_before
+        adjusted: list[tuple[int, int]] = []
+        for coverage_start, coverage_end in existing:
+            if coverage_start < start_line:
+                adjusted.append(
+                    (coverage_start, min(coverage_end, start_line - 1))
+                )
+            if coverage_end > end_line_before:
+                adjusted.append(
+                    (
+                        max(coverage_start, end_line_before + 1) + delta,
+                        coverage_end + delta,
+                    )
+                )
+
+        if adjusted:
+            self._coverage[path] = _merge_ranges(adjusted)[-_MAX_RANGES_PER_FILE:]
+        else:
+            self._coverage.pop(path, None)
 
     def _record_coverage(
         self,
@@ -146,6 +187,22 @@ def _returned_ranges(result: dict[str, Any]) -> list[tuple[int, int]]:
 
     fallback = _valid_range(result.get("start_line"), result.get("end_line"))
     return [fallback] if fallback is not None else []
+
+
+def _patch_range(result: dict[str, Any]) -> tuple[int, int, int] | None:
+    """Extract inclusive before/after line bounds from a successful patch."""
+    start = result.get("start_line")
+    end_before = result.get("end_line_before")
+    end_after = result.get("end_line_after")
+    if (
+        not _is_line_number(start)
+        or not _is_line_number(end_before)
+        or not _is_line_number(end_after)
+        or end_before < start
+        or end_after < start
+    ):
+        return None
+    return start, end_before, end_after
 
 
 def _valid_range(start: Any, end: Any) -> tuple[int, int] | None:

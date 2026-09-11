@@ -558,14 +558,17 @@ Code Squid also wires Core's `RepeatedReadNudge` immediately before the
 repeated-failure Hook. It keeps bounded, run-local line-range coverage from
 successful `read_file` result metadata under normalized absolute path keys,
 preferring the separate exact `returned_line_ranges` when a full-file read is
-truncated. A successful `write_file` or `apply_patch` invalidates only the
-identified target file. When at least 70% of a returned read is already covered
-for that unchanged file, it counts as redundant; the second redundant reread
-after the useful original returns advisory one-turn guidance through
-`HookResponse.additional_context`. Emission resets that file's repetition
-streak. Failed mutations do not invalidate coverage, and `before_run` clears
-all state. The Hook never blocks or transforms an action or result, and
-`AgentLoop` has no feature-specific logic for it.
+truncated. A successful `write_file` invalidates all coverage for its target. A
+successful `apply_patch` instead uses its before/after line bounds to discard
+the changed span while preserving coverage before it and shifting coverage
+after it by the line-count delta. When at least 70% of a returned read is
+already covered for that unchanged range, it counts as redundant; by default
+the first redundant reread after the useful original returns advisory one-turn
+guidance through `HookResponse.additional_context`. The threshold remains
+configurable, and emission resets that file's repetition streak. Failed
+mutations do not alter coverage, and `before_run` clears all state. The Hook
+never blocks or transforms an action or result, and `AgentLoop` has no
+feature-specific logic for it.
 
 ### before_accept_final
 
