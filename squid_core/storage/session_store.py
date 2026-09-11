@@ -14,6 +14,8 @@ from squid_core.storage.atomic_json import atomic_write_json
 # Keep this list small until the app has real UX that needs more states.
 ALLOWED_STATUSES = {"active", "complete", "failed", "abandoned", "interrupted"}
 RUNTIME_LIFECYCLE_EVENTS = {
+    "hooks_configured",
+    "hook_execution",
     "model_request_started",
     "model_request_finished",
     "model_request_failed",

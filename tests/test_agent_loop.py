@@ -1152,6 +1152,7 @@ def test_loop_emits_basic_run_events(tmp_path) -> None:
     event_types = [event["type"] for event in events]
     assert event_types == [
         "run_started",
+        "hooks_configured",
         "model_request_started",
         "model_request_finished",
         "assistant_message",
@@ -1164,31 +1165,32 @@ def test_loop_emits_basic_run_events(tmp_path) -> None:
     ]
     assert events[0]["repo_root"] == str(tmp_path)
     assert events[0]["task"] == ""
-    assert events[3]["message"] == "Reading file."
-    assert events[3]["text"] == "Reading file."
-    assert events[3]["phase"] == "narration"
-    assert {key: value for key, value in events[3].items() if key != "timestamp"} == {
+    assert events[1]["hooks"] == []
+    assert events[4]["message"] == "Reading file."
+    assert events[4]["text"] == "Reading file."
+    assert events[4]["phase"] == "narration"
+    assert {key: value for key, value in events[4].items() if key != "timestamp"} == {
         "session_id": None,
         "type": "assistant_message",
         "phase": "narration",
         "message": "Reading file.",
         "text": "Reading file.",
     }
-    assert events[4]["tool"] == "read_file"
-    assert events[4]["path"] == str(target)
-    assert events[5]["ok"] is True
+    assert events[5]["tool"] == "read_file"
     assert events[5]["path"] == str(target)
-    assert events[8]["message"] == "TASK COMPLETE"
-    assert events[8]["text"] == "TASK COMPLETE"
-    assert events[8]["phase"] == "final"
-    assert {key: value for key, value in events[8].items() if key != "timestamp"} == {
+    assert events[6]["ok"] is True
+    assert events[6]["path"] == str(target)
+    assert events[9]["message"] == "TASK COMPLETE"
+    assert events[9]["text"] == "TASK COMPLETE"
+    assert events[9]["phase"] == "final"
+    assert {key: value for key, value in events[9].items() if key != "timestamp"} == {
         "session_id": None,
         "type": "final_message",
         "phase": "final",
         "message": "TASK COMPLETE",
         "text": "TASK COMPLETE",
     }
-    assert events[9]["status"] == "complete"
+    assert events[10]["status"] == "complete"
     assert all("timestamp" in event for event in events)
 
 
@@ -1219,9 +1221,9 @@ def test_streaming_enabled_emits_started_deltas_and_full_assistant_message() -> 
     event_types = [event["type"] for event in events]
     assert event_types[:5] == [
         "run_started",
+        "hooks_configured",
         "model_request_started",
         "assistant_message_started",
-        "assistant_delta",
         "assistant_delta",
     ]
     assert [event["delta"] for event in events if event["type"] == "assistant_delta"] == [
@@ -1306,8 +1308,9 @@ def test_streaming_enabled_emits_tool_preparing_before_message_and_tool_started(
     loop.run()
 
     event_types = [event["type"] for event in events]
-    assert event_types[:9] == [
+    assert event_types[:10] == [
         "run_started",
+        "hooks_configured",
         "model_request_started",
         "assistant_message_started",
         "assistant_delta",

@@ -1,3 +1,7 @@
+"""Exercise Hook aggregation, lifecycle effects, and AgentLoop integration."""
+
+import pytest
+
 from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.hooks import (
     BeforeAcceptFinalContext,
@@ -225,6 +229,102 @@ def test_hook_runner_noop_returns_empty_decisions() -> None:
     assert run_finished == HookResponse()
 
 
+def test_hook_runner_reports_compact_outcomes_at_every_lifecycle_seam() -> None:
+    events = []
+    context_block = PromptContextBlock("title", "sensitive body")
+    follow_up = FollowUpRunRequest(task="sensitive follow-up")
+
+    class EverySeamHook:
+        def before_run(self, ctx):
+            return HookResponse(context_blocks=(context_block,))
+
+        def before_model_turn(self, ctx):
+            return None
+
+        def before_tool_execute(self, ctx):
+            return HookResponse(action={"tool": "changed"}, approval_reason="why")
+
+        def tool_result(self, ctx):
+            return HookResponse(
+                updated_tool_output={"ok": True, "secret": "value"},
+                additional_context="private guidance",
+            )
+
+        def before_accept_final(self, ctx):
+            return HookResponse(report_note="private note")
+
+        def run_finished(self, ctx):
+            return HookResponse(follow_up_requests=(follow_up,), notes=("note",))
+
+    runner = HookRunner([EverySeamHook()])
+    runner.before_run(
+        BeforeRunContext(None, "repo", "task"), event_sink=events.append
+    )
+    runner.before_model_turn(
+        BeforeModelTurnContext(None, "repo", "task", (), 0),
+        event_sink=events.append,
+    )
+    runner.before_tool_execute(
+        BeforeToolExecuteContext(None, "repo", {"tool": "original"}, 0),
+        event_sink=events.append,
+    )
+    runner.tool_result(
+        ToolResultContext(None, "repo", {"tool": "original"}, {"ok": True}),
+        event_sink=events.append,
+    )
+    runner.before_accept_final(
+        BeforeAcceptFinalContext(None, "repo", {}, "done"),
+        event_sink=events.append,
+    )
+    runner.run_finished(
+        RunFinishedContext(None, "repo", "complete"), event_sink=events.append
+    )
+
+    assert [event["seam"] for event in events] == [
+        "before_run",
+        "before_model_turn",
+        "before_tool_execute",
+        "tool_result",
+        "before_accept_final",
+        "run_finished",
+    ]
+    assert events[1]["status"] == "no_effect"
+    assert events[2]["effects"] == ["updated_action", "approval_reasons"]
+    assert events[3]["effects"] == [
+        "updated_tool_output",
+        "additional_context",
+    ]
+    assert events[5]["effects"] == ["follow_up_requests", "notes"]
+    assert "sensitive body" not in str(events)
+    assert "private guidance" not in str(events)
+    assert "secret" not in str(events)
+
+
+def test_hook_error_is_reported_without_swallowing_it() -> None:
+    events = []
+
+    class FailingHook:
+        def before_run(self, ctx):
+            raise RuntimeError("do not copy this detail")
+
+    with pytest.raises(RuntimeError, match="do not copy this detail"):
+        HookRunner([FailingHook()]).before_run(
+            BeforeRunContext(None, "repo", "task"), event_sink=events.append
+        )
+
+    assert events == [
+        {
+            "type": "hook_execution",
+            "hook": "FailingHook",
+            "seam": "before_run",
+            "status": "error",
+            "produced_effect": False,
+            "effects": [],
+            "error_type": "RuntimeError",
+        }
+    ]
+
+
 def test_before_run_aggregates_context_and_carries_it_into_a_block() -> None:
     first = PromptContextBlock("First", "One")
     second = PromptContextBlock("Second", "Two")
@@ -356,10 +456,12 @@ def test_before_run_block_fails_without_calling_model() -> None:
     assert session_store.statuses == ["failed"]
     assert [event["type"] for event in events] == [
         "run_started",
+        "hooks_configured",
+        "hook_execution",
         "run_failed",
         "run_finished",
     ]
-    assert events[1]["reason"] == "blocked"
+    assert events[3]["reason"] == "blocked"
 
 
 def test_run_finished_complete_receives_context_after_final_is_stored() -> None:
@@ -420,6 +522,21 @@ def test_run_finished_failure_marks_otherwise_successful_run_failed() -> None:
     )
     assert hook.calls == 1
     assert session_store.statuses == ["failed"]
+    hook_event = next(
+        event
+        for event in events
+        if event["type"] == "hook_execution"
+    )
+    assert {key: value for key, value in hook_event.items() if key != "timestamp"} == {
+        "session_id": "session-1",
+        "type": "hook_execution",
+        "hook": "FailingFinishedHook",
+        "seam": "run_finished",
+        "status": "error",
+        "produced_effect": False,
+        "effects": [],
+        "error_type": "RuntimeError",
+    }
     assert [event["type"] for event in events[-2:]] == [
         "run_failed",
         "run_finished",
@@ -552,16 +669,20 @@ def test_agent_loop_final_hook_blocks_and_retries_without_storing_final() -> Non
     }
     assert [event["type"] for event in events] == [
         "run_started",
+        "hooks_configured",
         "model_request_started",
         "model_request_finished",
+        "hook_execution",
         "reply_rejected",
         "model_request_started",
         "model_request_finished",
+        "hook_execution",
         "final_message",
         "run_finished",
     ]
-    assert events[3]["reason"] == "final_blocked_by_hook"
-    assert events[3]["detail"] == "Run the verification before finalizing."
+    rejected = next(event for event in events if event["type"] == "reply_rejected")
+    assert rejected["reason"] == "final_blocked_by_hook"
+    assert rejected["detail"] == "Run the verification before finalizing."
 
 
 def test_agent_loop_final_hook_allows_existing_final_behavior() -> None:
@@ -678,7 +799,8 @@ def test_before_run_block_uses_guidance_when_reason_is_empty() -> None:
     result = loop.run()
 
     assert result == RunResult(status="failed", reason="Fix setup first.")
-    assert events[1]["reason"] == "Fix setup first."
+    failed = next(event for event in events if event["type"] == "run_failed")
+    assert failed["reason"] == "Fix setup first."
 
 
 def test_before_run_context_is_visible_to_model_but_not_persisted() -> None:

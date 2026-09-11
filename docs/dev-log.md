@@ -1,3 +1,22 @@
+- 2026-09-10: Audited the normal Code Squid Hook path and confirmed that the
+  application builder already appended `RepeatedReadNudge` and
+  `RepeatedFailureNudge` before passing its `HookRunner` into `AgentLoop`; no
+  production wiring fix was needed. Added compact `hooks_configured` and
+  per-handler `hook_execution` records to the existing persisted runtime-event
+  pipeline. Outcomes distinguish no effect, an effect category, and errors
+  without copying Hook-returned text, Tool output, prompt context, or exception
+  details. Added generic coverage for every lifecycle seam and Hook errors plus
+  Code Squid builder regressions proving that unchanged `read_file` ranges with
+  70% overlap fire the repeated-read guidance and 69% overlap does not, while
+  both leave events in the normal session JSONL. `run_command` file inspection
+  remains outside repeated-read tracking because it has no structured returned
+  line metadata. Focused Hook, wiring, persistence, and loop coverage passed 149
+  tests. The full suite passed 1,109 tests and retained the same nine unrelated
+  baseline failures already recorded by preceding patches: eight stale
+  prompt-copy expectations and one Windows TTY path-rendering assertion.
+  Production/test compilation and `git diff --check` passed; no live model
+  inference ran.
+
 - 2026-09-10: Added a minimal normalized provider reasoning setting with
   `off`, `low`, `medium`, and `high` values and a default of `null`. Code Squid
   application settings now pass the value through Core's existing

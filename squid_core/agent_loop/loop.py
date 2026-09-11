@@ -148,7 +148,8 @@ class AgentLoop:
                     sorted(getattr(self.session, "files_written", set()))
                 ),
                 tool_steps_used=tool_steps_used,
-            )
+            ),
+            event_sink=self._emit_hook_event,
         )
 
     def _hook_notes_from_decision(
@@ -183,6 +184,13 @@ class AgentLoop:
         except Exception:
             # Preserve the original runtime exception if diagnostic persistence
             # itself fails while the loop is already unwinding.
+            pass
+
+    def _emit_hook_event(self, event: dict) -> None:
+        """Keep Hook diagnostics from becoming a new runtime failure mode."""
+        try:
+            self._emit_runtime_event(event)
+        except Exception:
             pass
 
     def _handle_compaction_event(self, event: dict) -> None:
@@ -348,6 +356,12 @@ class AgentLoop:
                 }
             )
             tool_definitions = self.agent.tool_definitions()
+            self._emit_hook_event(
+                {
+                    "type": "hooks_configured",
+                    "hooks": list(self.hook_runner.hook_names()),
+                }
+            )
             run_stage = "before_run_hook"
             before_run = self.hook_runner.before_run(
                 BeforeRunContext(
@@ -356,7 +370,8 @@ class AgentLoop:
                     task=getattr(self.agent, "task", ""),
                     skill_name=getattr(self.agent, "skill_name", None),
                     allowed_tools=self._allowed_tools_from_definitions(tool_definitions),
-                )
+                ),
+                event_sink=self._emit_hook_event,
             )
             if before_run.block:
                 reason = (
@@ -427,7 +442,8 @@ class AgentLoop:
                         task=getattr(self.agent, "task", ""),
                         messages=tuple(self.session.messages),
                         tool_steps_used=tool_steps_used,
-                    )
+                    ),
+                    event_sink=self._emit_hook_event,
                 )
                 context_message = turn_context_message(
                     [
@@ -523,7 +539,8 @@ class AgentLoop:
                                 sorted(getattr(self.session, "files_written", set()))
                             ),
                             tool_steps_used=tool_steps_used,
-                        )
+                        ),
+                        event_sink=self._emit_hook_event,
                     )
                     if final_decision.block:
                         guidance = (
@@ -603,7 +620,8 @@ class AgentLoop:
                             repo_root=str(self.session.repo_root),
                             action=action,
                             tool_steps_used=tool_steps_used,
-                        )
+                        ),
+                        event_sink=self._emit_hook_event,
                     )
                     if tool_decision.block:
                         action = tool_decision.action or action
@@ -658,7 +676,8 @@ class AgentLoop:
                             repo_root=str(self.session.repo_root),
                             action=action,
                             result=result,
-                        )
+                        ),
+                        event_sink=self._emit_hook_event,
                     )
                     result = tool_result_response.updated_tool_output
                     # Hook guidance uses the same one-request-only path as other

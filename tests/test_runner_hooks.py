@@ -1,3 +1,6 @@
+"""Verify Code Squid's application-owned Hook construction and wiring."""
+
+import json
 from pathlib import Path
 
 from code_squid.settings import (
@@ -9,6 +12,7 @@ from code_squid.settings import (
 )
 from squid_core.agent_loop import RunResult
 from code_squid.app_paths import CODE_SQUID_HOME_ENV
+from squid_core.tools.builtins.read_file import execute as execute_read_file
 from squid_core.hooks import (
     BeforeRunContext,
     PromptContextBlock,
@@ -78,6 +82,75 @@ class FakeModelAdapter:
 
     def supports_streaming(self) -> bool:
         return False
+
+
+class SequenceModelAdapter:
+    """Return normalized replies while retaining each model-visible request."""
+
+    def __init__(self, replies: list[dict]) -> None:
+        self.replies = iter(replies)
+        self.calls = []
+
+    def respond(self, messages: list[dict], tool_definitions: list[dict]) -> dict:
+        self.calls.append(list(messages))
+        return next(self.replies)
+
+    def supports_streaming(self) -> bool:
+        return False
+
+
+class RuntimeAgent:
+    """Small deterministic agent that exercises the real AgentLoop lifecycle."""
+
+    task = "Inspect overlapping ranges"
+    skill_name = None
+
+    def initial_messages(self) -> list[dict]:
+        return [{"role": "system", "content": "system"}]
+
+    def tool_definitions(self) -> list[dict]:
+        return [{"function": {"name": "read_file"}}]
+
+    def should_stop(self, session) -> bool:
+        return any(
+            message.get("role") == "assistant"
+            and message.get("content") == "TASK COMPLETE"
+            for message in session.messages
+        )
+
+    def validate_reply(self, reply: dict) -> dict:
+        return {"ok": True, "reason": ""}
+
+
+class ReadFileExecutor:
+    """Execute only the built-in read operation needed by this regression."""
+
+    def __init__(self, repo_root: Path) -> None:
+        self.repo_root = repo_root
+
+    def execute(self, action: dict) -> dict:
+        return execute_read_file(self.repo_root, **action["args"])
+
+
+def _reply(content: str, action: dict | None = None) -> dict:
+    actions = [] if action is None else [action]
+    message = {"role": "assistant", "content": content}
+    if action is not None:
+        message["tool_calls"] = [
+            {
+                "id": action["tool_call_id"],
+                "type": "function",
+                "function": {
+                    "name": action["tool"],
+                    "arguments": json.dumps(action["args"]),
+                },
+            }
+        ]
+    return {
+        "message": message,
+        "actions": actions,
+        "raw_reply": {"assistant": {"content": content}},
+    }
 
 
 class ManualContextHook:
@@ -236,6 +309,97 @@ def test_manual_hooks_and_loaded_hooks_combine(
     assert "DISK_COMBINED_MARKER" in context
     assert context.index("MANUAL_COMBINED_MARKER") < context.index(
         "DISK_COMBINED_MARKER"
+    )
+
+
+def _run_overlapping_reads(tmp_path: Path, second_start: int):
+    path = tmp_path / "deepseek_sample.py"
+    path.write_text(
+        "".join(f"line {line}\n" for line in range(1, 201)),
+        encoding="utf-8",
+    )
+    actions = [
+        {
+            "tool": "read_file",
+            "args": {"path": str(path), "start_line": 1, "end_line": 100},
+            "tool_call_id": "read-1",
+        },
+        {
+            "tool": "read_file",
+            "args": {
+                "path": str(path),
+                "start_line": second_start,
+                "end_line": second_start + 99,
+            },
+            "tool_call_id": "read-2",
+        },
+    ]
+    model = SequenceModelAdapter(
+        [
+            _reply("Read the first range.", actions[0]),
+            _reply("Read an overlapping range.", actions[1]),
+            _reply("TASK COMPLETE"),
+        ]
+    )
+    run = build_coding_task_run(
+        repo_root=tmp_path,
+        task="Inspect overlapping ranges",
+        display=FakeDisplay(),
+        settings=_settings(),
+        agent=RuntimeAgent(),
+        model_adapter=model,
+        tool_executor=ReadFileExecutor(tmp_path),
+    )
+
+    assert run.loop.run() == RunResult(status="complete")
+    entries = [
+        json.loads(line)
+        for line in run.session_store.jsonl_path.read_text(
+            encoding="utf-8"
+        ).splitlines()
+    ]
+    return model, entries
+
+
+def test_default_runtime_repeated_read_fires_and_is_logged(tmp_path: Path) -> None:
+    model, entries = _run_overlapping_reads(tmp_path, second_start=31)
+
+    configured = next(entry for entry in entries if entry["type"] == "hooks_configured")
+    assert configured["hooks"][-2:] == [
+        "RepeatedReadNudge",
+        "RepeatedFailureNudge",
+    ]
+    read_events = [
+        entry
+        for entry in entries
+        if entry["type"] == "hook_execution"
+        and entry["hook"] == "RepeatedReadNudge"
+        and entry["seam"] == "tool_result"
+    ]
+    assert [event["status"] for event in read_events] == ["no_effect", "effect"]
+    assert read_events[1]["effects"] == ["additional_context"]
+    assert "You recently inspected most" in model.calls[2][-1]["content"]
+    assert "hook_execution" not in str(model.calls)
+
+
+def test_default_runtime_repeated_read_noop_is_still_logged(tmp_path: Path) -> None:
+    model, entries = _run_overlapping_reads(tmp_path, second_start=32)
+
+    read_events = [
+        entry
+        for entry in entries
+        if entry["type"] == "hook_execution"
+        and entry["hook"] == "RepeatedReadNudge"
+        and entry["seam"] == "tool_result"
+    ]
+    assert [event["status"] for event in read_events] == [
+        "no_effect",
+        "no_effect",
+    ]
+    assert all(event["produced_effect"] is False for event in read_events)
+    assert not any(
+        "You recently inspected most" in str(message.get("content", ""))
+        for message in model.calls[2]
     )
 
 

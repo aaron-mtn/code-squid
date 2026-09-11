@@ -422,6 +422,8 @@ terminal output.
 Current loop-level event types include:
 
 - `run_started`
+- `hooks_configured`
+- `hook_execution`
 - `model_request_started`
 - `model_request_finished`
 - `model_request_failed`
@@ -453,6 +455,17 @@ estimate, duration, and bounded error details. These events, plus `run_failed`
 and `run_interrupted`, are appended to the session's existing linked JSONL log
 before terminal status changes; they remain diagnostic entries and are never
 replayed as model transcript messages.
+
+`hooks_configured` records the installed Hook class names once per run.
+`hook_execution` records one implemented-handler invocation with `hook`, `seam`,
+`status` (`no_effect`, `effect`, or `error`), `produced_effect`, and an `effects`
+list. Errors add only `error_type`. Effect names describe the response category,
+such as `context_blocks`, `block`, `updated_action`, `approval_reasons`,
+`updated_tool_output`, `additional_context`, `report_note`,
+`follow_up_requests`, or `notes`; Hook-returned text and payload data are not
+copied into the event. The runner emits these records through the same durable
+runtime-event path as model-request diagnostics, and observer/persistence
+failure while reporting a Hook outcome cannot alter the Hook's behavior.
 
 Callback delivery is best-effort. Observer failures must not crash the run.
 
@@ -569,6 +582,25 @@ configurable, and emission resets that file's repetition streak. Failed
 mutations do not alter coverage, and `before_run` clears all state. The Hook
 never blocks or transforms an action or result, and `AgentLoop` has no
 feature-specific logic for it.
+
+There is no separate "small reread" size limit in the current implementation:
+the overlap ratio applies to any non-empty valid returned range metadata. A
+successful read is tracked only when `ok` is exactly `true`, its path can be
+resolved from result or action metadata, and it reports a valid inclusive
+`start_line`/`end_line` range or valid `returned_line_ranges`. Coverage is the
+merged union of prior returned ranges for that normalized path, bounded to 100
+files and 64 ranges per file. The current range is redundant when at least 70%
+of its returned lines are in that union. The default threshold is one redundant
+reread, so an original useful read followed by one qualifying overlap emits
+guidance. "Consecutive" is per file rather than globally adjacent: a successful
+non-redundant read of that file resets its count, emission resets it, and a
+successful mutation resets it; unrelated Tool calls and reads of other files do
+not. `write_file` invalidates the target's whole coverage, while `apply_patch`
+preserves unaffected coverage only when trustworthy before/after line bounds
+are present and otherwise invalidates the whole target. Failed reads and failed
+mutations neither add nor invalidate coverage. File inspection performed inside
+`run_command`, including shell searches, does not participate because it does
+not produce `read_file` range metadata.
 
 ### before_accept_final
 

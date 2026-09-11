@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
+
+
+HookEventSink = Callable[[dict[str, Any]], None]
 
 
 @dataclass(frozen=True)
@@ -99,7 +102,16 @@ class HookRunner:
     def __init__(self, hooks: list[object] | None = None) -> None:
         self.hooks = hooks or []
 
-    def before_run(self, ctx: BeforeRunContext) -> HookResponse:
+    def hook_names(self) -> tuple[str, ...]:
+        """Return compact identities suitable for runtime diagnostics."""
+        return tuple(type(hook).__name__ for hook in self.hooks)
+
+    def before_run(
+        self,
+        ctx: BeforeRunContext,
+        *,
+        event_sink: HookEventSink | None = None,
+    ) -> HookResponse:
         context_blocks: list[PromptContextBlock] = []
 
         for hook in self.hooks:
@@ -107,7 +119,7 @@ class HookRunner:
             if handler is None:
                 continue
 
-            decision = handler(ctx)
+            decision = _invoke_hook(hook, "before_run", handler, ctx, event_sink)
             if decision is None:
                 continue
 
@@ -122,7 +134,12 @@ class HookRunner:
 
         return HookResponse(context_blocks=tuple(context_blocks))
 
-    def before_model_turn(self, ctx: BeforeModelTurnContext) -> HookResponse:
+    def before_model_turn(
+        self,
+        ctx: BeforeModelTurnContext,
+        *,
+        event_sink: HookEventSink | None = None,
+    ) -> HookResponse:
         context_blocks: list[PromptContextBlock] = []
 
         for hook in self.hooks:
@@ -130,7 +147,9 @@ class HookRunner:
             if handler is None:
                 continue
 
-            response = handler(ctx)
+            response = _invoke_hook(
+                hook, "before_model_turn", handler, ctx, event_sink
+            )
             if response is None:
                 continue
 
@@ -138,7 +157,12 @@ class HookRunner:
 
         return HookResponse(context_blocks=tuple(context_blocks))
 
-    def before_tool_execute(self, ctx: BeforeToolExecuteContext) -> HookResponse:
+    def before_tool_execute(
+        self,
+        ctx: BeforeToolExecuteContext,
+        *,
+        event_sink: HookEventSink | None = None,
+    ) -> HookResponse:
         action = ctx.action
         approval_reasons: list[str] = []
 
@@ -147,13 +171,17 @@ class HookRunner:
             if handler is None:
                 continue
 
-            decision = handler(
+            decision = _invoke_hook(
+                hook,
+                "before_tool_execute",
+                handler,
                 BeforeToolExecuteContext(
                     session_id=ctx.session_id,
                     repo_root=ctx.repo_root,
                     action=action,
                     tool_steps_used=ctx.tool_steps_used,
-                )
+                ),
+                event_sink,
             )
             if decision is None:
                 continue
@@ -180,7 +208,12 @@ class HookRunner:
             approval_reason="; ".join(approval_reasons),
         )
 
-    def tool_result(self, ctx: ToolResultContext) -> HookResponse:
+    def tool_result(
+        self,
+        ctx: ToolResultContext,
+        *,
+        event_sink: HookEventSink | None = None,
+    ) -> HookResponse:
         result = ctx.result
         additional_context: list[str] = []
 
@@ -189,13 +222,17 @@ class HookRunner:
             if handler is None:
                 continue
 
-            response = handler(
+            response = _invoke_hook(
+                hook,
+                "tool_result",
+                handler,
                 ToolResultContext(
                     session_id=ctx.session_id,
                     repo_root=ctx.repo_root,
                     action=ctx.action,
                     result=result,
-                )
+                ),
+                event_sink,
             )
             if response is None:
                 continue
@@ -210,7 +247,12 @@ class HookRunner:
             additional_context="\n\n".join(additional_context),
         )
 
-    def before_accept_final(self, ctx: BeforeAcceptFinalContext) -> HookResponse:
+    def before_accept_final(
+        self,
+        ctx: BeforeAcceptFinalContext,
+        *,
+        event_sink: HookEventSink | None = None,
+    ) -> HookResponse:
         report_notes: list[str] = []
 
         for hook in self.hooks:
@@ -218,7 +260,9 @@ class HookRunner:
             if handler is None:
                 continue
 
-            decision = handler(ctx)
+            decision = _invoke_hook(
+                hook, "before_accept_final", handler, ctx, event_sink
+            )
             if decision is None:
                 continue
 
@@ -234,7 +278,12 @@ class HookRunner:
 
         return HookResponse(report_note="\n\n".join(report_notes))
 
-    def run_finished(self, ctx: RunFinishedContext) -> HookResponse:
+    def run_finished(
+        self,
+        ctx: RunFinishedContext,
+        *,
+        event_sink: HookEventSink | None = None,
+    ) -> HookResponse:
         follow_up_requests: list[FollowUpRunRequest] = []
         notes: list[str] = []
 
@@ -243,7 +292,9 @@ class HookRunner:
             if handler is None:
                 continue
 
-            decision = handler(ctx)
+            decision = _invoke_hook(
+                hook, "run_finished", handler, ctx, event_sink
+            )
             if decision is None:
                 continue
 
@@ -254,6 +305,87 @@ class HookRunner:
             follow_up_requests=tuple(follow_up_requests),
             notes=tuple(notes),
         )
+
+
+def _invoke_hook(
+    hook: object,
+    seam: str,
+    handler: Callable[[Any], HookResponse | None],
+    context: Any,
+    event_sink: HookEventSink | None,
+) -> HookResponse | None:
+    """Call one Hook and report only compact, non-payload outcome metadata."""
+    hook_name = type(hook).__name__
+    try:
+        response = handler(context)
+        effects = _response_effects(response)
+    except BaseException as error:
+        _emit_hook_event(
+            event_sink,
+            {
+                "type": "hook_execution",
+                "hook": hook_name,
+                "seam": seam,
+                "status": "error",
+                "produced_effect": False,
+                "effects": [],
+                "error_type": type(error).__name__,
+            },
+        )
+        raise
+
+    _emit_hook_event(
+        event_sink,
+        {
+            "type": "hook_execution",
+            "hook": hook_name,
+            "seam": seam,
+            "status": "effect" if effects else "no_effect",
+            "produced_effect": bool(effects),
+            "effects": effects,
+        },
+    )
+    return response
+
+
+def _response_effects(response: HookResponse | None) -> list[str]:
+    """Describe effect categories without copying Hook-returned payloads."""
+    if response is None:
+        return []
+
+    effects = []
+    effect_fields = (
+        ("block", response.block),
+        ("reason", response.reason),
+        ("guidance", response.guidance),
+        ("context_blocks", response.context_blocks),
+        ("updated_action", response.action is not None),
+        ("approval_reasons", response.approval_reason),
+        ("updated_tool_output", response.updated_tool_output is not None),
+        ("additional_context", response.additional_context),
+        ("report_note", response.report_note),
+        ("follow_up_requests", response.follow_up_requests),
+        ("notes", response.notes),
+    )
+    for name, value in effect_fields:
+        if value:
+            effects.append(name)
+    return effects
+
+
+def _emit_hook_event(
+    event_sink: HookEventSink | None,
+    event: dict[str, Any],
+) -> None:
+    """Keep diagnostics observational even if their sink becomes unavailable."""
+    if event_sink is None:
+        return
+    try:
+        event_sink(event)
+    except Exception:
+        # Hook diagnostics must not change Hook or run behavior.
+        pass
+
 
 def _preserve_tool_call_id(previous: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
     if "tool_call_id" not in previous:
