@@ -576,12 +576,15 @@ successful `apply_patch` instead uses its before/after line bounds to discard
 the changed span while preserving coverage before it and shifting coverage
 after it by the line-count delta. When at least 70% of a returned read is
 already covered for that unchanged range, it counts as redundant; by default
-the first redundant reread after the useful original returns advisory one-turn
-guidance through `HookResponse.additional_context`. The threshold remains
-configurable, and emission resets that file's repetition streak. Failed
-mutations do not alter coverage, and `before_run` clears all state. The Hook
-never blocks or transforms an action or result, and `AgentLoop` has no
-feature-specific logic for it.
+the first redundant reread after the useful original keeps its normal contents
+and returns advisory one-turn guidance through
+`HookResponse.additional_context`. The next qualifying reread in that file's
+streak replaces the model-facing result through `updated_tool_output` with a
+small successful `already_covered` result containing no file contents, then
+resets the streak. The threshold remains configurable and controls when the
+advisory stage begins. Failed mutations do not alter coverage, and `before_run`
+clears all state. The Hook never blocks or transforms an action, and
+`AgentLoop` has no feature-specific logic for it.
 
 There is no separate "small reread" size limit in `RepeatedReadNudge`: the
 overlap ratio applies to any non-empty valid returned range metadata, including
@@ -593,13 +596,14 @@ merged union of prior returned ranges for that normalized path, bounded to 100
 files and 64 ranges per file. The current range is redundant when at least 70%
 of its returned lines are in that union. The default threshold is one redundant
 reread, so an original useful read followed by one qualifying overlap emits
-guidance. "Consecutive" is per file rather than globally adjacent: a successful
-non-redundant read of that file resets its count, emission resets it, and a
-successful mutation resets it; unrelated Tool calls and reads of other files do
-not. `write_file` invalidates the target's whole coverage, while `apply_patch`
-preserves unaffected coverage only when trustworthy before/after line bounds
-are present and otherwise invalidates the whole target. Failed reads and failed
-mutations neither add nor invalidate coverage. File inspection performed inside
+guidance and the following qualifying overlap is masked. "Consecutive" is per
+file rather than globally adjacent: a successful non-redundant read of that file
+resets its count, masking resets it, and a successful mutation resets it;
+unrelated Tool calls and reads of other files do not. `write_file` invalidates
+the target's whole coverage, while `apply_patch` preserves unaffected coverage
+only when trustworthy before/after line bounds are present and otherwise
+invalidates the whole target. Failed reads and failed mutations neither add nor
+invalidate coverage or advance the streak. File inspection performed inside
 `run_command`, including shell searches, does not participate because it does
 not produce `read_file` range metadata.
 

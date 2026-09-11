@@ -1,3 +1,19 @@
+- 2026-09-11: Escalated Core's existing `RepeatedReadNudge` in two stages. The
+  first substantially redundant unchanged `read_file` still returns its normal
+  contents with the existing transient guidance; the next qualifying read in
+  the same per-file streak now uses the `tool_result` transformation seam to
+  return a small successful `already_covered` result without duplicate source
+  text, then resets that streak. Non-redundant reads and successful mutations
+  reset pending escalation as before, failed reads do not advance it, and all
+  existing range coverage, truncated head/tail, patch adjustment, write
+  invalidation, and per-file isolation rules remain unchanged. Verification:
+  focused repeated-read and Hook suites passed 62 tests. The full suite passed
+  1,129 tests and retained the same nine unrelated baseline failures already
+  recorded by preceding patches: eight stale prompt-copy expectations and one
+  Windows TTY path-rendering assertion. Production/test compilation and
+  `git diff --check` passed; no live model inference ran. No follow-up work is
+  intentionally deferred.
+
 - 2026-09-11: Updated Code Squid's canonical read guidance to prefer whole-file
   reads when useful and substantial coherent regions for larger files, while
   discouraging incremental adjacent ranges and post-patch rereads used only as

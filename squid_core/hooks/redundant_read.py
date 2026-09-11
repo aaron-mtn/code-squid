@@ -20,10 +20,15 @@ _GUIDANCE = (
     "result unless you need exact current text for an edit or a specific unresolved "
     "detail."
 )
+_ALREADY_COVERED_MESSAGE = (
+    "You already read this unchanged section of the file. No file content is "
+    "being returned again. Reuse the existing context, stop rereading this "
+    "section, and take the next useful action."
+)
 
 
 class RepeatedReadNudge:
-    """Offer transient guidance after repeated overlapping reads of one file.
+    """Escalate repeated overlapping reads of one unchanged file range.
 
     Coverage comes only from successful ``read_file`` result metadata. Successful
     built-in mutations adjust or invalidate the affected file, so no filesystem
@@ -101,9 +106,15 @@ class RepeatedReadNudge:
             self._redundant_counts[path] = count
             return None
 
-        # Guidance is one-request-only; a later warning needs a fresh streak.
+        if count == self.threshold:
+            # The first escalation remains advisory and leaves the successful
+            # read intact. One more redundant read in this streak is masked.
+            self._redundant_counts[path] = count
+            return HookResponse(additional_context=_GUIDANCE)
+
+        # After masking, require a fresh streak before escalating again.
         self._redundant_counts.pop(path, None)
-        return HookResponse(additional_context=_GUIDANCE)
+        return HookResponse(updated_tool_output=_already_covered_result(action, result))
 
     def _adjust_coverage_for_patch(
         self,
@@ -168,6 +179,35 @@ def _result_path(action: dict[str, Any], result: dict[str, Any]) -> str | None:
     if not isinstance(path, str) or not path:
         return None
     return os.path.normcase(str(Path(path).expanduser().resolve()))
+
+
+def _already_covered_result(
+    action: dict[str, Any], result: dict[str, Any]
+) -> dict[str, Any]:
+    """Build a successful model-facing result without duplicate file content."""
+    masked = {
+        "ok": True,
+        "tool": "read_file",
+        "path": result.get("path"),
+        "already_covered": True,
+        "message": _ALREADY_COVERED_MESSAGE,
+    }
+
+    args = action.get("args")
+    if isinstance(args, dict):
+        if masked["path"] is None:
+            masked["path"] = args.get("path")
+        for source_key, target_key in (
+            ("start_line", "requested_start_line"),
+            ("end_line", "requested_end_line"),
+        ):
+            if source_key in args:
+                masked[target_key] = args[source_key]
+
+    for key in ("start_line", "end_line", "returned_line_ranges"):
+        if key in result:
+            masked[key] = result[key]
+    return masked
 
 
 def _returned_ranges(result: dict[str, Any]) -> list[tuple[int, int]]:
