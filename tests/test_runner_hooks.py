@@ -329,7 +329,9 @@ def _run_overlapping_reads(tmp_path: Path, second_start: int):
             "args": {
                 "path": str(path),
                 "start_line": second_start,
-                "end_line": second_start + 99,
+                # Keep the coverage-boundary fixture at the configured minimum
+                # so read_file's intentional small-range expansion is not involved.
+                "end_line": second_start + 149,
             },
             "tool_call_id": "read-2",
         },
@@ -362,7 +364,7 @@ def _run_overlapping_reads(tmp_path: Path, second_start: int):
 
 
 def test_default_runtime_repeated_read_fires_and_is_logged(tmp_path: Path) -> None:
-    model, entries = _run_overlapping_reads(tmp_path, second_start=31)
+    model, entries = _run_overlapping_reads(tmp_path, second_start=46)
 
     configured = next(entry for entry in entries if entry["type"] == "hooks_configured")
     assert configured["hooks"][-2:] == [
@@ -383,7 +385,7 @@ def test_default_runtime_repeated_read_fires_and_is_logged(tmp_path: Path) -> No
 
 
 def test_default_runtime_repeated_read_noop_is_still_logged(tmp_path: Path) -> None:
-    model, entries = _run_overlapping_reads(tmp_path, second_start=32)
+    model, entries = _run_overlapping_reads(tmp_path, second_start=47)
 
     read_events = [
         entry

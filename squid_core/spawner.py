@@ -252,6 +252,7 @@ def build_agent_loop(
             allow_outside_workspace=settings.approval_mode == "never",
             tools={} if tools is None else tools,
             platform_context=platform_context,
+            read_file_settings=settings.read_file,
         )
     if tool_results is None:
         tool_results = ToolResults()

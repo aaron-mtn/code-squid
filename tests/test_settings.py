@@ -58,6 +58,8 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert runtime_settings.approval_mode == "never"
     assert runtime_settings.compaction.compact_fraction == 0.8
     assert runtime_settings.compaction.min_recent_chunks == 2
+    assert runtime_settings.read_file.default_max_lines == 1000
+    assert runtime_settings.read_file.minimum_range_lines == 150
 
 
 def test_application_settings_survive_workspace_change_and_process_reload(

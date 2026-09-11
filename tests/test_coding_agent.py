@@ -308,6 +308,16 @@ def test_default_tool_usage_guidance_is_used_without_skill() -> None:
     assert TOOL_USAGE_GUIDANCE in system_prompt()
 
 
+def test_read_guidance_prefers_coherent_reads_over_incremental_ranges() -> None:
+    assert "read the whole file first when the full context is useful" in TOOL_USAGE_GUIDANCE
+    assert "read each required region once with enough surrounding context" in TOOL_USAGE_GUIDANCE
+    assert "substantial coherent reads" in TOOL_USAGE_GUIDANCE
+    assert "one tool call should gather a meaningful unit of information" in TOOL_USAGE_GUIDANCE
+    assert "Do not walk through a file incrementally with small ranges" in TOOL_USAGE_GUIDANCE
+    assert "For obviously large files, prefer a focused line range" not in TOOL_USAGE_GUIDANCE
+    assert "do not re-read solely to confirm it happened" in TOOL_USAGE_GUIDANCE
+
+
 def test_baseline_policy_uses_corrective_failures_and_changes_stalled_approaches() -> None:
     assert (
         "When a tool failure returns exact corrective information, use it directly "

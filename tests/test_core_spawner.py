@@ -1,10 +1,16 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 import squid_core.spawner as core_spawner
 from code_squid.agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
-from squid_core.settings import CompactionSettings, ProviderSettings, RuntimeSettings
+from squid_core.settings import (
+    CompactionSettings,
+    ProviderSettings,
+    ReadFileSettings,
+    RuntimeSettings,
+)
 from squid_core.session import Session
 from squid_core.agent import Agent
 from squid_core.storage import SessionStore, UndoStore
@@ -63,6 +69,23 @@ def test_generic_run_builds_default_agent_and_ui_neutral_display(tmp_path: Path)
     assert run.loop.agent.tools == {}
     assert run.loop.model_adapter is adapter
     assert type(run.loop.display) is core_spawner.NullDisplay
+
+
+def test_generic_run_passes_read_file_sizing_to_default_executor(tmp_path: Path) -> None:
+    read_file_settings = ReadFileSettings(
+        default_max_lines=80,
+        minimum_range_lines=20,
+    )
+
+    run = core_spawner.build_agent_run(
+        tmp_path,
+        "Sized reads",
+        settings=replace(_settings(), read_file=read_file_settings),
+        model_adapter=object(),
+        **_storage_paths(tmp_path),
+    )
+
+    assert run.loop.tool_executor.read_file_settings is read_file_settings
 
 
 def test_generic_run_requires_explicit_storage_paths(tmp_path: Path) -> None:

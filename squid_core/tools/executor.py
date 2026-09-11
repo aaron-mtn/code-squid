@@ -4,12 +4,14 @@ from pathlib import Path
 
 from squid_core.platform_context import PlatformContext
 from squid_core.safety.workspace_boundary import workspace_boundary_reason
+from squid_core.settings import ReadFileSettings
 from .builtins import TOOLS
 from .builtins.apply_patch import PatchCandidateStore
 
 
 BUILTIN_RUN_COMMAND = TOOLS["run_command"]["execute"]
 BUILTIN_APPLY_PATCH = TOOLS["apply_patch"]["execute"]
+BUILTIN_READ_FILE = TOOLS["read_file"]["execute"]
 
 
 class ToolExecutor:
@@ -26,6 +28,7 @@ class ToolExecutor:
         allow_outside_workspace: bool = False,
         tools: dict | None = None,
         platform_context: PlatformContext | None = None,
+        read_file_settings: ReadFileSettings | None = None,
     ) -> None:
         self.repo_root = repo_root
         self.session = session
@@ -33,6 +36,7 @@ class ToolExecutor:
         self.allow_outside_workspace = allow_outside_workspace
         self.tools = TOOLS if tools is None else tools
         self.platform_context = platform_context
+        self.read_file_settings = read_file_settings or ReadFileSettings()
         # The executor is constructed per agent run, which bounds candidate lifetime
         # without coupling diagnostic recovery to persisted Session history.
         self.patch_candidates = PatchCandidateStore()
@@ -101,6 +105,8 @@ class ToolExecutor:
                 execute_args = {**args, "platform_context": self.platform_context}
             elif tool["execute"] is BUILTIN_APPLY_PATCH:
                 execute_args = {**args, "candidate_store": self.patch_candidates}
+            elif tool["execute"] is BUILTIN_READ_FILE:
+                execute_args = {**args, "settings": self.read_file_settings}
 
             result = tool["execute"](self.repo_root, **execute_args)
             if not result.get("ok") and provisional_snapshot_path is not None:

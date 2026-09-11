@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from squid_core.hooks import HookResponse, RepeatedReadNudge
+from squid_core.tools.builtins.read_file import execute as read_file
 
 
 GUIDANCE = (
@@ -143,6 +144,31 @@ def test_overlap_uses_actual_result_range_not_requested_range(tmp_path: Path) ->
         returned_start=1,
         returned_end=100,
     ) is not None
+
+
+def test_expanded_read_metadata_drives_repeated_read_coverage(tmp_path: Path) -> None:
+    hook = RepeatedReadNudge()
+    path = tmp_path / "expanded.py"
+    path.write_text("".join(f"line {line}\n" for line in range(1, 301)), encoding="utf-8")
+    action = {
+        "tool": "read_file",
+        "args": {"path": str(path), "start_line": 100, "end_line": 109},
+    }
+
+    first_result = read_file(tmp_path, **action["args"])
+    assert (first_result["start_line"], first_result["end_line"]) == (30, 179)
+    assert hook.tool_result(_Context(action=action, result=first_result)) is None
+
+    second_result = read_file(tmp_path, str(path), start_line=40, end_line=160)
+    assert hook.tool_result(
+        _Context(
+            action={
+                "tool": "read_file",
+                "args": {"path": str(path), "start_line": 40, "end_line": 160},
+            },
+            result=second_result,
+        )
+    ) == HookResponse(additional_context=GUIDANCE)
 
 
 def test_truncated_full_file_tracks_each_returned_range_separately(

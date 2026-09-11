@@ -13,6 +13,7 @@ from squid_core.tools.builtins import TOOLS
 from squid_core.tools.builtins.run_command import execute as run_command
 from squid_core.tools.builtins.apply_patch import execute as apply_patch
 from squid_core.tools.builtins.write_file import execute as write_file
+from squid_core.settings import ReadFileSettings
 
 
 run_command_module = importlib.import_module("squid_core.tools.builtins.run_command")
@@ -70,19 +71,11 @@ def test_read_file_supports_start_and_end_line_range(tmp_path: Path) -> None:
 
     result = read_file(tmp_path, str(file_path), start_line=2, end_line=3)
 
-    assert result == {
-        "ok": True,
-        "tool": "read_file",
-        "path": str(file_path),
-        "content": "two\nthree\n",
-        "content_truncated": False,
-        "content_original_chars": 10,
-        "content_returned_chars": 10,
-        "start_line": 2,
-        "end_line": 3,
-        "total_lines": 4,
-        "ranged": True,
-    }
+    assert result["content"] == "one\ntwo\nthree\nfour\n"
+    assert result["start_line"] == 1
+    assert result["end_line"] == 4
+    assert result["total_lines"] == 4
+    assert result["ranged"] is True
 
 
 def test_read_file_supports_start_line_without_end_line(tmp_path: Path) -> None:
@@ -91,8 +84,8 @@ def test_read_file_supports_start_line_without_end_line(tmp_path: Path) -> None:
 
     result = read_file(tmp_path, str(file_path), start_line=2)
 
-    assert result["content"] == "two\nthree\n"
-    assert result["start_line"] == 2
+    assert result["content"] == "one\ntwo\nthree\n"
+    assert result["start_line"] == 1
     assert result["end_line"] == 3
     assert result["total_lines"] == 3
     assert result["ranged"] is True
@@ -107,9 +100,9 @@ def test_read_file_supports_end_line_without_start_line(tmp_path: Path) -> None:
 
     result = read_file(tmp_path, str(file_path), end_line=2)
 
-    assert result["content"] == "one\ntwo\n"
+    assert result["content"] == "one\ntwo\nthree\n"
     assert result["start_line"] == 1
-    assert result["end_line"] == 2
+    assert result["end_line"] == 3
     assert result["total_lines"] == 3
     assert result["ranged"] is True
     assert result["content_truncated"] is False
@@ -182,6 +175,77 @@ def test_read_file_does_not_truncate_large_ranged_read(tmp_path: Path) -> None:
     assert result["content_returned_chars"] == len(original_content)
     assert "returned_line_ranges" not in result
     assert "truncation_guidance" not in result
+
+
+def test_small_middle_range_expands_with_balanced_context(tmp_path: Path) -> None:
+    file_path = tmp_path / "middle.txt"
+    lines = [f"line {number}\n" for number in range(1, 1001)]
+    file_path.write_text("".join(lines), encoding="utf-8")
+
+    result = read_file(tmp_path, str(file_path), start_line=520, end_line=560)
+
+    assert result["start_line"] == 466
+    assert result["end_line"] == 615
+    assert len(result["content"].splitlines()) == 150
+    assert result["content"].startswith("line 466\n")
+    assert result["content"].endswith("line 615\n")
+
+
+def test_small_range_near_beginning_shifts_expansion_inside_file(tmp_path: Path) -> None:
+    file_path = tmp_path / "beginning.txt"
+    lines = [f"line {number}\n" for number in range(1, 301)]
+    file_path.write_text("".join(lines), encoding="utf-8")
+
+    result = read_file(tmp_path, str(file_path), start_line=10, end_line=20)
+
+    assert (result["start_line"], result["end_line"]) == (1, 150)
+    assert result["content"] == "".join(lines[:150])
+
+
+def test_small_range_near_end_shifts_expansion_inside_file(tmp_path: Path) -> None:
+    file_path = tmp_path / "end.txt"
+    lines = [f"line {number}\n" for number in range(1, 301)]
+    file_path.write_text("".join(lines), encoding="utf-8")
+
+    result = read_file(tmp_path, str(file_path), start_line=290, end_line=300)
+
+    assert (result["start_line"], result["end_line"]) == (151, 300)
+    assert result["content"] == "".join(lines[150:])
+
+
+def test_range_at_or_above_minimum_is_unchanged(tmp_path: Path) -> None:
+    file_path = tmp_path / "large-enough.txt"
+    lines = [f"line {number}\n" for number in range(1, 401)]
+    file_path.write_text("".join(lines), encoding="utf-8")
+
+    result = read_file(tmp_path, str(file_path), start_line=100, end_line=249)
+
+    assert (result["start_line"], result["end_line"]) == (100, 249)
+    assert result["content"] == "".join(lines[99:249])
+
+
+def test_read_file_uses_supplied_sizing_settings_and_keeps_truncation_metadata(
+    tmp_path: Path,
+) -> None:
+    file_path = tmp_path / "custom-limit.txt"
+    lines = [f"line {number}\n" for number in range(1, 12)]
+    original_content = "".join(lines)
+    file_path.write_text(original_content, encoding="utf-8")
+
+    result = read_file(
+        tmp_path,
+        str(file_path),
+        settings=ReadFileSettings(default_max_lines=10, minimum_range_lines=4),
+    )
+
+    assert result["content"] == "".join((*lines[:5], *lines[-5:]))
+    assert result["content_truncated"] is True
+    assert result["content_original_chars"] == len(original_content)
+    assert result["content_returned_chars"] == len(result["content"])
+    assert result["returned_line_ranges"] == [
+        {"start_line": 1, "end_line": 5},
+        {"start_line": 7, "end_line": 11},
+    ]
 
 
 def test_run_command_keeps_shared_character_truncation(

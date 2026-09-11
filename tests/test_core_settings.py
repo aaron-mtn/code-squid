@@ -2,7 +2,12 @@
 
 import pytest
 
-from squid_core.settings import CompactionSettings, ProviderSettings, RuntimeSettings
+from squid_core.settings import (
+    CompactionSettings,
+    ProviderSettings,
+    ReadFileSettings,
+    RuntimeSettings,
+)
 
 
 def compaction_settings() -> CompactionSettings:
@@ -36,6 +41,16 @@ def test_custom_adapter_runtime_settings_need_no_provider_selection() -> None:
     )
 
     assert settings.provider is None
+    assert settings.read_file == ReadFileSettings(
+        default_max_lines=1000,
+        minimum_range_lines=150,
+    )
+
+
+@pytest.mark.parametrize("value", [0, -1, True, 1.5, "150"])
+def test_core_rejects_invalid_read_file_sizing(value: object) -> None:
+    with pytest.raises(ValueError, match="read_file"):
+        ReadFileSettings(minimum_range_lines=value)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("max_tool_steps", [0, -1, True])

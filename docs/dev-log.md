@@ -1,3 +1,19 @@
+- 2026-09-11: Updated Code Squid's canonical read guidance to prefer whole-file
+  reads when useful and substantial coherent regions for larger files, while
+  discouraging incremental adjacent ranges and post-patch rereads used only as
+  confirmation. Added Core `ReadFileSettings` defaults of 1,000 maximum lines
+  for whole-file reads and a 150-line minimum ranged-read window. Small valid
+  ranges now expand around the requested area and shift at file boundaries;
+  larger ranges, full-file truncation, and past-EOF reads retain their prior
+  behavior. Results report the effective expanded line bounds, preserving
+  `RepeatedReadNudge` coverage semantics. Focused read, prompt, repeated-read,
+  settings, and runtime-wiring verification passed 182 tests. The full suite
+  passed 1,122 tests and retained the same nine unrelated baseline failures
+  already recorded by preceding patches: eight stale prompt-copy expectations
+  and one Windows TTY path-rendering assertion. Production and test compilation
+  plus `git diff --check` passed; no live model inference ran. No follow-up work
+  is intentionally deferred.
+
 - 2026-09-10: Audited the normal Code Squid Hook path and confirmed that the
   application builder already appended `RepeatedReadNudge` and
   `RepeatedFailureNudge` before passing its `HookRunner` into `AgentLoop`; no

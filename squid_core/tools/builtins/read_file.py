@@ -2,8 +2,10 @@
 
 from pathlib import Path
 
+from squid_core.settings import ReadFileSettings
+
 TOOL_NAME = "read_file"
-MAX_FULL_FILE_LINES = 1000
+DEFAULT_SETTINGS = ReadFileSettings()
 
 
 # Return the tool definition shown to the model.
@@ -14,7 +16,9 @@ def tool_definition() -> dict:
             "name": TOOL_NAME,
             "description": (
                 "Read a UTF-8 file at an absolute path. Full-file reads return at most "
-                "1000 lines; optional 1-based inclusive line ranges are not truncated."
+                f"{DEFAULT_SETTINGS.default_max_lines} lines; optional 1-based inclusive "
+                "line ranges are not truncated, and small ranges may include surrounding "
+                "context."
             ),
             "parameters": {
                 "type": "object",
@@ -39,7 +43,14 @@ def tool_definition() -> dict:
 
 
 # Read a file and return the result in a consistent shape.
-def execute(_repo_root: Path, path: str, start_line: int | None = None, end_line: int | None = None) -> dict:
+def execute(
+    _repo_root: Path,
+    path: str,
+    start_line: int | None = None,
+    end_line: int | None = None,
+    *,
+    settings: ReadFileSettings = DEFAULT_SETTINGS,
+) -> dict:
     file_path = Path(path)
     if not file_path.is_absolute():
         return {
@@ -73,6 +84,12 @@ def execute(_repo_root: Path, path: str, start_line: int | None = None, end_line
         actual_end = min(requested_end, total_lines)
 
     if ranged and actual_start <= total_lines:
+        actual_start, actual_end = _expanded_range(
+            actual_start,
+            actual_end,
+            total_lines,
+            settings.minimum_range_lines,
+        )
         content = "".join(lines[actual_start - 1 : actual_end])
 
     if ranged:
@@ -83,7 +100,7 @@ def execute(_repo_root: Path, path: str, start_line: int | None = None, end_line
         }
     else:
         original_chars = len(content)
-        if total_lines <= MAX_FULL_FILE_LINES:
+        if total_lines <= settings.default_max_lines:
             content_metadata = {
                 "truncated": False,
                 "original_chars": original_chars,
@@ -92,8 +109,8 @@ def execute(_repo_root: Path, path: str, start_line: int | None = None, end_line
         else:
             # Keep both ends symmetrical so the omitted interval is easy to
             # inspect with a follow-up ranged read.
-            head_lines = MAX_FULL_FILE_LINES // 2
-            tail_lines = MAX_FULL_FILE_LINES - head_lines
+            head_lines = settings.default_max_lines // 2
+            tail_lines = settings.default_max_lines - head_lines
             tail_start = total_lines - tail_lines + 1
             content = "".join((*lines[:head_lines], *lines[-tail_lines:]))
             content_metadata = {
@@ -121,11 +138,41 @@ def execute(_repo_root: Path, path: str, start_line: int | None = None, end_line
             {"start_line": tail_start, "end_line": total_lines},
         ]
         result["truncation_guidance"] = (
-            f"Full-file read truncated to {MAX_FULL_FILE_LINES} of {total_lines} lines; "
+            f"Full-file read truncated to {settings.default_max_lines} of {total_lines} lines; "
             f"returned lines 1-{head_lines} and {tail_start}-{total_lines}. Use "
             "start_line and end_line to inspect the missing relevant section."
         )
     return result
+
+
+def _expanded_range(
+    start_line: int,
+    end_line: int,
+    total_lines: int,
+    minimum_lines: int,
+) -> tuple[int, int]:
+    """Expand a valid requested region around its center, shifting at file edges."""
+
+    target_lines = min(minimum_lines, total_lines)
+    returned_lines = end_line - start_line + 1
+    if returned_lines >= target_lines:
+        return start_line, end_line
+
+    missing_lines = target_lines - returned_lines
+    expanded_start = max(1, start_line - missing_lines // 2)
+    expanded_end = min(
+        total_lines,
+        end_line + (missing_lines - missing_lines // 2),
+    )
+
+    # If one file edge constrained the balanced window, use the available room
+    # on the other side so small requests still receive the configured context.
+    remaining = target_lines - (expanded_end - expanded_start + 1)
+    if remaining and expanded_start == 1:
+        expanded_end = min(total_lines, expanded_end + remaining)
+    elif remaining:
+        expanded_start = max(1, expanded_start - remaining)
+    return expanded_start, expanded_end
 
 
 # Validate caller-supplied 1-based inclusive line ranges before reading.

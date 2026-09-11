@@ -113,6 +113,22 @@ class ToolResultTrimmingSettings:
 
 
 @dataclass(frozen=True)
+class ReadFileSettings:
+    """Tune built-in file-read sizing without changing its public schema."""
+
+    default_max_lines: int = 1000
+    minimum_range_lines: int = 150
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("default_max_lines", self.default_max_lines),
+            ("minimum_range_lines", self.minimum_range_lines),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"read_file {name} must be a positive integer")
+
+
+@dataclass(frozen=True)
 class RuntimeSettings:
     """Effective settings that affect generic runtime behavior."""
 
@@ -124,6 +140,7 @@ class RuntimeSettings:
     tool_result_trimming: ToolResultTrimmingSettings = field(
         default_factory=ToolResultTrimmingSettings
     )
+    read_file: ReadFileSettings = field(default_factory=ReadFileSettings)
 
     def __post_init__(self) -> None:
         if self.approval_mode not in VALID_APPROVAL_MODES:

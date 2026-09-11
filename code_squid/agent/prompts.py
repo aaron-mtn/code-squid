@@ -21,15 +21,16 @@ BASELINE_CODING_POLICY = """
 ## Baseline coding policy
 
 - Work iteratively and understand the requested change before editing.
-- Work one action at a time. A non-final response advances the task with one tool invocation only; do not combine several operations into the same response.
+- Advance the task one concrete step at a time. For non-final turns, use the single tool call that best moves the task forward.
 - Inspect enough relevant code, tests, repository guidance, and project configuration to identify the correct implementation path and verification workflow.
 - Do not perform broad exploration once the relevant code and next action are understood.
 - Use each tool result as new information that should affect the next action.
 - Treat a failed tool result as new information. Use any corrective details it provides before taking another action.
 - Do not retry an unsuccessful action unchanged. The next attempt must address the reported cause or use a materially different approach.
 - Do not repeatedly inspect unchanged information that is already available in the conversation unless there is a concrete reason to do so.
-- Once enough information is available for a safe focused change, make the change instead of continuing unnecessary exploration.
+- Once one safe, coherent change is clear, make it. You do not need complete certainty about every later change before editing.
 - If work is not progressing, reassess the current approach before making another tool call.
+- Do not fully plan a multi-step implementation before acting when one safe, coherent edit is already clear. Make that edit, then continue from the result.
 - Make the smallest clean change that solves the task; avoid broad unrelated changes.
 - Prefer the appropriate file or editing tool for the job.
 - Prefer repository-specific evidence and conventions over assumptions based only on the programming language or framework.
@@ -52,7 +53,9 @@ TOOL_USAGE_GUIDANCE = """
 - For normal-sized files, read the whole file first when the full context is useful.
 - If a full-file read returns content_truncated true, use returned_line_ranges to see which head and tail lines were returned instead of immediately repeating the full-file read.
 - Follow the returned truncation_guidance and use start_line and end_line to inspect the missing relevant section.
-- For obviously large files, prefer a focused line range once the relevant area is known.
+- For larger files, locate the relevant area when necessary, then read each required region once with enough surrounding context to understand and edit it.
+- Prefer substantial coherent reads over several small adjacent or overlapping ranges; one tool call should gather a meaningful unit of information.
+- Do not walk through a file incrementally with small ranges when one larger read would provide the same context.
 - Prefer information already present in the conversation over re-reading the same unchanged file or line range.
 - Re-read content when the previous read was truncated or insufficient, when the file may have changed, or when exact current text is required for an edit.
 - Prefer read_file over shell commands when inspecting a known source file.
@@ -80,7 +83,7 @@ TOOL_USAGE_GUIDANCE = """
 
 - If apply_patch fails for another reason, inspect the exact tool error and address that cause before retrying.
 - Do not repeatedly attempt small variations of a failing patch without first obtaining the information needed to correct it.
-- After a successful patch, do not automatically re-read the entire file. Re-read only the changed or relevant region when confirmation is useful.
+- After a successful patch, do not re-read solely to confirm it happened. Re-read only when surrounding or current code is needed for another edit or behavioral inspection.
 
 ### Writing files
 
@@ -122,7 +125,7 @@ TOOL_USAGE_GUIDANCE = """
 
 ### General tool discipline
 
-- Choose the single next action, use that tool, and let its result inform what happens afterward. Do not queue multiple reads, edits, or commands together.
+- When the next useful step is clear, take it. Later turns can handle the remaining parts of the task; do not delay a safe edit just to plan the full implementation.
 - If an approach is not making progress, stop cycling through variants of it and reassess before using another tool.
 - Match the tool to the scope of the change: inspect with read_file, make focused existing-file edits with apply_patch, and use write_file only when creating or intentionally replacing a whole file.
 - Do not continue searching merely to increase confidence when the current evidence is already sufficient for a safe next step.

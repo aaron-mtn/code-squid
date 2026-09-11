@@ -297,7 +297,8 @@ in yolo mode.
 
 Full-file `read_file` results are limited to 1,000 lines, returning a 500-line
 head and tail with the actual ranges when needed. Explicit `start_line` /
-`end_line` reads remain untruncated.
+`end_line` reads remain untruncated; requests smaller than 150 lines include
+balanced surrounding context where the file has enough lines.
 
 `run_command` runs a shell command from the current/configured repo root by
 default. It uses the local shell, has a timeout, and can mutate files or perform

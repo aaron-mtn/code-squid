@@ -583,8 +583,9 @@ mutations do not alter coverage, and `before_run` clears all state. The Hook
 never blocks or transforms an action or result, and `AgentLoop` has no
 feature-specific logic for it.
 
-There is no separate "small reread" size limit in the current implementation:
-the overlap ratio applies to any non-empty valid returned range metadata. A
+There is no separate "small reread" size limit in `RepeatedReadNudge`: the
+overlap ratio applies to any non-empty valid returned range metadata, including
+an effective range expanded by `read_file`. A
 successful read is tracked only when `ok` is exactly `true`, its path can be
 resolved from result or action metadata, and it reports a valid inclusive
 `start_line`/`end_line` range or valid `returned_line_ranges`. Coverage is the
@@ -1607,14 +1608,20 @@ root-level properties.
 - requires an absolute path
 - reads UTF-8 text
 - supports optional 1-based inclusive `start_line` and `end_line`
-- supports ranged reads for focused inspection
+- keeps read sizing in Core's small `ReadFileSettings`, whose defaults cap
+  whole-file reads at 1,000 lines and target at least 150 lines for ranged reads
 - returns whole-file reads unchanged through 1,000 lines
 - for larger whole-file reads, returns 500 head lines and 500 tail lines with
   explicit `returned_line_ranges` and model-facing `truncation_guidance`
 - does not truncate ranged reads
-- preserves the existing content, character-count, truncation, requested-range,
-  and total-line metadata; the character counts describe the original and
-  returned content but do not impose a second read limit
+- expands a ranged read below 150 returned lines around the requested area,
+  shifting the window at file edges to retain up to 150 lines when available;
+  ranges already at least 150 lines and requests starting past EOF are unchanged
+- reports the effective expanded `start_line` and `end_line`, so runtime Hooks
+  track the content actually returned rather than only the requested interval
+- preserves the existing content, character-count, truncation, ranged-read,
+  and total-line metadata; the character counts describe the returned content
+  but do not impose a second read limit
 - is checked against the workspace boundary before execution unless trusted
   outside-workspace access is configured or approved
 
