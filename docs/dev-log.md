@@ -1,3 +1,20 @@
+- 2026-09-11: Made reconstructed compaction summaries explicitly synthetic and
+  non-authoritative. Compaction still protects the initial system and verbatim
+  first user messages, but now inserts its model-generated summary as an
+  `assistant` message headed `# Compacted Working Context` with a model-visible
+  warning that real user messages are authoritative and the lossy summary cannot
+  add, replace, or override their requirements. Strengthened the generic
+  summarizer prompt against inventing or reinterpreting requested behavior.
+  Triggering, chunk selection, recent-tail retention, tool-call/result integrity,
+  lifecycle diagnostics, exact-summary logging, metadata, and failure handling
+  are unchanged. Verification: 21 focused compaction tests and 144 related
+  adapter/provider/agent-loop tests passed; production/test compilation, import
+  smoke, and `git diff --check` passed. The full suite passed 1,130 tests and
+  retained the same nine unrelated baseline failures recorded by preceding
+  patches: eight stale prompt-copy expectations and one Windows TTY path-rendering
+  assertion. No live model inference ran. Preserving later real user messages
+  beyond the existing recent-tail policy remains intentionally deferred.
+
 - 2026-09-11: Escalated Core's existing `RepeatedReadNudge` in two stages. The
   first substantially redundant unchanged `read_file` still returns its normal
   contents with the existing transient guidance; the next qualifying read in

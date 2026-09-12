@@ -1441,15 +1441,19 @@ When triggered, compaction:
 - selects oldest whole chunks in order until their cumulative estimate reaches
   that target or the minimum recent-chunk boundary prevents further selection
 - summarizes older chunks with `ModelAdapter.complete_text(...)`
-- replaces those older chunks with one user message headed
-  `# Compacted Prior Context`
+- replaces those older chunks with one assistant message headed
+  `# Compacted Working Context`; the assistant role marks it as model-generated,
+  while its preamble explicitly says it is lossy, context-only, non-authoritative,
+  and cannot add, replace, or override real user requirements
 - keeps at least `settings.compaction.min_recent_chunks` newest chunks verbatim
 
 The application and Core defaults are `enabled=True`,
 `trigger_input_tokens=25_000`, `compact_fraction=0.80`, and
-`min_recent_chunks=2`. A prior `# Compacted Prior Context` message is an ordinary
-eligible chunk on a later pass, so repeated compaction naturally folds an older
-summary into the next summary without a separate memory mechanism. The removed
+`min_recent_chunks=2`. Only the initial user message is protected; later real user
+messages remain subject to the existing chunk selection policy. A prior
+`# Compacted Working Context` assistant message is an ordinary eligible chunk on
+a later pass, so repeated compaction naturally folds an older summary into the
+next summary without a separate memory mechanism. The removed
 `keep_recent_turns` JSON field is ignored if it remains in an older settings
 file; users who customized it must replace it with `min_recent_chunks`.
 
