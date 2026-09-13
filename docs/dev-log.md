@@ -1,3 +1,22 @@
+- 2026-09-12: Corrected `RepeatedReadNudge` mutation invalidation so a
+  successful `apply_patch` makes its changed lines readable on the next
+  intersecting `read_file`, even when unchanged surrounding lines keep the
+  verification window above the normal 70% overlap threshold. Patch handling
+  still trims or splits old coverage and shifts post-edit coverage by the line
+  delta, while a separate bounded stale-span marker forces only the first read
+  returning changed lines through and is cleared for the lines that read made
+  fresh. Successful `write_file` clears both coverage and stale markers for its
+  target; file identities remain isolated. Added regressions for real patch and
+  read integration, immediate repeat masking, partial-range preservation,
+  line-count shifts, whole-file writes, cross-file isolation, and retained the
+  existing truncated head/tail coverage test. Verification: 30 focused
+  repeated-read tests and 156 broader Hook/runtime/Tool tests passed; changed
+  modules and tests compiled, and `git diff --check` passed. The full suite
+  passed 1,135 tests and retained the same nine unrelated baseline failures
+  recorded by the preceding patch: eight stale prompt-copy expectations and
+  one Windows TTY path-rendering assertion. No live model inference ran. No
+  concrete follow-up is intentionally deferred.
+
 - 2026-09-12: Changed Core's existing `RepeatedReadNudge` so the first
   substantially overlapping unchanged `read_file` reread at the configured
   threshold is masked immediately instead of returning duplicate source. The

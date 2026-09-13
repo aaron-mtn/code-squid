@@ -9,6 +9,7 @@ from squid_core.hooks import (
     RepeatedReadNudge,
     ToolResultContext,
 )
+from squid_core.tools.builtins.apply_patch import execute as apply_patch
 from squid_core.tools.builtins.read_file import execute as read_file
 
 
@@ -441,6 +442,105 @@ def test_changed_patch_lines_are_not_known_coverage(tmp_path: Path) -> None:
     assert _read(hook, path, returned_start=40, returned_end=52) is None
 
 
+def test_patch_verification_read_is_returned_once_then_masked(
+    tmp_path: Path,
+) -> None:
+    """A narrow edit must defeat overlap masking for its first verification."""
+    runner = HookRunner([RepeatedReadNudge()])
+    path = tmp_path / "script.js"
+    lines = [f"const line{i} = {i};" for i in range(1, 501)]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def context(tool: str, args: dict, result: dict) -> ToolResultContext:
+        return ToolResultContext(
+            session_id=None,
+            repo_root=str(tmp_path),
+            action={"tool": tool, "args": args},
+            result=result,
+        )
+
+    initial_args = {"path": str(path), "start_line": 1, "end_line": 500}
+    initial_result = read_file(tmp_path, **initial_args)
+    assert runner.tool_result(
+        context("read_file", initial_args, initial_result)
+    ).updated_tool_output["content"] == initial_result["content"]
+
+    patch_args = {
+        "path": str(path),
+        "old_text": lines[164],
+        "new_text": "const line165 = 'changed';",
+    }
+    patch_result = apply_patch(tmp_path, **patch_args)
+    assert patch_result["ok"] is True
+    runner.tool_result(context("apply_patch", patch_args, patch_result))
+
+    verify_args = {"path": str(path), "start_line": 158, "end_line": 175}
+    verify_result = read_file(tmp_path, **verify_args)
+    first_verification = runner.tool_result(
+        context("read_file", verify_args, verify_result)
+    )
+    assert "const line165 = 'changed';" in first_verification.updated_tool_output[
+        "content"
+    ]
+    assert first_verification.additional_context == ""
+
+    repeated_verification = runner.tool_result(
+        context("read_file", verify_args, verify_result)
+    )
+    assert repeated_verification.updated_tool_output["already_covered"] is True
+    assert "content" not in repeated_verification.updated_tool_output
+
+
+def test_partial_patch_preserves_both_sides_but_stale_overlap_is_readable(
+    tmp_path: Path,
+) -> None:
+    hook = RepeatedReadNudge()
+    path = tmp_path / "a.py"
+    _read(hook, path, returned_start=100, returned_end=250)
+
+    _mutate(
+        hook,
+        "apply_patch",
+        path,
+        start_line=160,
+        end_line_before=170,
+        end_line_after=170,
+    )
+
+    assert list(hook._coverage.values()) == [[(100, 159), (171, 250)]]
+    assert list(hook._stale_ranges.values()) == [[(160, 170)]]
+    # Most of this range remains covered, but it includes changed source.
+    assert _read(hook, path, returned_start=150, returned_end=180) is None
+    assert hook._stale_ranges == {}
+    _assert_first_reread_is_masked(
+        _read(hook, path, returned_start=150, returned_end=180)
+    )
+
+
+def test_line_count_patch_shifts_coverage_and_uncovers_replacement(
+    tmp_path: Path,
+) -> None:
+    hook = RepeatedReadNudge()
+    path = tmp_path / "a.py"
+    _read(hook, path, returned_start=100, returned_end=250)
+
+    _mutate(
+        hook,
+        "apply_patch",
+        path,
+        start_line=160,
+        end_line_before=170,
+        end_line_after=173,
+    )
+
+    assert list(hook._coverage.values()) == [[(100, 159), (174, 253)]]
+    assert list(hook._stale_ranges.values()) == [[(160, 173)]]
+    assert _read(hook, path, returned_start=150, returned_end=180) is None
+    _assert_first_reread_is_masked(
+        _read(hook, path, returned_start=174, returned_end=253)
+    )
+
+
 def test_successful_apply_patch_resets_pending_escalation(tmp_path: Path) -> None:
     hook = RepeatedReadNudge()
     path = tmp_path / "a.py"
@@ -463,10 +563,43 @@ def test_successful_write_file_invalidates_prior_reads(tmp_path: Path) -> None:
     hook = RepeatedReadNudge()
     path = tmp_path / "a.py"
     _read(hook, path)
+    _mutate(
+        hook,
+        "apply_patch",
+        path,
+        start_line=40,
+        end_line_before=45,
+        end_line_after=45,
+    )
+    assert hook._stale_ranges
 
     _mutate(hook, "write_file", path)
 
+    assert hook._coverage == {}
+    assert hook._stale_ranges == {}
     assert _read(hook, path) is None
+
+
+def test_mutation_of_one_file_preserves_other_file_coverage(
+    tmp_path: Path,
+) -> None:
+    hook = RepeatedReadNudge()
+    changed_path = tmp_path / "changed.py"
+    other_path = tmp_path / "other.py"
+    _read(hook, changed_path)
+    _read(hook, other_path)
+
+    _mutate(
+        hook,
+        "apply_patch",
+        changed_path,
+        start_line=40,
+        end_line_before=45,
+        end_line_after=45,
+    )
+
+    _assert_first_reread_is_masked(_read(hook, other_path))
+    assert _read(hook, changed_path, returned_start=35, returned_end=50) is None
 
 
 def test_successful_write_file_resets_pending_escalation(tmp_path: Path) -> None:

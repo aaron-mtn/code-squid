@@ -56,6 +56,7 @@ TOOL_USAGE_GUIDANCE = """
 - For larger files, locate the relevant area when necessary, then read each required region once with enough surrounding context to understand and edit it.
 - Prefer substantial coherent reads over several small adjacent or overlapping ranges; one tool call should gather a meaningful unit of information.
 - Do not walk through a file incrementally with small ranges when one larger read would provide the same context.
+- Do not broaden or repeat a read merely for extra confidence once the relevant code and surrounding context are already understood.
 - Prefer information already present in the conversation over re-reading the same unchanged file or line range.
 - Re-read content when the previous read was truncated or insufficient, when the file may have changed, or when exact current text is required for an edit.
 - Prefer read_file over shell commands when inspecting a known source file.

@@ -574,8 +574,13 @@ preferring the separate exact `returned_line_ranges` when a full-file read is
 truncated. A successful `write_file` invalidates all coverage for its target. A
 successful `apply_patch` instead uses its before/after line bounds to discard
 the changed span while preserving coverage before it and shifting coverage
-after it by the line-count delta. When at least 70% of a returned read is
-already covered for that unchanged range, it counts as redundant; by default
+after it by the line-count delta. The Hook separately remembers patch-stale
+spans so the first successful read returning changed lines is never masked just
+because its wider verification window still overlaps at least 70% known
+surrounding content. That read clears only the stale lines it returned and
+records them as fresh coverage, so an immediate repeat is redundant again. When
+at least 70% of any other returned read is already covered for that unchanged
+range, it counts as redundant; by default
 the first redundant reread after the useful original replaces the model-facing
 result through `updated_tool_output` with a small successful `already_covered`
 result containing no file contents. It also returns action-oriented one-turn
@@ -602,10 +607,11 @@ the stronger masked correction. "Consecutive" is per file rather than globally
 adjacent: a successful non-redundant read of that file resets its count, the
 stronger escalation resets it, and a successful mutation resets it; unrelated
 Tool calls and reads of other files do not. `write_file` invalidates the target's
-whole coverage, while `apply_patch` preserves unaffected coverage only when
-trustworthy before/after line bounds are present and otherwise invalidates the
-whole target. Failed reads and failed mutations neither add nor invalidate
-coverage or advance the streak. File inspection performed inside `run_command`,
+whole coverage and any patch-stale markers, while `apply_patch` preserves
+unaffected coverage only when trustworthy before/after line bounds are present
+and otherwise invalidates the whole target. Failed reads and failed mutations
+neither add nor invalidate coverage or advance the streak. File inspection
+performed inside `run_command`,
 including shell searches, does not participate because it does not produce
 `read_file` range metadata.
 

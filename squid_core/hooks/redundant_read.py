@@ -20,7 +20,7 @@ _GUIDANCE = (
     "range substantially overlaps information already in context. Reuse that context "
     "instead of rereading for confidence. If the intended edit is clear, make the "
     "focused edit now. Read again only if you need information that was not previously "
-    "returned."
+    "returned. Otherwise go back over the information you already have in your context and move on to the next step."
 )
 _ESCALATED_ALREADY_COVERED_MESSAGE = (
     "You already read this unchanged section of the file. No file content is "
@@ -50,11 +50,16 @@ class RepeatedReadNudge:
         # Hosts inspect Hook sources as configuration metadata.
         self.source = source
         self._coverage: dict[str, list[tuple[int, int]]] = {}
+        # Patch-invalidated spans need an explicit marker: trimming them from
+        # coverage is not enough when a wider verification read still overlaps
+        # unchanged coverage above the substantial-overlap threshold.
+        self._stale_ranges: dict[str, list[tuple[int, int]]] = {}
         self._redundant_counts: dict[str, int] = {}
 
     def before_run(self, _ctx) -> None:
         """Discard all observations from the preceding run."""
         self._coverage.clear()
+        self._stale_ranges.clear()
         self._redundant_counts.clear()
 
     def tool_result(self, ctx) -> HookResponse | None:
@@ -73,6 +78,7 @@ class RepeatedReadNudge:
                     self._adjust_coverage_for_patch(path, result)
                 else:
                     self._coverage.pop(path, None)
+                    self._stale_ranges.pop(path, None)
 
         return None
 
@@ -90,7 +96,10 @@ class RepeatedReadNudge:
             return None
 
         previous_coverage = self._coverage.get(path, ())
-        is_redundant = (
+        intersects_stale_range = _ranges_intersect(
+            self._stale_ranges.get(path, ()), returned_ranges
+        )
+        is_redundant = not intersects_stale_range and (
             _overlap_ratio(previous_coverage, returned_ranges)
             >= SUBSTANTIAL_OVERLAP_RATIO
         )
@@ -98,6 +107,8 @@ class RepeatedReadNudge:
         # Classify before recording so a read cannot overlap with itself. The
         # dedicated range list keeps truncated head and tail coverage separate.
         self._record_coverage(path, returned_ranges)
+        if intersects_stale_range:
+            self._mark_stale_ranges_fresh(path, returned_ranges)
 
         if not is_redundant:
             self._redundant_counts.pop(path, None)
@@ -142,14 +153,28 @@ class RepeatedReadNudge:
             # A successful mutation without trustworthy bounds cannot preserve
             # coverage safely, so fall back to whole-file invalidation.
             self._coverage.pop(path, None)
+            self._stale_ranges.pop(path, None)
             return
 
         existing = self._coverage.get(path)
+        start_line, end_line_before, end_line_after = patch_range
+        delta = end_line_after - end_line_before
+        old_patch_span = [(start_line, end_line_before)]
+        invalidates_current_context = bool(
+            existing and _ranges_intersect(existing, old_patch_span)
+        ) or _ranges_intersect(self._stale_ranges.get(path, ()), old_patch_span)
+        self._shift_stale_ranges_for_patch(
+            path, start_line, end_line_before, end_line_after
+        )
+        if invalidates_current_context:
+            stale = self._stale_ranges.get(path, [])
+            self._stale_ranges[path] = _merge_ranges(
+                stale + [(start_line, end_line_after)]
+            )[-_MAX_RANGES_PER_FILE:]
+
         if not existing:
             return
 
-        start_line, end_line_before, end_line_after = patch_range
-        delta = end_line_after - end_line_before
         adjusted: list[tuple[int, int]] = []
         for coverage_start, coverage_end in existing:
             if coverage_start < start_line:
@@ -169,6 +194,54 @@ class RepeatedReadNudge:
         else:
             self._coverage.pop(path, None)
 
+    def _shift_stale_ranges_for_patch(
+        self,
+        path: str,
+        start_line: int,
+        end_line_before: int,
+        end_line_after: int,
+    ) -> None:
+        """Keep unread stale spans aligned across successive patches."""
+        existing = self._stale_ranges.get(path)
+        if not existing:
+            return
+
+        delta = end_line_after - end_line_before
+        adjusted: list[tuple[int, int]] = []
+        for stale_start, stale_end in existing:
+            if stale_start < start_line:
+                adjusted.append((stale_start, min(stale_end, start_line - 1)))
+            if stale_end > end_line_before:
+                adjusted.append(
+                    (
+                        max(stale_start, end_line_before + 1) + delta,
+                        stale_end + delta,
+                    )
+                )
+
+        if adjusted:
+            self._stale_ranges[path] = _merge_ranges(adjusted)[
+                -_MAX_RANGES_PER_FILE:
+            ]
+        else:
+            self._stale_ranges.pop(path, None)
+
+    def _mark_stale_ranges_fresh(
+        self,
+        path: str,
+        returned_ranges: list[tuple[int, int]],
+    ) -> None:
+        """Remove only successfully reread lines from mutation-stale spans."""
+        stale = self._stale_ranges.get(path)
+        if not stale:
+            return
+
+        remaining = _subtract_ranges(stale, returned_ranges)
+        if remaining:
+            self._stale_ranges[path] = remaining[-_MAX_RANGES_PER_FILE:]
+        else:
+            self._stale_ranges.pop(path, None)
+
     def _record_coverage(
         self,
         path: str,
@@ -179,6 +252,7 @@ class RepeatedReadNudge:
         if not existing and len(self._coverage) >= _MAX_TRACKED_FILES:
             oldest_path = next(iter(self._coverage))
             del self._coverage[oldest_path]
+            self._stale_ranges.pop(oldest_path, None)
             self._redundant_counts.pop(oldest_path, None)
         self._coverage[path] = _merge_ranges(existing + returned_ranges)[
             -_MAX_RANGES_PER_FILE:
@@ -312,6 +386,38 @@ def _overlap_ratio(
             if overlap_start <= overlap_end:
                 overlap_lines += overlap_end - overlap_start + 1
     return overlap_lines / current_lines
+
+
+def _ranges_intersect(
+    first: Sequence[tuple[int, int]],
+    second: Sequence[tuple[int, int]],
+) -> bool:
+    """Return whether two inclusive range collections share any line."""
+    for first_start, first_end in first:
+        for second_start, second_end in second:
+            if max(first_start, second_start) <= min(first_end, second_end):
+                return True
+    return False
+
+
+def _subtract_ranges(
+    ranges: Sequence[tuple[int, int]],
+    removed: Sequence[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    """Subtract inclusive ranges while retaining any fragments on either side."""
+    remaining = _merge_ranges(ranges)
+    for removed_start, removed_end in _merge_ranges(removed):
+        fragments: list[tuple[int, int]] = []
+        for start, end in remaining:
+            if end < removed_start or start > removed_end:
+                fragments.append((start, end))
+                continue
+            if start < removed_start:
+                fragments.append((start, removed_start - 1))
+            if end > removed_end:
+                fragments.append((removed_end + 1, end))
+        remaining = fragments
+    return remaining
 
 
 def _merge_ranges(ranges: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:
