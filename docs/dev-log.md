@@ -1,3 +1,24 @@
+- 2026-09-12: Made successful context compaction a reset boundary for Core's
+  `RepeatedReadNudge`. `AgentLoop` now dispatches a narrow Hook seam only for
+  the existing authoritative `compaction_applied` event, after the in-memory
+  transcript rebuild and compaction-event persistence. The Hook clears all
+  tracked files' coverage, patch-stale ranges, and per-file redundant-read
+  counters, so the first post-compaction read returns fresh source and an
+  immediate repeat is suppressed normally. Compaction checks, starts,
+  requests, failures, and otherwise unapplied attempts leave state intact.
+  Added focused state/sequence regressions, Hook seam coverage, and AgentLoop
+  lifecycle integration coverage, and synchronized the repeated-read test's
+  stale guidance copy with the already-existing production text without
+  changing that prompt. Verification: 32 focused repeated-read tests and 219
+  broader Hook/runtime/compaction/Tool tests passed; the full suite passed
+  1,139 tests with the same nine unrelated baseline failures recorded by the
+  preceding patches (eight stale prompt-copy expectations and one Windows TTY
+  path-rendering assertion). Changed modules and tests compiled, the Core Hook
+  import smoke passed, and `git diff --check` passed. No compaction policy,
+  thresholds, production prompts, Tool schemas, mutation invalidation, or
+  repeated-read escalation behavior changed. No live model inference ran, and
+  no concrete follow-up is intentionally deferred.
+
 - 2026-09-12: Corrected `RepeatedReadNudge` mutation invalidation so a
   successful `apply_patch` makes its changed lines readable on the next
   intersecting `read_file`, even when unchanged surrounding lines keep the

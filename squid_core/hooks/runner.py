@@ -35,6 +35,14 @@ class BeforeModelTurnContext:
 
 
 @dataclass(frozen=True)
+class CompactionAppliedContext:
+    """Identify a session whose model-visible transcript was compacted."""
+
+    session_id: str | None
+    repo_root: str
+
+
+@dataclass(frozen=True)
 class BeforeToolExecuteContext:
     session_id: str | None
     repo_root: str
@@ -156,6 +164,20 @@ class HookRunner:
             context_blocks.extend(response.context_blocks)
 
         return HookResponse(context_blocks=tuple(context_blocks))
+
+    def compaction_applied(
+        self,
+        ctx: CompactionAppliedContext,
+        *,
+        event_sink: HookEventSink | None = None,
+    ) -> None:
+        """Notify hooks only after compaction replaces the active transcript."""
+        for hook in self.hooks:
+            handler = getattr(hook, "compaction_applied", None)
+            if handler is None:
+                continue
+
+            _invoke_hook(hook, "compaction_applied", handler, ctx, event_sink)
 
     def before_tool_execute(
         self,

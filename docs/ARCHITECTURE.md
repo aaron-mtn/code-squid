@@ -526,6 +526,17 @@ request, but is not appended to `session.messages` and is not persisted.
 Hooks contribute prompt blocks through `HookResponse.context_blocks`; there is
 no separate return convention for this event.
 
+### compaction_applied
+
+Runs only after the compactor has replaced the active in-memory transcript and
+the `compaction_applied` lifecycle event has been persisted when session storage
+is present. It is a notification seam with no `HookResponse` effects.
+
+Checks, threshold crossings, compaction start/request events, failures, and
+unapplied attempts never reach this seam. This makes successful compaction a
+simple reset boundary for Hooks whose state describes what remains visible in
+the model transcript.
+
 ### before_tool_execute
 
 Runs after the model response has been normalized and validated as a real tool
@@ -589,8 +600,13 @@ the current context and make a focused edit when the intended change is clear.
 The next qualifying reread in that file's streak remains masked, uses a stronger
 correction, and then resets the streak. The threshold remains configurable and
 controls when first-reread masking and guidance begin. Failed mutations do not
-alter coverage, and `before_run` clears all state. The Hook never blocks or
-transforms an action, and `AgentLoop` has no feature-specific logic for it.
+alter coverage, and `before_run` clears all state. Successful transcript
+compaction also clears all files' coverage, mutation-stale ranges, and per-file
+redundant-read counters through the `compaction_applied` Hook seam. Earlier
+compaction lifecycle events and failed or otherwise unapplied attempts leave
+state intact because the original transcript remains active. The Hook never
+blocks or transforms an action, and `AgentLoop` has no feature-specific logic
+for it.
 
 There is no separate "small reread" size limit in `RepeatedReadNudge`: the
 overlap ratio applies to any non-empty valid returned range metadata, including
@@ -1466,10 +1482,11 @@ next summary without a separate memory mechanism. The removed
 file; users who customized it must replace it with `min_recent_chunks`.
 
 `AgentLoop` supplies one callback that persists each lifecycle event through
-`SessionStore.append_compaction_event(...)` when storage is wired in and also
-publishes the authoritative start event through the loop's existing observer
-seam. The compactor writes a chronological diagnostic lifecycle beside normal
-transcript entries:
+`SessionStore.append_compaction_event(...)` when storage is wired in, publishes
+the authoritative start event through the loop's existing observer seam, and
+dispatches the narrow `compaction_applied` Hook seam after successful
+application. The compactor writes a chronological diagnostic lifecycle beside
+normal transcript entries:
 
 - `compaction_check` records the estimate, configured trigger, threshold result,
   whether compaction is possible, and compactable-selection diagnostics

@@ -58,6 +58,14 @@ class RepeatedReadNudge:
 
     def before_run(self, _ctx) -> None:
         """Discard all observations from the preceding run."""
+        self._reset_state()
+
+    def compaction_applied(self, _ctx) -> None:
+        """Forget reads removed from the model-visible transcript."""
+        self._reset_state()
+
+    def _reset_state(self) -> None:
+        """Clear all coverage and escalation state as one lifecycle unit."""
         self._coverage.clear()
         self._stale_ranges.clear()
         self._redundant_counts.clear()

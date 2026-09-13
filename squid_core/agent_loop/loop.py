@@ -25,6 +25,7 @@ from squid_core.hooks import (
     BeforeModelTurnContext,
     BeforeRunContext,
     BeforeToolExecuteContext,
+    CompactionAppliedContext,
     FollowUpRunRequest,
     HookResponse,
     HookRunner,
@@ -194,12 +195,23 @@ class AgentLoop:
             pass
 
     def _handle_compaction_event(self, event: dict) -> None:
-        """Persist compaction diagnostics and publish its visible start seam."""
+        """Persist compaction diagnostics and dispatch successful application."""
         # Persistence retains the complete lifecycle. Only the authoritative
         # start belongs on the compact observer path used by presentation.
         if self.session_store is not None:
             self.session_store.append_compaction_event(event)
-        if event.get("type") == "compaction_started":
+        event_type = event.get("type")
+        if event_type == "compaction_applied":
+            # The compactor emits this only after replacing session.messages.
+            # Earlier lifecycle events and failures leave Hook state untouched.
+            self.hook_runner.compaction_applied(
+                CompactionAppliedContext(
+                    session_id=self._session_id(),
+                    repo_root=str(self.session.repo_root),
+                ),
+                event_sink=self._emit_hook_event,
+            )
+        if event_type == "compaction_started":
             self._emit_event(event)
 
     def _should_stream_assistant_text(self) -> bool:

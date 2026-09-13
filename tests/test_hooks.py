@@ -8,6 +8,7 @@ from squid_core.hooks import (
     BeforeModelTurnContext,
     BeforeRunContext,
     BeforeToolExecuteContext,
+    CompactionAppliedContext,
     FollowUpRunRequest,
     HookRunner,
     HookResponse,
@@ -218,9 +219,13 @@ def test_hook_runner_noop_returns_empty_decisions() -> None:
     run_finished = runner.run_finished(
         RunFinishedContext(session_id=None, repo_root="", status="complete")
     )
+    compaction_applied = runner.compaction_applied(
+        CompactionAppliedContext(session_id=None, repo_root="")
+    )
 
     assert before_run == HookResponse()
     assert before_model_turn == HookResponse()
+    assert compaction_applied is None
     assert before_tool_execute == HookResponse(
         action={"tool": "read_file"},
         approval_reason="",
@@ -239,6 +244,9 @@ def test_hook_runner_reports_compact_outcomes_at_every_lifecycle_seam() -> None:
             return HookResponse(context_blocks=(context_block,))
 
         def before_model_turn(self, ctx):
+            return None
+
+        def compaction_applied(self, ctx):
             return None
 
         def before_tool_execute(self, ctx):
@@ -264,6 +272,9 @@ def test_hook_runner_reports_compact_outcomes_at_every_lifecycle_seam() -> None:
         BeforeModelTurnContext(None, "repo", "task", (), 0),
         event_sink=events.append,
     )
+    runner.compaction_applied(
+        CompactionAppliedContext(None, "repo"), event_sink=events.append
+    )
     runner.before_tool_execute(
         BeforeToolExecuteContext(None, "repo", {"tool": "original"}, 0),
         event_sink=events.append,
@@ -283,18 +294,19 @@ def test_hook_runner_reports_compact_outcomes_at_every_lifecycle_seam() -> None:
     assert [event["seam"] for event in events] == [
         "before_run",
         "before_model_turn",
+        "compaction_applied",
         "before_tool_execute",
         "tool_result",
         "before_accept_final",
         "run_finished",
     ]
     assert events[1]["status"] == "no_effect"
-    assert events[2]["effects"] == ["updated_action", "approval_reasons"]
-    assert events[3]["effects"] == [
+    assert events[3]["effects"] == ["updated_action", "approval_reasons"]
+    assert events[4]["effects"] == [
         "updated_tool_output",
         "additional_context",
     ]
-    assert events[5]["effects"] == ["follow_up_requests", "notes"]
+    assert events[6]["effects"] == ["follow_up_requests", "notes"]
     assert "sensitive body" not in str(events)
     assert "private guidance" not in str(events)
     assert "secret" not in str(events)

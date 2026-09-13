@@ -10,7 +10,12 @@ from code_squid.agent.coding import CodingAgent
 from squid_core.safety import ActionPreflightDecision
 from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.safety import ApprovalDecision, ApprovalPolicy
-from squid_core.hooks import HookResponse, HookRunner, ToolResultContext
+from squid_core.hooks import (
+    HookResponse,
+    HookRunner,
+    RepeatedReadNudge,
+    ToolResultContext,
+)
 from squid_core.session import Session
 from squid_core.tools import ToolResults
 from squid_core.storage import SessionStore
@@ -926,6 +931,84 @@ def test_compaction_lifecycle_is_published_through_loop_events() -> None:
     ]
     assert [event["type"] for event in compaction_events] == ["compaction_started"]
     assert compaction_events[0]["messages_before"] == 4
+
+
+def test_only_applied_compaction_resets_repeated_read_state(tmp_path) -> None:
+    hook = RepeatedReadNudge()
+    path = tmp_path / "source.py"
+    action = {"tool": "read_file", "args": {"path": str(path)}}
+    result = {
+        "ok": True,
+        "tool": "read_file",
+        "path": str(path),
+        "content": "source",
+        "start_line": 1,
+        "end_line": 10,
+    }
+    context = ToolResultContext(None, str(tmp_path), action, result)
+    hook.tool_result(context)
+    loop = AgentLoop(
+        session=Session(repo_root=tmp_path),
+        model_adapter=FakeModelAdapter([]),
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=StopImmediatelyAgent(),
+        display=NullDisplay(),
+        hook_runner=HookRunner([hook]),
+    )
+
+    for event in (
+        {"type": "compaction_check", "will_compact": True},
+        {"type": "compaction_started"},
+        {"type": "compaction_failed", "stage": "model_request"},
+    ):
+        loop._handle_compaction_event(event)
+
+    assert hook.tool_result(context).updated_tool_output["already_covered"] is True
+
+    loop._handle_compaction_event({"type": "compaction_applied"})
+
+    assert hook.tool_result(context) is None
+
+
+def test_failed_compaction_event_persistence_does_not_reset_read_state(
+    tmp_path,
+) -> None:
+    class FailingCompactionStore(FakeSessionStore):
+        def append_compaction_event(self, event: dict) -> None:
+            raise RuntimeError("compaction persistence failed")
+
+    hook = RepeatedReadNudge()
+    path = tmp_path / "source.py"
+    context = ToolResultContext(
+        None,
+        str(tmp_path),
+        {"tool": "read_file", "args": {"path": str(path)}},
+        {
+            "ok": True,
+            "tool": "read_file",
+            "path": str(path),
+            "content": "source",
+            "start_line": 1,
+            "end_line": 10,
+        },
+    )
+    hook.tool_result(context)
+    loop = AgentLoop(
+        session=Session(repo_root=tmp_path),
+        model_adapter=FakeModelAdapter([]),
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=StopImmediatelyAgent(),
+        display=NullDisplay(),
+        session_store=FailingCompactionStore(),
+        hook_runner=HookRunner([hook]),
+    )
+
+    with pytest.raises(RuntimeError, match="compaction persistence failed"):
+        loop._handle_compaction_event({"type": "compaction_applied"})
+
+    assert hook.tool_result(context).updated_tool_output["already_covered"] is True
 
 
 def test_compactor_is_not_called_when_session_already_stopped() -> None:

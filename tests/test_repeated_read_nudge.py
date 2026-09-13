@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from squid_core.hooks import (
+    CompactionAppliedContext,
     HookResponse,
     HookRunner,
     RepeatedReadNudge,
@@ -18,7 +19,8 @@ GUIDANCE = (
     "range substantially overlaps information already in context. Reuse that context "
     "instead of rereading for confidence. If the intended edit is clear, make the "
     "focused edit now. Read again only if you need information that was not previously "
-    "returned."
+    "returned. Otherwise go back over the information you already have in your context "
+    "and move on to the next step."
 )
 ESCALATED_ALREADY_COVERED_MESSAGE = (
     "You already read this unchanged section of the file. No file content is "
@@ -662,6 +664,83 @@ def test_before_run_clears_history(tmp_path: Path) -> None:
     hook.before_run(None)
 
     assert _read(hook, path) is None
+
+
+def test_successful_compaction_allows_fresh_read_then_masks_immediate_reread(
+    tmp_path: Path,
+) -> None:
+    hook = RepeatedReadNudge()
+    runner = HookRunner([hook])
+    path = tmp_path / "a.py"
+    action = {
+        "tool": "read_file",
+        "args": {"path": str(path), "start_line": 100, "end_line": 180},
+    }
+
+    def observe(content: str) -> HookResponse:
+        return runner.tool_result(
+            ToolResultContext(
+                session_id="session-1",
+                repo_root=str(tmp_path),
+                action=action,
+                result={
+                    "ok": True,
+                    "tool": "read_file",
+                    "path": str(path),
+                    "content": content,
+                    "start_line": 100,
+                    "end_line": 180,
+                },
+            )
+        )
+
+    assert observe("ORIGINAL SOURCE").updated_tool_output["content"] == (
+        "ORIGINAL SOURCE"
+    )
+    before_compaction = observe("REDUNDANT SOURCE")
+    assert before_compaction.updated_tool_output["already_covered"] is True
+    assert "content" not in before_compaction.updated_tool_output
+
+    runner.compaction_applied(
+        CompactionAppliedContext(session_id="session-1", repo_root=str(tmp_path))
+    )
+
+    fresh = observe("SOURCE RETURNED AFTER COMPACTION")
+    assert fresh.updated_tool_output["content"] == "SOURCE RETURNED AFTER COMPACTION"
+    immediate_reread = observe("REDUNDANT SOURCE AFTER COMPACTION")
+    assert immediate_reread.updated_tool_output["already_covered"] is True
+    assert "content" not in immediate_reread.updated_tool_output
+
+
+def test_successful_compaction_clears_all_files_and_redundant_read_state(
+    tmp_path: Path,
+) -> None:
+    hook = RepeatedReadNudge(threshold=3)
+    first_path = tmp_path / "first.py"
+    second_path = tmp_path / "second.py"
+
+    _read(hook, first_path)
+    _read(hook, second_path)
+    assert _read(hook, first_path) is None
+    _mutate(
+        hook,
+        "apply_patch",
+        second_path,
+        start_line=40,
+        end_line_before=50,
+        end_line_after=50,
+    )
+    assert hook._coverage
+    assert hook._stale_ranges
+    assert hook._redundant_counts
+
+    hook.compaction_applied(None)
+
+    assert hook._coverage == {}
+    assert hook._stale_ranges == {}
+    assert hook._redundant_counts == {}
+    assert _read(hook, first_path) is None
+    assert _read(hook, second_path) is None
 
 
 def test_escalated_mask_resets_repetition_streak(tmp_path: Path) -> None:
