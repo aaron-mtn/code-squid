@@ -16,11 +16,13 @@ _MAX_TRACKED_FILES = 100
 _MAX_RANGES_PER_FILE = 64
 _MUTATION_TOOLS = {"apply_patch", "write_file"}
 _GUIDANCE = (
-    "You recently inspected most of this unchanged file range. Reuse the existing "
-    "result unless you need exact current text for an edit or a specific unresolved "
-    "detail."
+    "You already read this unchanged section and it is still current. The requested "
+    "range substantially overlaps information already in context. Reuse that context "
+    "instead of rereading for confidence. If the intended edit is clear, make the "
+    "focused edit now. Read again only if you need information that was not previously "
+    "returned."
 )
-_ALREADY_COVERED_MESSAGE = (
+_ESCALATED_ALREADY_COVERED_MESSAGE = (
     "You already read this unchanged section of the file. No file content is "
     "being returned again. Reuse the existing context, stop rereading this "
     "section, and take the next useful action."
@@ -107,14 +109,27 @@ class RepeatedReadNudge:
             return None
 
         if count == self.threshold:
-            # The first escalation remains advisory and leaves the successful
-            # read intact. One more redundant read in this streak is masked.
+            # Keep the first correction useful without rewarding the redundant
+            # read with another copy of source that is already in context.
             self._redundant_counts[path] = count
-            return HookResponse(additional_context=_GUIDANCE)
+            return HookResponse(
+                updated_tool_output=_already_covered_result(
+                    action,
+                    result,
+                    message=_current_result_message(action, result),
+                ),
+                additional_context=_GUIDANCE,
+            )
 
-        # After masking, require a fresh streak before escalating again.
+        # The stronger correction completes the escalation and starts a fresh streak.
         self._redundant_counts.pop(path, None)
-        return HookResponse(updated_tool_output=_already_covered_result(action, result))
+        return HookResponse(
+            updated_tool_output=_already_covered_result(
+                action,
+                result,
+                message=_ESCALATED_ALREADY_COVERED_MESSAGE,
+            )
+        )
 
     def _adjust_coverage_for_patch(
         self,
@@ -182,7 +197,10 @@ def _result_path(action: dict[str, Any], result: dict[str, Any]) -> str | None:
 
 
 def _already_covered_result(
-    action: dict[str, Any], result: dict[str, Any]
+    action: dict[str, Any],
+    result: dict[str, Any],
+    *,
+    message: str,
 ) -> dict[str, Any]:
     """Build a successful model-facing result without duplicate file content."""
     masked = {
@@ -190,7 +208,7 @@ def _already_covered_result(
         "tool": "read_file",
         "path": result.get("path"),
         "already_covered": True,
-        "message": _ALREADY_COVERED_MESSAGE,
+        "message": message,
     }
 
     args = action.get("args")
@@ -208,6 +226,26 @@ def _already_covered_result(
         if key in result:
             masked[key] = result[key]
     return masked
+
+
+def _current_result_message(
+    action: dict[str, Any], result: dict[str, Any]
+) -> str:
+    """Describe the still-current prior result without repeating its contents."""
+    path = result.get("path")
+    if not isinstance(path, str) or not path:
+        args = action.get("args")
+        path = args.get("path") if isinstance(args, dict) else None
+
+    ranges = _returned_ranges(result)
+    range_text = ", ".join(
+        str(start) if start == end else f"{start}-{end}"
+        for start, end in ranges
+    )
+    return (
+        f"Already read unchanged content: {path} lines {range_text}. "
+        "The previous result is still current."
+    )
 
 
 def _returned_ranges(result: dict[str, Any]) -> list[tuple[int, int]]:

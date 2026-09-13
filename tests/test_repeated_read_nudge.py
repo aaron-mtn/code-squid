@@ -13,11 +13,13 @@ from squid_core.tools.builtins.read_file import execute as read_file
 
 
 GUIDANCE = (
-    "You recently inspected most of this unchanged file range. Reuse the existing "
-    "result unless you need exact current text for an edit or a specific unresolved "
-    "detail."
+    "You already read this unchanged section and it is still current. The requested "
+    "range substantially overlaps information already in context. Reuse that context "
+    "instead of rereading for confidence. If the intended edit is clear, make the "
+    "focused edit now. Read again only if you need information that was not previously "
+    "returned."
 )
-ALREADY_COVERED_MESSAGE = (
+ESCALATED_ALREADY_COVERED_MESSAGE = (
     "You already read this unchanged section of the file. No file content is "
     "being returned again. Reuse the existing context, stop rereading this "
     "section, and take the next useful action."
@@ -89,17 +91,38 @@ def _mutate(
     )
 
 
-def test_exact_repeated_returned_range_nudges_on_first_reread(
+def _assert_first_reread_is_masked(
+    response: HookResponse | None,
+) -> dict:
+    assert response is not None
+    assert response.additional_context == GUIDANCE
+    assert response.updated_tool_output is not None
+    assert response.updated_tool_output["already_covered"] is True
+    assert response.updated_tool_output["message"].startswith(
+        "Already read unchanged content:"
+    )
+    assert response.updated_tool_output["message"].endswith(
+        "The previous result is still current."
+    )
+    assert "content" not in response.updated_tool_output
+    return response.updated_tool_output
+
+
+def test_exact_repeated_returned_range_is_masked_on_first_reread(
     tmp_path: Path,
 ) -> None:
     hook = RepeatedReadNudge()
     path = tmp_path / "a.py"
 
     assert _read(hook, path) is None
-    assert _read(hook, path) == HookResponse(additional_context=GUIDANCE)
+    output = _assert_first_reread_is_masked(_read(hook, path))
+    assert output["message"] == (
+        f"Already read unchanged content: {path} lines 1-100. "
+        "The previous result is still current."
+    )
 
 
-def test_first_redundant_read_keeps_normal_contents_at_runner_seam(
+def test_first_redundant_read_replaces_contents_at_runner_seam(
     tmp_path: Path,
 ) -> None:
     runner = HookRunner([RepeatedReadNudge()])
@@ -125,8 +148,52 @@ def test_first_redundant_read_keeps_normal_contents_at_runner_seam(
     assert first.additional_context == ""
 
     redundant = runner.tool_result(context)
-    assert redundant.updated_tool_output == result
+    assert redundant.updated_tool_output == {
+        "ok": True,
+        "tool": "read_file",
+        "path": str(path),
+        "already_covered": True,
+        "message": (
+            f"Already read unchanged content: {path} lines 1-10. "
+            "The previous result is still current."
+        ),
+        "start_line": 1,
+        "end_line": 10,
+    }
     assert redundant.additional_context == GUIDANCE
+    assert "content" not in redundant.updated_tool_output
+
+
+def test_non_overlapping_range_keeps_normal_contents_at_runner_seam(
+    tmp_path: Path,
+) -> None:
+    runner = HookRunner([RepeatedReadNudge()])
+    path = tmp_path / "a.py"
+
+    def context(start: int, end: int, content: str) -> ToolResultContext:
+        action = {
+            "tool": "read_file",
+            "args": {"path": str(path), "start_line": start, "end_line": end},
+        }
+        return ToolResultContext(
+            session_id=None,
+            repo_root=str(tmp_path),
+            action=action,
+            result={
+                "ok": True,
+                "tool": "read_file",
+                "path": str(path),
+                "content": content,
+                "start_line": start,
+                "end_line": end,
+            },
+        )
+
+    runner.tool_result(context(1, 100, "first range"))
+    new_range = runner.tool_result(context(101, 200, "new range"))
+
+    assert new_range.updated_tool_output["content"] == "new range"
+    assert new_range.additional_context == ""
 
 
 def test_second_redundant_read_masks_file_content(tmp_path: Path) -> None:
@@ -134,7 +201,7 @@ def test_second_redundant_read_masks_file_content(tmp_path: Path) -> None:
     path = tmp_path / "a.py"
 
     assert _read(hook, path) is None
-    assert _read(hook, path) == HookResponse(additional_context=GUIDANCE)
+    _assert_first_reread_is_masked(_read(hook, path))
 
     response = _read(
         hook,
@@ -152,7 +219,7 @@ def test_second_redundant_read_masks_file_content(tmp_path: Path) -> None:
         "tool": "read_file",
         "path": str(path),
         "already_covered": True,
-        "message": ALREADY_COVERED_MESSAGE,
+        "message": ESCALATED_ALREADY_COVERED_MESSAGE,
         "requested_start_line": 10,
         "requested_end_line": 20,
         "start_line": 1,
@@ -176,7 +243,7 @@ def test_nudge_is_emitted_only_at_configured_threshold(tmp_path: Path) -> None:
 
     assert _read(hook, path) is None
     assert _read(hook, path) is None
-    assert _read(hook, path) == HookResponse(additional_context=GUIDANCE)
+    _assert_first_reread_is_masked(_read(hook, path))
     assert _read(hook, path).updated_tool_output["already_covered"] is True
 
 
@@ -187,8 +254,8 @@ def test_heavily_overlapping_returned_ranges_count_as_redundant(
     path = tmp_path / "a.py"
     _read(hook, path, returned_start=1, returned_end=100)
 
-    assert _read(hook, path, returned_start=31, returned_end=130) == HookResponse(
-        additional_context=GUIDANCE
+    _assert_first_reread_is_masked(
+        _read(hook, path, returned_start=31, returned_end=130)
     )
 
 
@@ -218,8 +285,8 @@ def test_low_overlap_resets_pending_escalation(tmp_path: Path) -> None:
     assert _read(hook, path, returned_start=1, returned_end=100) is not None
 
     assert _read(hook, path, returned_start=101, returned_end=200) is None
-    assert _read(hook, path, returned_start=101, returned_end=200) == HookResponse(
-        additional_context=GUIDANCE
+    _assert_first_reread_is_masked(
+        _read(hook, path, returned_start=101, returned_end=200)
     )
 
 
@@ -252,7 +319,7 @@ def test_expanded_read_metadata_drives_repeated_read_coverage(tmp_path: Path) ->
     assert hook.tool_result(_Context(action=action, result=first_result)) is None
 
     second_result = read_file(tmp_path, str(path), start_line=40, end_line=160)
-    assert hook.tool_result(
+    response = hook.tool_result(
         _Context(
             action={
                 "tool": "read_file",
@@ -260,7 +327,8 @@ def test_expanded_read_metadata_drives_repeated_read_coverage(tmp_path: Path) ->
             },
             result=second_result,
         )
-    ) == HookResponse(additional_context=GUIDANCE)
+    )
+    _assert_first_reread_is_masked(response)
 
 
 def test_truncated_full_file_tracks_each_returned_range_separately(
@@ -416,7 +484,7 @@ def test_failed_reads_do_not_advance_pending_escalation(tmp_path: Path) -> None:
     hook = RepeatedReadNudge()
     path = tmp_path / "a.py"
     _read(hook, path)
-    assert _read(hook, path) == HookResponse(additional_context=GUIDANCE)
+    _assert_first_reread_is_masked(_read(hook, path))
 
     assert _read(hook, path, ok=False) is None
     response = _read(hook, path)
@@ -431,8 +499,8 @@ def test_redundant_streaks_are_independent_per_file(tmp_path: Path) -> None:
     _read(hook, first_path)
     _read(hook, second_path)
 
-    assert _read(hook, first_path) == HookResponse(additional_context=GUIDANCE)
-    assert _read(hook, second_path) == HookResponse(additional_context=GUIDANCE)
+    _assert_first_reread_is_masked(_read(hook, first_path))
+    _assert_first_reread_is_masked(_read(hook, second_path))
     assert _read(hook, first_path).updated_tool_output["already_covered"] is True
     assert _read(hook, second_path).updated_tool_output["already_covered"] is True
 
@@ -444,7 +512,7 @@ def test_failed_mutations_do_not_invalidate_prior_reads(tmp_path: Path) -> None:
 
     _mutate(hook, "apply_patch", path, ok=False)
 
-    assert _read(hook, path) == HookResponse(additional_context=GUIDANCE)
+    _assert_first_reread_is_masked(_read(hook, path))
 
     _mutate(hook, "write_file", path, ok=False)
 
@@ -463,14 +531,17 @@ def test_before_run_clears_history(tmp_path: Path) -> None:
     assert _read(hook, path) is None
 
 
-def test_masked_result_resets_repetition_streak(tmp_path: Path) -> None:
+def test_escalated_mask_resets_repetition_streak(tmp_path: Path) -> None:
     hook = RepeatedReadNudge()
     path = tmp_path / "a.py"
     _read(hook, path)
-    assert _read(hook, path) is not None
+    _assert_first_reread_is_masked(_read(hook, path))
     assert hook._redundant_counts
 
-    assert _read(hook, path).updated_tool_output["already_covered"] is True
+    escalated = _read(hook, path)
+    assert escalated.updated_tool_output["already_covered"] is True
+    assert escalated.updated_tool_output["message"] == ESCALATED_ALREADY_COVERED_MESSAGE
+    assert escalated.additional_context == ""
     assert hook._redundant_counts == {}
 
-    assert _read(hook, path) == HookResponse(additional_context=GUIDANCE)
+    _assert_first_reread_is_masked(_read(hook, path))

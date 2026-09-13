@@ -379,8 +379,20 @@ def test_default_runtime_repeated_read_fires_and_is_logged(tmp_path: Path) -> No
         and entry["seam"] == "tool_result"
     ]
     assert [event["status"] for event in read_events] == ["no_effect", "effect"]
-    assert read_events[1]["effects"] == ["additional_context"]
-    assert "You recently inspected most" in model.calls[2][-1]["content"]
+    assert read_events[1]["effects"] == [
+        "updated_tool_output",
+        "additional_context",
+    ]
+    second_read_result = json.loads(
+        next(
+            message["content"]
+            for message in reversed(model.calls[2])
+            if message.get("role") == "tool"
+        )
+    )
+    assert second_read_result["already_covered"] is True
+    assert "content" not in second_read_result
+    assert "If the intended edit is clear" in model.calls[2][-1]["content"]
     assert "hook_execution" not in str(model.calls)
 
 
@@ -400,7 +412,7 @@ def test_default_runtime_repeated_read_noop_is_still_logged(tmp_path: Path) -> N
     ]
     assert all(event["produced_effect"] is False for event in read_events)
     assert not any(
-        "You recently inspected most" in str(message.get("content", ""))
+        "If the intended edit is clear" in str(message.get("content", ""))
         for message in model.calls[2]
     )
 

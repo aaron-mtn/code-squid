@@ -1,3 +1,21 @@
+- 2026-09-12: Changed Core's existing `RepeatedReadNudge` so the first
+  substantially overlapping unchanged `read_file` reread at the configured
+  threshold is masked immediately instead of returning duplicate source. The
+  small successful `already_covered` result preserves path and range metadata,
+  identifies the still-current prior result, and is paired with action-oriented
+  guidance to reuse context and make a focused edit when clear. A further
+  qualifying reread retains the stronger correction and resets the per-file
+  streak. Existing overlap thresholds, coverage tracking, truncated-range
+  handling, mutation invalidation/adjustment, per-file isolation, and reset
+  rules remain unchanged; `read_file` itself was not changed. Verification:
+  focused repeated-read tests passed 26 tests; broader Hook, runtime-wiring, and
+  agent-loop tests passed 111 tests. The full suite passed 1,131 tests and
+  retained the same nine unrelated baseline failures recorded by preceding
+  patches: eight stale prompt-copy expectations and one Windows TTY
+  path-rendering assertion. Changed modules and tests compiled, the Core Hook
+  import smoke passed, and `git diff --check` passed. No live model inference
+  ran, and no follow-up work is intentionally deferred.
+
 - 2026-09-11: Made reconstructed compaction summaries explicitly synthetic and
   non-authoritative. Compaction still protects the initial system and verbatim
   first user messages, but now inserts its model-generated summary as an
