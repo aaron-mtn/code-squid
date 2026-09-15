@@ -195,6 +195,10 @@ and application layer; `squid_core/` is the reusable agent runtime.
 
     The Workspace row uses the same fixed panel and keyboard-only interaction:
     a seven-row scrolling viewport is backed only by at most ten recent paths.
+    That recent-path tuple is authoritative for Workspace viewport bounds,
+    arrow movement, and activation. Submenu state is fully prepared before its
+    mode is published, so rendering cannot combine Workspace presentation with
+    a preceding provider, model, or session option list.
     The current root is always included and initially selected. Basenames are
     the primary labels, with a compact parent hint only when basenames collide.
     Enter publishes the selected recent path as a distinct workspace handoff;

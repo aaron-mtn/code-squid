@@ -564,6 +564,77 @@ def test_workspace_view_selects_current_path_without_mutating_root(tmp_path) -> 
     assert menu.take_workspace_handoff() == original_root
 
 
+def test_opening_workspace_publishes_mode_after_discovery_state(tmp_path) -> None:
+    layout = startup_scene_layout(80)
+    rendered_during_discovery: list[list[str]] = []
+    modes_during_discovery: list[str] = []
+    menu = StartupMenu(tmp_path, load_settings(tmp_path))
+
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Provider")
+    menu.activate()
+    assert len(menu._options) > 1
+    menu.back()
+
+    def discover(_root: Path) -> list[Path]:
+        modes_during_discovery.append(menu.mode)
+        rendered_during_discovery.append(menu.panel_lines(layout))
+        return [tmp_path]
+
+    menu.workspace_discovery = discover
+    menu.selected_index = MAIN_ROWS.index("Workspace")
+    menu.activate()
+
+    assert rendered_during_discovery
+    assert modes_during_discovery == ["main"]
+    assert menu.mode == "workspace"
+    assert tmp_path.name in "\n".join(menu.panel_lines(layout))
+
+
+def test_workspace_rendering_ignores_stale_shared_option_count(tmp_path) -> None:
+    workspace = tmp_path / "only-workspace"
+    menu = StartupMenu(tmp_path, load_settings(tmp_path))
+    menu.mode = "workspace"
+    menu.selected_index = 5
+    menu._options = tuple(f"stale-{index}" for index in range(8))
+    menu._workspace_paths = (workspace,)
+
+    rendered = "\n".join(menu.panel_lines(startup_scene_layout(80)))
+
+    assert "only-workspace" in rendered
+    assert "stale-" not in rendered
+
+
+def test_empty_workspace_list_renders_and_activates_safely(tmp_path) -> None:
+    menu = StartupMenu(
+        tmp_path,
+        load_settings(tmp_path),
+        workspace_discovery=lambda _root: [],
+    )
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Workspace")
+    menu.activate()
+
+    lines = menu.panel_lines(startup_scene_layout(80))
+
+    assert menu.mode == "workspace"
+    assert len(lines) == startup_scene_layout(80).panel.height
+    assert menu.activate() is False
+    assert menu.take_workspace_handoff() is None
+
+
+def test_workspace_activation_rejects_index_outside_paths(tmp_path) -> None:
+    menu = StartupMenu(tmp_path, load_settings(tmp_path))
+    menu.mode = "workspace"
+    menu.selected_index = 2
+    menu._workspace_paths = (tmp_path,)
+    menu._options = (str(tmp_path), "stale-a", "stale-b")
+
+    assert menu.activate() is False
+    assert menu.mode == "workspace"
+    assert menu.take_workspace_handoff() is None
+
+
 def test_workspace_view_keeps_centered_footer_for_long_paths(tmp_path) -> None:
     long_root = tmp_path.joinpath(*(["nested-workspace-segment"] * 12))
     menu = StartupMenu(long_root, load_settings(tmp_path))

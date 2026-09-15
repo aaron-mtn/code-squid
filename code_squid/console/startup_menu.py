@@ -223,6 +223,18 @@ class StartupMenu:
         if self.mode == "main":
             self._open_main_row()
             return False
+        if self.mode == "workspace":
+            # Recent paths are authoritative for this specialized submenu.
+            # Shared option state can briefly belong to the preceding submenu.
+            if not 0 <= self.selected_index < len(self._workspace_paths):
+                return False
+            self._workspace_handoff = self._workspace_paths[self.selected_index]
+            # Workspace ownership moves to the CLI; this menu must not mutate
+            # its root while other workspace-scoped objects still exist.
+            self.focused = False
+            self.mode = "main"
+            self.selected_index = self._main_selected_index
+            return False
         if not self._options:
             return False
 
@@ -266,28 +278,27 @@ class StartupMenu:
                     # The startup renderer exits at this boundary; keep menu
                     # focus from leaking into a later fresh startup scene.
                     self.focused = False
-        elif self.mode == "workspace":
-            self._workspace_handoff = self._workspace_paths[self.selected_index]
-            # Workspace ownership moves to the CLI; this menu must not mutate
-            # its root while other workspace-scoped objects still exist.
-            self.focused = False
         self.mode = "main"
         self.selected_index = self._main_selected_index
         return saved_session_activated
 
     def _open_main_row(self) -> None:
         self._main_selected_index = self.selected_index
-        self.mode = MAIN_ROWS[self.selected_index].lower()
+        next_mode = MAIN_ROWS[self.selected_index].lower()
         self.selected_index = 0
         self._model_message = ()
-        if self.mode == "provider":
+        # Prepare the selected submenu before publishing its mode. Rendering can
+        # occur from discovery callbacks and must not pair a new mode with the
+        # preceding submenu's shared state.
+        self._options = ()
+        if next_mode == "provider":
             self._options = tuple(profile.provider_id for profile in PROVIDER_PROFILES)
             self._provider_statuses = {}
             for provider_id in self._options:
                 candidate = settings_for_provider(self.settings, provider_id)
                 self._provider_statuses[provider_id] = provider_ready(candidate)
             self._select_current(self.settings.model.provider)
-        elif self.mode == "model":
+        elif next_mode == "model":
             try:
                 models = self.model_discovery(self.settings)
             except Exception:
@@ -297,16 +308,16 @@ class StartupMenu:
                 self._select_current(self.settings.model.name)
             else:
                 self._model_message = MODEL_FALLBACK
-        elif self.mode == "safety":
+        elif next_mode == "safety":
             self._options = tuple(SAFETY_MODES)
             self._select_current(self.startup_info.approval_mode)
-        elif self.mode == "mod":
+        elif next_mode == "mod":
             mods = discover_mods(code_squid_home())
             self._options = ("none",) + tuple(
                 sorted(name for name, mod in mods.items() if mod.valid)
             )
             self._select_current(self.mod_name or "none")
-        elif self.mode == "session":
+        elif next_mode == "session":
             self._session_metadata = tuple(self.session_discovery(self.repo_root))
             self._options = ("",) + tuple(
                 str(metadata.get("session_id", ""))
@@ -314,19 +325,21 @@ class StartupMenu:
             )
             if self.session_id in self._options:
                 self.selected_index = self._options.index(self.session_id)
-        elif self.mode == "workspace":
+        elif next_mode == "workspace":
+            self._workspace_paths = ()
             self._workspace_paths = tuple(self.workspace_discovery(self.repo_root))
             self._options = tuple(str(path) for path in self._workspace_paths)
             if self.repo_root in self._workspace_paths:
                 self.selected_index = self._workspace_paths.index(self.repo_root)
-        else:
-            self._options = ()
+        self.mode = next_mode
 
     def _select_current(self, value: str) -> None:
         if value in self._options:
             self.selected_index = self._options.index(value)
 
-    def _current_options(self) -> Sequence[str]:
+    def _current_options(self) -> Sequence[object]:
+        if self.mode == "workspace":
+            return self._workspace_paths
         return MAIN_ROWS if self.mode == "main" else self._options
 
     def panel_lines(self, layout: StartupSceneLayout) -> list[str]:
@@ -409,15 +422,15 @@ class StartupMenu:
 
     def _workspace_panel_lines(self, layout: StartupSceneLayout) -> list[str]:
         """Render a bounded recent-workspace viewport with concise labels."""
+        labels = _workspace_labels(self._workspace_paths)
         start = min(
             max(self.selected_index - SUBMENU_VISIBLE_LIMIT + 1, 0),
-            max(len(self._options) - SUBMENU_VISIBLE_LIMIT, 0),
+            max(len(labels) - SUBMENU_VISIBLE_LIMIT, 0),
         )
         visible_indexes = range(
             start,
-            min(start + SUBMENU_VISIBLE_LIMIT, len(self._options)),
+            min(start + SUBMENU_VISIBLE_LIMIT, len(labels)),
         )
-        labels = _workspace_labels(self._workspace_paths)
         option_width = _submenu_option_width(layout)
         rows = [
             _workspace_option_row(

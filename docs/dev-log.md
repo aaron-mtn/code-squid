@@ -1,3 +1,15 @@
+- 2026-09-14: Fixed the startup Workspace submenu's transient-state crash.
+  Workspace rendering, movement, and activation now use the recent-path tuple
+  as their authoritative collection, invalid activation indexes are ignored,
+  and an empty recent list remains safely open. Main-row activation also
+  prepares submenu-specific state before publishing the new mode, preventing a
+  render callback from pairing Workspace labels with stale provider/model
+  options. Added focused regressions for submenu transitions, mismatched stale
+  option counts, empty discovery, and out-of-range activation. Verification:
+  40 focused startup-menu tests passed; 347 broader console/UI tests passed
+  with the existing unrelated Windows TTY path-rendering assertion failure.
+  Changed modules compiled and `git diff --check` passed.
+
 - 2026-09-14: Added explicit verification intent to Core's `run_command` schema
   and result metadata, defaulting to false without inspecting command text.
   Added a separate run-local `VerificationState` Hook that becomes true only
