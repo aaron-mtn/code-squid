@@ -583,29 +583,30 @@ mechanisms while `code_squid.agent_setup` owns both guidance texts and enables
 them for Code Squid runs. Its `source` remains configuration metadata used by
 hosts; it no longer controls prompt rendering.
 
-Code Squid also wires Core's `VerificationState`, `RepeatedReadNudge`, and
-`PostVerificationNudge` immediately before the repeated-failure Hook.
-`VerificationState` independently records whether a successful `run_command`
-result explicitly marked `verification=true` is current, the normalized command
-signatures that have succeeded for the current implementation, and a shared
-post-verification no-progress count. Signatures preserve internal shell text but
-normalize surrounding whitespace and line endings; a different signature is
-verification progress without attempting to rank test breadth. A repeated
-successful signature increments the no-progress count. A failed verification
-resets that count and leaves verification non-current because it produced new,
-actionable information. Successful `write_file` and `apply_patch` results reset
-all three facts globally. The state starts empty for every run and is not
+Code Squid wires Core's `RepeatedReadNudge` and `PostVerificationNudge`
+immediately before the repeated-failure Hook. `PostVerificationNudge` is
+self-contained: it records whether a successful `run_command` result explicitly
+marked `verification=true` is current, the normalized command signatures that
+have succeeded for the current implementation, and its post-verification
+no-progress streak. Signatures preserve internal shell text but normalize
+surrounding whitespace and line endings; a different signature is verification
+progress without attempting to rank test breadth. A failed verification leaves
+verification non-current because it produced new, actionable information.
+Successful `write_file` and `apply_patch` results invalidate all facts tied to
+the prior implementation. The Hook starts empty for every run and is not
 persisted.
 
-`PostVerificationNudge` owns the small user-facing policy layered on that state.
 After verification is current, each successful ordinary `read_file` result and
 each duplicate successful verification counts as an action without implementation
 or verification progress. At three actions, the Hook supplies one-turn advisory
 guidance asking the model to identify a concrete unresolved problem or finalize,
-then resets the streak so the message does not repeat forever. It does not block
-or finalize the run. Because `RepeatedReadNudge` runs first, a read it masks as
-already covered is left to that Hook's more specific guidance and is not counted
-again. Arbitrary non-verification commands remain conservatively unclassified:
+then resets the streak so the message does not repeat forever. New successful
+verification, successful structured mutation, failed explicit verification, and
+the start of a run also reset the policy streak. It does not block or finalize
+the run. Because `RepeatedReadNudge` runs first, a read it masks as already
+covered still advances the post-verification streak but does not emit stacked
+post-verification guidance on that result. Arbitrary non-verification commands
+remain conservatively unclassified:
 the current command Tool has no generic workspace-mutation signal, and the Hooks
 do not parse command names.
 
@@ -636,11 +637,9 @@ result through `updated_tool_output` with a small successful `already_covered`
 result containing no file contents. It also returns action-oriented one-turn
 guidance through `HookResponse.additional_context`, directing the model to reuse
 the current context and make a focused edit when the intended change is clear.
-When the separate verification state is true, that same first correction instead
-notes that verification passed since the last change and advises finalizing only
-when no concrete unresolved issue remains. This changes advisory wording only:
-verification is not treated as completion proof, and reads remain unblocked.
-The next qualifying reread in that file's streak remains masked, uses a stronger
+The repeated-read Hook does not know about verification; post-verification
+finalization policy belongs exclusively to `PostVerificationNudge`. The next
+qualifying reread in that file's streak remains masked, uses a stronger
 correction, and then resets the streak. The threshold remains configurable and
 controls when first-reread masking and guidance begin. Failed mutations do not
 alter coverage, and `before_run` clears all state. Successful transcript

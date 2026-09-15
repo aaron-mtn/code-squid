@@ -1,3 +1,19 @@
+- 2026-09-15: Made `PostVerificationNudge` self-contained and removed the
+  standalone `VerificationState` Hook. The nudge now privately owns current
+  verification, normalized successful-command signatures, duplicate detection,
+  and its no-progress streak. `RepeatedReadNudge` no longer accepts or consults
+  verification state and always emits its normal reread guidance. Reads masked
+  as already covered still advance the post-verification streak without stacking
+  finalization guidance on the same result. Application wiring and exports now
+  expose only the two independent policy Hooks. Verification: 57 focused
+  post-verification/repeated-read/wiring tests and 199 broader Hook/runtime
+  tests passed. The full suite passed 1,169 tests with the same nine unrelated
+  baseline failures documented by preceding patches: eight stale prompt-copy
+  expectations and one Windows TTY path-rendering assertion. Changed modules
+  compiled, the public-import/wiring smoke test passed, and `git diff --check`
+  passed. No live model inference ran, and no follow-up is intentionally
+  deferred.
+
 - 2026-09-14: Made `RepeatedReadNudge` coverage match source that remains in
   the effective model request. Request-only tool-result trimming now maps its
   retained character head/tail back to complete `read_file` source lines and

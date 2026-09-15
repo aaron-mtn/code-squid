@@ -9,7 +9,6 @@ from squid_core.hooks import (
     HookRunner,
     RepeatedReadNudge,
     ToolResultContext,
-    VerificationState,
 )
 from squid_core.tools.builtins.apply_patch import execute as apply_patch
 from squid_core.tools.builtins.read_file import execute as read_file
@@ -28,13 +27,6 @@ ESCALATED_ALREADY_COVERED_MESSAGE = (
     "being returned again. Reuse the existing context, stop rereading this "
     "section, and take the next useful action."
 )
-VERIFIED_GUIDANCE = (
-    "Verification has passed since the last change, and this read repeats "
-    "information already available. If there is no concrete unresolved issue, "
-    "finalize instead of continuing to inspect."
-)
-
-
 @dataclass(frozen=True)
 class _Context:
     action: dict
@@ -173,12 +165,11 @@ def test_first_redundant_read_replaces_contents_at_runner_seam(
     assert "content" not in redundant.updated_tool_output
 
 
-def test_redundant_read_before_verification_uses_normal_guidance(
+def test_repeated_read_nudge_has_no_verification_dependency(
     tmp_path: Path,
 ) -> None:
-    state = VerificationState()
-    hook = RepeatedReadNudge(verification_state=state)
-    runner = HookRunner([state, hook])
+    hook = RepeatedReadNudge()
+    runner = HookRunner([hook])
     path = tmp_path / "a.py"
     action = {"tool": "read_file", "args": {"path": str(path)}}
     result = {
@@ -197,12 +188,11 @@ def test_redundant_read_before_verification_uses_normal_guidance(
     assert redundant.additional_context == GUIDANCE
 
 
-def test_redundant_read_after_verification_uses_finalization_guidance(
+def test_redundant_read_uses_normal_guidance_after_verification_command(
     tmp_path: Path,
 ) -> None:
-    state = VerificationState()
-    hook = RepeatedReadNudge(verification_state=state)
-    runner = HookRunner([state, hook])
+    hook = RepeatedReadNudge()
+    runner = HookRunner([hook])
     path = tmp_path / "a.py"
     read_context = ToolResultContext(
         None,
@@ -231,15 +221,14 @@ def test_redundant_read_after_verification_uses_finalization_guidance(
     runner.tool_result(verification_context)
     redundant = runner.tool_result(read_context)
 
-    assert redundant.additional_context == VERIFIED_GUIDANCE
+    assert redundant.additional_context == GUIDANCE
 
 
 def test_redundant_read_after_later_mutation_returns_to_normal_guidance(
     tmp_path: Path,
 ) -> None:
-    state = VerificationState()
-    hook = RepeatedReadNudge(verification_state=state)
-    runner = HookRunner([state, hook])
+    hook = RepeatedReadNudge()
+    runner = HookRunner([hook])
     path = tmp_path / "a.py"
 
     def context(tool: str, result: dict) -> ToolResultContext:

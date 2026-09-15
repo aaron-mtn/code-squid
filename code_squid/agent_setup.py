@@ -25,7 +25,6 @@ from squid_core.hooks import (
     RepeatedFailureNudge,
     RepeatedReadNudge,
     PostVerificationNudge,
-    VerificationState,
     load_user_hooks,
 )
 from squid_core.mods import ResolvedMod, resolve_mod
@@ -299,13 +298,8 @@ def build_hook_runner(
     include_user_hooks: bool = False,
     app_home: Path | str | None = None,
 ) -> HookRunner:
-    verification_state = VerificationState(source="Code Squid")
-    repeated_read_hook = RepeatedReadNudge(
-        source="Code Squid",
-        verification_state=verification_state,
-    )
+    repeated_read_hook = RepeatedReadNudge(source="Code Squid")
     post_verification_hook = PostVerificationNudge(
-        verification_state,
         source="Code Squid",
     )
     no_progress_hook = RepeatedFailureNudge(
@@ -319,7 +313,6 @@ def build_hook_runner(
         return HookRunner(
             [
                 *hook_runner.hooks,
-                verification_state,
                 repeated_read_hook,
                 post_verification_hook,
                 no_progress_hook,
@@ -332,7 +325,6 @@ def build_hook_runner(
 
     combined_hooks.extend(
         (
-            verification_state,
             repeated_read_hook,
             post_verification_hook,
             no_progress_hook,
