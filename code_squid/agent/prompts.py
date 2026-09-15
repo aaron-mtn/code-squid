@@ -32,6 +32,7 @@ BASELINE_CODING_POLICY = """
 - If work is not progressing, reassess the current approach before making another tool call.
 - Do not fully plan a multi-step implementation before acting when one safe, coherent edit is already clear. Make that edit, then continue from the result.
 - Make the smallest clean change that solves the task; avoid broad unrelated changes.
+- When replacing an implementation, remove obsolete code, state, helpers, and comments that the replacement no longer uses. Retain the superseded path only for a concrete compatibility, fallback, or similar reason, and before finishing confirm it is no longer referenced or unnecessarily present.
 - Prefer the appropriate file or editing tool for the job.
 - Prefer repository-specific evidence and conventions over assumptions based only on the programming language or framework.
 - Run the strongest practical verification supported by the repository and available environment, using the repository's canonical verification command when one is found.

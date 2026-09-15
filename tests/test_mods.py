@@ -330,16 +330,33 @@ def test_one_session_switches_default_mods_and_back_as_coherent_runs(
     assert observed[0][:3] == (
         "mod-a",
         ("read_file",),
-        ("hook-a", "Code Squid", "Code Squid", "Code Squid"),
+        (
+            "hook-a",
+            "Code Squid",
+            "Code Squid",
+            "Code Squid",
+            "Code Squid",
+        ),
     )
     assert observed[1][:3] == (
         "mod-b",
         ("run_command",),
-        ("hook-b", "Code Squid", "Code Squid", "Code Squid"),
+        (
+            "hook-b",
+            "Code Squid",
+            "Code Squid",
+            "Code Squid",
+            "Code Squid",
+        ),
     )
     assert observed[2][0] is None
     assert set(observed[2][1]) == set(TOOLS)
-    assert observed[2][2] == ("Code Squid", "Code Squid", "Code Squid")
+    assert observed[2][2] == (
+        "Code Squid",
+        "Code Squid",
+        "Code Squid",
+        "Code Squid",
+    )
     for _, _, _, messages in observed:
         assert sum(message["role"] == "system" for message in messages) == 1
         assert messages[1 : 1 + len(original_non_system)] == original_non_system

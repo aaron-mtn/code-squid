@@ -1,3 +1,21 @@
+- 2026-09-14: Added a small post-verification no-progress nudge. Core's run-local
+  `VerificationState` now tracks current verification, normalized successful
+  command signatures for the current implementation, and a shared observation
+  streak. New successful verification commands reset the streak, duplicate
+  successful commands advance it, failed verification supplies actionable new
+  information and clears it, and successful structured edits invalidate all
+  prior verification facts. A separate `PostVerificationNudge`, wired after the
+  existing repeated-read Hook, counts supported post-verification reads and
+  duplicate checks and emits non-blocking finalization guidance after three
+  actions. It deliberately does not parse arbitrary shell commands. Added normal
+  coding guidance and a prompt-policy regression requiring obsolete replaced
+  implementations to be removed unless concretely retained. Verification: 61
+  focused hook/state/repeated-read/wiring/prompt/mod tests passed. The full suite
+  passed 1,164 tests with the nine previously documented unrelated failures
+  (eight stale prompt-copy expectations and one Windows TTY path-rendering
+  assertion). Core, application, and changed-test compilation plus
+  `git diff --check` passed.
+
 - 2026-09-14: Fixed the startup Workspace submenu's transient-state crash.
   Workspace rendering, movement, and activation now use the recent-path tuple
   as their authoritative collection, invalid activation indexes are ignored,

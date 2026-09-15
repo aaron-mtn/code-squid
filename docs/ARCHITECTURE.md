@@ -582,14 +582,31 @@ mechanisms while `code_squid.agent_setup` owns both guidance texts and enables
 them for Code Squid runs. Its `source` remains configuration metadata used by
 hosts; it no longer controls prompt rendering.
 
-Code Squid also wires Core's `VerificationState` and `RepeatedReadNudge`
-immediately before the repeated-failure Hook. `VerificationState` independently
-records whether a successful `run_command` result explicitly marked
-`verification=true` has occurred since the last successful structured file
-mutation. Failed verification commands and ordinary commands do not set it;
-successful `write_file` and `apply_patch` results reset it globally. The state
-starts false for every run and is not part of read coverage or repetition
-counters.
+Code Squid also wires Core's `VerificationState`, `RepeatedReadNudge`, and
+`PostVerificationNudge` immediately before the repeated-failure Hook.
+`VerificationState` independently records whether a successful `run_command`
+result explicitly marked `verification=true` is current, the normalized command
+signatures that have succeeded for the current implementation, and a shared
+post-verification no-progress count. Signatures preserve internal shell text but
+normalize surrounding whitespace and line endings; a different signature is
+verification progress without attempting to rank test breadth. A repeated
+successful signature increments the no-progress count. A failed verification
+resets that count and leaves verification non-current because it produced new,
+actionable information. Successful `write_file` and `apply_patch` results reset
+all three facts globally. The state starts empty for every run and is not
+persisted.
+
+`PostVerificationNudge` owns the small user-facing policy layered on that state.
+After verification is current, each successful ordinary `read_file` result and
+each duplicate successful verification counts as an action without implementation
+or verification progress. At three actions, the Hook supplies one-turn advisory
+guidance asking the model to identify a concrete unresolved problem or finalize,
+then resets the streak so the message does not repeat forever. It does not block
+or finalize the run. Because `RepeatedReadNudge` runs first, a read it masks as
+already covered is left to that Hook's more specific guidance and is not counted
+again. Arbitrary non-verification commands remain conservatively unclassified:
+the current command Tool has no generic workspace-mutation signal, and the Hooks
+do not parse command names.
 
 `RepeatedReadNudge` keeps bounded, run-local line-range coverage from
 successful `read_file` result metadata under normalized absolute path keys,

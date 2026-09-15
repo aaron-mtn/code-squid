@@ -18,6 +18,7 @@ from squid_core.hooks import (
     PromptContextBlock,
     RepeatedFailureNudge,
     RepeatedReadNudge,
+    PostVerificationNudge,
     HookResponse,
     VerificationState,
 )
@@ -255,11 +256,14 @@ def test_default_runner_behavior_does_not_load_user_hooks(
 def test_code_squid_always_wires_product_owned_no_progress_guidance() -> None:
     runner = build_hook_runner()
 
-    assert isinstance(runner.hooks[-3], VerificationState)
+    assert isinstance(runner.hooks[-4], VerificationState)
+    assert runner.hooks[-4].source == "Code Squid"
+    assert isinstance(runner.hooks[-3], RepeatedReadNudge)
     assert runner.hooks[-3].source == "Code Squid"
-    assert isinstance(runner.hooks[-2], RepeatedReadNudge)
+    assert runner.hooks[-3].verification_state is runner.hooks[-4]
+    assert isinstance(runner.hooks[-2], PostVerificationNudge)
     assert runner.hooks[-2].source == "Code Squid"
-    assert runner.hooks[-2].verification_state is runner.hooks[-3]
+    assert runner.hooks[-2].verification_state is runner.hooks[-4]
     assert isinstance(runner.hooks[-1], RepeatedFailureNudge)
     assert runner.hooks[-1].guidance == NO_PROGRESS_GUIDANCE
     assert runner.hooks[-1].run_command_guidance == RUN_COMMAND_RECOVERY_GUIDANCE
@@ -371,9 +375,10 @@ def test_default_runtime_repeated_read_fires_and_is_logged(tmp_path: Path) -> No
     model, entries = _run_overlapping_reads(tmp_path, second_start=46)
 
     configured = next(entry for entry in entries if entry["type"] == "hooks_configured")
-    assert configured["hooks"][-3:] == [
+    assert configured["hooks"][-4:] == [
         "VerificationState",
         "RepeatedReadNudge",
+        "PostVerificationNudge",
         "RepeatedFailureNudge",
     ]
     read_events = [

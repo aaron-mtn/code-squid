@@ -339,6 +339,12 @@ def test_baseline_policy_requires_behavioral_verification_against_the_request() 
     )
 
 
+def test_baseline_policy_removes_replaced_implementations() -> None:
+    assert "remove obsolete code, state, helpers, and comments" in BASELINE_CODING_POLICY
+    assert "only for a concrete compatibility, fallback" in BASELINE_CODING_POLICY
+    assert "no longer referenced or unnecessarily present" in BASELINE_CODING_POLICY
+
+
 def test_apply_patch_guidance_prefers_diagnostics_over_unconditional_rereads() -> None:
     assert "Choose the intended returned candidate" in TOOL_USAGE_GUIDANCE
     assert "retry apply_patch with only that match_id" in TOOL_USAGE_GUIDANCE
