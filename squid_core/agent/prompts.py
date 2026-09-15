@@ -40,7 +40,29 @@ PROTECTED_RESPONSE_PROTOCOL = """
 - A non-final turn uses exactly one real tool call for the immediate next step.
 - Never batch multiple tool calls in one response.
 - A final response uses no tool call and contains non-empty human-readable content.
-- Finish only when the task is complete and verification was run or honestly cannot be run.
+- Finish only when the task is complete and you have run the verification that is appropriate and practical for the task, or when further verification honestly cannot be performed.
+""".strip()
+
+
+PROTECTED_VERIFICATION_GUIDANCE = """
+## Verification honesty
+
+Do not claim something was verified unless you actually verified it.
+
+In the final response, clearly distinguish:
+- what you changed
+- what you actually tested or checked
+- what those checks demonstrated
+- anything important that was not verified
+
+Do not infer runtime behavior from a syntax check alone.
+Do not say tests passed unless you actually ran them successfully.
+Do not claim interactive or visual behavior works unless you actually exercised it.
+Do not say a change is fully verified unless the evidence you gathered supports that claim.
+
+If verification was limited, unavailable, or only partial, say so plainly.
+
+Report the strongest conclusion supported by the evidence you actually observed, not the conclusion you expected or intended.
 """.strip()
 
 
@@ -72,7 +94,7 @@ I’ve got enough context now. More digging isn’t going to help, so I’m maki
 [exactly one real tool call to edit the relevant file]
 
 Valid final response:
-Fixed it and ran the relevant checks. The change stayed focused to the part that was causing the issue.
+Fixed the issue and ran the relevant checks. The syntax check passed and the focused tests passed. I did not exercise the change interactively, so runtime behavior beyond those checks was not directly verified.
 """.strip()
 
 
@@ -181,6 +203,7 @@ def system_prompt(
         tool_usage_guidance(defaults.tool_usage_guidance, skill),
         VISIBLE_NARRATION_GUIDANCE,
         PROTECTED_RESPONSE_PROTOCOL,
+        PROTECTED_VERIFICATION_GUIDANCE,
         final_guidance,
         PROTECTED_RESPONSE_EXAMPLES,
     ]

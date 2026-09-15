@@ -42,7 +42,14 @@ def tool_definition() -> dict:
                     "command": {
                         "type": "string",
                         "description": "Shell command to run",
-                    }
+                    },
+                    "verification": {
+                        "type": "boolean",
+                        "description": (
+                            "Whether this command is being run to verify the current changes"
+                        ),
+                        "default": False,
+                    },
                 },
                 "required": ["command"],
             },
@@ -55,6 +62,7 @@ def execute(
     repo_root: Path,
     command: str,
     platform_context: PlatformContext | None = None,
+    verification: bool = False,
 ) -> dict:
     platform_context = platform_context or detect_platform_context()
     subprocess_command: str | list[str] = command
@@ -94,6 +102,7 @@ def execute(
             "output_returned_chars": output_metadata["returned_chars"],
             "returncode": -1,
             "timed_out": True,
+            "verification": verification,
             "failure_class": "timeout",
             "shell": platform_context.shell_name,
             "platform": platform_context.os_name,
@@ -113,6 +122,7 @@ def execute(
             "ok": False,
             "tool": TOOL_NAME,
             "command": command,
+            "verification": verification,
             "output": output,
             "output_truncated": output_metadata["truncated"],
             "output_original_chars": output_metadata["original_chars"],
@@ -128,6 +138,7 @@ def execute(
         "ok": result.returncode == 0,
         "tool": TOOL_NAME,
         "command": command,
+        "verification": verification,
         "output": output,
         "output_truncated": output_metadata["truncated"],
         "output_original_chars": output_metadata["original_chars"],

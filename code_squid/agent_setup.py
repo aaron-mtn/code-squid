@@ -24,6 +24,7 @@ from squid_core.hooks import (
     HookRunner,
     RepeatedFailureNudge,
     RepeatedReadNudge,
+    VerificationState,
     load_user_hooks,
 )
 from squid_core.mods import ResolvedMod, resolve_mod
@@ -297,7 +298,11 @@ def build_hook_runner(
     include_user_hooks: bool = False,
     app_home: Path | str | None = None,
 ) -> HookRunner:
-    repeated_read_hook = RepeatedReadNudge(source="Code Squid")
+    verification_state = VerificationState(source="Code Squid")
+    repeated_read_hook = RepeatedReadNudge(
+        source="Code Squid",
+        verification_state=verification_state,
+    )
     no_progress_hook = RepeatedFailureNudge(
         NO_PROGRESS_GUIDANCE,
         run_command_guidance=RUN_COMMAND_RECOVERY_GUIDANCE,
@@ -307,14 +312,21 @@ def build_hook_runner(
         # Application policy remains active when callers replace the optional
         # Hook collection for tests or embedding.
         return HookRunner(
-            [*hook_runner.hooks, repeated_read_hook, no_progress_hook]
+            [
+                *hook_runner.hooks,
+                verification_state,
+                repeated_read_hook,
+                no_progress_hook,
+            ]
         )
 
     combined_hooks = list(hooks or [])
     if include_user_hooks:
         combined_hooks.extend(load_user_hooks(app_home=code_squid_home(app_home)))
 
-    combined_hooks.extend((repeated_read_hook, no_progress_hook))
+    combined_hooks.extend(
+        (verification_state, repeated_read_hook, no_progress_hook)
+    )
 
     return HookRunner(combined_hooks)
 

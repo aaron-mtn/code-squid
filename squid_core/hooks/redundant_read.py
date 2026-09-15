@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .runner import HookResponse
+from .verification_state import VerificationState
 
 
 DEFAULT_REPEATED_READ_THRESHOLD = 1
@@ -21,6 +22,11 @@ _GUIDANCE = (
     "instead of rereading for confidence. If the intended edit is clear, make the "
     "focused edit now. Read again only if you need information that was not previously "
     "returned. Otherwise go back over the information you already have in your context and move on to the next step."
+)
+_VERIFIED_GUIDANCE = (
+    "Verification has passed since the last change, and this read repeats "
+    "information already available. If there is no concrete unresolved issue, "
+    "finalize instead of continuing to inspect."
 )
 _ESCALATED_ALREADY_COVERED_MESSAGE = (
     "You already read this unchanged section of the file. No file content is "
@@ -42,6 +48,7 @@ class RepeatedReadNudge:
         *,
         threshold: int = DEFAULT_REPEATED_READ_THRESHOLD,
         source: str = "runtime",
+        verification_state: VerificationState | None = None,
     ) -> None:
         if threshold < 1:
             raise ValueError("repeated-read threshold must be at least 1")
@@ -49,6 +56,9 @@ class RepeatedReadNudge:
         self.threshold = threshold
         # Hosts inspect Hook sources as configuration metadata.
         self.source = source
+        # Verification is deliberately owned and updated outside this Hook;
+        # repeated-read logic only consults the fact when choosing guidance.
+        self.verification_state = verification_state
         self._coverage: dict[str, list[tuple[int, int]]] = {}
         # Patch-invalidated spans need an explicit marker: trimming them from
         # coverage is not enough when a wider verification read still overlaps
@@ -137,7 +147,7 @@ class RepeatedReadNudge:
                     result,
                     message=_current_result_message(action, result),
                 ),
-                additional_context=_GUIDANCE,
+                additional_context=self._guidance(),
             )
 
         # The stronger correction completes the escalation and starts a fresh streak.
@@ -149,6 +159,15 @@ class RepeatedReadNudge:
                 message=_ESCALATED_ALREADY_COVERED_MESSAGE,
             )
         )
+
+    def _guidance(self) -> str:
+        """Choose wording without treating verification as completion proof."""
+        if (
+            self.verification_state is not None
+            and self.verification_state.verified_since_last_mutation
+        ):
+            return _VERIFIED_GUIDANCE
+        return _GUIDANCE
 
     def _adjust_coverage_for_patch(
         self,

@@ -63,6 +63,33 @@ def test_run_command_uses_selected_repo_root_as_cwd(tmp_path: Path) -> None:
 
     assert result["ok"] is True
     assert result["output"] == f"{workspace.resolve()}\n"
+    assert result["verification"] is False
+
+
+def test_run_command_exposes_and_returns_explicit_verification_intent(
+    tmp_path: Path,
+) -> None:
+    parameters = TOOLS["run_command"]["definition"]()["function"]["parameters"]
+
+    assert parameters["properties"]["verification"] == {
+        "type": "boolean",
+        "description": "Whether this command is being run to verify the current changes",
+        "default": False,
+    }
+
+    executable = (
+        f"& '{sys.executable}'"
+        if sys.platform == "win32"
+        else shlex.quote(sys.executable)
+    )
+    result = run_command(
+        tmp_path,
+        f'{executable} -c "print(\'verified\')"',
+        verification=True,
+    )
+
+    assert result["ok"] is True
+    assert result["verification"] is True
 
 
 def test_read_file_supports_start_and_end_line_range(tmp_path: Path) -> None:
@@ -562,12 +589,13 @@ def test_run_command_timeout_returns_normal_failure_result(monkeypatch: pytest.M
 
     monkeypatch.setattr(run_command_module.subprocess, "run", raise_timeout)
 
-    result = run_command(tmp_path, "sleep 1")
+    result = run_command(tmp_path, "sleep 1", verification=True)
 
     assert result["ok"] is False
     assert result["timed_out"] is True
     assert result["tool"] == "run_command"
     assert result["command"] == "sleep 1"
+    assert result["verification"] is True
     assert result["failure_class"] == "timeout"
 
 

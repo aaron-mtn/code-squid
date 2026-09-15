@@ -30,6 +30,7 @@ from .runner import (
     RunFinishedContext,
     ToolResultContext,
 )
+from .verification_state import VerificationState
 
 __all__ = [
     "BeforeAcceptFinalContext",
@@ -50,6 +51,7 @@ __all__ = [
     "RunFinishedContext",
     "SUBSTANTIAL_OVERLAP_RATIO",
     "ToolResultContext",
+    "VerificationState",
     "list_user_hooks",
     "load_hook_infos",
     "load_user_hooks",

@@ -578,8 +578,16 @@ mechanisms while `code_squid.agent_setup` owns both guidance texts and enables
 them for Code Squid runs. Its `source` remains configuration metadata used by
 hosts; it no longer controls prompt rendering.
 
-Code Squid also wires Core's `RepeatedReadNudge` immediately before the
-repeated-failure Hook. It keeps bounded, run-local line-range coverage from
+Code Squid also wires Core's `VerificationState` and `RepeatedReadNudge`
+immediately before the repeated-failure Hook. `VerificationState` independently
+records whether a successful `run_command` result explicitly marked
+`verification=true` has occurred since the last successful structured file
+mutation. Failed verification commands and ordinary commands do not set it;
+successful `write_file` and `apply_patch` results reset it globally. The state
+starts false for every run and is not part of read coverage or repetition
+counters.
+
+`RepeatedReadNudge` keeps bounded, run-local line-range coverage from
 successful `read_file` result metadata under normalized absolute path keys,
 preferring the separate exact `returned_line_ranges` when a full-file read is
 truncated. A successful `write_file` invalidates all coverage for its target. A
@@ -597,6 +605,10 @@ result through `updated_tool_output` with a small successful `already_covered`
 result containing no file contents. It also returns action-oriented one-turn
 guidance through `HookResponse.additional_context`, directing the model to reuse
 the current context and make a focused edit when the intended change is clear.
+When the separate verification state is true, that same first correction instead
+notes that verification passed since the last change and advises finalizing only
+when no concrete unresolved issue remains. This changes advisory wording only:
+verification is not treated as completion proof, and reads remain unblocked.
 The next qualifying reread in that file's streak remains masked, uses a stronger
 correction, and then resets the streak. The threshold remains configurable and
 controls when first-reread masking and guidance begin. Failed mutations do not
@@ -1628,7 +1640,7 @@ The protected built-in Tool surface is:
 - `read_file(path, start_line=None, end_line=None)`
 - `write_file(path, content)`
 - `apply_patch(path, old_text, new_text)` or candidate selection with `match_id`
-- `run_command(command)`
+- `run_command(command, verification=false)`
 
 The `apply_patch` JSON schema declares all four arguments in the top-level
 object `properties`; its `anyOf` branches carry only the two alternative
@@ -1709,6 +1721,9 @@ editing.
 
 `run_command`:
 
+- exposes an optional boolean `verification` intent, defaulting to `false`, and
+  returns that intent with every process result
+- does not infer verification from command text, languages, or test frameworks
 - on Windows, invokes the detected PowerShell executable with `-NoProfile` and
   `-Command`, without `shell=True`
 - on other platforms, executes through the system shell with `shell=True`

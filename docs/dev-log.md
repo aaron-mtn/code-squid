@@ -1,3 +1,20 @@
+- 2026-09-14: Added explicit verification intent to Core's `run_command` schema
+  and result metadata, defaulting to false without inspecting command text.
+  Added a separate run-local `VerificationState` Hook that becomes true only
+  after a successful explicitly marked verification command and resets after a
+  successful `apply_patch` or `write_file`. Code Squid now shares that state
+  with the existing `RepeatedReadNudge`, which uses finalization-aware wording
+  for its normal redundant-read guidance when verification is current; it does
+  not block reads or infer completion. Existing read coverage, mutation
+  invalidation, escalation, and compaction behavior remain unchanged. Added
+  focused Tool schema/result, state-transition, application-wiring, and guidance
+  regressions. Verification: 101 focused Tool/state/repeated-read/wiring/mod
+  tests passed; 338 broader relevant tests passed with five unrelated stale
+  prompt-copy failures; the full suite passed 1,150 tests with the nine unrelated
+  baseline failures (eight stale prompt-copy expectations and one Windows TTY
+  path-rendering assertion). Core and application compilation, Hook/tool import
+  smoke checks, and `git diff --check` passed.
+
 - 2026-09-12: Made successful context compaction a reset boundary for Core's
   `RepeatedReadNudge`. `AgentLoop` now dispatches a narrow Hook seam only for
   the existing authoritative `compaction_applied` event, after the in-memory

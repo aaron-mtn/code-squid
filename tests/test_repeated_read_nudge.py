@@ -9,6 +9,7 @@ from squid_core.hooks import (
     HookRunner,
     RepeatedReadNudge,
     ToolResultContext,
+    VerificationState,
 )
 from squid_core.tools.builtins.apply_patch import execute as apply_patch
 from squid_core.tools.builtins.read_file import execute as read_file
@@ -26,6 +27,11 @@ ESCALATED_ALREADY_COVERED_MESSAGE = (
     "You already read this unchanged section of the file. No file content is "
     "being returned again. Reuse the existing context, stop rereading this "
     "section, and take the next useful action."
+)
+VERIFIED_GUIDANCE = (
+    "Verification has passed since the last change, and this read repeats "
+    "information already available. If there is no concrete unresolved issue, "
+    "finalize instead of continuing to inspect."
 )
 
 
@@ -165,6 +171,110 @@ def test_first_redundant_read_replaces_contents_at_runner_seam(
     }
     assert redundant.additional_context == GUIDANCE
     assert "content" not in redundant.updated_tool_output
+
+
+def test_redundant_read_before_verification_uses_normal_guidance(
+    tmp_path: Path,
+) -> None:
+    state = VerificationState()
+    hook = RepeatedReadNudge(verification_state=state)
+    runner = HookRunner([state, hook])
+    path = tmp_path / "a.py"
+    action = {"tool": "read_file", "args": {"path": str(path)}}
+    result = {
+        "ok": True,
+        "tool": "read_file",
+        "path": str(path),
+        "content": "source",
+        "start_line": 1,
+        "end_line": 10,
+    }
+    context = ToolResultContext(None, str(tmp_path), action, result)
+
+    runner.tool_result(context)
+    redundant = runner.tool_result(context)
+
+    assert redundant.additional_context == GUIDANCE
+
+
+def test_redundant_read_after_verification_uses_finalization_guidance(
+    tmp_path: Path,
+) -> None:
+    state = VerificationState()
+    hook = RepeatedReadNudge(verification_state=state)
+    runner = HookRunner([state, hook])
+    path = tmp_path / "a.py"
+    read_context = ToolResultContext(
+        None,
+        str(tmp_path),
+        {"tool": "read_file", "args": {"path": str(path)}},
+        {
+            "ok": True,
+            "tool": "read_file",
+            "path": str(path),
+            "content": "source",
+            "start_line": 1,
+            "end_line": 10,
+        },
+    )
+    verification_context = ToolResultContext(
+        None,
+        str(tmp_path),
+        {
+            "tool": "run_command",
+            "args": {"command": "check", "verification": True},
+        },
+        {"ok": True, "tool": "run_command", "verification": True},
+    )
+
+    runner.tool_result(read_context)
+    runner.tool_result(verification_context)
+    redundant = runner.tool_result(read_context)
+
+    assert redundant.additional_context == VERIFIED_GUIDANCE
+
+
+def test_redundant_read_after_later_mutation_returns_to_normal_guidance(
+    tmp_path: Path,
+) -> None:
+    state = VerificationState()
+    hook = RepeatedReadNudge(verification_state=state)
+    runner = HookRunner([state, hook])
+    path = tmp_path / "a.py"
+
+    def context(tool: str, result: dict) -> ToolResultContext:
+        return ToolResultContext(
+            None,
+            str(tmp_path),
+            {"tool": tool, "args": {"path": str(path)}},
+            result,
+        )
+
+    runner.tool_result(
+        context("run_command", {"ok": True, "verification": True})
+    )
+    runner.tool_result(
+        context(
+            "write_file",
+            {"ok": True, "tool": "write_file", "path": str(path)},
+        )
+    )
+    read = context(
+        "read_file",
+        {
+            "ok": True,
+            "tool": "read_file",
+            "path": str(path),
+            "content": "changed source",
+            "start_line": 1,
+            "end_line": 10,
+        },
+    )
+
+    runner.tool_result(read)
+    redundant = runner.tool_result(read)
+
+    assert redundant.additional_context == GUIDANCE
 
 
 def test_non_overlapping_range_keeps_normal_contents_at_runner_seam(
