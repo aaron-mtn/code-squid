@@ -30,6 +30,7 @@ from squid_core.hooks import (
     HookResponse,
     HookRunner,
     PromptContextBlock,
+    ReadResultTrimmedContext,
     RunFinishedContext,
     ToolResultContext,
 )
@@ -225,7 +226,11 @@ class AgentLoop:
         messages = list(self.session.messages)
         if extra_messages:
             messages = [*messages, *extra_messages]
-        messages = render_messages_for_model(messages, self.tool_result_trimming)
+        messages = render_messages_for_model(
+            messages,
+            self.tool_result_trimming,
+            on_read_result_trimmed=self._handle_trimmed_read_result,
+        )
         request_event = {
             "provider": getattr(self.model_adapter, "provider_name", None),
             "model": getattr(self.model_adapter, "model_name", None),
@@ -292,6 +297,13 @@ class AgentLoop:
             }
         )
         return reply
+
+    def _handle_trimmed_read_result(self, trimmed: ReadResultTrimmedContext) -> None:
+        """Keep reread coverage aligned with the request-visible transcript."""
+        self.hook_runner.read_result_trimmed(
+            trimmed,
+            event_sink=self._emit_hook_event,
+        )
 
     # Seed a new transcript, or reconcile the one run-scoped message in an
     # existing transcript. A session may change specialization between runs,

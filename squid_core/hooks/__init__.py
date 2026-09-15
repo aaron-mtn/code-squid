@@ -32,6 +32,7 @@ from .runner import (
     HookResponse,
     HookRunner,
     PromptContextBlock,
+    ReadResultTrimmedContext,
     RunFinishedContext,
     ToolResultContext,
 )
@@ -49,6 +50,7 @@ __all__ = [
     "HookResponse",
     "HookRunner",
     "PromptContextBlock",
+    "ReadResultTrimmedContext",
     "DEFAULT_POST_VERIFICATION_THRESHOLD",
     "POST_VERIFICATION_GUIDANCE",
     "PostVerificationNudge",

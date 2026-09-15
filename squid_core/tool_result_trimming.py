@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from typing import Callable
 
+from squid_core.hooks.runner import ReadResultTrimmedContext
 from squid_core.settings import ToolResultTrimmingSettings
 
 
@@ -19,6 +21,8 @@ _OMITTED_MARKERS = {
 def render_messages_for_model(
     messages: list[dict],
     settings: ToolResultTrimmingSettings,
+    *,
+    on_read_result_trimmed: Callable[[ReadResultTrimmedContext], None] | None = None,
 ) -> list[dict]:
     """Return a request-only history view without mutating canonical messages."""
     if not settings.enabled:
@@ -44,6 +48,7 @@ def render_messages_for_model(
                 message,
                 tool_names.get(message.get("tool_call_id")),
                 settings,
+                on_read_result_trimmed,
             )
         )
     return rendered
@@ -95,6 +100,7 @@ def _render_tool_message(
     message: dict,
     paired_tool_name: str | None,
     settings: ToolResultTrimmingSettings,
+    on_read_result_trimmed: Callable[[ReadResultTrimmedContext], None] | None,
 ) -> dict:
     content = message.get("content")
     if not isinstance(content, str):
@@ -114,6 +120,23 @@ def _render_tool_message(
     )
     if rendered_result is result:
         return message
+
+    if paired_tool_name == "read_file" and on_read_result_trimmed is not None:
+        tool_call_id = message.get("tool_call_id")
+        if isinstance(tool_call_id, str):
+            path = result.get("path")
+            on_read_result_trimmed(
+                ReadResultTrimmedContext(
+                    tool_call_id=tool_call_id,
+                    path=path if isinstance(path, str) else None,
+                    retained_line_ranges=tuple(
+                        _retained_read_ranges(
+                            result,
+                            settings.read_old_content_chars,
+                        )
+                    ),
+                )
+            )
 
     rendered_message = dict(message)
     # Match ToolResults' canonical serialization so only the payload differs.
@@ -146,6 +169,80 @@ def _trim_payload(result: dict, field: str, limit: int, tool_name: str) -> dict:
     rendered[f"model_{field}_original_chars"] = len(payload)
     rendered[f"model_{field}_returned_chars"] = len(rendered[field])
     return rendered
+
+
+def _retained_read_ranges(result: dict, limit: int) -> list[tuple[int, int]]:
+    """Map fully retained payload lines back to their original source ranges."""
+    content = result.get("content")
+    if not isinstance(content, str) or len(content) <= limit:
+        return _read_ranges(result) if isinstance(content, str) else []
+
+    head_chars, tail_chars = _bounded_text_segment_lengths(limit)
+    retained_spans = [(0, head_chars)]
+    if tail_chars:
+        retained_spans.append((len(content) - tail_chars, len(content)))
+
+    source_lines = [
+        line_number
+        for start, end in _read_ranges(result)
+        for line_number in range(start, end + 1)
+    ]
+    payload_lines = content.splitlines(keepends=True)
+    # Metadata from caller-defined read tools may not describe the payload
+    # exactly. In that case, forgetting coverage is safer than blocking a read.
+    if len(payload_lines) != len(source_lines):
+        return []
+
+    retained_lines = []
+    offset = 0
+    for line_number, line in zip(source_lines, payload_lines):
+        line_end = offset + len(line)
+        if any(
+            offset >= span_start and line_end <= span_end
+            for span_start, span_end in retained_spans
+        ):
+            retained_lines.append(line_number)
+        offset = line_end
+    return _line_numbers_to_ranges(retained_lines)
+
+
+def _read_ranges(result: dict) -> list[tuple[int, int]]:
+    raw_ranges = result.get("returned_line_ranges")
+    if isinstance(raw_ranges, list):
+        ranges = []
+        for item in raw_ranges:
+            if not isinstance(item, dict):
+                continue
+            start = item.get("start_line")
+            end = item.get("end_line")
+            if _valid_line_range(start, end):
+                ranges.append((start, end))
+        return ranges
+
+    start = result.get("start_line")
+    end = result.get("end_line")
+    return [(start, end)] if _valid_line_range(start, end) else []
+
+
+def _valid_line_range(start: object, end: object) -> bool:
+    return (
+        isinstance(start, int)
+        and not isinstance(start, bool)
+        and isinstance(end, int)
+        and not isinstance(end, bool)
+        and start >= 1
+        and end >= start
+    )
+
+
+def _line_numbers_to_ranges(line_numbers: list[int]) -> list[tuple[int, int]]:
+    ranges: list[tuple[int, int]] = []
+    for line_number in line_numbers:
+        if not ranges or line_number != ranges[-1][1] + 1:
+            ranges.append((line_number, line_number))
+        else:
+            ranges[-1] = (ranges[-1][0], line_number)
+    return ranges
 
 
 def _trim_patch_diagnostics(result: dict, limit: int) -> dict:
@@ -195,8 +292,15 @@ def _bounded_text(text: str, limit: int, omitted_marker: str) -> str:
     marker = "\n[older payload truncated]\n"
     if limit <= len(marker):
         return marker[:limit]
-    remaining = limit - len(marker)
-    head_chars = (remaining + 1) // 2
-    tail_chars = remaining // 2
+    head_chars, tail_chars = _bounded_text_segment_lengths(limit)
     tail = text[-tail_chars:] if tail_chars else ""
     return text[:head_chars] + marker + tail
+
+
+def _bounded_text_segment_lengths(limit: int) -> tuple[int, int]:
+    """Return source head/tail character counts retained by ``_bounded_text``."""
+    marker_length = len("\n[older payload truncated]\n")
+    if limit <= marker_length:
+        return 0, 0
+    remaining = limit - marker_length
+    return (remaining + 1) // 2, remaining // 2

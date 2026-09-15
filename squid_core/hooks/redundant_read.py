@@ -15,6 +15,7 @@ SUBSTANTIAL_OVERLAP_RATIO = 0.7
 
 _MAX_TRACKED_FILES = 100
 _MAX_RANGES_PER_FILE = 64
+_MAX_TRACKED_READ_RESULTS = _MAX_TRACKED_FILES * _MAX_RANGES_PER_FILE
 _MUTATION_TOOLS = {"apply_patch", "write_file"}
 _GUIDANCE = (
     "You already read this unchanged section and it is still current. The requested "
@@ -38,9 +39,10 @@ _ESCALATED_ALREADY_COVERED_MESSAGE = (
 class RepeatedReadNudge:
     """Escalate repeated overlapping reads of one unchanged file range.
 
-    Coverage comes only from successful ``read_file`` result metadata. Successful
-    built-in mutations adjust or invalidate the affected file, so no filesystem
-    timestamp checks are needed.
+    Coverage comes from successful ``read_file`` source results and is reduced
+    when request rendering trims that source. Successful built-in mutations
+    adjust or invalidate the affected file, so no filesystem timestamp checks
+    are needed.
     """
 
     def __init__(
@@ -60,6 +62,11 @@ class RepeatedReadNudge:
         # repeated-read logic only consults the fact when choosing guidance.
         self.verification_state = verification_state
         self._coverage: dict[str, list[tuple[int, int]]] = {}
+        # Tool-call provenance lets request rendering retract one trimmed read
+        # without discarding overlapping source still visible in another result.
+        self._read_result_coverage: dict[
+            str, tuple[str, list[tuple[int, int, int, int]]]
+        ] = {}
         # Patch-invalidated spans need an explicit marker: trimming them from
         # coverage is not enough when a wider verification read still overlaps
         # unchanged coverage above the substantial-overlap threshold.
@@ -77,8 +84,28 @@ class RepeatedReadNudge:
     def _reset_state(self) -> None:
         """Clear all coverage and escalation state as one lifecycle unit."""
         self._coverage.clear()
+        self._read_result_coverage.clear()
         self._stale_ranges.clear()
         self._redundant_counts.clear()
+
+    def read_result_trimmed(self, ctx) -> None:
+        """Replace one result's coverage with only its still-visible source."""
+        previous = self._read_result_coverage.get(ctx.tool_call_id)
+        if previous is None:
+            return
+        path, segments = previous
+        retained_segments = _retain_original_segments(
+            segments, ctx.retained_line_ranges
+        )
+        if retained_segments:
+            self._read_result_coverage[ctx.tool_call_id] = (
+                path,
+                retained_segments,
+            )
+        else:
+            del self._read_result_coverage[ctx.tool_call_id]
+        self._rebuild_coverage_for_path(path)
+        self._redundant_counts.pop(path, None)
 
     def tool_result(self, ctx) -> HookResponse | None:
         """Observe one final tool result and optionally emit an advisory nudge."""
@@ -97,6 +124,7 @@ class RepeatedReadNudge:
                 else:
                     self._coverage.pop(path, None)
                     self._stale_ranges.pop(path, None)
+                    self._discard_result_coverage(path)
 
         return None
 
@@ -105,7 +133,9 @@ class RepeatedReadNudge:
         action: dict[str, Any],
         result: dict[str, Any],
     ) -> HookResponse | None:
-        if result.get("ok") is not True:
+        if result.get("ok") is not True or not isinstance(
+            result.get("content"), str
+        ):
             return None
 
         path = _result_path(action, result)
@@ -124,7 +154,23 @@ class RepeatedReadNudge:
 
         # Classify before recording so a read cannot overlap with itself. The
         # dedicated range list keeps truncated head and tail coverage separate.
-        self._record_coverage(path, returned_ranges)
+        if not is_redundant:
+            self._record_coverage(path, returned_ranges)
+            tool_call_id = action.get("tool_call_id")
+            if isinstance(tool_call_id, str):
+                if len(self._read_result_coverage) >= _MAX_TRACKED_READ_RESULTS:
+                    oldest_call_id = next(iter(self._read_result_coverage))
+                    oldest_path, _segments = self._read_result_coverage.pop(
+                        oldest_call_id
+                    )
+                    self._rebuild_coverage_for_path(oldest_path)
+                self._read_result_coverage[tool_call_id] = (
+                    path,
+                    [
+                        (start, end, start, end)
+                        for start, end in returned_ranges
+                    ],
+                )
         if intersects_stale_range:
             self._mark_stale_ranges_fresh(path, returned_ranges)
 
@@ -181,6 +227,7 @@ class RepeatedReadNudge:
             # coverage safely, so fall back to whole-file invalidation.
             self._coverage.pop(path, None)
             self._stale_ranges.pop(path, None)
+            self._discard_result_coverage(path)
             return
 
         existing = self._coverage.get(path)
@@ -200,26 +247,22 @@ class RepeatedReadNudge:
             )[-_MAX_RANGES_PER_FILE:]
 
         if not existing:
+            self._adjust_result_coverage_for_patch(
+                path, start_line, end_line_before, delta
+            )
             return
 
-        adjusted: list[tuple[int, int]] = []
-        for coverage_start, coverage_end in existing:
-            if coverage_start < start_line:
-                adjusted.append(
-                    (coverage_start, min(coverage_end, start_line - 1))
-                )
-            if coverage_end > end_line_before:
-                adjusted.append(
-                    (
-                        max(coverage_start, end_line_before + 1) + delta,
-                        coverage_end + delta,
-                    )
-                )
+        adjusted = _adjust_ranges_for_patch(
+            existing, start_line, end_line_before, delta
+        )
 
         if adjusted:
             self._coverage[path] = _merge_ranges(adjusted)[-_MAX_RANGES_PER_FILE:]
         else:
             self._coverage.pop(path, None)
+        self._adjust_result_coverage_for_patch(
+            path, start_line, end_line_before, delta
+        )
 
     def _shift_stale_ranges_for_patch(
         self,
@@ -281,9 +324,56 @@ class RepeatedReadNudge:
             del self._coverage[oldest_path]
             self._stale_ranges.pop(oldest_path, None)
             self._redundant_counts.pop(oldest_path, None)
+            self._discard_result_coverage(oldest_path)
         self._coverage[path] = _merge_ranges(existing + returned_ranges)[
             -_MAX_RANGES_PER_FILE:
         ]
+
+    def _rebuild_coverage_for_path(self, path: str) -> None:
+        ranges = []
+        for result_path, segments in self._read_result_coverage.values():
+            if result_path == path:
+                ranges.extend(
+                    (current_start, current_end)
+                    for (
+                        _original_start,
+                        _original_end,
+                        current_start,
+                        current_end,
+                    ) in segments
+                )
+        if ranges:
+            self._coverage[path] = _merge_ranges(ranges)[-_MAX_RANGES_PER_FILE:]
+        else:
+            self._coverage.pop(path, None)
+
+    def _discard_result_coverage(self, path: str) -> None:
+        for call_id, (result_path, _ranges) in list(
+            self._read_result_coverage.items()
+        ):
+            if result_path == path:
+                del self._read_result_coverage[call_id]
+
+    def _adjust_result_coverage_for_patch(
+        self,
+        path: str,
+        start_line: int,
+        end_line_before: int,
+        delta: int,
+    ) -> None:
+        """Apply the same mutation transform to per-result provenance."""
+        for call_id, (result_path, segments) in list(
+            self._read_result_coverage.items()
+        ):
+            if result_path != path:
+                continue
+            adjusted = _adjust_segments_for_patch(
+                segments, start_line, end_line_before, delta
+            )
+            if adjusted:
+                self._read_result_coverage[call_id] = (result_path, adjusted)
+            else:
+                del self._read_result_coverage[call_id]
 
 
 def _result_path(action: dict[str, Any], result: dict[str, Any]) -> str | None:
@@ -445,6 +535,84 @@ def _subtract_ranges(
                 fragments.append((removed_end + 1, end))
         remaining = fragments
     return remaining
+
+
+def _adjust_ranges_for_patch(
+    ranges: Sequence[tuple[int, int]],
+    start_line: int,
+    end_line_before: int,
+    delta: int,
+) -> list[tuple[int, int]]:
+    """Discard a changed span and shift source ranges following the patch."""
+    adjusted: list[tuple[int, int]] = []
+    for range_start, range_end in ranges:
+        if range_start < start_line:
+            adjusted.append((range_start, min(range_end, start_line - 1)))
+        if range_end > end_line_before:
+            adjusted.append(
+                (
+                    max(range_start, end_line_before + 1) + delta,
+                    range_end + delta,
+                )
+            )
+    return _merge_ranges(adjusted)[-_MAX_RANGES_PER_FILE:]
+
+
+def _retain_original_segments(
+    segments: Sequence[tuple[int, int, int, int]],
+    retained: Sequence[tuple[int, int]],
+) -> list[tuple[int, int, int, int]]:
+    """Keep current-coordinate portions whose original source remains visible."""
+    kept = []
+    for original_start, original_end, current_start, _current_end in segments:
+        for retained_start, retained_end in retained:
+            overlap_start = max(original_start, retained_start)
+            overlap_end = min(original_end, retained_end)
+            if overlap_start <= overlap_end:
+                kept.append(
+                    (
+                        overlap_start,
+                        overlap_end,
+                        current_start + overlap_start - original_start,
+                        current_start + overlap_end - original_start,
+                    )
+                )
+    return kept
+
+
+def _adjust_segments_for_patch(
+    segments: Sequence[tuple[int, int, int, int]],
+    start_line: int,
+    end_line_before: int,
+    delta: int,
+) -> list[tuple[int, int, int, int]]:
+    """Preserve original-to-current line mappings around a successful patch."""
+    adjusted = []
+    for original_start, original_end, current_start, current_end in segments:
+        if current_start < start_line:
+            kept_current_end = min(current_end, start_line - 1)
+            adjusted.append(
+                (
+                    original_start,
+                    original_start + kept_current_end - current_start,
+                    current_start,
+                    kept_current_end,
+                )
+            )
+        if current_end > end_line_before:
+            kept_current_start = max(current_start, end_line_before + 1)
+            kept_original_start = (
+                original_start + kept_current_start - current_start
+            )
+            adjusted.append(
+                (
+                    kept_original_start,
+                    original_end,
+                    kept_current_start + delta,
+                    current_end + delta,
+                )
+            )
+    return adjusted
 
 
 def _merge_ranges(ranges: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:

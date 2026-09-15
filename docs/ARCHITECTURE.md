@@ -389,7 +389,8 @@ and application layer; `squid_core/` is the reusable agent runtime.
     `model_adapter.py` owns provider
     normalization; `settings.py` owns generic provider/runtime/compaction
     and tool-result trimming semantics; `tool_result_trimming.py` owns the
-    request-only rendering of older built-in Tool payloads;
+    request-only rendering of older built-in Tool payloads and reports exact
+    retained source-line ranges when it trims a `read_file` result;
     `platform_context.py` describes the environment;
     `spawner.py` owns generic construction; `session.py` owns in-memory
     transcript state; and `skills.py` owns standalone Skills.
@@ -609,16 +610,25 @@ the current command Tool has no generic workspace-mutation signal, and the Hooks
 do not parse command names.
 
 `RepeatedReadNudge` keeps bounded, run-local line-range coverage from
-successful `read_file` result metadata under normalized absolute path keys,
+successful `read_file` source results under normalized absolute path keys,
 preferring the separate exact `returned_line_ranges` when a full-file read is
-truncated. A successful `write_file` invalidates all coverage for its target. A
+truncated. Coverage is request-visible rather than merely historical:
+request-only tool-result rendering maps retained head and tail characters back
+to complete source lines and dispatches `read_result_trimmed` with those
+ranges. The Hook keeps bounded per-tool-call provenance so it can retract only
+the trimmed result while preserving overlapping source visible from another
+result. Metadata and omission summaries do not preserve coverage, while
+canonical session messages remain unchanged. A successful `write_file`
+invalidates all coverage for its target. A
 successful `apply_patch` instead uses its before/after line bounds to discard
 the changed span while preserving coverage before it and shifting coverage
-after it by the line-count delta. The Hook separately remembers patch-stale
-spans so the first successful read returning changed lines is never masked just
-because its wider verification window still overlaps at least 70% known
-surrounding content. That read clears only the stale lines it returned and
-records them as fresh coverage, so an immediate repeat is redundant again. When
+after it by the line-count delta; per-result original-to-current mappings keep
+later trim notifications aligned across that shift. The Hook separately
+remembers patch-stale spans so the first successful read returning changed
+lines is never masked just because its wider verification window still overlaps
+at least 70% known surrounding content. That read clears only the stale lines
+it returned and records them as fresh coverage, so an immediate repeat is
+redundant again. When
 at least 70% of any other returned read is already covered for that unchanged
 range, it counts as redundant; by default
 the first redundant reread after the useful original replaces the model-facing
@@ -634,19 +644,21 @@ The next qualifying reread in that file's streak remains masked, uses a stronger
 correction, and then resets the streak. The threshold remains configurable and
 controls when first-reread masking and guidance begin. Failed mutations do not
 alter coverage, and `before_run` clears all state. Successful transcript
-compaction also clears all files' coverage, mutation-stale ranges, and per-file
-redundant-read counters through the `compaction_applied` Hook seam. Earlier
+compaction also clears all files' coverage, per-result provenance,
+mutation-stale ranges, and per-file redundant-read counters through the
+`compaction_applied` Hook seam. Earlier
 compaction lifecycle events and failed or otherwise unapplied attempts leave
 state intact because the original transcript remains active. The Hook never
-blocks or transforms an action, and `AgentLoop` has no feature-specific logic
-for it.
+blocks or transforms an action; `AgentLoop` only bridges the generic trimming
+notification into the Hook seam.
 
 There is no separate "small reread" size limit in `RepeatedReadNudge`: the
 overlap ratio applies to any non-empty valid returned range metadata, including
 an effective range expanded by `read_file`. A
 successful read is tracked only when `ok` is exactly `true`, its path can be
-resolved from result or action metadata, and it reports a valid inclusive
-`start_line`/`end_line` range or valid `returned_line_ranges`. Coverage is the
+resolved from result or action metadata, and it reports a string source payload
+plus a valid inclusive `start_line`/`end_line` range or valid
+`returned_line_ranges`. Coverage is the
 merged union of prior returned ranges for that normalized path, bounded to 100
 files and 64 ranges per file. The current range is redundant when at least 70%
 of its returned lines are in that union. The default threshold is one redundant

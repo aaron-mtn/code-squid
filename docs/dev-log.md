@@ -1,3 +1,21 @@
+- 2026-09-14: Made `RepeatedReadNudge` coverage match source that remains in
+  the effective model request. Request-only tool-result trimming now maps its
+  retained character head/tail back to complete `read_file` source lines and
+  notifies Hooks through a narrow `read_result_trimmed` seam. The repeated-read
+  Hook keeps bounded per-tool-call provenance, retracts fully or partially
+  trimmed results without losing overlapping visible reads, and preserves
+  original-to-current line mappings across patches. Metadata-only trimmed
+  results no longer suppress recovery reads; a successful recovery read
+  restores coverage normally. Canonical session/history rendering remains
+  unchanged, as do no-trimming behavior, mutation invalidation, compaction,
+  and shell-command handling. Verification: 53 focused trimming/repeated-read
+  tests and 271 broader Hook/loop/compaction/Tool tests passed. The full suite
+  passed 1,171 tests with the same nine unrelated baseline failures documented
+  by preceding patches: eight stale prompt-copy expectations and one Windows
+  TTY path-rendering assertion. Core, application, and test compilation plus
+  `git diff --check` passed. No live model inference ran, and no follow-up is
+  intentionally deferred.
+
 - 2026-09-14: Added a small post-verification no-progress nudge. Core's run-local
   `VerificationState` now tracks current verification, normalized successful
   command signatures for the current implementation, and a shared observation

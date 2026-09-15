@@ -43,6 +43,15 @@ class CompactionAppliedContext:
 
 
 @dataclass(frozen=True)
+class ReadResultTrimmedContext:
+    """Report source ranges still visible from one trimmed read result."""
+
+    tool_call_id: str
+    path: str | None
+    retained_line_ranges: tuple[tuple[int, int], ...]
+
+
+@dataclass(frozen=True)
 class BeforeToolExecuteContext:
     session_id: str | None
     repo_root: str
@@ -178,6 +187,19 @@ class HookRunner:
                 continue
 
             _invoke_hook(hook, "compaction_applied", handler, ctx, event_sink)
+
+    def read_result_trimmed(
+        self,
+        ctx: ReadResultTrimmedContext,
+        *,
+        event_sink: HookEventSink | None = None,
+    ) -> None:
+        """Notify hooks when request rendering removes old read source."""
+        for hook in self.hooks:
+            handler = getattr(hook, "read_result_trimmed", None)
+            if handler is None:
+                continue
+            _invoke_hook(hook, "read_result_trimmed", handler, ctx, event_sink)
 
     def before_tool_execute(
         self,
