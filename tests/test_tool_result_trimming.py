@@ -413,6 +413,8 @@ def test_fully_trimmed_read_can_be_read_again_and_restores_coverage(
     result = _read_result(path, "".join(lines), start_line=1, end_line=500)
     runner = HookRunner([RepeatedReadNudge()])
     _observe_read(runner, path, "read-1", result)
+    _observe_read(runner, path, "read-redundant", result)
+    assert runner.hooks[0]._redundant_counts
 
     render_messages_for_model(
         _tool_turn("read-1", "read_file", result),
@@ -420,6 +422,7 @@ def test_fully_trimmed_read_can_be_read_again_and_restores_coverage(
         on_read_result_trimmed=lambda event: _apply_trim_event(runner, event),
     )
 
+    assert runner.hooks[0]._redundant_counts == {}
     recovery = _read_result(path, "".join(lines[:250]), start_line=1, end_line=250)
     reread = _observe_read(runner, path, "read-2", recovery)
     assert reread.updated_tool_output == recovery

@@ -380,16 +380,22 @@ def test_low_overlap_returned_range_does_not_count(tmp_path: Path) -> None:
     assert hook._redundant_counts == {}
 
 
-def test_low_overlap_resets_pending_escalation(tmp_path: Path) -> None:
+def test_useful_read_preserves_pending_escalation(tmp_path: Path) -> None:
     hook = RepeatedReadNudge()
     path = tmp_path / "a.py"
     _read(hook, path, returned_start=1, returned_end=100)
-    assert _read(hook, path, returned_start=1, returned_end=100) is not None
+    _assert_first_reread_is_masked(
+        _read(hook, path, returned_start=1, returned_end=100)
+    )
 
     assert _read(hook, path, returned_start=101, returned_end=200) is None
-    _assert_first_reread_is_masked(
-        _read(hook, path, returned_start=101, returned_end=200)
+    response = _read(hook, path, returned_start=101, returned_end=200)
+
+    assert response is not None
+    assert response.updated_tool_output["message"] == (
+        ESCALATED_ALREADY_COVERED_MESSAGE
     )
+    assert hook._redundant_counts
 
 
 def test_overlap_uses_actual_result_range_not_requested_range(tmp_path: Path) -> None:
@@ -647,6 +653,7 @@ def test_successful_apply_patch_resets_pending_escalation(tmp_path: Path) -> Non
     path = tmp_path / "a.py"
     _read(hook, path)
     assert _read(hook, path) is not None
+    assert hook._redundant_counts
 
     _mutate(
         hook,
@@ -657,6 +664,7 @@ def test_successful_apply_patch_resets_pending_escalation(tmp_path: Path) -> Non
         end_line_after=50,
     )
 
+    assert hook._redundant_counts == {}
     assert _read(hook, path, returned_start=40, returned_end=50) is None
 
 
@@ -708,9 +716,11 @@ def test_successful_write_file_resets_pending_escalation(tmp_path: Path) -> None
     path = tmp_path / "a.py"
     _read(hook, path)
     assert _read(hook, path) is not None
+    assert hook._redundant_counts
 
     _mutate(hook, "write_file", path)
 
+    assert hook._redundant_counts == {}
     assert _read(hook, path) is None
 
 
@@ -739,6 +749,32 @@ def test_redundant_streaks_are_independent_per_file(tmp_path: Path) -> None:
     assert _read(hook, second_path).updated_tool_output["already_covered"] is True
 
 
+def test_useful_reads_preserve_strikes_independently_per_file(
+    tmp_path: Path,
+) -> None:
+    hook = RepeatedReadNudge()
+    first_path = tmp_path / "a.py"
+    second_path = tmp_path / "b.py"
+    _read(hook, first_path)
+    _read(hook, second_path)
+    _assert_first_reread_is_masked(_read(hook, first_path))
+    _assert_first_reread_is_masked(_read(hook, second_path))
+
+    assert _read(hook, first_path, returned_start=101, returned_end=200) is None
+    first_escalated = _read(
+        hook, first_path, returned_start=101, returned_end=200
+    )
+    assert first_escalated.updated_tool_output["message"] == (
+        ESCALATED_ALREADY_COVERED_MESSAGE
+    )
+
+    # Activity for the first file must not advance or forgive the second file.
+    second_escalated = _read(hook, second_path)
+    assert second_escalated.updated_tool_output["message"] == (
+        ESCALATED_ALREADY_COVERED_MESSAGE
+    )
+
+
 def test_failed_mutations_do_not_invalidate_prior_reads(tmp_path: Path) -> None:
     hook = RepeatedReadNudge()
     path = tmp_path / "a.py"
@@ -759,9 +795,12 @@ def test_before_run_clears_history(tmp_path: Path) -> None:
     hook = RepeatedReadNudge()
     path = tmp_path / "a.py"
     _read(hook, path)
+    _assert_first_reread_is_masked(_read(hook, path))
+    assert hook._redundant_counts
 
     hook.before_run(None)
 
+    assert hook._redundant_counts == {}
     assert _read(hook, path) is None
 
 
@@ -842,7 +881,9 @@ def test_successful_compaction_clears_all_files_and_redundant_read_state(
     assert _read(hook, second_path) is None
 
 
-def test_escalated_mask_resets_repetition_streak(tmp_path: Path) -> None:
+def test_escalated_mask_persists_until_coverage_is_invalidated(
+    tmp_path: Path,
+) -> None:
     hook = RepeatedReadNudge()
     path = tmp_path / "a.py"
     _read(hook, path)
@@ -853,6 +894,9 @@ def test_escalated_mask_resets_repetition_streak(tmp_path: Path) -> None:
     assert escalated.updated_tool_output["already_covered"] is True
     assert escalated.updated_tool_output["message"] == ESCALATED_ALREADY_COVERED_MESSAGE
     assert escalated.additional_context == ""
-    assert hook._redundant_counts == {}
+    assert hook._redundant_counts
 
-    _assert_first_reread_is_masked(_read(hook, path))
+    still_escalated = _read(hook, path)
+    assert still_escalated.updated_tool_output["message"] == (
+        ESCALATED_ALREADY_COVERED_MESSAGE
+    )

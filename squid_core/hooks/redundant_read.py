@@ -165,7 +165,6 @@ class RepeatedReadNudge:
             self._mark_stale_ranges_fresh(path, returned_ranges)
 
         if not is_redundant:
-            self._redundant_counts.pop(path, None)
             return None
 
         count = self._redundant_counts.get(path, 0) + 1
@@ -186,8 +185,10 @@ class RepeatedReadNudge:
                 additional_context=_GUIDANCE,
             )
 
-        # The stronger correction completes the escalation and starts a fresh streak.
-        self._redundant_counts.pop(path, None)
+        # Keep the escalated strike until coverage is invalidated. A useful read
+        # can add evidence for this file, but it does not undo earlier rereads.
+        # Saturating the count avoids unbounded growth once escalation is active.
+        self._redundant_counts[path] = self.threshold + 1
         return HookResponse(
             updated_tool_output=_already_covered_result(
                 action,

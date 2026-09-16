@@ -1,3 +1,15 @@
+- 2026-09-15: Made `RepeatedReadNudge` keep each file's redundant-read strikes
+  across later useful reads and after stronger escalation. Counts now remain at
+  the escalated level until existing evidence-invalidation seams clear them,
+  including successful mutation, relevant result trimming, compaction, and a
+  new run; files remain independent. Partial-overlap trimming and novel-only
+  read results remain intentionally deferred. Verification: 54 focused
+  repeated-read/trimming tests and 299 broader Hook/runtime tests passed. The
+  full suite passed 1,175 tests with the same nine unrelated baseline failures
+  documented by preceding patches: eight stale prompt-copy expectations and one
+  Windows TTY path-rendering assertion. Changed modules compiled, and
+  `git diff --check` passed. No live model inference ran.
+
 - 2026-09-15: Strengthened `PostVerificationNudge` around a deliberately small
   state model: current verification plus a count of subsequent successful Tool
   actions. The default threshold is now two; reads, searches, commands, other

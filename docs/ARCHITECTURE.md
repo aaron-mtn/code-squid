@@ -638,10 +638,12 @@ guidance through `HookResponse.additional_context`, directing the model to reuse
 the current context and make a focused edit when the intended change is clear.
 The repeated-read Hook does not know about verification; post-verification
 finalization policy belongs exclusively to `PostVerificationNudge`. The next
-qualifying reread in that file's streak remains masked, uses a stronger
-correction, and then resets the streak. The threshold remains configurable and
-controls when first-reread masking and guidance begin. Failed mutations do not
-alter coverage, and `before_run` clears all state. Successful transcript
+qualifying reread for that file remains masked and uses a stronger correction.
+That escalated strike persists while the supporting coverage remains current;
+useful reads can add coverage without forgiving earlier redundant reads. The
+threshold remains configurable and controls when first-reread masking and
+guidance begin. Failed mutations do not alter coverage, and `before_run` clears
+all state. Successful transcript
 compaction also clears all files' coverage, per-result provenance,
 mutation-stale ranges, and per-file redundant-read counters through the
 `compaction_applied` Hook seam. Earlier
@@ -662,10 +664,11 @@ files and 64 ranges per file. The current range is redundant when at least 70%
 of its returned lines are in that union. The default threshold is one redundant
 reread, so an original useful read followed by one qualifying overlap emits
 guidance while masking that reread; the following qualifying overlap receives
-the stronger masked correction. "Consecutive" is per file rather than globally
-adjacent: a successful non-redundant read of that file resets its count, the
-stronger escalation resets it, and a successful mutation resets it; unrelated
-Tool calls and reads of other files do not. `write_file` invalidates the target's
+the stronger masked correction. Strikes are per file rather than globally
+adjacent: non-redundant reads add coverage without resetting them, and unrelated
+Tool calls or reads of other files do not affect them. They reset when their
+supporting evidence is invalidated, including a successful mutation, relevant
+result trimming, compaction, or a new run. `write_file` invalidates the target's
 whole coverage and any patch-stale markers, while `apply_patch` preserves
 unaffected coverage only when trustworthy before/after line bounds are present
 and otherwise invalidates the whole target. Failed reads and failed mutations
