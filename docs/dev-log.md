@@ -1,3 +1,18 @@
+- 2026-09-16: Simplified Core's public `read_file` contract so every targeted
+  read uses a single `ranges` representation. Removed top-level `start_line`
+  and `end_line` from the schema and executor, capped requests at eight ranges,
+  and applied the existing normalized merged line budget uniformly to one- and
+  multi-region reads. Updated prompt guidance, repeated-read request metadata,
+  tests, README, and architecture documentation. Verification: 91 focused
+  read-tool and repeated-read tests passed; 180 broader trimming, compaction,
+  executor, agent-loop, and prompt-guidance tests passed with five known stale
+  prompt-copy checks excluded. The full suite passed 1,222 tests with the same
+  nine unrelated baseline failures documented by preceding patches: eight
+  stale prompt-copy expectations and one Windows TTY path-rendering assertion.
+  Core, application, and test modules compiled, the read-tool import/schema
+  smoke check passed, and `git diff --check` passed. No live model inference
+  ran, and no follow-up is intentionally deferred.
+
 - 2026-09-16: Added a generic optional reasoning-token budget to Core provider
   settings and Code Squid model settings, including strict non-negative-integer
   validation and the `CODE_SQUID_REASONING_TOKEN_BUDGET` override/unset behavior.

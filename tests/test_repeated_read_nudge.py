@@ -54,10 +54,11 @@ def _read(
     content: str = "FILE CONTENTS",
 ) -> HookResponse | None:
     args = {"path": str(path)}
-    if requested_start is not None:
-        args["start_line"] = requested_start
-    if requested_end is not None:
-        args["end_line"] = requested_end
+    if requested_start is not None or requested_end is not None:
+        assert requested_start is not None and requested_end is not None
+        args["ranges"] = [
+            {"start_line": requested_start, "end_line": requested_end}
+        ]
 
     result = {"ok": ok, "tool": "read_file", "path": str(path)}
     if ok:
@@ -283,7 +284,10 @@ def test_non_overlapping_range_keeps_normal_contents_at_runner_seam(
     def context(start: int, end: int, content: str) -> ToolResultContext:
         action = {
             "tool": "read_file",
-            "args": {"path": str(path), "start_line": start, "end_line": end},
+            "args": {
+                "path": str(path),
+                "ranges": [{"start_line": start, "end_line": end}],
+            },
         }
         return ToolResultContext(
             session_id=None,
@@ -330,8 +334,7 @@ def test_second_redundant_read_masks_file_content(tmp_path: Path) -> None:
         "path": str(path),
         "already_covered": True,
         "message": ESCALATED_ALREADY_COVERED_MESSAGE,
-        "requested_start_line": 10,
-        "requested_end_line": 20,
+        "requested_line_ranges": [{"start_line": 10, "end_line": 20}],
         "start_line": 1,
         "end_line": 100,
     }
@@ -603,19 +606,29 @@ def test_expanded_read_metadata_drives_repeated_read_coverage(tmp_path: Path) ->
     path.write_text("".join(f"line {line}\n" for line in range(1, 301)), encoding="utf-8")
     action = {
         "tool": "read_file",
-        "args": {"path": str(path), "start_line": 100, "end_line": 109},
+        "args": {
+            "path": str(path),
+            "ranges": [{"start_line": 100, "end_line": 109}],
+        },
     }
 
     first_result = read_file(tmp_path, **action["args"])
     assert (first_result["start_line"], first_result["end_line"]) == (30, 179)
     assert hook.tool_result(_Context(action=action, result=first_result)) is None
 
-    second_result = read_file(tmp_path, str(path), start_line=40, end_line=160)
+    second_result = read_file(
+        tmp_path,
+        str(path),
+        ranges=[{"start_line": 40, "end_line": 160}],
+    )
     response = hook.tool_result(
         _Context(
             action={
                 "tool": "read_file",
-                "args": {"path": str(path), "start_line": 40, "end_line": 160},
+                "args": {
+                    "path": str(path),
+                    "ranges": [{"start_line": 40, "end_line": 160}],
+                },
             },
             result=second_result,
         )
@@ -642,7 +655,7 @@ def test_truncated_full_file_tracks_each_returned_range_separately(
     _read(hook, path, returned_end=2000, returned_ranges=returned_ranges)
 
     # The omitted middle must not become remembered coverage merely because
-    # start_line/end_line span the whole file.
+    # The result's broad summary span must not replace its exact returned ranges.
     assert _read(hook, path, returned_start=700, returned_end=800) is None
     assert _read(
         hook, path, returned_end=2000, returned_ranges=returned_ranges
@@ -757,7 +770,10 @@ def test_patch_verification_read_is_returned_once_then_masked(
             result=result,
         )
 
-    initial_args = {"path": str(path), "start_line": 1, "end_line": 500}
+    initial_args = {
+        "path": str(path),
+        "ranges": [{"start_line": 1, "end_line": 500}],
+    }
     initial_result = read_file(tmp_path, **initial_args)
     assert runner.tool_result(
         context("read_file", initial_args, initial_result)
@@ -772,7 +788,10 @@ def test_patch_verification_read_is_returned_once_then_masked(
     assert patch_result["ok"] is True
     runner.tool_result(context("apply_patch", patch_args, patch_result))
 
-    verify_args = {"path": str(path), "start_line": 158, "end_line": 175}
+    verify_args = {
+        "path": str(path),
+        "ranges": [{"start_line": 158, "end_line": 175}],
+    }
     verify_result = read_file(tmp_path, **verify_args)
     first_verification = runner.tool_result(
         context("read_file", verify_args, verify_result)
@@ -1016,7 +1035,10 @@ def test_successful_compaction_allows_fresh_read_then_masks_immediate_reread(
     path = tmp_path / "a.py"
     action = {
         "tool": "read_file",
-        "args": {"path": str(path), "start_line": 100, "end_line": 180},
+        "args": {
+            "path": str(path),
+            "ranges": [{"start_line": 100, "end_line": 180}],
+        },
     }
 
     def observe(content: str) -> HookResponse:

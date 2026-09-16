@@ -51,17 +51,16 @@ TOOL_USAGE_GUIDANCE = """
 ### Reading files
 
 - Prefer read_file for reading known files.
-- For normal-sized files, read the whole file first when the full context is useful.
-- If a full-file read returns content_truncated true, use returned_line_ranges to see which head and tail lines were returned instead of immediately repeating the full-file read.
-- Follow the returned truncation_guidance and use start_line and end_line to inspect the missing relevant section.
-- For larger files, locate the relevant area when necessary, then read each required region once with enough surrounding context to understand and edit it.
-- Use start_line and end_line for one contiguous region. When several scattered regions of the same file are already known, prefer one ranges request within the normal total read limit over several sequential reads.
-- Prefer substantial coherent reads over several small adjacent or overlapping ranges; one tool call should gather a meaningful unit of information.
-- Do not use ranges for broad speculative reading; request only regions already known to be relevant.
-- Do not walk through a file incrementally with small ranges when one larger read would provide the same context.
+- Read the whole file when broad context is useful.
+- Do not manually page through an entire file with consecutive ranges.
+- If a full-file read returns content_truncated true, use returned_line_ranges to identify what source was actually returned and what relevant regions are still missing.
+- After a truncated whole-file read, use ranges only for the missing regions actually needed for the task. Do not reconstruct the entire file by reading every omitted section unless the task genuinely requires the complete file.
+- For every targeted read, use ranges with one or several regions of the same file.
+- When several relevant regions are already known, request them together in one read_file call rather than reading them sequentially.
+- Prefer substantial coherent regions over tiny inchworm reads.
+- Do not use many scattered ranges for speculative broad exploration.
 - Do not broaden or repeat a read merely for extra confidence once the relevant code and surrounding context are already understood.
-- Prefer information already present in the conversation over re-reading the same unchanged file or line range.
-- Re-read content when the previous read was truncated or insufficient, when the file may have changed, or when exact current text is required for an edit.
+- Do not reread unchanged ranges already available in context unless there is a concrete reason, such as exact current text being required for an edit.
 - Prefer read_file over shell commands when inspecting a known source file.
 
 ### Applying patches

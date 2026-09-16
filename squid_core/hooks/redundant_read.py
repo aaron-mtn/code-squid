@@ -414,12 +414,10 @@ def _already_covered_result(
     if isinstance(args, dict):
         if masked["path"] is None:
             masked["path"] = args.get("path")
-        for source_key, target_key in (
-            ("start_line", "requested_start_line"),
-            ("end_line", "requested_end_line"),
-        ):
-            if source_key in args:
-                masked[target_key] = args[source_key]
+        # Preserve the caller's uniform targeted-read shape when duplicate
+        # content is suppressed; returned_line_ranges still drives coverage.
+        if isinstance(args.get("ranges"), list):
+            masked["requested_line_ranges"] = args["ranges"]
 
     for key in ("start_line", "end_line", "returned_line_ranges"):
         if key in result:

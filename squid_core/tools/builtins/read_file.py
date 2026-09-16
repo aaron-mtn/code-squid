@@ -7,6 +7,7 @@ from squid_core.settings import ReadFileSettings
 
 TOOL_NAME = "read_file"
 DEFAULT_SETTINGS = ReadFileSettings()
+MAX_REQUESTED_RANGES = 8
 
 
 # Return the tool definition shown to the model.
@@ -17,13 +18,14 @@ def tool_definition() -> dict:
             "name": TOOL_NAME,
             "description": (
                 "Read a UTF-8 file at an absolute path. Full-file reads return at most "
-                f"{DEFAULT_SETTINGS.default_max_lines} lines. Use start_line/end_line for "
-                "one 1-based inclusive region, or ranges for several known scattered "
-                "regions in the same file; prefer one multi-range read to sequential reads "
-                "when the needed regions are already known. A single-region read is not "
-                "truncated. Small ranges may include surrounding context, and combined "
-                "multi-range source coverage must stay within the normal "
-                f"{DEFAULT_SETTINGS.default_max_lines}-line read limit."
+                f"{DEFAULT_SETTINGS.default_max_lines} lines. For every targeted read, use "
+                "ranges with one or several known 1-based inclusive regions of the same "
+                "file. Request known regions together, prefer substantial coherent regions, "
+                "and avoid speculative scattered reads. Small ranges may include surrounding "
+                "context, and total normalized coverage must stay within the normal "
+                f"{DEFAULT_SETTINGS.default_max_lines}-line limit. Example: "
+                "{\"path\": \"...\", \"ranges\": [{\"start_line\": 160, "
+                "\"end_line\": 260}, {\"start_line\": 620, \"end_line\": 780}]}"
             ),
             "parameters": {
                 "type": "object",
@@ -32,19 +34,10 @@ def tool_definition() -> dict:
                         "type": "string",
                         "description": "Absolute path to the file",
                     },
-                    "start_line": {
-                        "type": "integer",
-                        "description": "Optional 1-based inclusive starting line",
-                    },
-                    "end_line": {
-                        "type": "integer",
-                        "description": "Optional 1-based inclusive ending line",
-                    },
                     "ranges": {
                         "type": "array",
                         "description": (
-                            "Optional scattered 1-based inclusive regions in this file; "
-                            "cannot be combined with start_line or end_line"
+                            "Optional targeted 1-based inclusive regions in this file"
                         ),
                         "items": {
                             "type": "object",
@@ -56,9 +49,11 @@ def tool_definition() -> dict:
                             "additionalProperties": False,
                         },
                         "minItems": 1,
+                        "maxItems": MAX_REQUESTED_RANGES,
                     },
                 },
                 "required": ["path"],
+                "additionalProperties": False,
             },
         },
     }
@@ -68,8 +63,6 @@ def tool_definition() -> dict:
 def execute(
     _repo_root: Path,
     path: str,
-    start_line: int | None = None,
-    end_line: int | None = None,
     ranges: list[dict[str, int]] | None = None,
     *,
     settings: ReadFileSettings = DEFAULT_SETTINGS,
@@ -83,7 +76,7 @@ def execute(
             "error": "read_file requires an absolute path",
         }
 
-    range_error = _validate_read_ranges(start_line, end_line, ranges)
+    range_error = _validate_read_ranges(ranges)
     if range_error is not None:
         return {
             "ok": False,
@@ -97,7 +90,7 @@ def execute(
     total_lines = len(lines)
 
     if ranges is not None:
-        return _read_multiple_ranges(
+        return _read_ranges(
             path,
             lines,
             total_lines,
@@ -105,52 +98,27 @@ def execute(
             settings,
         )
 
-    ranged = start_line is not None or end_line is not None
-
-    actual_start = start_line if start_line is not None else 1
-    requested_end = end_line if end_line is not None else total_lines
-
-    if ranged and actual_start > total_lines:
-        actual_end = actual_start - 1
-        content = ""
-    else:
-        actual_end = min(requested_end, total_lines)
-
-    if ranged and actual_start <= total_lines:
-        actual_start, actual_end = _expanded_range(
-            actual_start,
-            actual_end,
-            total_lines,
-            settings.minimum_range_lines,
-        )
-        content = "".join(lines[actual_start - 1 : actual_end])
-
-    if ranged:
+    actual_start = 1
+    actual_end = total_lines
+    original_chars = len(content)
+    if total_lines <= settings.default_max_lines:
         content_metadata = {
             "truncated": False,
-            "original_chars": len(content),
-            "returned_chars": len(content),
+            "original_chars": original_chars,
+            "returned_chars": original_chars,
         }
     else:
-        original_chars = len(content)
-        if total_lines <= settings.default_max_lines:
-            content_metadata = {
-                "truncated": False,
-                "original_chars": original_chars,
-                "returned_chars": original_chars,
-            }
-        else:
-            # Keep both ends symmetrical so the omitted interval is easy to
-            # inspect with a follow-up ranged read.
-            head_lines = settings.default_max_lines // 2
-            tail_lines = settings.default_max_lines - head_lines
-            tail_start = total_lines - tail_lines + 1
-            content = "".join((*lines[:head_lines], *lines[-tail_lines:]))
-            content_metadata = {
-                "truncated": True,
-                "original_chars": original_chars,
-                "returned_chars": len(content),
-            }
+        # Keep both ends symmetrical so the omitted interval is easy to
+        # inspect with a follow-up ranged read.
+        head_lines = settings.default_max_lines // 2
+        tail_lines = settings.default_max_lines - head_lines
+        tail_start = total_lines - tail_lines + 1
+        content = "".join((*lines[:head_lines], *lines[-tail_lines:]))
+        content_metadata = {
+            "truncated": True,
+            "original_chars": original_chars,
+            "returned_chars": len(content),
+        }
 
     result = {
         "ok": True,
@@ -163,7 +131,7 @@ def execute(
         "start_line": actual_start,
         "end_line": actual_end,
         "total_lines": total_lines,
-        "ranged": ranged,
+        "ranged": False,
     }
     if content_metadata["truncated"]:
         result["returned_line_ranges"] = [
@@ -173,19 +141,19 @@ def execute(
         result["truncation_guidance"] = (
             f"Full-file read truncated to {settings.default_max_lines} of {total_lines} lines; "
             f"returned lines 1-{head_lines} and {tail_start}-{total_lines}. Use "
-            "start_line and end_line to inspect the missing relevant section."
+            "ranges to inspect the missing relevant section."
         )
     return result
 
 
-def _read_multiple_ranges(
+def _read_ranges(
     path: str,
     lines: list[str],
     total_lines: int,
     ranges: list[dict[str, int]],
     settings: ReadFileSettings,
 ) -> dict:
-    """Return normalized scattered regions through the existing range-list contract."""
+    """Return normalized targeted regions through the public range-list contract."""
 
     normalized = []
     for requested in ranges:
@@ -210,7 +178,7 @@ def _read_multiple_ranges(
             "tool": TOOL_NAME,
             "path": path,
             "error": (
-                "multi-range read covers "
+                "targeted read covers "
                 f"{source_lines} lines after normalization; maximum total coverage is "
                 f"{settings.default_max_lines} lines"
             ),
@@ -225,8 +193,8 @@ def _read_multiple_ranges(
         actual_start = merged[0][0]
         actual_end = merged[-1][1]
     else:
-        # Match a legacy range wholly past EOF: its empty interval begins at
-        # the earliest requested line and ends immediately before it.
+        # An empty interval begins at the earliest requested line and ends
+        # immediately before it, preserving useful location metadata.
         actual_start = min(item["start_line"] for item in ranges)
         actual_end = actual_start - 1
 
@@ -277,32 +245,28 @@ def _expanded_range(
 
 
 # Validate caller-supplied 1-based inclusive line ranges before reading.
-def _validate_range(start_line: int | None, end_line: int | None) -> str | None:
-    if start_line is not None and start_line < 1:
+def _validate_range(start_line: int, end_line: int) -> str | None:
+    if start_line < 1:
         return "start_line must be >= 1"
 
-    if end_line is not None and end_line < 1:
+    if end_line < 1:
         return "end_line must be >= 1"
 
-    if start_line is not None and end_line is not None and end_line < start_line:
+    if end_line < start_line:
         return "end_line must be >= start_line"
 
     return None
 
 
-def _validate_read_ranges(
-    start_line: int | None,
-    end_line: int | None,
-    ranges: object,
-) -> str | None:
-    """Validate the legacy range or the mutually exclusive multi-range form."""
+def _validate_read_ranges(ranges: object) -> str | None:
+    """Validate the optional public targeted-read representation."""
 
     if ranges is None:
-        return _validate_range(start_line, end_line)
-    if start_line is not None or end_line is not None:
-        return "ranges cannot be combined with start_line or end_line"
+        return None
     if not isinstance(ranges, list) or not ranges:
         return "ranges must be a non-empty list"
+    if len(ranges) > MAX_REQUESTED_RANGES:
+        return f"ranges may contain at most {MAX_REQUESTED_RANGES} items"
 
     for index, item in enumerate(ranges):
         if not isinstance(item, dict):

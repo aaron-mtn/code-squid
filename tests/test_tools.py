@@ -92,49 +92,24 @@ def test_run_command_exposes_and_returns_explicit_verification_intent(
     assert result["verification"] is True
 
 
-def test_read_file_supports_start_and_end_line_range(tmp_path: Path) -> None:
+def test_read_file_supports_one_targeted_range(tmp_path: Path) -> None:
     file_path = tmp_path / "input.txt"
     file_path.write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
 
-    result = read_file(tmp_path, str(file_path), start_line=2, end_line=3)
+    result = read_file(
+        tmp_path,
+        str(file_path),
+        ranges=[{"start_line": 2, "end_line": 3}],
+    )
 
     assert result["content"] == "one\ntwo\nthree\nfour\n"
     assert result["start_line"] == 1
     assert result["end_line"] == 4
+    assert result["returned_line_ranges"] == [
+        {"start_line": 1, "end_line": 4}
+    ]
     assert result["total_lines"] == 4
     assert result["ranged"] is True
-
-
-def test_read_file_supports_start_line_without_end_line(tmp_path: Path) -> None:
-    file_path = tmp_path / "input.txt"
-    file_path.write_text("one\ntwo\nthree\n", encoding="utf-8")
-
-    result = read_file(tmp_path, str(file_path), start_line=2)
-
-    assert result["content"] == "one\ntwo\nthree\n"
-    assert result["start_line"] == 1
-    assert result["end_line"] == 3
-    assert result["total_lines"] == 3
-    assert result["ranged"] is True
-    assert result["content_truncated"] is False
-    assert result["content_original_chars"] == len(result["content"])
-    assert result["content_returned_chars"] == len(result["content"])
-
-
-def test_read_file_supports_end_line_without_start_line(tmp_path: Path) -> None:
-    file_path = tmp_path / "input.txt"
-    file_path.write_text("one\ntwo\nthree\n", encoding="utf-8")
-
-    result = read_file(tmp_path, str(file_path), end_line=2)
-
-    assert result["content"] == "one\ntwo\nthree\n"
-    assert result["start_line"] == 1
-    assert result["end_line"] == 3
-    assert result["total_lines"] == 3
-    assert result["ranged"] is True
-    assert result["content_truncated"] is False
-    assert result["content_original_chars"] == len(result["content"])
-    assert result["content_returned_chars"] == len(result["content"])
 
 
 @pytest.mark.parametrize("line_count", [999, 1000])
@@ -184,24 +159,26 @@ def test_read_file_truncates_large_full_read_by_lines_and_reports_ranges(
     ]
     assert result["truncation_guidance"] == (
         "Full-file read truncated to 1000 of 1001 lines; returned lines 1-500 and "
-        "502-1001. Use start_line and end_line to inspect the missing relevant section."
+        "502-1001. Use ranges to inspect the missing relevant section."
     )
 
 
-def test_read_file_does_not_truncate_large_ranged_read(tmp_path: Path) -> None:
+def test_read_file_rejects_one_range_over_total_line_budget(tmp_path: Path) -> None:
     file_path = tmp_path / "large-range.txt"
     lines = [f"line {number}\n" for number in range(1, 1201)]
-    original_content = "".join(lines)
-    file_path.write_text(original_content, encoding="utf-8")
+    file_path.write_text("".join(lines), encoding="utf-8")
 
-    result = read_file(tmp_path, str(file_path), start_line=1, end_line=1200)
+    result = read_file(
+        tmp_path,
+        str(file_path),
+        ranges=[{"start_line": 1, "end_line": 1200}],
+    )
 
-    assert result["content"] == original_content
-    assert result["content_truncated"] is False
-    assert result["content_original_chars"] == len(original_content)
-    assert result["content_returned_chars"] == len(original_content)
-    assert "returned_line_ranges" not in result
-    assert "truncation_guidance" not in result
+    assert result["ok"] is False
+    assert result["error"] == (
+        "targeted read covers 1200 lines after normalization; "
+        "maximum total coverage is 1000 lines"
+    )
 
 
 def test_small_middle_range_expands_with_balanced_context(tmp_path: Path) -> None:
@@ -209,7 +186,11 @@ def test_small_middle_range_expands_with_balanced_context(tmp_path: Path) -> Non
     lines = [f"line {number}\n" for number in range(1, 1001)]
     file_path.write_text("".join(lines), encoding="utf-8")
 
-    result = read_file(tmp_path, str(file_path), start_line=520, end_line=560)
+    result = read_file(
+        tmp_path,
+        str(file_path),
+        ranges=[{"start_line": 520, "end_line": 560}],
+    )
 
     assert result["start_line"] == 466
     assert result["end_line"] == 615
@@ -223,7 +204,11 @@ def test_small_range_near_beginning_shifts_expansion_inside_file(tmp_path: Path)
     lines = [f"line {number}\n" for number in range(1, 301)]
     file_path.write_text("".join(lines), encoding="utf-8")
 
-    result = read_file(tmp_path, str(file_path), start_line=10, end_line=20)
+    result = read_file(
+        tmp_path,
+        str(file_path),
+        ranges=[{"start_line": 10, "end_line": 20}],
+    )
 
     assert (result["start_line"], result["end_line"]) == (1, 150)
     assert result["content"] == "".join(lines[:150])
@@ -234,7 +219,11 @@ def test_small_range_near_end_shifts_expansion_inside_file(tmp_path: Path) -> No
     lines = [f"line {number}\n" for number in range(1, 301)]
     file_path.write_text("".join(lines), encoding="utf-8")
 
-    result = read_file(tmp_path, str(file_path), start_line=290, end_line=300)
+    result = read_file(
+        tmp_path,
+        str(file_path),
+        ranges=[{"start_line": 290, "end_line": 300}],
+    )
 
     assert (result["start_line"], result["end_line"]) == (151, 300)
     assert result["content"] == "".join(lines[150:])
@@ -245,7 +234,11 @@ def test_range_at_or_above_minimum_is_unchanged(tmp_path: Path) -> None:
     lines = [f"line {number}\n" for number in range(1, 401)]
     file_path.write_text("".join(lines), encoding="utf-8")
 
-    result = read_file(tmp_path, str(file_path), start_line=100, end_line=249)
+    result = read_file(
+        tmp_path,
+        str(file_path),
+        ranges=[{"start_line": 100, "end_line": 249}],
+    )
 
     assert (result["start_line"], result["end_line"]) == (100, 249)
     assert result["content"] == "".join(lines[99:249])
@@ -349,10 +342,47 @@ def test_read_file_multi_range_budget_allows_exact_limit_and_rejects_excess(
         "tool": "read_file",
         "path": str(file_path),
         "error": (
-            "multi-range read covers 11 lines after normalization; "
+            "targeted read covers 11 lines after normalization; "
             "maximum total coverage is 10 lines"
         ),
     }
+
+
+def test_read_file_accepts_exactly_eight_ranges_within_budget(tmp_path: Path) -> None:
+    file_path = tmp_path / "eight-ranges.txt"
+    lines = [f"line {number}\n" for number in range(1, 17)]
+    file_path.write_text("".join(lines), encoding="utf-8")
+    ranges = [
+        {"start_line": line, "end_line": line}
+        for line in range(1, 16, 2)
+    ]
+
+    result = read_file(
+        tmp_path,
+        str(file_path),
+        ranges=ranges,
+        settings=ReadFileSettings(default_max_lines=8, minimum_range_lines=1),
+    )
+
+    assert result["ok"] is True
+    assert result["returned_line_ranges"] == ranges
+
+
+def test_read_file_rejects_more_than_eight_ranges(tmp_path: Path) -> None:
+    file_path = tmp_path / "nine-ranges.txt"
+    file_path.write_text("one\n", encoding="utf-8")
+
+    result = read_file(
+        tmp_path,
+        str(file_path),
+        ranges=[
+            {"start_line": line, "end_line": line}
+            for line in range(1, 10)
+        ],
+    )
+
+    assert result["ok"] is False
+    assert result["error"] == "ranges may contain at most 8 items"
 
 
 def test_read_file_expands_multi_ranges_before_merging_and_budgeting(
@@ -429,28 +459,6 @@ def test_run_command_keeps_shared_character_truncation(
 @pytest.mark.parametrize(
     ("kwargs", "error"),
     [
-        ({"start_line": 0}, "start_line must be >= 1"),
-        ({"end_line": 0}, "end_line must be >= 1"),
-        ({"start_line": 3, "end_line": 2}, "end_line must be >= start_line"),
-    ],
-)
-def test_read_file_rejects_invalid_ranges(tmp_path: Path, kwargs: dict, error: str) -> None:
-    file_path = tmp_path / "input.txt"
-    file_path.write_text("one\ntwo\nthree\n", encoding="utf-8")
-
-    result = read_file(tmp_path, str(file_path), **kwargs)
-
-    assert result == {
-        "ok": False,
-        "tool": "read_file",
-        "path": str(file_path),
-        "error": error,
-    }
-
-
-@pytest.mark.parametrize(
-    ("kwargs", "error"),
-    [
         (
             {"ranges": [{"start_line": 0, "end_line": 2}]},
             "ranges[0]: start_line must be >= 1",
@@ -463,12 +471,15 @@ def test_read_file_rejects_invalid_ranges(tmp_path: Path, kwargs: dict, error: s
             {"ranges": [{"start_line": 1}]},
             "ranges[0] requires start_line and end_line",
         ),
+        ({"ranges": []}, "ranges must be a non-empty list"),
+        ({"ranges": ["1-2"]}, "ranges[0] must be an object"),
         (
-            {
-                "start_line": 1,
-                "ranges": [{"start_line": 2, "end_line": 3}],
-            },
-            "ranges cannot be combined with start_line or end_line",
+            {"ranges": [{"start_line": 1, "end_line": 2, "extra": 3}]},
+            "ranges[0] may contain only start_line and end_line",
+        ),
+        (
+            {"ranges": [{"start_line": True, "end_line": 2}]},
+            "ranges[0] start_line and end_line must be integers",
         ),
     ],
 )
@@ -490,7 +501,11 @@ def test_read_file_range_past_eof_is_empty_and_sets_empty_range_end_line(tmp_pat
     file_path = tmp_path / "input.txt"
     file_path.write_text("one\ntwo\n", encoding="utf-8")
 
-    result = read_file(tmp_path, str(file_path), start_line=5, end_line=8)
+    result = read_file(
+        tmp_path,
+        str(file_path),
+        ranges=[{"start_line": 5, "end_line": 8}],
+    )
 
     assert result == {
         "ok": True,
@@ -502,21 +517,34 @@ def test_read_file_range_past_eof_is_empty_and_sets_empty_range_end_line(tmp_pat
         "content_returned_chars": 0,
         "start_line": 5,
         "end_line": 4,
+        "returned_line_ranges": [],
         "total_lines": 2,
         "ranged": True,
     }
 
 
-def test_read_file_definition_accepts_optional_line_range_arguments() -> None:
+def test_read_file_definition_exposes_only_path_and_optional_ranges() -> None:
     parameters = read_file_definition()["function"]["parameters"]
 
     assert parameters["required"] == ["path"]
-    assert parameters["properties"]["start_line"]["type"] == "integer"
-    assert parameters["properties"]["end_line"]["type"] == "integer"
+    assert set(parameters["properties"]) == {"path", "ranges"}
+    assert parameters["additionalProperties"] is False
     ranges = parameters["properties"]["ranges"]
     assert ranges["type"] == "array"
+    assert ranges["minItems"] == 1
+    assert ranges["maxItems"] == 8
     assert ranges["items"]["required"] == ["start_line", "end_line"]
     assert ranges["items"]["additionalProperties"] is False
+
+
+def test_read_file_execute_no_longer_accepts_top_level_line_bounds(
+    tmp_path: Path,
+) -> None:
+    file_path = tmp_path / "input.txt"
+    file_path.write_text("one\n", encoding="utf-8")
+
+    with pytest.raises(TypeError, match="unexpected keyword argument 'start_line'"):
+        read_file(tmp_path, str(file_path), start_line=1, end_line=1)
 
 
 def test_write_file_rejects_relative_path_succeeds_with_absolute_path_and_is_compact(tmp_path: Path) -> None:

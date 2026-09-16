@@ -324,17 +324,24 @@ def _run_overlapping_reads(tmp_path: Path, second_start: int):
     actions = [
         {
             "tool": "read_file",
-            "args": {"path": str(path), "start_line": 1, "end_line": 100},
+            "args": {
+                "path": str(path),
+                "ranges": [{"start_line": 1, "end_line": 100}],
+            },
             "tool_call_id": "read-1",
         },
         {
             "tool": "read_file",
             "args": {
                 "path": str(path),
-                "start_line": second_start,
-                # Keep the coverage-boundary fixture at the configured minimum
-                # so read_file's intentional small-range expansion is not involved.
-                "end_line": second_start + 149,
+                "ranges": [
+                    {
+                        "start_line": second_start,
+                        # Keep the coverage-boundary fixture at the configured minimum
+                        # so intentional small-range expansion is not involved.
+                        "end_line": second_start + 149,
+                    }
+                ],
             },
             "tool_call_id": "read-2",
         },

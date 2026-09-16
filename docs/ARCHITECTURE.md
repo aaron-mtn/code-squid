@@ -637,7 +637,8 @@ Hook handles each declared head/tail range independently and falls back to the
 original result when the payload's line count cannot be mapped safely to its
 metadata; it never rereads the filesystem to reconstruct source. A fully
 covered result becomes the existing small successful `already_covered` result
-with no file contents. Partial and full redundancy both advance the same
+with no file contents; targeted requests retain their requested regions as
+`requested_line_ranges`. Partial and full redundancy both advance the same
 persistent per-file strike system, while useful source is never discarded.
 At the configured threshold the Hook also returns action-oriented one-turn
 guidance through `HookResponse.additional_context`, directing the model to reuse
@@ -1694,7 +1695,7 @@ session workflow in the current MVP.
 
 The protected built-in Tool surface is:
 
-- `read_file(path, start_line=None, end_line=None, ranges=None)`
+- `read_file(path, ranges=None)`
 - `write_file(path, content)`
 - `apply_patch(path, old_text, new_text)` or candidate selection with `match_id`
 - `run_command(command, verification=false)`
@@ -1709,20 +1710,20 @@ root-level properties.
 
 - requires an absolute path
 - reads UTF-8 text
-- supports optional 1-based inclusive `start_line` and `end_line`
-- supports an alternative `ranges` list for scattered regions of the same
-  file; every item has inclusive `start_line` and `end_line`, and the two range
-  forms are mutually exclusive
+- uses an optional `ranges` list for every targeted read; it accepts one to
+  eight regions of the same file, and every item requires inclusive
+  `start_line` and `end_line` values
 - keeps read sizing in Core's small `ReadFileSettings`, whose defaults cap
   whole-file reads at 1,000 lines and target at least 150 lines for ranged reads
 - returns whole-file reads unchanged through 1,000 lines
 - for larger whole-file reads, returns 500 head lines and 500 tail lines with
   explicit `returned_line_ranges` and model-facing `truncation_guidance`
-- does not truncate ranged reads
+- rejects targeted reads whose normalized merged coverage exceeds the normal
+  total line budget rather than truncating them
 - expands a ranged read below 150 returned lines around the requested area,
   shifting the window at file edges to retain up to 150 lines when available;
   ranges already at least 150 lines and requests starting past EOF are unchanged
-- normalizes and expands each multi-range region with those same semantics,
+- normalizes and expands each requested region with those same semantics,
   then sorts and merges overlapping or adjacent effective regions before
   enforcing the 1,000-line total source-coverage budget; over-budget explicit
   multi-range requests fail instead of being partially returned

@@ -297,7 +297,7 @@ command summary.
 Code Squid exposes four local tools to the model:
 
 - `apply_patch(patch)`
-- `read_file(path, start_line=None, end_line=None, ranges=None)`
+- `read_file(path, ranges=None)`
 - `write_file(path, content)`
 - `run_command(command, verification=false)`
 
@@ -306,12 +306,11 @@ workspace root require approval in strict mode and are allowed without prompts
 in yolo mode.
 
 Full-file `read_file` results are limited to 1,000 lines, returning a 500-line
-head and tail with the actual ranges when needed. Explicit `start_line` /
-`end_line` reads remain untruncated; requests smaller than 150 lines include
-balanced surrounding context where the file has enough lines. A `ranges` list
-can request several scattered regions of the same file; normalized overlapping
-or adjacent regions merge, and their combined source coverage must remain
-within the same 1,000-line read budget.
+head and tail with the actual ranges when needed. Every targeted read uses a
+`ranges` list containing one to eight inclusive regions of the same file.
+Requests smaller than 150 lines include balanced surrounding context where the
+file has enough lines. Normalized overlapping or adjacent regions merge, and
+their combined source coverage must remain within the same 1,000-line budget.
 
 `run_command` runs a shell command from the current/configured repo root by
 default. It uses the local shell, has a timeout, and can mutate files or perform
