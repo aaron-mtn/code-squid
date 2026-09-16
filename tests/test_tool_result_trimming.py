@@ -541,6 +541,62 @@ def test_trimming_one_read_preserves_overlapping_visible_result(
     ]
 
 
+def test_multi_range_read_omits_covered_regions_but_preserves_novel_regions(
+    tmp_path: Path,
+) -> None:
+    path = str(tmp_path / "script.js")
+    lines = [f"line {line:03}\n" for line in range(1, 21)]
+    first = _read_result(path, "".join(lines[1:4]), start_line=2, end_line=4)
+    second_ranges = [
+        {"start_line": 2, "end_line": 5},
+        {"start_line": 15, "end_line": 17},
+    ]
+    second = _read_result(
+        path,
+        "".join((*lines[1:5], *lines[14:17])),
+        start_line=2,
+        end_line=17,
+        returned_line_ranges=second_ranges,
+    )
+    runner = HookRunner([RepeatedReadNudge()])
+    _observe_read(runner, path, "read-1", first)
+
+    shaped = _observe_read(runner, path, "read-2", second).updated_tool_output
+
+    assert shaped["content"] == "".join((lines[4], *lines[14:17]))
+    assert shaped["returned_line_ranges"] == [
+        {"start_line": 5, "end_line": 5},
+        {"start_line": 15, "end_line": 17},
+    ]
+    assert shaped["omitted_line_ranges"] == [
+        {"start_line": 2, "end_line": 4}
+    ]
+
+
+def test_fully_redundant_multi_range_read_is_masked(tmp_path: Path) -> None:
+    path = str(tmp_path / "script.js")
+    lines = [f"line {line:03}\n" for line in range(1, 21)]
+    ranges = [
+        {"start_line": 2, "end_line": 4},
+        {"start_line": 15, "end_line": 17},
+    ]
+    result = _read_result(
+        path,
+        "".join((*lines[1:4], *lines[14:17])),
+        start_line=2,
+        end_line=17,
+        returned_line_ranges=ranges,
+    )
+    runner = HookRunner([RepeatedReadNudge()])
+    _observe_read(runner, path, "read-1", result)
+
+    masked = _observe_read(runner, path, "read-2", result).updated_tool_output
+
+    assert masked["already_covered"] is True
+    assert masked["returned_line_ranges"] == ranges
+    assert "content" not in masked
+
+
 def test_trim_notification_stays_aligned_after_patch_line_shift(
     tmp_path: Path,
 ) -> None:

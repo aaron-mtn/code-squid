@@ -1677,7 +1677,7 @@ session workflow in the current MVP.
 
 The protected built-in Tool surface is:
 
-- `read_file(path, start_line=None, end_line=None)`
+- `read_file(path, start_line=None, end_line=None, ranges=None)`
 - `write_file(path, content)`
 - `apply_patch(path, old_text, new_text)` or candidate selection with `match_id`
 - `run_command(command, verification=false)`
@@ -1693,6 +1693,9 @@ root-level properties.
 - requires an absolute path
 - reads UTF-8 text
 - supports optional 1-based inclusive `start_line` and `end_line`
+- supports an alternative `ranges` list for scattered regions of the same
+  file; every item has inclusive `start_line` and `end_line`, and the two range
+  forms are mutually exclusive
 - keeps read sizing in Core's small `ReadFileSettings`, whose defaults cap
   whole-file reads at 1,000 lines and target at least 150 lines for ranged reads
 - returns whole-file reads unchanged through 1,000 lines
@@ -1702,6 +1705,14 @@ root-level properties.
 - expands a ranged read below 150 returned lines around the requested area,
   shifting the window at file edges to retain up to 150 lines when available;
   ranges already at least 150 lines and requests starting past EOF are unchanged
+- normalizes and expands each multi-range region with those same semantics,
+  then sorts and merges overlapping or adjacent effective regions before
+  enforcing the 1,000-line total source-coverage budget; over-budget explicit
+  multi-range requests fail instead of being partially returned
+- concatenates multi-range content in source order and reports each effective
+  region through the existing `returned_line_ranges` metadata, allowing
+  RepeatedReadNudge and request-only result trimming to keep their per-region
+  coverage and provenance behavior
 - reports the effective expanded `start_line` and `end_line`, so runtime Hooks
   track the content actually returned rather than only the requested interval
 - preserves the existing content, character-count, truncation, ranged-read,

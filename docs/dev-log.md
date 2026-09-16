@@ -1,3 +1,20 @@
+- 2026-09-15: Added optional same-file multi-range reads to Core's existing
+  `read_file` tool. A `ranges` request uses the legacy inclusive line and
+  minimum-context semantics for each region, sorts and merges overlapping or
+  adjacent effective ranges, and rejects combined coverage above the existing
+  `default_max_lines` budget. Results reuse `returned_line_ranges`, so
+  RepeatedReadNudge's novel-only shaping, mutation invalidation, compaction
+  reset, and trim-aware per-result provenance continue through the existing
+  machinery. Whole-file and single-range branches remain unchanged. Updated
+  the model-facing schema, prompt guidance, README, and architecture reference.
+  Verification: 228 focused read-tool, repeated-read, trimming, compaction,
+  executor, and runtime Hook tests passed. The full suite passed 1,192 tests
+  with the same nine unrelated baseline failures documented by preceding
+  patches: eight stale prompt-copy expectations and one Windows TTY
+  path-rendering assertion. Core, application, and test modules compiled, the
+  read-tool import/schema smoke check passed, and `git diff --check` passed. No
+  live model inference ran, and no follow-up is intentionally deferred.
+
 - 2026-09-15: Changed `RepeatedReadNudge` from ratio-based binary masking to
   exact novel-range shaping. Successful partially redundant reads now return
   only source lines not already visible and unchanged, including multiple

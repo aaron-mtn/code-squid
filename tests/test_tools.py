@@ -251,6 +251,133 @@ def test_range_at_or_above_minimum_is_unchanged(tmp_path: Path) -> None:
     assert result["content"] == "".join(lines[99:249])
 
 
+def test_read_file_returns_disjoint_ranges_in_source_order(tmp_path: Path) -> None:
+    file_path = tmp_path / "scattered.txt"
+    lines = [f"line {number}\n" for number in range(1, 21)]
+    file_path.write_text("".join(lines), encoding="utf-8")
+
+    result = read_file(
+        tmp_path,
+        str(file_path),
+        ranges=[
+            {"start_line": 15, "end_line": 17},
+            {"start_line": 2, "end_line": 4},
+        ],
+        settings=ReadFileSettings(default_max_lines=10, minimum_range_lines=1),
+    )
+
+    assert result["content"] == "".join((*lines[1:4], *lines[14:17]))
+    assert result["returned_line_ranges"] == [
+        {"start_line": 2, "end_line": 4},
+        {"start_line": 15, "end_line": 17},
+    ]
+    assert (result["start_line"], result["end_line"]) == (2, 17)
+    assert result["ranged"] is True
+
+
+@pytest.mark.parametrize(
+    ("ranges", "expected"),
+    [
+        (
+            [
+                {"start_line": 2, "end_line": 6},
+                {"start_line": 5, "end_line": 9},
+            ],
+            {"start_line": 2, "end_line": 9},
+        ),
+        (
+            [
+                {"start_line": 2, "end_line": 6},
+                {"start_line": 7, "end_line": 9},
+            ],
+            {"start_line": 2, "end_line": 9},
+        ),
+    ],
+)
+def test_read_file_merges_overlapping_and_adjacent_ranges(
+    tmp_path: Path,
+    ranges: list[dict[str, int]],
+    expected: dict[str, int],
+) -> None:
+    file_path = tmp_path / "merged.txt"
+    lines = [f"line {number}\n" for number in range(1, 21)]
+    file_path.write_text("".join(lines), encoding="utf-8")
+
+    result = read_file(
+        tmp_path,
+        str(file_path),
+        ranges=ranges,
+        settings=ReadFileSettings(default_max_lines=8, minimum_range_lines=1),
+    )
+
+    assert result["ok"] is True
+    assert result["content"] == "".join(lines[1:9])
+    assert result["returned_line_ranges"] == [expected]
+
+
+def test_read_file_multi_range_budget_allows_exact_limit_and_rejects_excess(
+    tmp_path: Path,
+) -> None:
+    file_path = tmp_path / "budget.txt"
+    lines = [f"line {number}\n" for number in range(1, 31)]
+    file_path.write_text("".join(lines), encoding="utf-8")
+    settings = ReadFileSettings(default_max_lines=10, minimum_range_lines=1)
+
+    exact = read_file(
+        tmp_path,
+        str(file_path),
+        ranges=[
+            {"start_line": 1, "end_line": 5},
+            {"start_line": 21, "end_line": 25},
+        ],
+        settings=settings,
+    )
+    excess = read_file(
+        tmp_path,
+        str(file_path),
+        ranges=[
+            {"start_line": 1, "end_line": 5},
+            {"start_line": 20, "end_line": 25},
+        ],
+        settings=settings,
+    )
+
+    assert exact["ok"] is True
+    assert len(exact["content"].splitlines()) == 10
+    assert excess == {
+        "ok": False,
+        "tool": "read_file",
+        "path": str(file_path),
+        "error": (
+            "multi-range read covers 11 lines after normalization; "
+            "maximum total coverage is 10 lines"
+        ),
+    }
+
+
+def test_read_file_expands_multi_ranges_before_merging_and_budgeting(
+    tmp_path: Path,
+) -> None:
+    file_path = tmp_path / "expanded.txt"
+    lines = [f"line {number}\n" for number in range(1, 501)]
+    file_path.write_text("".join(lines), encoding="utf-8")
+
+    result = read_file(
+        tmp_path,
+        str(file_path),
+        ranges=[
+            {"start_line": 400, "end_line": 400},
+            {"start_line": 100, "end_line": 100},
+        ],
+    )
+
+    assert result["returned_line_ranges"] == [
+        {"start_line": 26, "end_line": 175},
+        {"start_line": 326, "end_line": 475},
+    ]
+    assert len(result["content"].splitlines()) == 300
+
+
 def test_read_file_uses_supplied_sizing_settings_and_keeps_truncation_metadata(
     tmp_path: Path,
 ) -> None:
@@ -321,6 +448,44 @@ def test_read_file_rejects_invalid_ranges(tmp_path: Path, kwargs: dict, error: s
     }
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "error"),
+    [
+        (
+            {"ranges": [{"start_line": 0, "end_line": 2}]},
+            "ranges[0]: start_line must be >= 1",
+        ),
+        (
+            {"ranges": [{"start_line": 3, "end_line": 2}]},
+            "ranges[0]: end_line must be >= start_line",
+        ),
+        (
+            {"ranges": [{"start_line": 1}]},
+            "ranges[0] requires start_line and end_line",
+        ),
+        (
+            {
+                "start_line": 1,
+                "ranges": [{"start_line": 2, "end_line": 3}],
+            },
+            "ranges cannot be combined with start_line or end_line",
+        ),
+    ],
+)
+def test_read_file_rejects_invalid_multi_range_forms(
+    tmp_path: Path,
+    kwargs: dict,
+    error: str,
+) -> None:
+    file_path = tmp_path / "input.txt"
+    file_path.write_text("one\ntwo\nthree\n", encoding="utf-8")
+
+    result = read_file(tmp_path, str(file_path), **kwargs)
+
+    assert result["ok"] is False
+    assert result["error"] == error
+
+
 def test_read_file_range_past_eof_is_empty_and_sets_empty_range_end_line(tmp_path: Path) -> None:
     file_path = tmp_path / "input.txt"
     file_path.write_text("one\ntwo\n", encoding="utf-8")
@@ -348,6 +513,10 @@ def test_read_file_definition_accepts_optional_line_range_arguments() -> None:
     assert parameters["required"] == ["path"]
     assert parameters["properties"]["start_line"]["type"] == "integer"
     assert parameters["properties"]["end_line"]["type"] == "integer"
+    ranges = parameters["properties"]["ranges"]
+    assert ranges["type"] == "array"
+    assert ranges["items"]["required"] == ["start_line", "end_line"]
+    assert ranges["items"]["additionalProperties"] is False
 
 
 def test_write_file_rejects_relative_path_succeeds_with_absolute_path_and_is_compact(tmp_path: Path) -> None:
