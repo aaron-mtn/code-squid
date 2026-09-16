@@ -534,9 +534,11 @@ def test_trimming_one_read_preserves_overlapping_visible_result(
         on_read_result_trimmed=lambda event: _apply_trim_event(runner, event),
     )
 
-    assert _observe_read(runner, path, "read-3", second).updated_tool_output[
-        "already_covered"
-    ] is True
+    reread = _observe_read(runner, path, "read-3", second).updated_tool_output
+    assert reread["content"] == "".join(lines[3:5])
+    assert reread["returned_line_ranges"] == [
+        {"start_line": 4, "end_line": 5}
+    ]
 
 
 def test_trim_notification_stays_aligned_after_patch_line_shift(

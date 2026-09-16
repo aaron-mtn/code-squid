@@ -394,13 +394,17 @@ def test_default_runtime_repeated_read_fires_and_is_logged(tmp_path: Path) -> No
             if message.get("role") == "tool"
         )
     )
-    assert second_read_result["already_covered"] is True
-    assert "content" not in second_read_result
+    assert second_read_result["partially_redundant"] is True
+    assert second_read_result["returned_line_ranges"] == [
+        {"start_line": 151, "end_line": 195}
+    ]
+    assert second_read_result["content"].startswith("line 151\n")
+    assert "line 150\n" not in second_read_result["content"]
     assert "If the intended edit is clear" in model.calls[2][-1]["content"]
     assert "hook_execution" not in str(model.calls)
 
 
-def test_default_runtime_repeated_read_noop_is_still_logged(tmp_path: Path) -> None:
+def test_default_runtime_low_overlap_is_filtered_and_logged(tmp_path: Path) -> None:
     model, entries = _run_overlapping_reads(tmp_path, second_start=47)
 
     read_events = [
@@ -410,12 +414,9 @@ def test_default_runtime_repeated_read_noop_is_still_logged(tmp_path: Path) -> N
         and entry["hook"] == "RepeatedReadNudge"
         and entry["seam"] == "tool_result"
     ]
-    assert [event["status"] for event in read_events] == [
-        "no_effect",
-        "no_effect",
-    ]
-    assert all(event["produced_effect"] is False for event in read_events)
-    assert not any(
+    assert [event["status"] for event in read_events] == ["no_effect", "effect"]
+    assert read_events[1]["produced_effect"] is True
+    assert any(
         "If the intended edit is clear" in str(message.get("content", ""))
         for message in model.calls[2]
     )

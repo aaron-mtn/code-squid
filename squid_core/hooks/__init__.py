@@ -19,7 +19,6 @@ from .post_verification import (
 )
 from .redundant_read import (
     DEFAULT_REPEATED_READ_THRESHOLD,
-    SUBSTANTIAL_OVERLAP_RATIO,
     RepeatedReadNudge,
 )
 from .runner import (
@@ -58,7 +57,6 @@ __all__ = [
     "DEFAULT_REPEATED_READ_THRESHOLD",
     "RepeatedReadNudge",
     "RunFinishedContext",
-    "SUBSTANTIAL_OVERLAP_RATIO",
     "ToolResultContext",
     "list_user_hooks",
     "load_hook_infos",

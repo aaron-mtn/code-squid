@@ -1,4 +1,4 @@
-"""Detect repeated reads of substantially overlapping unchanged file ranges."""
+"""Detect repeated reads and omit unchanged source already visible to the model."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from .runner import HookResponse
 
 
 DEFAULT_REPEATED_READ_THRESHOLD = 1
-SUBSTANTIAL_OVERLAP_RATIO = 0.7
 
 _MAX_TRACKED_FILES = 100
 _MAX_RANGES_PER_FILE = 64
@@ -133,49 +132,51 @@ class RepeatedReadNudge:
         if path is None or not returned_ranges:
             return None
 
-        previous_coverage = self._coverage.get(path, ())
-        intersects_stale_range = _ranges_intersect(
-            self._stale_ranges.get(path, ()), returned_ranges
+        # Stale lines are not unchanged coverage even though older results may
+        # still contain their pre-patch text. A verification read must return
+        # those lines again while unchanged portions can still be omitted.
+        unchanged_coverage = _subtract_ranges(
+            self._coverage.get(path, ()),
+            self._stale_ranges.get(path, ()),
         )
-        is_redundant = not intersects_stale_range and (
-            _overlap_ratio(previous_coverage, returned_ranges)
-            >= SUBSTANTIAL_OVERLAP_RATIO
-        )
+        novel_ranges = _subtract_ranges(returned_ranges, unchanged_coverage)
+        covered_ranges = _subtract_ranges(returned_ranges, novel_ranges)
 
-        # Classify before recording so a read cannot overlap with itself. The
-        # dedicated range list keeps truncated head and tail coverage separate.
-        if not is_redundant:
-            self._record_coverage(path, returned_ranges)
-            tool_call_id = action.get("tool_call_id")
-            if isinstance(tool_call_id, str):
-                if len(self._read_result_coverage) >= _MAX_TRACKED_READ_RESULTS:
-                    oldest_call_id = next(iter(self._read_result_coverage))
-                    oldest_path, _segments = self._read_result_coverage.pop(
-                        oldest_call_id
-                    )
-                    self._rebuild_coverage_for_path(oldest_path)
-                self._read_result_coverage[tool_call_id] = (
-                    path,
-                    [
-                        (start, end, start, end)
-                        for start, end in returned_ranges
-                    ],
-                )
-        if intersects_stale_range:
+        if not covered_ranges:
+            self._record_read_coverage(path, action, returned_ranges)
             self._mark_stale_ranges_fresh(path, returned_ranges)
-
-        if not is_redundant:
             return None
 
-        count = self._redundant_counts.get(path, 0) + 1
+        if novel_ranges:
+            shaped_result = _partially_redundant_result(
+                result,
+                returned_ranges=returned_ranges,
+                covered_ranges=covered_ranges,
+                novel_ranges=novel_ranges,
+            )
+            # When content cannot be mapped exactly, preserving the original is
+            # safer than attaching incorrect line labels. Its complete visible
+            # range then needs provenance for later trim notifications.
+            visible_ranges = novel_ranges
+            if shaped_result is None:
+                shaped_result = result
+                visible_ranges = returned_ranges
+            self._record_read_coverage(path, action, visible_ranges)
+            self._mark_stale_ranges_fresh(path, returned_ranges)
+
+            count = self._record_redundant_strike(path)
+            return HookResponse(
+                updated_tool_output=shaped_result,
+                additional_context=_GUIDANCE if count == self.threshold else "",
+            )
+
+        count = self._record_redundant_strike(path)
         if count < self.threshold:
-            self._redundant_counts[path] = count
             return None
 
         if count == self.threshold:
             # Keep the first correction useful without rewarding the redundant
             # read with another copy of source that is already in context.
-            self._redundant_counts[path] = count
             return HookResponse(
                 updated_tool_output=_already_covered_result(
                     action,
@@ -188,13 +189,38 @@ class RepeatedReadNudge:
         # Keep the escalated strike until coverage is invalidated. A useful read
         # can add evidence for this file, but it does not undo earlier rereads.
         # Saturating the count avoids unbounded growth once escalation is active.
-        self._redundant_counts[path] = self.threshold + 1
         return HookResponse(
             updated_tool_output=_already_covered_result(
                 action,
                 result,
                 message=_ESCALATED_ALREADY_COVERED_MESSAGE,
             )
+        )
+
+    def _record_redundant_strike(self, path: str) -> int:
+        """Advance one file's persistent redundant-read escalation state."""
+        count = min(self._redundant_counts.get(path, 0) + 1, self.threshold + 1)
+        self._redundant_counts[path] = count
+        return count
+
+    def _record_read_coverage(
+        self,
+        path: str,
+        action: dict[str, Any],
+        visible_ranges: list[tuple[int, int]],
+    ) -> None:
+        """Record only source ranges actually exposed by this hook result."""
+        self._record_coverage(path, visible_ranges)
+        tool_call_id = action.get("tool_call_id")
+        if not isinstance(tool_call_id, str):
+            return
+        if len(self._read_result_coverage) >= _MAX_TRACKED_READ_RESULTS:
+            oldest_call_id = next(iter(self._read_result_coverage))
+            oldest_path, _segments = self._read_result_coverage.pop(oldest_call_id)
+            self._rebuild_coverage_for_path(oldest_path)
+        self._read_result_coverage[tool_call_id] = (
+            path,
+            [(start, end, start, end) for start, end in visible_ranges],
         )
 
     def _adjust_coverage_for_patch(
@@ -401,6 +427,77 @@ def _already_covered_result(
     return masked
 
 
+def _partially_redundant_result(
+    result: dict[str, Any],
+    *,
+    returned_ranges: list[tuple[int, int]],
+    covered_ranges: list[tuple[int, int]],
+    novel_ranges: list[tuple[int, int]],
+) -> dict[str, Any] | None:
+    """Return a copy containing only novel lines, or ``None`` if mapping is unsafe."""
+    content = result["content"]
+    lines = content.splitlines(keepends=True)
+    if returned_ranges != sorted(returned_ranges) or any(
+        current_start <= previous_end
+        for (_previous_start, previous_end), (current_start, _current_end) in zip(
+            returned_ranges, returned_ranges[1:]
+        )
+    ):
+        return None
+    expected_lines = sum(end - start + 1 for start, end in returned_ranges)
+    if len(lines) != expected_lines:
+        return None
+
+    kept_content: list[str] = []
+    content_offset = 0
+    for returned_start, returned_end in returned_ranges:
+        segment_length = returned_end - returned_start + 1
+        segment_lines = lines[content_offset : content_offset + segment_length]
+        content_offset += segment_length
+        for novel_start, novel_end in novel_ranges:
+            kept_start = max(returned_start, novel_start)
+            kept_end = min(returned_end, novel_end)
+            if kept_start <= kept_end:
+                kept_content.extend(
+                    segment_lines[
+                        kept_start - returned_start : kept_end - returned_start + 1
+                    ]
+                )
+
+    shaped = dict(result)
+    shaped["content"] = "".join(kept_content)
+    shaped["start_line"] = novel_ranges[0][0]
+    shaped["end_line"] = novel_ranges[-1][1]
+    shaped["returned_line_ranges"] = _range_dicts(novel_ranges)
+    shaped["content_returned_chars"] = len(shaped["content"])
+    shaped["partially_redundant"] = True
+    shaped["omitted_line_ranges"] = _range_dicts(covered_ranges)
+    shaped["message"] = (
+        f"Lines {_format_ranges(covered_ranges)} were already available unchanged "
+        f"and were omitted. Returning new content from lines "
+        f"{_format_ranges(novel_ranges)}."
+    )
+    if shaped.get("content_truncated") is True:
+        shaped["truncation_guidance"] = (
+            "The underlying full-file read was truncated; after omitting unchanged "
+            f"coverage, this result returns lines {_format_ranges(novel_ranges)}."
+        )
+    return shaped
+
+
+def _range_dicts(ranges: Sequence[tuple[int, int]]) -> list[dict[str, int]]:
+    """Render internal inclusive ranges in read_file result metadata form."""
+    return [{"start_line": start, "end_line": end} for start, end in ranges]
+
+
+def _format_ranges(ranges: Sequence[tuple[int, int]]) -> str:
+    """Format inclusive source ranges compactly for model-facing messages."""
+    return ", ".join(
+        str(start) if start == end else f"{start}-{end}"
+        for start, end in ranges
+    )
+
+
 def _current_result_message(
     action: dict[str, Any], result: dict[str, Any]
 ) -> str:
@@ -430,10 +527,11 @@ def _returned_ranges(result: dict[str, Any]) -> list[tuple[int, int]]:
         ranges = []
         for item in raw_ranges:
             if not isinstance(item, dict):
-                continue
+                return []
             line_range = _valid_range(item.get("start_line"), item.get("end_line"))
-            if line_range is not None:
-                ranges.append(line_range)
+            if line_range is None:
+                return []
+            ranges.append(line_range)
         return ranges
 
     fallback = _valid_range(result.get("start_line"), result.get("end_line"))
@@ -464,27 +562,6 @@ def _valid_range(start: Any, end: Any) -> tuple[int, int] | None:
 
 def _is_line_number(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 1
-
-
-def _overlap_ratio(
-    previous: Sequence[tuple[int, int]],
-    current: Sequence[tuple[int, int]],
-) -> float:
-    """Return the fraction of current returned lines covered by earlier reads."""
-    merged_previous = _merge_ranges(previous)
-    merged_current = _merge_ranges(current)
-    current_lines = sum(end - start + 1 for start, end in merged_current)
-    if current_lines == 0:
-        return 0.0
-
-    overlap_lines = 0
-    for current_start, current_end in merged_current:
-        for previous_start, previous_end in merged_previous:
-            overlap_start = max(current_start, previous_start)
-            overlap_end = min(current_end, previous_end)
-            if overlap_start <= overlap_end:
-                overlap_lines += overlap_end - overlap_start + 1
-    return overlap_lines / current_lines
 
 
 def _ranges_intersect(

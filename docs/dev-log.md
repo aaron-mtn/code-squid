@@ -1,3 +1,23 @@
+- 2026-09-15: Changed `RepeatedReadNudge` from ratio-based binary masking to
+  exact novel-range shaping. Successful partially redundant reads now return
+  only source lines not already visible and unchanged, including multiple
+  fragments and truncated head/tail results, with accurate returned-range and
+  character metadata plus a compact omission message. Fully new reads remain
+  unchanged; fully covered reads retain the existing `already_covered` mask.
+  Partial reads advance the persistent per-file strike while recording only
+  source actually left visible, so later reads and `read_result_trimmed`
+  continue to reflect model-visible coverage. Unsafe content-to-range mappings
+  conservatively preserve the original result. The obsolete 70% overlap
+  constant and public export were removed. Mutation invalidation, stale-range
+  refresh, compaction, and post-verification behavior were not redesigned.
+  Verification: 42 focused repeated-read tests and 163 broader Hook/runtime
+  tests passed. The full suite passed 1,181 tests with the same nine unrelated
+  baseline failures documented by preceding patches: eight stale prompt-copy
+  expectations and one Windows TTY path-rendering assertion. Core,
+  application, and test modules compiled, the public import smoke test passed,
+  and `git diff --check` passed. No live model inference ran, and no follow-up
+  is intentionally deferred.
+
 - 2026-09-15: Made `RepeatedReadNudge` keep each file's redundant-read strikes
   across later useful reads and after stronger escalation. Counts now remain at
   the escalated level until existing evidence-invalidation seams clear them,

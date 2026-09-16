@@ -7,6 +7,7 @@ from squid_core.hooks import (
     CompactionAppliedContext,
     HookResponse,
     HookRunner,
+    ReadResultTrimmedContext,
     RepeatedReadNudge,
     ToolResultContext,
 )
@@ -27,6 +28,13 @@ ESCALATED_ALREADY_COVERED_MESSAGE = (
     "being returned again. Reuse the existing context, stop rereading this "
     "section, and take the next useful action."
 )
+
+
+def _source(start: int, end: int) -> str:
+    """Build predictable one-line source records for slicing assertions."""
+    return "".join(f"line {line}\n" for line in range(start, end + 1))
+
+
 @dataclass(frozen=True)
 class _Context:
     action: dict
@@ -349,19 +357,22 @@ def test_nudge_is_emitted_only_at_configured_threshold(tmp_path: Path) -> None:
     assert _read(hook, path).updated_tool_output["already_covered"] is True
 
 
-def test_heavily_overlapping_returned_ranges_count_as_redundant(
+def test_partially_overlapping_result_is_not_fully_masked_when_mapping_is_unsafe(
     tmp_path: Path,
 ) -> None:
     hook = RepeatedReadNudge()
     path = tmp_path / "a.py"
     _read(hook, path, returned_start=1, returned_end=100)
 
-    _assert_first_reread_is_masked(
-        _read(hook, path, returned_start=31, returned_end=130)
-    )
+    response = _read(hook, path, returned_start=31, returned_end=130)
+
+    assert response is not None
+    assert response.updated_tool_output["content"] == "FILE CONTENTS"
+    assert "already_covered" not in response.updated_tool_output
+    assert hook._redundant_counts
 
 
-def test_exactly_seventy_percent_overlap_counts_as_redundant(
+def test_any_partial_overlap_counts_as_redundant(
     tmp_path: Path,
 ) -> None:
     hook = RepeatedReadNudge()
@@ -371,13 +382,186 @@ def test_exactly_seventy_percent_overlap_counts_as_redundant(
     assert _read(hook, path, returned_start=1, returned_end=100) is not None
 
 
-def test_low_overlap_returned_range_does_not_count(tmp_path: Path) -> None:
+def test_low_overlap_returned_range_counts_as_partial_redundancy(
+    tmp_path: Path,
+) -> None:
     hook = RepeatedReadNudge()
     path = tmp_path / "a.py"
     _read(hook, path, returned_start=1, returned_end=100)
 
-    assert _read(hook, path, returned_start=32, returned_end=131) is None
-    assert hook._redundant_counts == {}
+    assert _read(hook, path, returned_start=100, returned_end=199) is not None
+    assert hook._redundant_counts
+
+
+def test_partial_overlap_at_start_returns_only_trailing_novel_lines(
+    tmp_path: Path,
+) -> None:
+    hook = RepeatedReadNudge()
+    path = tmp_path / "start.py"
+    _read(hook, path, returned_end=3, content=_source(1, 3))
+
+    response = _read(hook, path, returned_end=6, content=_source(1, 6))
+
+    output = response.updated_tool_output
+    assert output["content"] == _source(4, 6)
+    assert (output["start_line"], output["end_line"]) == (4, 6)
+    assert output["returned_line_ranges"] == [
+        {"start_line": 4, "end_line": 6}
+    ]
+    assert output["omitted_line_ranges"] == [
+        {"start_line": 1, "end_line": 3}
+    ]
+    assert output["content_returned_chars"] == len(_source(4, 6))
+    assert "Lines 1-3 were already available unchanged" in output["message"]
+
+
+def test_partial_overlap_at_end_returns_only_leading_novel_lines(
+    tmp_path: Path,
+) -> None:
+    hook = RepeatedReadNudge()
+    path = tmp_path / "end.py"
+    _read(hook, path, returned_start=4, returned_end=6, content=_source(4, 6))
+
+    output = _read(
+        hook, path, returned_end=6, content=_source(1, 6)
+    ).updated_tool_output
+
+    assert output["content"] == _source(1, 3)
+    assert output["returned_line_ranges"] == [
+        {"start_line": 1, "end_line": 3}
+    ]
+
+
+def test_middle_and_multiple_covered_ranges_produce_novel_fragments(
+    tmp_path: Path,
+) -> None:
+    hook = RepeatedReadNudge()
+    path = tmp_path / "fragments.py"
+    _read(hook, path, returned_start=2, returned_end=3, content=_source(2, 3))
+    _read(hook, path, returned_start=5, returned_end=5, content=_source(5, 5))
+
+    output = _read(
+        hook, path, returned_end=6, content=_source(1, 6)
+    ).updated_tool_output
+
+    assert output["content"] == _source(1, 1) + _source(4, 4) + _source(6, 6)
+    assert output["returned_line_ranges"] == [
+        {"start_line": 1, "end_line": 1},
+        {"start_line": 4, "end_line": 4},
+        {"start_line": 6, "end_line": 6},
+    ]
+    assert output["omitted_line_ranges"] == [
+        {"start_line": 2, "end_line": 3},
+        {"start_line": 5, "end_line": 5},
+    ]
+
+
+def test_truncated_multi_range_result_filters_each_segment_independently(
+    tmp_path: Path,
+) -> None:
+    hook = RepeatedReadNudge()
+    path = tmp_path / "truncated.py"
+    _read(
+        hook,
+        path,
+        returned_end=10,
+        returned_ranges=[
+            {"start_line": 1, "end_line": 2},
+            {"start_line": 9, "end_line": 10},
+        ],
+        content=_source(1, 2) + _source(9, 10),
+    )
+    result_content = _source(1, 4) + _source(7, 10)
+
+    output = _read(
+        hook,
+        path,
+        returned_end=10,
+        returned_ranges=[
+            {"start_line": 1, "end_line": 4},
+            {"start_line": 7, "end_line": 10},
+        ],
+        content=result_content,
+    ).updated_tool_output
+
+    assert output["content"] == _source(3, 4) + _source(7, 8)
+    assert output["returned_line_ranges"] == [
+        {"start_line": 3, "end_line": 4},
+        {"start_line": 7, "end_line": 8},
+    ]
+    assert (output["start_line"], output["end_line"]) == (3, 8)
+
+
+def test_partial_read_expands_coverage_and_preserves_its_strike(
+    tmp_path: Path,
+) -> None:
+    hook = RepeatedReadNudge()
+    path = tmp_path / "expanded.py"
+    _read(hook, path, returned_end=3, content=_source(1, 3))
+
+    partial = _read(hook, path, returned_end=6, content=_source(1, 6))
+    assert partial.updated_tool_output["content"] == _source(4, 6)
+    assert hook._redundant_counts
+
+    # A fully useful read adds coverage without forgiving the earlier partial.
+    assert _read(
+        hook,
+        path,
+        returned_start=7,
+        returned_end=8,
+        content=_source(7, 8),
+    ) is None
+    assert hook._redundant_counts
+    repeated = _read(hook, path, returned_end=8, content=_source(1, 8))
+    assert repeated.updated_tool_output["already_covered"] is True
+    assert repeated.updated_tool_output["message"] == (
+        ESCALATED_ALREADY_COVERED_MESSAGE
+    )
+
+
+def test_trimmed_partial_result_retracts_only_its_remaining_visible_source(
+    tmp_path: Path,
+) -> None:
+    hook = RepeatedReadNudge()
+    path = tmp_path / "trimmed.py"
+    _read(hook, path, returned_end=3, content=_source(1, 3))
+    action = {
+        "tool": "read_file",
+        "tool_call_id": "partial-read",
+        "args": {"path": str(path)},
+    }
+    result = {
+        "ok": True,
+        "tool": "read_file",
+        "path": str(path),
+        "content": _source(1, 6),
+        "start_line": 1,
+        "end_line": 6,
+    }
+    response = hook.tool_result(_Context(action=action, result=result))
+    assert response.updated_tool_output["returned_line_ranges"] == [
+        {"start_line": 4, "end_line": 6}
+    ]
+
+    hook.read_result_trimmed(
+        ReadResultTrimmedContext(
+            tool_call_id="partial-read",
+            path=str(path),
+            retained_line_ranges=((5, 5),),
+        )
+    )
+    reread = _read(
+        hook,
+        path,
+        returned_start=4,
+        returned_end=6,
+        content=_source(4, 6),
+    )
+    assert reread.updated_tool_output["content"] == _source(4, 4) + _source(6, 6)
+    assert reread.updated_tool_output["returned_line_ranges"] == [
+        {"start_line": 4, "end_line": 4},
+        {"start_line": 6, "end_line": 6},
+    ]
 
 
 def test_useful_read_preserves_pending_escalation(tmp_path: Path) -> None:
@@ -436,7 +620,14 @@ def test_expanded_read_metadata_drives_repeated_read_coverage(tmp_path: Path) ->
             result=second_result,
         )
     )
-    _assert_first_reread_is_masked(response)
+    assert response is not None
+    output = response.updated_tool_output
+    assert output["content"] == "".join(
+        f"line {line}\n" for line in range(26, 30)
+    )
+    assert output["returned_line_ranges"] == [
+        {"start_line": 26, "end_line": 29}
+    ]
 
 
 def test_truncated_full_file_tracks_each_returned_range_separately(
@@ -589,7 +780,10 @@ def test_patch_verification_read_is_returned_once_then_masked(
     assert "const line165 = 'changed';" in first_verification.updated_tool_output[
         "content"
     ]
-    assert first_verification.additional_context == ""
+    assert first_verification.additional_context == GUIDANCE
+    assert first_verification.updated_tool_output["returned_line_ranges"] == [
+        {"start_line": 165, "end_line": 165}
+    ]
 
     repeated_verification = runner.tool_result(
         context("read_file", verify_args, verify_result)
@@ -617,10 +811,14 @@ def test_partial_patch_preserves_both_sides_but_stale_overlap_is_readable(
     assert list(hook._coverage.values()) == [[(100, 159), (171, 250)]]
     assert list(hook._stale_ranges.values()) == [[(160, 170)]]
     # Most of this range remains covered, but it includes changed source.
-    assert _read(hook, path, returned_start=150, returned_end=180) is None
+    verification = _read(hook, path, returned_start=150, returned_end=180)
+    assert verification is not None
+    assert "already_covered" not in verification.updated_tool_output
     assert hook._stale_ranges == {}
-    _assert_first_reread_is_masked(
-        _read(hook, path, returned_start=150, returned_end=180)
+    repeated = _read(hook, path, returned_start=150, returned_end=180)
+    assert repeated.updated_tool_output["already_covered"] is True
+    assert repeated.updated_tool_output["message"] == (
+        ESCALATED_ALREADY_COVERED_MESSAGE
     )
 
 
@@ -642,9 +840,13 @@ def test_line_count_patch_shifts_coverage_and_uncovers_replacement(
 
     assert list(hook._coverage.values()) == [[(100, 159), (174, 253)]]
     assert list(hook._stale_ranges.values()) == [[(160, 173)]]
-    assert _read(hook, path, returned_start=150, returned_end=180) is None
-    _assert_first_reread_is_masked(
-        _read(hook, path, returned_start=174, returned_end=253)
+    verification = _read(hook, path, returned_start=150, returned_end=180)
+    assert verification is not None
+    assert "already_covered" not in verification.updated_tool_output
+    repeated = _read(hook, path, returned_start=174, returned_end=253)
+    assert repeated.updated_tool_output["already_covered"] is True
+    assert repeated.updated_tool_output["message"] == (
+        ESCALATED_ALREADY_COVERED_MESSAGE
     )
 
 
@@ -708,7 +910,9 @@ def test_mutation_of_one_file_preserves_other_file_coverage(
     )
 
     _assert_first_reread_is_masked(_read(hook, other_path))
-    assert _read(hook, changed_path, returned_start=35, returned_end=50) is None
+    changed = _read(hook, changed_path, returned_start=35, returned_end=50)
+    assert changed is not None
+    assert "already_covered" not in changed.updated_tool_output
 
 
 def test_successful_write_file_resets_pending_escalation(tmp_path: Path) -> None:

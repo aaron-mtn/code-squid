@@ -625,15 +625,20 @@ the changed span while preserving coverage before it and shifting coverage
 after it by the line-count delta; per-result original-to-current mappings keep
 later trim notifications aligned across that shift. The Hook separately
 remembers patch-stale spans so the first successful read returning changed
-lines is never masked just because its wider verification window still overlaps
-at least 70% known surrounding content. That read clears only the stale lines
-it returned and records them as fresh coverage, so an immediate repeat is
-redundant again. When
-at least 70% of any other returned read is already covered for that unchanged
-range, it counts as redundant; by default
-the first redundant reread after the useful original replaces the model-facing
-result through `updated_tool_output` with a small successful `already_covered`
-result containing no file contents. It also returns action-oriented one-turn
+lines is never masked merely because its wider verification window also
+contains known surrounding content. For every successful read, the Hook
+subtracts visible unchanged coverage from the actual returned ranges. A fully
+new result passes through unchanged. A partially redundant result is shaped
+from the already-returned payload so it contains only novel source fragments,
+with `start_line`, `end_line`, `returned_line_ranges`, returned-character
+metadata, and an omission summary updated to describe those fragments. The
+Hook handles each declared head/tail range independently and falls back to the
+original result when the payload's line count cannot be mapped safely to its
+metadata; it never rereads the filesystem to reconstruct source. A fully
+covered result becomes the existing small successful `already_covered` result
+with no file contents. Partial and full redundancy both advance the same
+persistent per-file strike system, while useful source is never discarded.
+At the configured threshold the Hook also returns action-oriented one-turn
 guidance through `HookResponse.additional_context`, directing the model to reuse
 the current context and make a focused edit when the intended change is clear.
 The repeated-read Hook does not know about verification; post-verification
@@ -652,18 +657,19 @@ state intact because the original transcript remains active. The Hook never
 blocks or transforms an action; `AgentLoop` only bridges the generic trimming
 notification into the Hook seam.
 
-There is no separate "small reread" size limit in `RepeatedReadNudge`: the
-overlap ratio applies to any non-empty valid returned range metadata, including
-an effective range expanded by `read_file`. A
+There is no separate "small reread" size or overlap-ratio limit in
+`RepeatedReadNudge`: any covered portion is omitted from a partially redundant
+result, including an effective range expanded by `read_file`. A
 successful read is tracked only when `ok` is exactly `true`, its path can be
 resolved from result or action metadata, and it reports a string source payload
 plus a valid inclusive `start_line`/`end_line` range or valid
 `returned_line_ranges`. Coverage is the
 merged union of prior returned ranges for that normalized path, bounded to 100
-files and 64 ranges per file. The current range is redundant when at least 70%
-of its returned lines are in that union. The default threshold is one redundant
-reread, so an original useful read followed by one qualifying overlap emits
-guidance while masking that reread; the following qualifying overlap receives
+files and 64 ranges per file. Per-result provenance records the source the Hook
+actually left visible, so later `read_result_trimmed` notifications retract only
+those ranges. The default threshold is one redundant read, so an original
+useful read followed by one overlap emits guidance while filtering or masking
+that read; the following redundant read receives
 the stronger masked correction. Strikes are per file rather than globally
 adjacent: non-redundant reads add coverage without resetting them, and unrelated
 Tool calls or reads of other files do not affect them. They reset when their
