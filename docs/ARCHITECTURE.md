@@ -586,29 +586,28 @@ hosts; it no longer controls prompt rendering.
 Code Squid wires Core's `RepeatedReadNudge` and `PostVerificationNudge`
 immediately before the repeated-failure Hook. `PostVerificationNudge` is
 self-contained: it records whether a successful `run_command` result explicitly
-marked `verification=true` is current, the normalized command signatures that
-have succeeded for the current implementation, and its post-verification
-no-progress streak. Signatures preserve internal shell text but normalize
-surrounding whitespace and line endings; a different signature is verification
-progress without attempting to rank test breadth. A failed verification leaves
-verification non-current because it produced new, actionable information.
+marked `verification=true` is current and the number of subsequent successful
+Tool actions without an implementation change. Verification command text has no
+identity semantics: once verification is current, another successful explicit
+verification is continued post-verification activity rather than a fresh window.
+A failed verification leaves verification non-current so the agent can address
+the new, actionable failure normally.
 Successful `write_file` and `apply_patch` results invalidate all facts tied to
 the prior implementation. The Hook starts empty for every run and is not
 persisted.
 
-After verification is current, each successful ordinary `read_file` result and
-each duplicate successful verification counts as an action without implementation
-or verification progress. At three actions, the Hook supplies one-turn advisory
-guidance asking the model to identify a concrete unresolved problem or finalize,
-then resets the streak so the message does not repeat forever. New successful
-verification, successful structured mutation, failed explicit verification, and
-the start of a run also reset the policy streak. It does not block or finalize
-the run. Because `RepeatedReadNudge` runs first, a read it masks as already
-covered still advances the post-verification streak but does not emit stacked
-post-verification guidance on that result. Arbitrary non-verification commands
-remain conservatively unclassified:
-the current command Tool has no generic workspace-mutation signal, and the Hooks
-do not parse command names.
+After verification is current, every successful non-mutation Tool result counts,
+including reads, searches, commands, other Tool activity, and repeated explicit
+verification. At the default threshold of two actions, the Hook supplies direct
+one-turn advisory guidance to act on a concrete remaining problem or finalize,
+then resets the counter so the message does not repeat forever. The first
+successful verification after a mutation, successful structured mutation,
+failed explicit verification, and the start of a run reset the counter. It does
+not block or finalize the run. Because `RepeatedReadNudge` runs first, a read it
+masks as already covered still advances the post-verification count but does not
+emit stacked post-verification guidance on that result. This policy deliberately
+recognizes only the built-in `write_file` and `apply_patch` mutation Tools; it
+does not infer workspace changes from command text or filesystem observation.
 
 `RepeatedReadNudge` keeps bounded, run-local line-range coverage from
 successful `read_file` source results under normalized absolute path keys,

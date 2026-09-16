@@ -1,3 +1,18 @@
+- 2026-09-15: Strengthened `PostVerificationNudge` around a deliberately small
+  state model: current verification plus a count of subsequent successful Tool
+  actions. The default threshold is now two; reads, searches, commands, other
+  successful non-mutation activity, and repeated verification all advance the
+  count regardless of verification command text. Successful `apply_patch` or
+  `write_file` and failed explicit verification invalidate the current receipt
+  and reset the count. Command-signature tracking was removed. The Hook remains
+  advisory and retains its non-stacking behavior with `RepeatedReadNudge`.
+  Verification: 103 focused post-verification/wiring/agent-loop tests passed.
+  The full suite passed 1,174 tests with the same nine unrelated baseline
+  failures documented by the preceding patch: eight stale prompt-copy
+  expectations and one Windows TTY path-rendering assertion. Core, application,
+  and test modules compiled, and `git diff --check` passed. No live model
+  inference ran, and no follow-up is intentionally deferred.
+
 - 2026-09-15: Made `PostVerificationNudge` self-contained and removed the
   standalone `VerificationState` Hook. The nudge now privately owns current
   verification, normalized successful-command signatures, duplicate detection,
