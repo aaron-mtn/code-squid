@@ -25,6 +25,7 @@ from squid_core.hooks import (
     RepeatedFailureNudge,
     RepeatedReadNudge,
     PostVerificationNudge,
+    TooManyReadsNudge,
     load_user_hooks,
 )
 from squid_core.mods import ResolvedMod, resolve_mod
@@ -260,6 +261,7 @@ def build_coding_task_run(
         hook_runner=hook_runner,
         include_user_hooks=include_user_hooks,
         app_home=app_home,
+        too_many_reads_enabled=settings.runtime.too_many_reads_enabled,
     )
     loop = build_core_agent_loop(
         repo_root=repo_root,
@@ -297,8 +299,10 @@ def build_hook_runner(
     hook_runner: HookRunner | None = None,
     include_user_hooks: bool = False,
     app_home: Path | str | None = None,
+    too_many_reads_enabled: bool = True,
 ) -> HookRunner:
     repeated_read_hook = RepeatedReadNudge(source="Code Squid")
+    too_many_reads_hook = TooManyReadsNudge(source="Code Squid")
     post_verification_hook = PostVerificationNudge(
         source="Code Squid",
     )
@@ -307,15 +311,18 @@ def build_hook_runner(
         run_command_guidance=RUN_COMMAND_RECOVERY_GUIDANCE,
         source="Code Squid",
     )
+    built_in_hooks = [repeated_read_hook]
+    if too_many_reads_enabled:
+        built_in_hooks.append(too_many_reads_hook)
+    built_in_hooks.extend((post_verification_hook, no_progress_hook))
+
     if hook_runner is not None:
         # Application policy remains active when callers replace the optional
         # Hook collection for tests or embedding.
         return HookRunner(
             [
                 *hook_runner.hooks,
-                repeated_read_hook,
-                post_verification_hook,
-                no_progress_hook,
+                *built_in_hooks,
             ]
         )
 
@@ -323,13 +330,7 @@ def build_hook_runner(
     if include_user_hooks:
         combined_hooks.extend(load_user_hooks(app_home=code_squid_home(app_home)))
 
-    combined_hooks.extend(
-        (
-            repeated_read_hook,
-            post_verification_hook,
-            no_progress_hook,
-        )
-    )
+    combined_hooks.extend(built_in_hooks)
 
     return HookRunner(combined_hooks)
 

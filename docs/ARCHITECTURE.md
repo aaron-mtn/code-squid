@@ -584,8 +584,21 @@ mechanisms while `code_squid.agent_setup` owns both guidance texts and enables
 them for Code Squid runs. Its `source` remains configuration metadata used by
 hosts; it no longer controls prompt rendering.
 
-Code Squid wires Core's `RepeatedReadNudge` and `PostVerificationNudge`
-immediately before the repeated-failure Hook. `PostVerificationNudge` is
+Code Squid wires Core's `RepeatedReadNudge`, `TooManyReadsNudge`, and
+`PostVerificationNudge` immediately before the repeated-failure Hook.
+`TooManyReadsNudge` counts successful `read_file` results since the last
+successful `write_file` or `apply_patch`. Commands, other Tools, and all failed
+results are neutral: they neither increment nor reset the count. It supplies
+one-turn advisory context on the third successful read, stronger context on the
+fifth and every later read, and never blocks or transforms the read result.
+Unlike source coverage, this behavioral count intentionally survives transcript
+compaction; only a successful built-in mutation or `before_run` resets it. The
+thresholds remain constructor arguments in Core, while Code Squid enables the
+Hook by default and exposes the independent boolean
+`runtime.too_many_reads_enabled` application setting. Disabling it does not
+disable any other built-in Hook.
+
+`PostVerificationNudge` is
 self-contained: it records whether a successful `run_command` result explicitly
 marked `verification=true` is current and the number of subsequent successful
 Tool actions without an implementation change. Verification command text has no

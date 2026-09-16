@@ -47,6 +47,7 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert settings.runtime.approval_mode == "never"
     assert settings.runtime.max_tool_steps is None
     assert settings.runtime.stream_assistant_text is False
+    assert settings.runtime.too_many_reads_enabled is True
     assert settings.compaction.enabled is True
     assert settings.compaction.trigger_input_tokens == 25_000
     assert settings.compaction.compact_fraction == 0.8
@@ -63,6 +64,27 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert runtime_settings.compaction.min_recent_chunks == 2
     assert runtime_settings.read_file.default_max_lines == 1000
     assert runtime_settings.read_file.minimum_range_lines == 150
+
+
+def test_too_many_reads_hook_can_be_disabled_in_runtime_settings(
+    tmp_path: Path,
+) -> None:
+    write_settings(tmp_path, {"runtime": {"too_many_reads_enabled": False}})
+
+    settings = load_settings(tmp_path)
+
+    assert settings.runtime.too_many_reads_enabled is False
+
+
+@pytest.mark.parametrize("enabled", [None, 0, 1, "false"])
+def test_invalid_too_many_reads_enabled_raises(
+    tmp_path: Path,
+    enabled: object,
+) -> None:
+    write_settings(tmp_path, {"runtime": {"too_many_reads_enabled": enabled}})
+
+    with pytest.raises(ValueError, match="runtime\\.too_many_reads_enabled"):
+        load_settings(tmp_path)
 
 
 def test_application_settings_survive_workspace_change_and_process_reload(

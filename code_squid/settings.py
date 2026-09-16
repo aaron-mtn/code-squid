@@ -41,6 +41,7 @@ VALID_APPROVAL_MODES = {"never", "always", "guarded"}
 # a loop guard for smaller or less reliable models.
 DEFAULT_MAX_TOOL_STEPS = None
 DEFAULT_STREAM_ASSISTANT_TEXT = False
+DEFAULT_TOO_MANY_READS_ENABLED = True
 
 DEFAULT_COMPACTION_ENABLED = True
 DEFAULT_COMPACTION_TRIGGER_INPUT_TOKENS = 25_000
@@ -70,6 +71,7 @@ class RuntimeSettings:
     approval_mode: str = DEFAULT_APPROVAL_MODE
     max_tool_steps: int | None = DEFAULT_MAX_TOOL_STEPS
     stream_assistant_text: bool = DEFAULT_STREAM_ASSISTANT_TEXT
+    too_many_reads_enabled: bool = DEFAULT_TOO_MANY_READS_ENABLED
 
 
 @dataclass(frozen=True)
@@ -244,6 +246,22 @@ def _stream_assistant_text(runtime_settings: dict[str, Any], settings_path: Path
         return stream_assistant_text
 
     return stream_env == "1"
+
+
+def _too_many_reads_enabled(
+    runtime_settings: dict[str, Any],
+    settings_path: Path,
+) -> bool:
+    enabled = runtime_settings.get(
+        "too_many_reads_enabled",
+        DEFAULT_TOO_MANY_READS_ENABLED,
+    )
+    if not isinstance(enabled, bool):
+        raise ValueError(
+            f"Invalid settings JSON in {settings_path}: "
+            "runtime.too_many_reads_enabled must be a boolean"
+        )
+    return enabled
 
 
 def _positive_int(value: Any, field_path: str, settings_path: Path) -> int:
@@ -506,6 +524,7 @@ def load_settings(repo_root: Path) -> Settings:
     approval_mode = _approval_mode(runtime_settings, settings_path)
     max_tool_steps = _max_tool_steps(runtime_settings, settings_path)
     stream_assistant_text = _stream_assistant_text(runtime_settings, settings_path)
+    too_many_reads_enabled = _too_many_reads_enabled(runtime_settings, settings_path)
     compaction = _compaction_settings(compaction_settings, settings_path)
 
     debug_env = os.getenv("CODE_SQUID_DEBUG")
@@ -528,6 +547,7 @@ def load_settings(repo_root: Path) -> Settings:
             approval_mode=approval_mode,
             max_tool_steps=max_tool_steps,
             stream_assistant_text=stream_assistant_text,
+            too_many_reads_enabled=too_many_reads_enabled,
         ),
         compaction=compaction,
         providers=providers,

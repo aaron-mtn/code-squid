@@ -19,6 +19,7 @@ from squid_core.hooks import (
     RepeatedFailureNudge,
     RepeatedReadNudge,
     PostVerificationNudge,
+    TooManyReadsNudge,
     HookResponse,
 )
 from code_squid.agent_setup import (
@@ -255,13 +256,48 @@ def test_default_runner_behavior_does_not_load_user_hooks(
 def test_code_squid_always_wires_product_owned_no_progress_guidance() -> None:
     runner = build_hook_runner()
 
-    assert isinstance(runner.hooks[-3], RepeatedReadNudge)
+    assert isinstance(runner.hooks[-4], RepeatedReadNudge)
+    assert runner.hooks[-4].source == "Code Squid"
+    assert isinstance(runner.hooks[-3], TooManyReadsNudge)
     assert runner.hooks[-3].source == "Code Squid"
     assert isinstance(runner.hooks[-2], PostVerificationNudge)
     assert runner.hooks[-2].source == "Code Squid"
     assert isinstance(runner.hooks[-1], RepeatedFailureNudge)
     assert runner.hooks[-1].guidance == NO_PROGRESS_GUIDANCE
     assert runner.hooks[-1].run_command_guidance == RUN_COMMAND_RECOVERY_GUIDANCE
+
+
+def test_too_many_reads_default_hook_can_be_disabled() -> None:
+    runner = build_hook_runner(too_many_reads_enabled=False)
+
+    assert not any(isinstance(hook, TooManyReadsNudge) for hook in runner.hooks)
+    assert any(isinstance(hook, RepeatedReadNudge) for hook in runner.hooks)
+    assert any(isinstance(hook, PostVerificationNudge) for hook in runner.hooks)
+    assert any(isinstance(hook, RepeatedFailureNudge) for hook in runner.hooks)
+
+
+def test_coding_task_settings_disable_too_many_reads_hook(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _install_runner_fakes(monkeypatch)
+    settings = Settings(
+        model=ModelSettings(),
+        display=DisplaySettings(debug=False),
+        runtime=RuntimeSettings(too_many_reads_enabled=False),
+        compaction=CompactionSettings(enabled=False),
+    )
+
+    run = build_coding_task_run(
+        repo_root=tmp_path,
+        task="Do the thing",
+        display=FakeDisplay(),
+        settings=settings,
+    )
+
+    assert not any(
+        isinstance(hook, TooManyReadsNudge) for hook in run.loop.hook_runner.hooks
+    )
 
 
 def test_include_user_hooks_loads_disk_hooks(
@@ -377,8 +413,9 @@ def test_default_runtime_repeated_read_fires_and_is_logged(tmp_path: Path) -> No
     model, entries = _run_overlapping_reads(tmp_path, second_start=46)
 
     configured = next(entry for entry in entries if entry["type"] == "hooks_configured")
-    assert configured["hooks"][-3:] == [
+    assert configured["hooks"][-4:] == [
         "RepeatedReadNudge",
+        "TooManyReadsNudge",
         "PostVerificationNudge",
         "RepeatedFailureNudge",
     ]

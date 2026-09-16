@@ -1,3 +1,19 @@
+- 2026-09-16: Added Core's optional `TooManyReadsNudge` to recognize successful
+  `read_file` accumulation without a successful `apply_patch` or `write_file`.
+  The advisory Hook nudges at three reads, escalates at five and later reads,
+  treats commands and failed Tools as neutral, preserves its behavioral count
+  through compaction, resets at run start, and never changes read output. Code
+  Squid now wires it independently beside the existing built-in Hooks and can
+  disable it with `runtime.too_many_reads_enabled` without affecting them.
+  Focused tests cover thresholds, non-consecutive reads, mutation and failure
+  semantics, compaction, run reset, unmodified output, threshold validation,
+  default wiring, and settings-based disabling. Verification: 263 focused and
+  broader Hook/agent-loop tests passed; the full suite passed 1,242 tests with
+  the same nine unrelated baseline failures documented by preceding patches:
+  eight stale prompt-copy expectations and one Windows TTY path-rendering
+  assertion. All Python modules compiled and `git diff --check` passed. No live
+  model inference ran, and no follow-up is intentionally deferred.
+
 - 2026-09-16: Simplified Core's public `read_file` contract so every targeted
   read uses a single `ranges` representation. Removed top-level `start_line`
   and `end_line` from the schema and executor, capped requests at eight ranges,
