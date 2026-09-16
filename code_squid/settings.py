@@ -30,6 +30,7 @@ DEFAULT_PROVIDER = "lm_studio"
 DEFAULT_DEBUG = False
 DEFAULT_TEMPERATURE = None
 DEFAULT_REASONING_MODE = None
+DEFAULT_REASONING_TOKEN_BUDGET = None
 
 # Approval mode is parsed here, but enforcement belongs in the runtime/tool
 # execution path. "never" is the current trusted-local behavior.
@@ -56,6 +57,7 @@ class ModelSettings:
     provider: str = DEFAULT_PROVIDER
     temperature: float | int | None = DEFAULT_TEMPERATURE
     reasoning_mode: str | None = DEFAULT_REASONING_MODE
+    reasoning_token_budget: int | None = DEFAULT_REASONING_TOKEN_BUDGET
 
 
 @dataclass(frozen=True)
@@ -107,6 +109,7 @@ class Settings:
                 api_key=self.model.api_key,
                 temperature=self.model.temperature,
                 reasoning_mode=self.model.reasoning_mode,
+                reasoning_token_budget=self.model.reasoning_token_budget,
             ),
             approval_mode=self.runtime.approval_mode,
             max_tool_steps=self.runtime.max_tool_steps,
@@ -372,6 +375,46 @@ def _reasoning_mode(model_settings: dict[str, Any], settings_path: Path) -> str 
     return _validate_reasoning_mode(reasoning_mode_env, "CODE_SQUID_REASONING_MODE")
 
 
+def _validate_reasoning_token_budget(value: Any, source: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(
+            f"Invalid {source}: model.reasoning_token_budget must be null or a "
+            "non-negative integer"
+        )
+    return value
+
+
+def _reasoning_token_budget(
+    model_settings: dict[str, Any],
+    settings_path: Path,
+) -> int | None:
+    budget = _validate_reasoning_token_budget(
+        model_settings.get(
+            "reasoning_token_budget",
+            DEFAULT_REASONING_TOKEN_BUDGET,
+        ),
+        f"settings JSON in {settings_path}",
+    )
+    budget_env = os.getenv("CODE_SQUID_REASONING_TOKEN_BUDGET")
+    if budget_env is None:
+        return budget
+    if budget_env == "":
+        return None
+    try:
+        parsed_budget = int(budget_env)
+    except ValueError as error:
+        raise ValueError(
+            "Invalid CODE_SQUID_REASONING_TOKEN_BUDGET: "
+            "model.reasoning_token_budget must be null or a non-negative integer"
+        ) from error
+    return _validate_reasoning_token_budget(
+        parsed_budget,
+        "CODE_SQUID_REASONING_TOKEN_BUDGET",
+    )
+
+
 def _provider(model_settings: dict[str, Any], settings_path: Path) -> str:
     provider = os.getenv("CODE_SQUID_PROVIDER", model_settings.get("provider", DEFAULT_PROVIDER))
     if provider not in VALID_PROVIDERS:
@@ -458,6 +501,7 @@ def load_settings(repo_root: Path) -> Settings:
     model_name = os.getenv("CODE_SQUID_MODEL", model_settings.get("name", DEFAULT_MODEL_NAME))
     temperature = _temperature(model_settings, settings_path)
     reasoning_mode = _reasoning_mode(model_settings, settings_path)
+    reasoning_token_budget = _reasoning_token_budget(model_settings, settings_path)
     debug = display_settings.get("debug", DEFAULT_DEBUG)
     approval_mode = _approval_mode(runtime_settings, settings_path)
     max_tool_steps = _max_tool_steps(runtime_settings, settings_path)
@@ -477,6 +521,7 @@ def load_settings(repo_root: Path) -> Settings:
             provider=provider,
             temperature=temperature,
             reasoning_mode=reasoning_mode,
+            reasoning_token_budget=reasoning_token_budget,
         ),
         display=DisplaySettings(debug=bool(debug)),
         runtime=RuntimeSettings(

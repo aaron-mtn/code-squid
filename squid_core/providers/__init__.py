@@ -34,6 +34,7 @@ def build_provider(
             api_key=settings.api_key,
             temperature=settings.temperature,
             reasoning_mode=settings.reasoning_mode,
+            reasoning_token_budget=getattr(settings, "reasoning_token_budget", None),
             provider_name=settings.provider,
         )
 

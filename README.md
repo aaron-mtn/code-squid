@@ -153,6 +153,7 @@ Supported environment overrides:
 - `CODE_SQUID_PROVIDER`
 - `CODE_SQUID_TEMPERATURE`
 - `CODE_SQUID_REASONING_MODE`
+- `CODE_SQUID_REASONING_TOKEN_BUDGET`
 - `CODE_SQUID_DEBUG`
 
 `CODE_SQUID_TRACE=1` enables debug output and prints the full transcript at the
@@ -191,7 +192,8 @@ key through its provider-scoped `api_key`, `api_key_env`, or
   "model": {
     "provider": "openrouter",
     "name": "your-model-name",
-    "reasoning_mode": "medium"
+    "reasoning_mode": "low",
+    "reasoning_token_budget": 4000
   },
   "providers": {
     "openrouter": {
@@ -206,6 +208,14 @@ key through its provider-scoped `api_key`, `api_key_env`, or
 `high`. When omitted or `null`, Code Squid sends no persistent reasoning
 override. The normalized setting is currently translated only for OpenRouter;
 other providers retain their existing request behavior.
+
+`model.reasoning_token_budget` is optional and accepts `null`, zero, or a
+positive integer. It is a reasoning-only budget, not a total response limit.
+OpenRouter receives positive values as `reasoning.max_tokens`; when both a mode
+and a positive budget are configured, the explicit budget takes precedence.
+An empty `CODE_SQUID_REASONING_TOKEN_BUDGET` unsets a saved budget. Zero remains
+a valid Core value but is not sent to OpenRouter because its API does not
+document zero as a valid direct reasoning budget.
 
 Known issue: OpenRouter may emit multiple tool calls in one reply. Code Squid
 rejects those replies and retries.

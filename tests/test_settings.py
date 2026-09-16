@@ -14,6 +14,7 @@ ENV_VARS = [
     "CODE_SQUID_PROVIDER",
     "CODE_SQUID_TEMPERATURE",
     "CODE_SQUID_REASONING_MODE",
+    "CODE_SQUID_REASONING_TOKEN_BUDGET",
     "CODE_SQUID_DEBUG",
     "CODE_SQUID_STREAM_ASSISTANT_TEXT",
 ]
@@ -41,6 +42,7 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert settings.model.provider == "lm_studio"
     assert settings.model.temperature is None
     assert settings.model.reasoning_mode is None
+    assert settings.model.reasoning_token_budget is None
     assert settings.display.debug is False
     assert settings.runtime.approval_mode == "never"
     assert settings.runtime.max_tool_steps is None
@@ -55,6 +57,7 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert runtime_settings.provider.model_name == "qwen3.5-9b"
     assert runtime_settings.provider.api_key == "lm-studio"
     assert runtime_settings.provider.reasoning_mode is None
+    assert runtime_settings.provider.reasoning_token_budget is None
     assert runtime_settings.approval_mode == "never"
     assert runtime_settings.compaction.compact_fraction == 0.8
     assert runtime_settings.compaction.min_recent_chunks == 2
@@ -332,6 +335,25 @@ def test_settings_file_accepts_reasoning_mode(
     assert settings.to_runtime_settings().provider.reasoning_mode == reasoning_mode
 
 
+@pytest.mark.parametrize("reasoning_token_budget", [0, 1, 4_000])
+def test_settings_file_accepts_reasoning_token_budget(
+    tmp_path: Path,
+    reasoning_token_budget: int,
+) -> None:
+    write_settings(
+        tmp_path,
+        {"model": {"reasoning_token_budget": reasoning_token_budget}},
+    )
+
+    settings = load_settings(tmp_path)
+
+    assert settings.model.reasoning_token_budget == reasoning_token_budget
+    assert (
+        settings.to_runtime_settings().provider.reasoning_token_budget
+        == reasoning_token_budget
+    )
+
+
 def test_settings_file_allows_null_max_tool_steps(tmp_path: Path) -> None:
     write_settings(tmp_path, {"runtime": {"max_tool_steps": None}})
 
@@ -442,6 +464,49 @@ def test_invalid_reasoning_mode_settings_raise(
     write_settings(tmp_path, {"model": {"reasoning_mode": reasoning_mode}})
 
     with pytest.raises(ValueError, match="model\\.reasoning_mode"):
+        load_settings(tmp_path)
+
+
+def test_reasoning_token_budget_env_var_overrides_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    write_settings(tmp_path, {"model": {"reasoning_token_budget": 2_000}})
+    monkeypatch.setenv("CODE_SQUID_REASONING_TOKEN_BUDGET", "4000")
+
+    assert load_settings(tmp_path).model.reasoning_token_budget == 4_000
+
+
+def test_empty_reasoning_token_budget_env_var_unsets_saved_value(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    write_settings(tmp_path, {"model": {"reasoning_token_budget": 2_000}})
+    monkeypatch.setenv("CODE_SQUID_REASONING_TOKEN_BUDGET", "")
+
+    assert load_settings(tmp_path).model.reasoning_token_budget is None
+
+
+@pytest.mark.parametrize("value", ["many", "1.5", "-1"])
+def test_invalid_reasoning_token_budget_env_var_raises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    monkeypatch.setenv("CODE_SQUID_REASONING_TOKEN_BUDGET", value)
+
+    with pytest.raises(ValueError, match="CODE_SQUID_REASONING_TOKEN_BUDGET"):
+        load_settings(tmp_path)
+
+
+@pytest.mark.parametrize("value", [True, False, -1, 1.5, "4000", []])
+def test_invalid_reasoning_token_budget_settings_raise(
+    tmp_path: Path,
+    value: object,
+) -> None:
+    write_settings(tmp_path, {"model": {"reasoning_token_budget": value}})
+
+    with pytest.raises(ValueError, match=r"model\.reasoning_token_budget"):
         load_settings(tmp_path)
 
 

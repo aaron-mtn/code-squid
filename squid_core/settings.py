@@ -19,6 +19,7 @@ class ProviderSettings:
     api_key: str | None
     temperature: float | int | None = None
     reasoning_mode: str | None = None
+    reasoning_token_budget: int | None = None
 
     def __post_init__(self) -> None:
         if not self.provider:
@@ -44,6 +45,17 @@ class ProviderSettings:
             valid_modes = ", ".join(sorted(VALID_REASONING_MODES))
             raise ValueError(
                 f"reasoning_mode must be null or one of {valid_modes}"
+            )
+        if (
+            self.reasoning_token_budget is not None
+            and (
+                isinstance(self.reasoning_token_budget, bool)
+                or not isinstance(self.reasoning_token_budget, int)
+                or self.reasoning_token_budget < 0
+            )
+        ):
+            raise ValueError(
+                "reasoning_token_budget must be null or a non-negative integer"
             )
 
 

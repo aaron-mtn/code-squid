@@ -454,9 +454,10 @@ tool-call preparation and does not carry an assistant-text phase.
 
 Event payloads should stay compact. They must not include raw file contents,
 full command output, prompts, duplicated message bodies, provider payloads, API
-keys, headers, or secrets. Model-request lifecycle events retain
-only provider/model identity when available, message count, a rough request-token
-estimate, duration, and bounded error details. These events, plus `run_failed`
+keys, headers, or secrets. Model-request lifecycle events retain only
+provider/model identity when available, effective normalized reasoning mode and
+token budget when configured, message count, a rough request-token estimate,
+duration, and bounded error details. These events, plus `run_failed`
 and `run_interrupted`, are appended to the session's existing linked JSONL log
 before terminal status changes; they remain diagnostic entries and are never
 replayed as model transcript messages.
@@ -1146,6 +1147,7 @@ Missing settings are allowed. Defaults keep the CLI usable with LM Studio:
 - provider: `lm_studio`
 - temperature: `null`
 - reasoning mode: `null` (do not override provider/model behavior)
+- reasoning token budget: `null` (use provider/model behavior)
 - display debug: `false`
 - approval mode: `never`
 - max tool steps: unlimited
@@ -1159,6 +1161,7 @@ Supported settings sections and fields:
 - `model.provider`
 - `model.temperature`
 - `model.reasoning_mode`
+- `model.reasoning_token_budget`
 - `providers.<provider_id>.base_url`
 - `providers.<provider_id>.api_key`
 - `providers.<provider_id>.api_key_env`
@@ -1203,6 +1206,10 @@ still waits for the full validated assistant response.
 `model.reasoning_mode` is `null`, `off`, `low`, `medium`, or `high`. `null`
 means the provider request receives no persistent reasoning-specific setting,
 preserving its existing model/provider default.
+`model.reasoning_token_budget` is `null` or a non-negative integer. It is a
+reasoning/thinking-only limit and must never be translated into a total response
+token cap. Zero is preserved in generic settings; each provider must explicitly
+support zero before transmitting it.
 
 Environment overrides are optional development, headless, and automation
 inputs—not the normal user configuration UX. Current overrides are:
@@ -1213,6 +1220,7 @@ inputs—not the normal user configuration UX. Current overrides are:
 - `CODE_SQUID_PROVIDER`
 - `CODE_SQUID_TEMPERATURE`
 - `CODE_SQUID_REASONING_MODE`
+- `CODE_SQUID_REASONING_TOKEN_BUDGET`
 - `CODE_SQUID_DEBUG`
 - `CODE_SQUID_STREAM_ASSISTANT_TEXT`
 
@@ -1223,6 +1231,8 @@ environment override resolves that provider's own saved connection or profile
 defaults and does not inherit another provider's URL or credential. Environment
 values affect only the process's effective settings and are never copied into
 the sparse persisted mapping by loading.
+An absent reasoning-budget override preserves the saved value, an empty value
+unsets it, and an integer string replaces it for the current process.
 `CODE_SQUID_STREAM_ASSISTANT_TEXT=1` enables assistant text
 streaming and `0` disables it. There are no compaction environment overrides in
 the current code. Interactive provider and model writes never mutate those
@@ -1337,14 +1347,21 @@ tool-call replay with `content: null` for assistant messages that have
 `tool_calls` and no content. This provider-specific behavior is handled before
 messages are sent to the provider.
 
-Reasoning configuration remains a single optional
-`ProviderSettings.reasoning_mode` value and travels through built-in provider
-construction to the concrete request builder. Only the explicit `openrouter`
-identity currently translates it: `off` becomes OpenRouter reasoning effort
-`none`, while `low`, `medium`, and `high` retain their names. `null` emits no
-reasoning field. LM Studio, Squid Models, Ollama, and generic OpenAI-compatible
-requests currently ignore the normalized setting because no provider mapping
-is defined for them; there is no capability registry or model-specific policy.
+Reasoning configuration consists of optional normalized
+`ProviderSettings.reasoning_mode` and `reasoning_token_budget` values. Both
+travel through built-in provider construction to the concrete request builder;
+Core does not contain provider-specific translation policy. Only the explicit
+`openrouter` identity currently translates them. Without a positive budget,
+`off` becomes OpenRouter reasoning effort `none`, while `low`, `medium`, and
+`high` retain their names. A positive explicit budget is sent as
+`reasoning.max_tokens` and takes precedence over effort because OpenRouter
+documents those controls as alternatives. The adapter does not send zero,
+which OpenRouter does not document as a valid direct budget. The existing
+per-request `please_stop_contemplating_the_void` override remains authoritative
+and sends effort `none` without the configured budget. LM Studio, Squid Models,
+Ollama, and generic OpenAI-compatible requests do not translate numeric budgets
+or approximate them with total-generation limits; Squid Models retains only its
+existing `chat_template_kwargs.enable_thinking = false` request override.
 
 The OpenAI-compatible provider sends `parallel_tool_calls: false` whenever tools
 are present. OpenRouter may still return multiple tool calls. Code Squid handles

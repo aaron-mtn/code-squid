@@ -1913,9 +1913,12 @@ def test_tool_result_context_is_transient_and_updated_output_is_persisted(
 
 def test_successful_model_request_lifecycle_is_persisted(tmp_path) -> None:
     session_store = SessionStore.create(tmp_path, "successful request")
+    model_adapter = FakeModelAdapter([reply("TASK COMPLETE")])
+    model_adapter.reasoning_mode = "low"
+    model_adapter.reasoning_token_budget = 4_000
     loop = AgentLoop(
         session=Session(repo_root=tmp_path),
-        model_adapter=FakeModelAdapter([reply("TASK COMPLETE")]),
+        model_adapter=model_adapter,
         tool_executor=FakeToolExecutor(),
         tool_results=FakeToolResults(),
         agent=FakeAgent(),
@@ -1936,6 +1939,8 @@ def test_successful_model_request_lifecycle_is_persisted(tmp_path) -> None:
     ]
     assert lifecycle[0]["provider"] == "fake-provider"
     assert lifecycle[0]["model"] == "fake-model"
+    assert lifecycle[0]["reasoning_mode"] == "low"
+    assert lifecycle[0]["reasoning_token_budget"] == 4_000
     assert lifecycle[0]["message_count"] == 1
     assert lifecycle[0]["estimated_request_tokens"] > 0
     assert lifecycle[1]["duration_ms"] >= 0

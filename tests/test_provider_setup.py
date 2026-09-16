@@ -152,12 +152,14 @@ def test_openrouter_public_discovery_omits_auth_and_env_key_reaches_inference(
 
     monkeypatch.setenv("CODE_SQUID_PROVIDER", "openrouter")
     monkeypatch.setenv("CODE_SQUID_REASONING_MODE", "medium")
+    monkeypatch.setenv("CODE_SQUID_REASONING_TOKEN_BUDGET", "4000")
     monkeypatch.setenv("OPENROUTER_API_KEY", "environment-secret")
     monkeypatch.setattr("squid_core.providers.openai_compatible.request.urlopen", urlopen)
     settings = load_settings(tmp_path)
     provider = build_provider(settings.to_runtime_settings().provider)
     assert provider._api_key == "environment-secret"
     assert provider.reasoning_mode == "medium"
+    assert provider.reasoning_token_budget == 4_000
     assert provider.list_models() == ["vendor/model"]
     assert requests[0].get_header("Authorization") is None
 

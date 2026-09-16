@@ -22,6 +22,7 @@ class OpenAICompatibleProvider(BaseProvider):
         api_key: str | None,
         temperature: float | int | None = None,
         reasoning_mode: str | None = None,
+        reasoning_token_budget: int | None = None,
         provider_name: str = "openai_compatible",
     ) -> None:
         self.base_url = base_url
@@ -30,6 +31,7 @@ class OpenAICompatibleProvider(BaseProvider):
         self._api_key = api_key
         self.temperature = temperature
         self.reasoning_mode = reasoning_mode
+        self.reasoning_token_budget = reasoning_token_budget
         self.provider_name = provider_name
         # OpenRouter's catalog is public, so discovery may construct this
         # transport without a credential. The inference client stays absent in
@@ -315,17 +317,27 @@ class OpenAICompatibleProvider(BaseProvider):
             payload["tool_choice"] = tool_choice
         provider_name = getattr(self, "provider_name", "openai_compatible")
         reasoning_mode = getattr(self, "reasoning_mode", None)
-        if provider_name == "openrouter" and reasoning_mode is not None:
-            # OpenRouter calls disabled reasoning "none" on the wire; Core's
-            # normalized user-facing value stays "off" across providers.
-            effort = "none" if reasoning_mode == "off" else reasoning_mode
-            payload["extra_body"] = {"reasoning": {"effort": effort}}
+        reasoning_token_budget = getattr(self, "reasoning_token_budget", None)
+        if provider_name == "openrouter":
+            if reasoning_token_budget is not None and reasoning_token_budget > 0:
+                # OpenRouter documents max_tokens and effort as alternatives.
+                # The explicit budget is more precise, so it wins when set.
+                payload["extra_body"] = {
+                    "reasoning": {"max_tokens": reasoning_token_budget},
+                }
+            elif reasoning_mode is not None:
+                # OpenRouter calls disabled reasoning "none" on the wire;
+                # Core's normalized user-facing value stays "off".
+                effort = "none" if reasoning_mode == "off" else reasoning_mode
+                payload["extra_body"] = {"reasoning": {"effort": effort}}
         if please_stop_contemplating_the_void:
             if provider_name == "squid_models":
                 payload["extra_body"] = {
                     "chat_template_kwargs": {"enable_thinking": False},
                 }
             elif provider_name == "openrouter":
+                # This request-local override is authoritative even when the
+                # provider has a normal numeric reasoning budget configured.
                 payload["extra_body"] = {"reasoning": {"effort": "none"}}
         return payload
 

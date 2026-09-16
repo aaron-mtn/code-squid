@@ -30,6 +30,15 @@ class ModelAdapter:
         self.model_name = model_name
         self.tool_call_content_mode = tool_call_content_mode
         self.provider_name = provider_name or type(provider).__name__
+        # These normalized values are safe request metadata. Keeping them on
+        # the adapter lets the runtime log effective configuration without
+        # exposing provider payloads or credentials.
+        self.reasoning_mode = getattr(provider, "reasoning_mode", None)
+        self.reasoning_token_budget = getattr(
+            provider,
+            "reasoning_token_budget",
+            None,
+        )
 
     # Send transcript messages and tool definitions to the provider,
     # then normalize the raw provider response into the internal reply shape.

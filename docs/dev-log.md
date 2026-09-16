@@ -1,3 +1,26 @@
+- 2026-09-16: Added a generic optional reasoning-token budget to Core provider
+  settings and Code Squid model settings, including strict non-negative-integer
+  validation and the `CODE_SQUID_REASONING_TOKEN_BUDGET` override/unset behavior.
+  Built-in provider construction now forwards both normalized reasoning values.
+  OpenRouter sends positive budgets through its separate
+  `reasoning.max_tokens` field; because its current API documents budget and
+  effort as alternatives, an explicit budget wins. Zero remains valid in Core
+  but is not sent without documented provider support. The existing request-
+  local no-reasoning override remains authoritative, and unsupported adapters
+  do not approximate a reasoning budget with total output limits. Model request
+  lifecycle events now include the effective normalized values when configured.
+  Verification: 267 focused settings/provider/generation/spawner/agent-loop
+  tests passed. The full suite passed 1,221 tests with the same nine unrelated
+  baseline failures documented by preceding patches: eight stale prompt-copy
+  expectations and one Windows TTY path-rendering assertion. All Python modules
+  compiled, the public settings/provider import smoke check passed, and
+  `git diff --check` passed. A credentialed OpenRouter smoke test against
+  `deepseek/deepseek-v4-flash-0731` used reasoning mode `low` and a 4,000-token
+  reasoning budget; it returned normal assistant code successfully with 36
+  input, 301 output, and 337 total tokens. The short request did not exhaust the
+  budget, and OpenRouter's returned usage did not separate reasoning tokens, so
+  cutoff-at-budget behavior was not directly observed.
+
 - 2026-09-15: Added optional same-file multi-range reads to Core's existing
   `read_file` tool. A `ranges` request uses the legacy inclusive line and
   minimum-context semantics for each region, sorts and merges overlapping or

@@ -85,6 +85,39 @@ def test_core_reasoning_mode_defaults_to_none() -> None:
     )
 
     assert settings.reasoning_mode is None
+    assert settings.reasoning_token_budget is None
+
+
+@pytest.mark.parametrize("reasoning_token_budget", [0, 1, 4_000])
+def test_core_accepts_reasoning_token_budgets(
+    reasoning_token_budget: int,
+) -> None:
+    settings = ProviderSettings(
+        provider="custom",
+        model_name="model",
+        base_url=None,
+        api_key=None,
+        reasoning_token_budget=reasoning_token_budget,
+    )
+
+    assert settings.reasoning_token_budget == reasoning_token_budget
+
+
+@pytest.mark.parametrize(
+    "reasoning_token_budget",
+    [True, False, -1, 1.5, "4000", [], {}],
+)
+def test_core_rejects_invalid_reasoning_token_budgets(
+    reasoning_token_budget: object,
+) -> None:
+    with pytest.raises(ValueError, match="reasoning_token_budget"):
+        ProviderSettings(
+            provider="custom",
+            model_name="model",
+            base_url=None,
+            api_key=None,
+            reasoning_token_budget=reasoning_token_budget,  # type: ignore[arg-type]
+        )
 
 
 @pytest.mark.parametrize("reasoning_mode", ["off", "low", "medium", "high"])

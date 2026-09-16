@@ -26,11 +26,13 @@ class FakeClient:
 def provider_with_fake_client(
     temperature=None,
     reasoning_mode=None,
+    reasoning_token_budget=None,
     provider_name: str = "openai_compatible",
 ) -> tuple[OpenAICompatibleProvider, FakeClient]:
     provider = OpenAICompatibleProvider.__new__(OpenAICompatibleProvider)
     provider.temperature = temperature
     provider.reasoning_mode = reasoning_mode
+    provider.reasoning_token_budget = reasoning_token_budget
     provider.provider_name = provider_name
     provider.client = FakeClient()
     return provider, provider.client
@@ -105,7 +107,10 @@ def test_generic_openai_compatible_omits_speculative_reasoning_fields() -> None:
 
 
 def test_managed_llama_cpp_disables_thinking_when_requested() -> None:
-    provider, client = provider_with_fake_client(provider_name="squid_models")
+    provider, client = provider_with_fake_client(
+        provider_name="squid_models",
+        reasoning_token_budget=4_000,
+    )
 
     provider.create_response(
         model="test-model",
@@ -159,6 +164,79 @@ def test_openrouter_translates_normalized_reasoning_modes() -> None:
         assert client.chat.completions.payloads[0]["extra_body"] == {
             "reasoning": {"effort": effort},
         }
+
+
+def test_openrouter_uses_separate_reasoning_token_budget() -> None:
+    provider, client = provider_with_fake_client(
+        provider_name="openrouter",
+        reasoning_token_budget=4_000,
+    )
+
+    provider.create_response(model="test-model", messages=[], tools=[])
+
+    payload = client.chat.completions.payloads[0]
+    assert payload["extra_body"] == {"reasoning": {"max_tokens": 4_000}}
+    assert "max_tokens" not in payload
+    assert "max_output_tokens" not in payload
+
+
+def test_openrouter_explicit_budget_takes_precedence_over_reasoning_mode() -> None:
+    provider, client = provider_with_fake_client(
+        provider_name="openrouter",
+        reasoning_mode="low",
+        reasoning_token_budget=4_000,
+    )
+
+    provider.create_response(model="test-model", messages=[], tools=[])
+
+    assert client.chat.completions.payloads[0]["extra_body"] == {
+        "reasoning": {"max_tokens": 4_000},
+    }
+
+
+def test_openrouter_does_not_send_undocumented_zero_reasoning_budget() -> None:
+    provider, client = provider_with_fake_client(
+        provider_name="openrouter",
+        reasoning_token_budget=0,
+    )
+
+    provider.create_response(model="test-model", messages=[], tools=[])
+
+    assert "extra_body" not in client.chat.completions.payloads[0]
+
+
+def test_openrouter_no_reasoning_override_takes_precedence_over_budget() -> None:
+    provider, client = provider_with_fake_client(
+        provider_name="openrouter",
+        reasoning_mode="high",
+        reasoning_token_budget=4_000,
+    )
+
+    provider.create_response(
+        model="test-model",
+        messages=[],
+        tools=[],
+        please_stop_contemplating_the_void=True,
+    )
+
+    assert client.chat.completions.payloads[0]["extra_body"] == {
+        "reasoning": {"effort": "none"},
+    }
+
+
+def test_unsupported_providers_ignore_reasoning_token_budget() -> None:
+    for provider_name in ("openai_compatible", "lm_studio", "squid_models"):
+        provider, client = provider_with_fake_client(
+            provider_name=provider_name,
+            reasoning_token_budget=4_000,
+        )
+
+        provider.create_response(model="test-model", messages=[], tools=[])
+
+        payload = client.chat.completions.payloads[0]
+        assert "extra_body" not in payload
+        assert "max_tokens" not in payload
+        assert "max_output_tokens" not in payload
 
 
 def test_generic_openai_compatible_ignores_normalized_reasoning_mode() -> None:

@@ -234,6 +234,12 @@ class AgentLoop:
         request_event = {
             "provider": getattr(self.model_adapter, "provider_name", None),
             "model": getattr(self.model_adapter, "model_name", None),
+            "reasoning_mode": getattr(self.model_adapter, "reasoning_mode", None),
+            "reasoning_token_budget": getattr(
+                self.model_adapter,
+                "reasoning_token_budget",
+                None,
+            ),
             "message_count": len(messages),
             "estimated_request_tokens": estimate_messages_tokens(messages),
         }
