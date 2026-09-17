@@ -340,6 +340,19 @@ def test_baseline_policy_requires_behavioral_verification_against_the_request() 
     )
 
 
+def test_baseline_policy_requires_explicit_run_command_verification_intent() -> None:
+    assert "Every run_command call must explicitly set verification" in (
+        BASELINE_CODING_POLICY
+    )
+    assert "tests, syntax checks, validation builds, lint or type checks" in (
+        BASELINE_CODING_POLICY
+    )
+    assert "repository discovery, file listings, code searches" in (
+        BASELINE_CODING_POLICY
+    )
+    assert "Classify the command by its purpose" in BASELINE_CODING_POLICY
+
+
 def test_baseline_policy_removes_replaced_implementations() -> None:
     assert "remove obsolete code, state, helpers, and comments" in BASELINE_CODING_POLICY
     assert "only for a concrete compatibility, fallback" in BASELINE_CODING_POLICY

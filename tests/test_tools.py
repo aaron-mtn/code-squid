@@ -59,6 +59,7 @@ def test_run_command_uses_selected_repo_root_as_cwd(tmp_path: Path) -> None:
     result = run_command(
         workspace,
         f'{executable} -c "from pathlib import Path; print(Path.cwd())"',
+        verification=False,
     )
 
     assert result["ok"] is True
@@ -73,9 +74,12 @@ def test_run_command_exposes_and_returns_explicit_verification_intent(
 
     assert parameters["properties"]["verification"] == {
         "type": "boolean",
-        "description": "Whether this command is being run to verify the current changes",
-        "default": False,
+        "description": (
+            "REQUIRED. True when this command checks whether the current "
+            "implementation is correct; false otherwise."
+        ),
     }
+    assert parameters["required"] == ["command", "verification"]
 
     executable = (
         f"& '{sys.executable}'"
@@ -90,6 +94,22 @@ def test_run_command_exposes_and_returns_explicit_verification_intent(
 
     assert result["ok"] is True
     assert result["verification"] is True
+
+
+def test_run_command_preserves_explicit_non_verification_intent(tmp_path: Path) -> None:
+    executable = (
+        f"& '{sys.executable}'"
+        if sys.platform == "win32"
+        else shlex.quote(sys.executable)
+    )
+    result = run_command(
+        tmp_path,
+        f'{executable} -c "print(\'inspected\')"',
+        verification=False,
+    )
+
+    assert result["ok"] is True
+    assert result["verification"] is False
 
 
 def test_read_file_supports_one_targeted_range(tmp_path: Path) -> None:
@@ -490,7 +510,7 @@ def test_run_command_keeps_shared_character_truncation(
         lambda *args, **kwargs: Completed(),
     )
 
-    result = run_command(tmp_path, "generate lots of output")
+    result = run_command(tmp_path, "generate lots of output", verification=False)
     expected_output, expected_metadata = truncate_head_tail(output)
 
     assert result["output"] == expected_output
@@ -856,7 +876,12 @@ def test_run_command_classifies_powershell_invalid_separator(
     context = PlatformContext("Windows", "PowerShell", "powershell", "\\", True)
     monkeypatch.setattr(run_command_module.subprocess, "run", lambda *args, **kwargs: Completed())
 
-    result = run_command(tmp_path, "Get-Date && Get-Date", platform_context=context)
+    result = run_command(
+        tmp_path,
+        "Get-Date && Get-Date",
+        verification=False,
+        platform_context=context,
+    )
 
     assert result["failure_class"] == "shell_syntax_error"
     assert result["shell"] == "PowerShell"
@@ -881,7 +906,12 @@ def test_run_command_classifies_recognizable_missing_executable(
     context = PlatformContext("Windows", "PowerShell", "powershell", "\\", True)
     monkeypatch.setattr(run_command_module.subprocess, "run", lambda *args, **kwargs: Completed())
 
-    result = run_command(tmp_path, "missing-tool", platform_context=context)
+    result = run_command(
+        tmp_path,
+        "missing-tool",
+        verification=False,
+        platform_context=context,
+    )
 
     assert result["failure_class"] == "command_not_found"
 
@@ -898,7 +928,12 @@ def test_run_command_keeps_ordinary_project_failure_generic(
     context = PlatformContext("Linux", "bash", "/bin/bash", "/", False)
     monkeypatch.setattr(run_command_module.subprocess, "run", lambda *args, **kwargs: Completed())
 
-    result = run_command(tmp_path, "pytest -q", platform_context=context)
+    result = run_command(
+        tmp_path,
+        "pytest -q",
+        verification=True,
+        platform_context=context,
+    )
 
     assert result["failure_class"] == "process_failed"
     assert result["output"] == Completed.stdout
@@ -926,7 +961,7 @@ def test_run_command_uses_selected_powershell_on_windows(
         lambda *args, **kwargs: calls.append((args, kwargs)) or Completed(),
     )
 
-    result = run_command(tmp_path, "Get-ChildItem")
+    result = run_command(tmp_path, "Get-ChildItem", verification=False)
 
     args, kwargs = calls[0]
     assert args[0] == [
@@ -961,7 +996,12 @@ def test_run_command_uses_supplied_context_without_redetecting(monkeypatch, tmp_
         lambda *args, **kwargs: calls.append((args, kwargs)) or Completed(),
     )
 
-    result = run_command(tmp_path, "printf ok", platform_context=context)
+    result = run_command(
+        tmp_path,
+        "printf ok",
+        verification=False,
+        platform_context=context,
+    )
 
     assert calls[0][0][0] == "printf ok"
     assert calls[0][1]["shell"] is True

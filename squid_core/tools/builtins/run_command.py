@@ -46,12 +46,12 @@ def tool_definition() -> dict:
                     "verification": {
                         "type": "boolean",
                         "description": (
-                            "Whether this command is being run to verify the current changes"
+                            "REQUIRED. True when this command checks whether the current "
+                            "implementation is correct; false otherwise."
                         ),
-                        "default": False,
                     },
                 },
-                "required": ["command"],
+                "required": ["command", "verification"],
             },
         },
     }
@@ -61,8 +61,8 @@ def tool_definition() -> dict:
 def execute(
     repo_root: Path,
     command: str,
+    verification: bool,
     platform_context: PlatformContext | None = None,
-    verification: bool = False,
 ) -> dict:
     platform_context = platform_context or detect_platform_context()
     subprocess_command: str | list[str] = command

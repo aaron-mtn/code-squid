@@ -600,12 +600,16 @@ def test_read_file_and_run_command_do_not_snapshot(tmp_path: Path) -> None:
     command_result = executor.execute(
         {
             "tool": "run_command",
-            "args": {"command": "$true" if sys.platform == "win32" else "true"},
+            "args": {
+                "command": "$true" if sys.platform == "win32" else "true",
+                "verification": False,
+            },
         }
     )
 
     assert read_result["ok"] is True
     assert command_result["ok"] is True
+    assert command_result["verification"] is False
     assert undo_store.paths == []
 
 

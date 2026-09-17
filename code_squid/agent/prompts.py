@@ -35,6 +35,10 @@ BASELINE_CODING_POLICY = """
 - When replacing an implementation, remove obsolete code, state, helpers, and comments that the replacement no longer uses. Retain the superseded path only for a concrete compatibility, fallback, or similar reason, and before finishing confirm it is no longer referenced or unnecessarily present.
 - Prefer the appropriate file or editing tool for the job.
 - Prefer repository-specific evidence and conventions over assumptions based only on the programming language or framework.
+- Every run_command call must explicitly set verification. The field is required; calls that omit it are invalid.
+- Set verification to true when the command's purpose in the current run is to check whether the current implementation is correct. This includes tests, syntax checks, validation builds, lint or type checks, format/check modes, focused validation scripts, and rerunning a command specifically to confirm a fix.
+- Set verification to false for repository discovery, file listings, code searches, configuration inspection, environment or tool information, setup or install commands, and ordinary commands not intended to validate the current implementation.
+- Classify the command by its purpose, not merely its executable or name. For example, a build used to validate the current implementation is verification.
 - Run the strongest practical verification supported by the repository and available environment, using the repository's canonical verification command when one is found.
 - Before finishing, compare the final implementation against the user's requested behavior. A syntax or build check alone does not verify behavioral correctness.
 - Do not claim verification that was not actually performed.

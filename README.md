@@ -299,7 +299,7 @@ Code Squid exposes four local tools to the model:
 - `apply_patch(patch)`
 - `read_file(path, ranges=None)`
 - `write_file(path, content)`
-- `run_command(command, verification=false)`
+- `run_command(command, verification)`
 
 `read_file` and `write_file` require absolute paths. Paths outside the selected
 workspace root require approval in strict mode and are allowed without prompts
@@ -314,9 +314,11 @@ their combined source coverage must remain within the same 1,000-line budget.
 
 `run_command` runs a shell command from the current/configured repo root by
 default. It uses the local shell, has a timeout, and can mutate files or perform
-other local side effects. The model sets `verification=true` when the command's
-purpose is to verify the current changes; Code Squid does not infer verification
-from command or language-specific text.
+other local side effects. The required boolean `verification` records the
+command's purpose in the current run. The model sets it to `true` when the
+command checks whether the current implementation is correct and to `false`
+otherwise; Code Squid does not infer verification from command or
+language-specific text.
 
 Code Squid is a trusted local tool, not a hardened sandbox. Review tasks and
 model/provider behavior with that in mind.

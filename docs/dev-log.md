@@ -1,3 +1,14 @@
+- 2026-09-17: Made Core's existing `run_command.verification` boolean required
+  in both the model-facing schema and built-in executor signature. Code Squid's
+  non-replaceable baseline policy now explains purpose-based classification,
+  representative verification and non-verification commands, and that omitted
+  values are invalid. Normal model-adapter validation rejects omissions, while
+  canonical command results and `PostVerificationNudge` behavior remain
+  unchanged. Focused Tool, adapter, executor, prompt, and post-verification
+  coverage passed 123 tests. The full suite passed 1,255 tests with the same 29
+  unrelated existing prompt-copy, repeated-read-guidance-copy, and Windows TTY
+  expectation failures recorded by preceding patches. Production and test
+  compilation plus `git diff --check` passed; no live model inference was run.
 - 2026-09-16: Simplified built-in Tool results at the existing request-only
   model-rendering seam. Canonical transcript JSON and runtime result
   dictionaries remain unchanged for Hooks, storage, replay, trimming, and

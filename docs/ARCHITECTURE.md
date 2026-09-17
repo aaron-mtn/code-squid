@@ -1764,7 +1764,7 @@ The protected built-in Tool surface is:
 - `read_file(path, ranges=None)`
 - `write_file(path, content)`
 - `apply_patch(path, old_text, new_text)` or candidate selection with `match_id`
-- `run_command(command, verification=false)`
+- `run_command(command, verification)`
 
 The `apply_patch` JSON schema declares all four arguments in the top-level
 object `properties`; its `anyOf` branches carry only the two alternative
@@ -1856,8 +1856,9 @@ editing.
 
 `run_command`:
 
-- exposes an optional boolean `verification` intent, defaulting to `false`, and
-  returns that intent with every process result
+- requires an explicit boolean `verification` intent and returns that intent
+  with every process result; missing intent is rejected through normal Tool
+  schema validation
 - does not infer verification from command text, languages, or test frameworks
 - on Windows, invokes the detected PowerShell executable with `-NoProfile` and
   `-Command`, without `shell=True`

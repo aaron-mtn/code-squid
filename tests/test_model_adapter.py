@@ -6,6 +6,7 @@ from squid_core.model_adapter import (
     model_request_error_details,
 )
 from squid_core.tools.builtins.apply_patch import tool_definition as apply_patch_definition
+from squid_core.tools.builtins.run_command import tool_definition as run_command_definition
 
 
 class FakeFunction:
@@ -265,6 +266,18 @@ def test_missing_required_args_are_rejected_from_passed_definitions() -> None:
 
     assert reply["actions"] == []
     assert reply["format_error"] == "Missing required arguments for local_tool: content"
+
+
+def test_run_command_without_verification_is_rejected() -> None:
+    reply = adapter_response(
+        FakeToolCall("call_1", "run_command", '{"command": "pytest -q"}'),
+        [run_command_definition()],
+    )
+
+    assert reply["actions"] == []
+    assert reply["format_error"] == (
+        "Missing required arguments for run_command: verification"
+    )
 
 
 @pytest.mark.parametrize(
