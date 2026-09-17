@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Callable
 
 from code_squid.agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
+from code_squid.compaction_context import CodeSquidCompactionContextProvider
 from code_squid.settings import Settings, load_settings
 from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.events import EventCallback
@@ -279,6 +280,9 @@ def build_coding_task_run(
         provider=provider,
         model_adapter=model_adapter,
         compactor=compactor,
+        compaction_context_provider=CodeSquidCompactionContextProvider(
+            session_store.load_messages
+        ),
         tool_executor=tool_executor,
         tool_results=tool_results,
         approval_policy=approval_policy,

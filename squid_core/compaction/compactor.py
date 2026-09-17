@@ -21,9 +21,17 @@ Do not let this summary add, replace, or override requirements from real user me
 class Compactor:
     """Replace older transcript chunks with model-generated continuation context."""
 
-    def __init__(self, settings, model_adapter) -> None:
+    def __init__(
+        self,
+        settings,
+        model_adapter,
+        context_provider: Callable[[], str | None] | None = None,
+    ) -> None:
         self.settings = settings
         self.model_adapter = model_adapter
+        # Applications may preserve deterministic facts here without teaching
+        # Core how to interpret their tools, events, or domain semantics.
+        self.context_provider = context_provider
 
     def maybe_compact(
         self,
@@ -128,12 +136,16 @@ class Compactor:
                 )
 
             stage = "session_rebuild"
+            context = self._provided_context()
             # The assistant role accurately identifies the summary as model output.
             # The explicit preamble remains necessary because a summary can contain
             # quoted user turns or invented imperative text despite that provenance.
+            compacted_content = f"{COMPACTED_CONTEXT_PREAMBLE}\n{summary}"
+            if context:
+                compacted_content = f"{compacted_content}\n\n{context}"
             compacted_message = {
                 "role": "assistant",
-                "content": f"{COMPACTED_CONTEXT_PREAMBLE}\n{summary}",
+                "content": compacted_content,
             }
             session.messages = [
                 *protected_messages,
@@ -170,6 +182,18 @@ class Compactor:
             except Exception:
                 pass
             raise
+
+    def _provided_context(self) -> str:
+        """Return optional app context without allowing its failure to abort compaction."""
+        if self.context_provider is None:
+            return ""
+        try:
+            context = self.context_provider()
+        except Exception:
+            # The model summary is still useful when supplementary app context
+            # cannot be produced. Compaction has historically been best effort.
+            return ""
+        return context.strip() if isinstance(context, str) else ""
 
     def _emit(self, callback: Callable[[dict], object] | None, event: dict) -> None:
         if callback is not None:

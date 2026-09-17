@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from code_squid.app_paths import session_indexes_path
+from code_squid.compaction_context import CodeSquidCompactionContextProvider
 from code_squid.settings import (
     CompactionSettings,
     DisplaySettings,
@@ -96,6 +97,21 @@ def test_run_construction_uses_core_null_display_when_omitted(tmp_path: Path) ->
 
     assert type(run.loop.display) is NullDisplay
     assert run.loop.approval_policy.prompter is None
+
+
+def test_code_squid_installs_authoritative_compaction_context_provider(
+    tmp_path: Path,
+) -> None:
+    run = build_coding_task_run(
+        tmp_path,
+        "Preserve runtime facts",
+        model_adapter=object(),
+    )
+
+    assert isinstance(
+        run.loop.compactor.context_provider,
+        CodeSquidCompactionContextProvider,
+    )
 
 
 def test_run_construction_uses_supplied_display_for_approvals(tmp_path: Path) -> None:

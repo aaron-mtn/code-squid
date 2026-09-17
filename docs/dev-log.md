@@ -1,3 +1,25 @@
+- 2026-09-17: Added a small optional Core compaction-context callback that
+  appends deterministic application text only after a model-written summary.
+  Missing, empty, invalid, or failing callbacks preserve summary-only
+  compaction. Code Squid now supplies an application-owned provider that reads
+  the full canonical session message history at compaction time and carries
+  forward only the latest known successful direct mutation, latest explicit
+  verification and its relationship to later known direct mutations, and the
+  latest concrete unresolved Tool failure. Core has no Code Squid Tool
+  semantics, no planner state was added, and the provider makes no filesystem,
+  behavioral-correctness, completion, or command-side-effect claims. The
+  provider omits successful command output and carries short failure output
+  verbatim; long failure output is bounded mechanically to raw head and tail
+  portions without error parsing. The generic summarizer guidance now makes
+  recency, stale verification,
+  unresolved failures, and intended-versus-performed changes explicit.
+  Focused output-context verification passed 9 tests, and the broader
+  compaction/context/runner/architecture-boundary suite passed 66 tests.
+  The final full suite completed with 1,269 passing tests and the same 29
+  unrelated existing prompt-copy, repeated-read-guidance-copy, and Windows TTY
+  expectation failures recorded by preceding patches. Production and test
+  compilation, direct
+  imports, and `git diff --check` passed; no live model inference was run.
 - 2026-09-17: Made Core's existing `run_command.verification` boolean required
   in both the model-facing schema and built-in executor signature. Code Squid's
   non-replaceable baseline policy now explains purpose-based classification,

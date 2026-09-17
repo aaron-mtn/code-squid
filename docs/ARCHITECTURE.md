@@ -53,6 +53,10 @@ and application layer; `squid_core/` is the reusable agent runtime.
     resolution, hooks, platform context, Agent configuration, and translation
     into the generic `squid_core.spawner` seam. It is presentation-neutral and
     does not import the console frontend.
+  - `compaction_context.py` owns Code Squid's deterministic authoritative
+    compaction facts. It reads the session store's canonical messages at
+    compaction time and understands only the application's direct-mutation,
+    verification, and recoverable-failure Tool semantics.
   - `app_paths.py` owns Code Squid application-home policy, the application-wide
     settings path, repository-local
     session/undo/error-log locations, the global session-index and recent-
@@ -305,8 +309,9 @@ and application layer; `squid_core/` is the reusable agent runtime.
     import `code_squid.agent.prompts`.
 
 - `squid_core/compaction/`
-  - Generic transcript compaction mechanics, prompt ownership, trigger-status
-    reporting, and rough transcript token estimation.
+  - Generic transcript compaction mechanics, prompt ownership, optional
+    app-provided post-summary context, trigger-status reporting, and rough
+    transcript token estimation.
   - `compactor.py` owns trigger, chunking, summary, and retention behavior and
     is exposed as `squid_core.compaction.Compactor`.
   - `prompts.py` asks for continuation-critical task, finding, resource,
@@ -1571,10 +1576,15 @@ When triggered, compaction:
 - selects oldest whole chunks in order until their cumulative estimate reaches
   that target or the minimum recent-chunk boundary prevents further selection
 - summarizes older chunks with `ModelAdapter.complete_text(...)`
+- asks an optional zero-argument application provider for deterministic
+  model-visible context after the model summary has been generated; an absent,
+  empty, invalid, or failing provider leaves the prior summary-only behavior
+  unchanged
 - replaces those older chunks with one assistant message headed
   `# Compacted Working Context`; the assistant role marks it as model-generated,
   while its preamble explicitly says it is lossy, context-only, non-authoritative,
-  and cannot add, replace, or override real user requirements
+  and cannot add, replace, or override real user requirements; provider text,
+  when present, is appended after the model-written summary
 - keeps at least `settings.compaction.min_recent_chunks` newest chunks verbatim
 
 The application and Core defaults are `enabled=True`,
@@ -1586,6 +1596,21 @@ a later pass, so repeated compaction naturally folds an older summary into the
 next summary without a separate memory mechanism. The removed
 `keep_recent_turns` JSON field is ignored if it remains in an older settings
 file; users who customized it must replace it with `min_recent_chunks`.
+
+The Core provider seam is deliberately text-only and has no knowledge of Code
+Squid Tools, source files, verification commands, task state, or filesystem
+truth. `code_squid.compaction_context.CodeSquidCompactionContextProvider` is
+wired only by the Code Squid application builder. It reloads the complete
+append-only canonical message history from `SessionStore` at compaction time,
+pairs Tool calls with their JSON results, and reports only the latest successful
+known direct `apply_patch`/`write_file` mutation, latest explicitly marked
+verification, whether a later known direct mutation makes that verification
+stale, and the latest concrete Tool failure not clearly superseded by a later
+success. It does not infer changes made by commands or external Tools, inspect
+the filesystem, maintain planner state, or derive facts from the model summary.
+Successful verification output is omitted. Failure output is retained verbatim
+when short, or as a fixed-size raw head and tail separated by an omission marker
+when long; the provider does not parse or rank failure lines.
 
 `AgentLoop` supplies one callback that persists each lifecycle event through
 `SessionStore.append_compaction_event(...)` when storage is wired in, publishes

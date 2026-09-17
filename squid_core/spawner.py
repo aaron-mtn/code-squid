@@ -131,6 +131,7 @@ def build_agent_run(
     provider=None,
     model_adapter=None,
     compactor=None,
+    compaction_context_provider: Callable[[], str | None] | None = None,
     tool_executor=None,
     tool_results=None,
     approval_policy=None,
@@ -221,6 +222,7 @@ def build_agent_run(
         provider=provider,
         model_adapter=model_adapter,
         compactor=compactor,
+        compaction_context_provider=compaction_context_provider,
         tool_executor=tool_executor,
         tool_results=tool_results,
         approval_policy=approval_policy,
@@ -249,6 +251,7 @@ def build_agent_loop(
     provider=None,
     model_adapter=None,
     compactor=None,
+    compaction_context_provider: Callable[[], str | None] | None = None,
     tool_executor=None,
     tool_results=None,
     approval_policy=None,
@@ -274,7 +277,11 @@ def build_agent_loop(
             provider_name=settings.provider.provider,
         )
     if compactor is None:
-        compactor = Compactor(settings.compaction, model_adapter)
+        compactor = Compactor(
+            settings.compaction,
+            model_adapter,
+            context_provider=compaction_context_provider,
+        )
     _wire_model_view_observer(model_adapter, session_store)
     if tool_executor is None:
         tool_executor = ToolExecutor(

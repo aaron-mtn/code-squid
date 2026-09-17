@@ -139,6 +139,48 @@ def test_above_threshold_replaces_older_chunks_with_synthetic_context_message() 
     ) == 1
 
 
+def test_no_context_provider_preserves_existing_compacted_output_exactly() -> None:
+    current_session = session(compactable_messages())
+
+    Compactor(settings(), FakeModelAdapter("summary text")).maybe_compact(
+        current_session
+    )
+
+    assert current_session.messages[2]["content"] == (
+        f"{compaction_module.compactor.COMPACTED_CONTEXT_PREAMBLE}\nsummary text"
+    )
+
+
+def test_provider_context_is_appended_after_generated_summary() -> None:
+    current_session = session(compactable_messages())
+
+    Compactor(
+        settings(),
+        FakeModelAdapter("model summary"),
+        context_provider=lambda: "# Deterministic Facts\nexact fact",
+    ).maybe_compact(current_session)
+
+    content = current_session.messages[2]["content"]
+    assert content.index("model summary") < content.index("# Deterministic Facts")
+    assert content.endswith("# Deterministic Facts\nexact fact")
+
+
+def test_provider_failure_does_not_destroy_successful_compaction() -> None:
+    current_session = session(compactable_messages())
+
+    def fail_context() -> str:
+        raise RuntimeError("context unavailable")
+
+    result = Compactor(
+        settings(),
+        FakeModelAdapter("usable summary"),
+        context_provider=fail_context,
+    ).maybe_compact(current_session)
+
+    assert result is not None
+    assert current_session.messages[2]["content"].endswith("usable summary")
+
+
 def test_initial_system_and_user_messages_are_preserved() -> None:
     messages = compactable_messages()
     current_session = session(messages)
@@ -453,6 +495,14 @@ def test_compaction_does_not_import_code_squid_application_prompts() -> None:
     assert "squid_core.compaction.prompts" in source
 
 
+def test_core_compactor_has_no_code_squid_tool_semantics() -> None:
+    source = inspect.getsource(compaction_module.compactor)
+
+    assert "apply_patch" not in source
+    assert "write_file" not in source
+    assert "run_command" not in source
+
+
 def test_generic_prompt_carries_task_tool_verification_and_failure_context() -> None:
     model_adapter = FakeModelAdapter("continuation summary")
     messages = [
@@ -477,6 +527,12 @@ def test_generic_prompt_carries_task_tool_verification_and_failure_context() -> 
     assert "failed attempts and corrections" in prompt
     assert "Do not invent facts, requested behavior, task requirements" in prompt
     assert "Do not reinterpret an instruction" in prompt
+    assert "Summarize the current working state, not an earlier state" in prompt
+    assert "Later events supersede earlier events" in prompt
+    assert "later failed verification supersedes earlier successful verification" in prompt
+    assert "a later mutation makes earlier verification stale" in prompt
+    assert "Preserve unresolved failures and mistakes" in prompt
+    assert "Distinguish intended changes from changes actually performed" in prompt
     assert current_session.messages[:2] == messages[:2]
 
 
