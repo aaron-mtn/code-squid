@@ -1,3 +1,18 @@
+- 2026-09-16: Simplified built-in Tool results at the existing request-only
+  model-rendering seam. Canonical transcript JSON and runtime result
+  dictionaries remain unchanged for Hooks, storage, replay, trimming, and
+  coverage tracking. Model requests now receive compact textual observations:
+  `read_file` emits ordinary source beneath exact per-region line headers and
+  explicit gap markers (including partial/suppressed repeated reads), commands
+  use a small output block, patch failures retain recovery identifiers and
+  current candidate text, and successful writes are status plus path. Unknown
+  tools remain JSON. Added focused formatter, trimming/coverage, provider
+  pairing, and `model-view.jsonl` assertions. Verification: 242 focused and
+  broader agent-loop, Hook, compaction, built-in Tool, executor, spawner, and
+  model-view tests passed. The full suite passed 1,252 tests with the same 29
+  unrelated existing prompt-copy, repeated-read-guidance-copy, and Windows TTY
+  expectation failures recorded by preceding patches. Production/test
+  compilation and `git diff --check` passed; no live model inference was run.
 - 2026-09-16: Added always-on per-session `model-view.jsonl` request capture
   beside `session.jsonl`. Refactored the initial loop-level implementation so
   `ModelAdapter` exposes a generic request observer and invokes it from one

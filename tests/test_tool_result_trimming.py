@@ -1,7 +1,6 @@
 """Tests for request-only trimming of older canonical tool results."""
 
 import copy
-import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -39,8 +38,8 @@ def _tool_turn(call_id: str, name: str, result: dict) -> list[dict]:
     ]
 
 
-def _result(message: dict) -> dict:
-    return json.loads(message["content"])
+def _observation(message: dict) -> str:
+    return message["content"]
 
 
 def _read_result(
@@ -88,17 +87,17 @@ def _apply_trim_event(runner: HookRunner, event: ReadResultTrimmedContext) -> No
     runner.read_result_trimmed(event)
 
 
-def test_newest_results_remain_exactly_model_visible() -> None:
+def test_newest_results_are_textual_without_changing_pairing() -> None:
     messages = [
         *_tool_turn(
             "old",
             "read_file",
-            {"ok": True, "tool": "read_file", "content": "o" * 40},
+            _read_result("C:/repo/old.py", "old\n", start_line=1, end_line=1),
         ),
         *_tool_turn(
             "recent-1",
             "read_file",
-            {"ok": True, "tool": "read_file", "content": "a" * 40},
+            _read_result("C:/repo/new.py", "alpha\nbeta\n", start_line=7, end_line=8),
         ),
         *_tool_turn(
             "recent-2",
@@ -113,20 +112,145 @@ def test_newest_results_remain_exactly_model_visible() -> None:
 
     rendered = render_messages_for_model(messages, settings)
 
-    assert rendered[-3:] == messages[-3:]
-    assert rendered[-1]["content"] == messages[-1]["content"]
-    assert rendered[-3]["content"] == messages[-3]["content"]
+    assert rendered[-3]["content"] == (
+        "READ_FILE OK\npath: C:/repo/new.py\n\n"
+        "<<< CODE SQUID SOURCE: new.py lines 7-8 >>>\nalpha\nbeta"
+    )
+    assert rendered[-1]["content"].startswith("RUN_COMMAND OK\n\n<<< OUTPUT >>>")
+    assert rendered[-1]["tool_call_id"] == messages[-1]["tool_call_id"]
 
 
-def test_old_read_content_is_bounded_and_metadata_survives() -> None:
+def test_disjoint_read_regions_have_exact_headers_and_gap_marker() -> None:
+    result = _read_result(
+        "C:/repo/script.js",
+        "one\ntwo\n<<< CODE SQUID: lines 3-7 omitted from this read >>>\neight\nnine\n",
+        start_line=1,
+        end_line=9,
+        returned_line_ranges=[
+            {"start_line": 1, "end_line": 2},
+            {"start_line": 8, "end_line": 9},
+        ],
+    )
+
+    observation = _observation(
+        render_messages_for_model(
+            _tool_turn("read", "read_file", result),
+            ToolResultTrimmingSettings(),
+        )[-1]
+    )
+
+    assert "<<< CODE SQUID SOURCE: script.js lines 1-2 >>>\none\ntwo" in observation
+    assert "<<< CODE SQUID OMITTED: script.js lines 3-7 >>>" in observation
+    assert "<<< CODE SQUID SOURCE: script.js lines 8-9 >>>\neight\nnine" in observation
+
+
+def test_contiguous_read_does_not_gain_a_fake_gap_marker() -> None:
+    result = _read_result(
+        "C:/repo/script.js",
+        "four\nfive\nsix\n",
+        start_line=4,
+        end_line=6,
+    )
+
+    observation = _observation(
+        render_messages_for_model(
+            _tool_turn("read", "read_file", result),
+            ToolResultTrimmingSettings(),
+        )[-1]
+    )
+
+    assert "<<< CODE SQUID SOURCE: script.js lines 4-6 >>>" in observation
+    assert "CODE SQUID OMITTED" not in observation
+
+
+def test_partial_and_suppressed_reads_are_clear_text_observations() -> None:
+    partial = _read_result(
+        "C:/repo/script.js",
+        "fresh\n",
+        start_line=501,
+        end_line=501,
+        returned_line_ranges=[{"start_line": 501, "end_line": 501}],
+    )
+    partial.update(
+        {
+            "partially_redundant": True,
+            "omitted_line_ranges": [{"start_line": 420, "end_line": 500}],
+        }
+    )
+    skipped = {
+        "ok": True,
+        "tool": "read_file",
+        "path": "C:/repo/script.js",
+        "already_covered": True,
+        "start_line": 420,
+        "end_line": 620,
+        "returned_line_ranges": [{"start_line": 420, "end_line": 620}],
+        "message": "The previous result is still current.",
+    }
+
+    partial_observation = _observation(
+        render_messages_for_model(
+            _tool_turn("partial", "read_file", partial),
+            ToolResultTrimmingSettings(),
+        )[-1]
+    )
+    skipped_observation = _observation(
+        render_messages_for_model(
+            _tool_turn("skipped", "read_file", skipped),
+            ToolResultTrimmingSettings(),
+        )[-1]
+    )
+
+    assert partial_observation.startswith("READ_FILE PARTIAL")
+    assert (
+        "<<< CODE SQUID OMITTED: script.js lines 420-500 already available unchanged >>>"
+        in partial_observation
+    )
+    assert "<<< CODE SQUID SOURCE: script.js lines 501-501 >>>\nfresh" in partial_observation
+    assert skipped_observation.startswith("READ_FILE SKIPPED")
+    assert "lines: 420-620" in skipped_observation
+    assert "reason: unchanged source already available in context" in skipped_observation
+
+
+def test_recent_patch_failure_keeps_recovery_identifiers_and_text() -> None:
+    result = {
+        "ok": False,
+        "tool": "apply_patch",
+        "path": "C:/repo/example.py",
+        "error": "old_text_not_found",
+        "candidates": [
+            {
+                "match_id": "m7",
+                "start_line": 40,
+                "end_line": 42,
+                "text": "current\nsource\ntext\n",
+                "similarity": 0.94,
+            }
+        ],
+    }
+
+    observation = _observation(
+        render_messages_for_model(
+            _tool_turn("patch", "apply_patch", result),
+            ToolResultTrimmingSettings(),
+        )[-1]
+    )
+
+    assert "reason: old_text_not_found" in observation
+    assert "<<< CANDIDATE 1 m7 lines 40-42 >>>" in observation
+    assert "current\nsource\ntext" in observation
+
+
+def test_old_read_content_is_bounded_with_exact_source_identity() -> None:
+    content = "".join(f"line {line:02}\n" for line in range(1, 21))
     canonical_result = {
         "ok": True,
         "tool": "read_file",
         "path": "C:/repo/example.py",
-        "content": "0123456789" * 10,
+        "content": content,
         "content_truncated": True,
         "content_original_chars": 400,
-        "content_returned_chars": 100,
+        "content_returned_chars": len(content),
         "start_line": 1,
         "end_line": 20,
         "total_lines": 40,
@@ -136,20 +260,21 @@ def test_old_read_content_is_bounded_and_metadata_survives() -> None:
 
     rendered = render_messages_for_model(
         messages,
-        ToolResultTrimmingSettings(recent_full_results=0, read_old_content_chars=30),
+        ToolResultTrimmingSettings(
+            recent_full_results=0,
+            read_old_content_chars=len("\n[older payload truncated]\n") + 16,
+        ),
     )
-    result = _result(rendered[-1])
+    observation = _observation(rendered[-1])
 
-    assert len(result["content"]) == 30
-    assert result["path"] == canonical_result["path"]
-    assert result["start_line"] == 1
-    assert result["end_line"] == 20
-    assert result["total_lines"] == 40
-    assert result["content_truncated"] is True
-    assert result["returned_line_ranges"] == canonical_result["returned_line_ranges"]
+    assert observation.startswith("READ_FILE OK\npath: C:/repo/example.py\ntruncated: yes")
+    assert "<<< CODE SQUID SOURCE: example.py lines 1-1 >>>\nline 01" in observation
+    assert "<<< CODE SQUID SOURCE: example.py lines 20-20 >>>\nline 20" in observation
+    assert "<<< CODE SQUID OMITTED: example.py lines 2-19 older result content trimmed >>>" in observation
+    assert canonical_result["content"] == content
 
 
-def test_zero_read_limit_omits_source_but_preserves_metadata() -> None:
+def test_zero_read_limit_omits_source_but_preserves_location() -> None:
     messages = _tool_turn(
         "read",
         "read_file",
@@ -157,28 +282,23 @@ def test_zero_read_limit_omits_source_but_preserves_metadata() -> None:
             "ok": True,
             "tool": "read_file",
             "path": "C:/repo/secret.py",
-            "content": "SOURCE_TEXT_MUST_DISAPPEAR",
+                "content": "seven\neight\nnine\n",
             "start_line": 7,
             "end_line": 9,
             "total_lines": 12,
         },
     )
 
-    result = _result(
+    observation = _observation(
         render_messages_for_model(
             messages,
             ToolResultTrimmingSettings(recent_full_results=0, read_old_content_chars=0),
         )[-1]
     )
 
-    assert "SOURCE_TEXT_MUST_DISAPPEAR" not in result["content"]
-    assert "omitted" in result["content"]
-    assert result["path"] == "C:/repo/secret.py"
-    assert (result["start_line"], result["end_line"], result["total_lines"]) == (
-        7,
-        9,
-        12,
-    )
+    assert "seven" not in observation
+    assert "SOURCE OMITTED FROM OLDER RESULT" in observation
+    assert "path: C:/repo/secret.py" in observation
 
 
 def test_old_command_output_is_bounded_with_failure_metadata() -> None:
@@ -198,7 +318,7 @@ def test_old_command_output_is_bounded_with_failure_metadata() -> None:
         },
     )
 
-    result = _result(
+    observation = _observation(
         render_messages_for_model(
             messages,
             ToolResultTrimmingSettings(
@@ -207,11 +327,31 @@ def test_old_command_output_is_bounded_with_failure_metadata() -> None:
         )[-1]
     )
 
-    assert len(result["output"]) == 45
-    assert result["returncode"] == 2
-    assert result["failure_class"] == "process_failed"
-    assert result["shell"] == "powershell"
-    assert result["platform"] == "windows"
+    assert observation.startswith(
+        "RUN_COMMAND FAILED\ncommand: pytest\nexit_code: 2\n"
+        "failure_class: process_failed\ntruncated: yes"
+    )
+    assert "<<< OUTPUT >>>\n" in observation
+    assert "[older payload truncated]" in observation
+
+
+def test_command_denial_keeps_its_failure_reason() -> None:
+    observation = _observation(
+        render_messages_for_model(
+            _tool_turn(
+                "command",
+                "run_command",
+                {
+                    "ok": False,
+                    "tool": "run_command",
+                    "error": "user denied tool action",
+                },
+            ),
+            ToolResultTrimmingSettings(),
+        )[-1]
+    )
+
+    assert observation == "RUN_COMMAND FAILED\nreason: user denied tool action"
 
 
 def test_old_failed_patch_bounds_diagnostics_without_losing_candidate_ids() -> None:
@@ -235,7 +375,7 @@ def test_old_failed_patch_bounds_diagnostics_without_losing_candidate_ids() -> N
         },
     )
 
-    result = _result(
+    observation = _observation(
         render_messages_for_model(
             messages,
             ToolResultTrimmingSettings(
@@ -243,14 +383,12 @@ def test_old_failed_patch_bounds_diagnostics_without_losing_candidate_ids() -> N
             ),
         )[-1]
     )
-    candidate = result["candidates"][0]
-
-    assert candidate["match_id"] == "m1"
-    assert candidate["start_line"] == 10
-    assert candidate["end_line"] == 12
-    retained_diagnostics = candidate.get("context", "") + candidate.get("text", "")
-    assert len(retained_diagnostics) <= 35
-    assert result["model_diagnostic_note"] == "[older patch diagnostic omitted]"
+    assert observation.startswith(
+        "APPLY_PATCH FAILED\npath: C:/repo/example.py\nreason: old_text_not_unique"
+    )
+    assert "<<< CANDIDATE 1 m1 lines 10-12 >>>" in observation
+    assert "[older payload truncated]" in observation
+    assert "<<< OLDER PATCH DIAGNOSTIC TRUNCATED >>>" in observation
 
 
 def test_rendering_never_mutates_canonical_messages_or_results() -> None:
@@ -303,14 +441,15 @@ def test_agent_loop_sends_trimmed_view_but_keeps_session_history_canonical() -> 
     loop._respond([])
 
     assert messages == before
-    assert len(_result(adapter.messages[-1])["content"]) == 25
+    assert adapter.messages[-1]["content"].startswith("READ_FILE OK")
+    assert "SOURCE OMITTED FROM OLDER RESULT" in adapter.messages[-1]["content"]
 
 
-def test_disabled_trimming_reproduces_current_messages() -> None:
+def test_disabled_trimming_still_uses_textual_model_format() -> None:
     messages = _tool_turn(
         "read",
         "read_file",
-        {"ok": True, "tool": "read_file", "content": "full source" * 100},
+        _read_result("C:/repo/full.py", "full source\n", start_line=1, end_line=1),
     )
 
     rendered = render_messages_for_model(
@@ -318,8 +457,10 @@ def test_disabled_trimming_reproduces_current_messages() -> None:
         ToolResultTrimmingSettings(enabled=False, recent_full_results=0),
     )
 
-    assert rendered == messages
-    assert rendered[-1]["content"] == messages[-1]["content"]
+    assert rendered[0] == messages[0]
+    assert rendered[-1]["content"].endswith(
+        "<<< CODE SQUID SOURCE: full.py lines 1-1 >>>\nfull source"
+    )
 
 
 def test_trimming_preserves_assistant_tool_result_pairing() -> None:
@@ -338,7 +479,8 @@ def test_trimming_preserves_assistant_tool_result_pairing() -> None:
 
     assert rendered[0]["tool_calls"][0]["id"] == "paired-call"
     assert rendered[1]["tool_call_id"] == "paired-call"
-    assert len(_result(rendered[1])["output"]) == 20
+    assert "RUN_COMMAND OK" in rendered[1]["content"]
+    assert "truncated: yes" in rendered[1]["content"]
 
 
 def test_old_write_payload_is_omitted_when_present_but_status_survives() -> None:
@@ -354,18 +496,14 @@ def test_old_write_payload_is_omitted_when_present_but_status_survives() -> None
         },
     )
 
-    result = _result(
+    observation = _observation(
         render_messages_for_model(
             messages,
             ToolResultTrimmingSettings(recent_full_results=0),
         )[-1]
     )
 
-    assert "written source" not in result["content"]
-    assert "omitted" in result["content"]
-    assert result["ok"] is True
-    assert result["path"] == "C:/repo/example.py"
-    assert result["characters_written"] == 500
+    assert observation == "WRITE_FILE OK\npath: C:/repo/example.py"
 
 
 def test_unknown_tools_are_left_unchanged() -> None:
@@ -510,10 +648,10 @@ def test_trimmed_read_metadata_does_not_preserve_source_coverage(
         ToolResultTrimmingSettings(recent_full_results=0, read_old_content_chars=0),
         on_read_result_trimmed=lambda event: _apply_trim_event(runner, event),
     )
-    trimmed_result = _result(rendered[-1])
+    observation = _observation(rendered[-1])
 
-    assert trimmed_result["start_line"] == 1
-    assert trimmed_result["end_line"] == 10
+    assert "path: " + path in observation
+    assert "SOURCE OMITTED FROM OLDER RESULT" in observation
     assert _observe_read(runner, path, "read-2", result).updated_tool_output == result
 
 

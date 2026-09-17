@@ -1654,6 +1654,21 @@ context, compaction output, Tool-result trimming, and adapter message
 normalization are therefore visible here. Observer failures are swallowed at
 the adapter boundary and cannot fail an otherwise valid provider request.
 
+Immediately before an ordinary agent request, Core's centralized
+tool-result-rendering seam parses canonical JSON Tool messages into a
+request-only view. Canonical session messages and result dictionaries remain
+complete and structured for Hooks, replay, trimming, and storage, while the
+four built-ins are shown to the model as compact text. `read_file` source is
+emitted as ordinary multiline text under per-region path and exact-line
+headers; every disjoint or trimmed gap has an explicit omitted interval.
+Repeated-read partial and skipped results use the same notation.
+`run_command` exposes command, exit status, concise failure metadata, and an
+output block; `apply_patch` keeps recovery IDs, ranges, and current candidate
+text; successful `write_file` results contain only status and path. Assistant
+Tool calls and their Tool messages retain the original `tool_call_id` pairing.
+Unknown tools retain their canonical serialization because Core cannot infer
+which caller-defined fields are safe to omit.
+
 Every provider reply is captured before agent validation as a diagnostic-only
 `model_reply` entry:
 

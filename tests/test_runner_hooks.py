@@ -431,20 +431,17 @@ def test_default_runtime_repeated_read_fires_and_is_logged(tmp_path: Path) -> No
         "updated_tool_output",
         "additional_context",
     ]
-    second_read_result = json.loads(
-        next(
-            message["content"]
-            for message in reversed(model.calls[2])
-            if message.get("role") == "tool"
-        )
+    second_read_observation = next(
+        message["content"]
+        for message in reversed(model.calls[2])
+        if message.get("role") == "tool"
     )
-    assert second_read_result["partially_redundant"] is True
-    assert second_read_result["returned_line_ranges"] == [
-        {"start_line": 151, "end_line": 195}
-    ]
-    assert second_read_result["content"].startswith("line 151\n")
-    assert "line 150\n" not in second_read_result["content"]
-    assert "If the intended edit is clear" in model.calls[2][-1]["content"]
+    assert second_read_observation.startswith("READ_FILE PARTIAL")
+    assert "lines 46-150 already available unchanged" in second_read_observation
+    assert "SOURCE: deepseek_sample.py lines 151-195" in second_read_observation
+    assert "line 151\n" in second_read_observation
+    assert "line 150\n" not in second_read_observation
+    assert "If the next edit is already clear" in model.calls[2][-1]["content"]
     assert "hook_execution" not in str(model.calls)
 
 
@@ -461,7 +458,11 @@ def test_default_runtime_low_overlap_is_filtered_and_logged(tmp_path: Path) -> N
     assert [event["status"] for event in read_events] == ["no_effect", "effect"]
     assert read_events[1]["produced_effect"] is True
     assert any(
-        "If the intended edit is clear" in str(message.get("content", ""))
+        "READ_FILE PARTIAL" in str(message.get("content", ""))
+        for message in model.calls[2]
+    )
+    assert any(
+        "If the next edit is already clear" in str(message.get("content", ""))
         for message in model.calls[2]
     )
 

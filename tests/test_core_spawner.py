@@ -230,6 +230,61 @@ def test_runtime_wires_finalized_requests_to_session_model_view(tmp_path: Path) 
     assert records[0]["reasoning_token_budget"] == 321
 
 
+def test_model_view_records_textual_tool_observation_not_canonical_json(
+    tmp_path: Path,
+) -> None:
+    class Provider:
+        def create_response(self, **request):
+            return _provider_response()
+
+    run = core_spawner.build_agent_run(
+        tmp_path,
+        "Observe a read",
+        settings=_settings(),
+        provider=Provider(),
+        **_storage_paths(tmp_path),
+    )
+    canonical_result = {
+        "ok": True,
+        "tool": "read_file",
+        "path": str(tmp_path / "script.py"),
+        "content": "first\nsecond\n",
+        "start_line": 10,
+        "end_line": 11,
+        "returned_line_ranges": [{"start_line": 10, "end_line": 11}],
+    }
+    assistant = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {
+                "id": "read-1",
+                "type": "function",
+                "function": {"name": "read_file", "arguments": "{}"},
+            }
+        ],
+    }
+    canonical_tool_message = ToolResults().message_from_action_result(
+        {"tool_call_id": "read-1"}, canonical_result
+    )
+    run.session.messages = [assistant, canonical_tool_message]
+
+    run.loop._respond([])
+
+    record = json.loads(
+        run.session_store.model_view_path.read_text(encoding="utf-8").splitlines()[-1]
+    )
+    model_tool_message = record["messages"][-1]
+    assert model_tool_message["tool_call_id"] == "read-1"
+    assert model_tool_message["content"].startswith("READ_FILE OK")
+    assert (
+        "<<< CODE SQUID SOURCE: script.py lines 10-11 >>>"
+        in model_tool_message["content"]
+    )
+    assert '"content": "first' not in model_tool_message["content"]
+    assert json.loads(canonical_tool_message["content"]) == canonical_result
+
+
 def test_each_real_retry_attempt_gets_its_own_model_view_record(
     tmp_path: Path,
 ) -> None:

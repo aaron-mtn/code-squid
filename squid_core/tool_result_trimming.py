@@ -1,4 +1,9 @@
-"""Render canonical tool results into a bounded, model-visible history view."""
+"""Render canonical tool results into a compact, model-visible history view.
+
+Canonical transcript messages remain JSON so Hooks, storage, and replay retain
+the complete machine-readable result.  This module owns the request-only seam
+where those dictionaries are trimmed and then presented to the model as text.
+"""
 
 from __future__ import annotations
 
@@ -25,21 +30,20 @@ def render_messages_for_model(
     on_read_result_trimmed: Callable[[ReadResultTrimmedContext], None] | None = None,
 ) -> list[dict]:
     """Return a request-only history view without mutating canonical messages."""
-    if not settings.enabled:
-        return list(messages)
-
     tool_indexes = [
         index for index, message in enumerate(messages) if message.get("role") == "tool"
     ]
-    old_count = max(0, len(tool_indexes) - settings.recent_full_results)
+    old_count = (
+        max(0, len(tool_indexes) - settings.recent_full_results)
+        if settings.enabled
+        else 0
+    )
     old_indexes = set(tool_indexes[:old_count])
-    if not old_indexes:
-        return list(messages)
 
     tool_names = _tool_names_by_call_id(messages)
     rendered = []
     for index, message in enumerate(messages):
-        if index not in old_indexes:
+        if message.get("role") != "tool":
             rendered.append(message)
             continue
 
@@ -49,6 +53,7 @@ def render_messages_for_model(
                 tool_names.get(message.get("tool_call_id")),
                 settings,
                 on_read_result_trimmed,
+                is_recent=index not in old_indexes,
             )
         )
     return rendered
@@ -101,6 +106,8 @@ def _render_tool_message(
     paired_tool_name: str | None,
     settings: ToolResultTrimmingSettings,
     on_read_result_trimmed: Callable[[ReadResultTrimmedContext], None] | None,
+    *,
+    is_recent: bool,
 ) -> dict:
     content = message.get("content")
     if not isinstance(content, str):
@@ -115,13 +122,18 @@ def _render_tool_message(
     rendered_result = render_tool_result_for_model(
         result,
         tool_name=paired_tool_name,
-        is_recent=False,
+        is_recent=is_recent,
         settings=settings,
     )
-    if rendered_result is result:
-        return message
 
-    if paired_tool_name == "read_file" and on_read_result_trimmed is not None:
+    name = paired_tool_name or result.get("tool")
+    read_was_trimmed = name == "read_file" and rendered_result is not result
+    retained_read_ranges = (
+        _retained_read_ranges(result, settings.read_old_content_chars)
+        if read_was_trimmed
+        else _read_ranges(result)
+    )
+    if read_was_trimmed and on_read_result_trimmed is not None:
         tool_call_id = message.get("tool_call_id")
         if isinstance(tool_call_id, str):
             path = result.get("path")
@@ -129,19 +141,310 @@ def _render_tool_message(
                 ReadResultTrimmedContext(
                     tool_call_id=tool_call_id,
                     path=path if isinstance(path, str) else None,
-                    retained_line_ranges=tuple(
-                        _retained_read_ranges(
-                            result,
-                            settings.read_old_content_chars,
-                        )
-                    ),
+                    retained_line_ranges=tuple(retained_read_ranges),
                 )
             )
 
+    content = _format_result_for_model(
+        rendered_result,
+        name if isinstance(name, str) else None,
+        source_result=result,
+        visible_read_ranges=retained_read_ranges,
+        read_was_trimmed=read_was_trimmed,
+    )
+    if content is None:
+        return message
+
     rendered_message = dict(message)
-    # Match ToolResults' canonical serialization so only the payload differs.
-    rendered_message["content"] = json.dumps(rendered_result, indent=2)
+    rendered_message["content"] = content
     return rendered_message
+
+
+def _format_result_for_model(
+    result: dict,
+    tool_name: str | None,
+    *,
+    source_result: dict,
+    visible_read_ranges: list[tuple[int, int]],
+    read_was_trimmed: bool,
+) -> str | None:
+    """Format recognized built-ins; unknown tools keep their canonical JSON."""
+    if tool_name == "read_file":
+        return _format_read_result(
+            result,
+            source_result=source_result,
+            visible_ranges=visible_read_ranges,
+            was_trimmed=read_was_trimmed,
+        )
+    if tool_name == "run_command":
+        return _format_command_result(result)
+    if tool_name == "apply_patch":
+        return _format_patch_result(result)
+    if tool_name == "write_file":
+        return _format_write_result(result)
+    return None
+
+
+def _format_read_result(
+    result: dict,
+    *,
+    source_result: dict,
+    visible_ranges: list[tuple[int, int]],
+    was_trimmed: bool,
+) -> str:
+    path = _text(result.get("path"), "(unknown)")
+    if result.get("ok") is not True:
+        return _format_simple_failure("READ_FILE", result, path=path)
+
+    returned_ranges = _read_ranges(source_result)
+    if result.get("already_covered") is True:
+        lines = ["READ_FILE SKIPPED", f"path: {path}"]
+        if returned_ranges:
+            lines.append(f"lines: {_format_ranges(returned_ranges)}")
+        lines.append("reason: unchanged source already available in context")
+        message = result.get("message")
+        if isinstance(message, str) and message:
+            lines.append(f"detail: {message}")
+        return "\n".join(lines)
+
+    partial = result.get("partially_redundant") is True
+    status = "PARTIAL" if partial else "OK"
+    lines = [f"READ_FILE {status}", f"path: {path}"]
+    if result.get("content_truncated") is True or was_trimmed:
+        lines.append("truncated: yes")
+
+    source_regions = _source_regions(source_result, visible_ranges)
+    omitted = _read_ranges_from_field(result, "omitted_line_ranges")
+    omitted_reason = " already available unchanged" if partial else ""
+    events: list[tuple[int, int, str, str | None]] = [
+        (start, end, "source", text) for start, end, text in source_regions
+    ]
+    events.extend((start, end, "omitted", omitted_reason) for start, end in omitted)
+    events.sort(key=lambda item: (item[0], item[2] != "omitted"))
+
+    # Any discontinuity between visible regions must remain explicit. This also
+    # covers built-in full-file truncation and request-only old-result trimming.
+    expanded: list[tuple[int, int, str, str | None]] = []
+    previous_end = None
+    for event in events:
+        start, end, kind, payload = event
+        if previous_end is not None and start > previous_end + 1:
+            reason = " older result content trimmed" if was_trimmed else ""
+            expanded.append((previous_end + 1, start - 1, "omitted", reason))
+        expanded.append(event)
+        previous_end = max(previous_end or 0, end)
+
+    filename = _path_name(path)
+    for start, end, kind, payload in expanded:
+        lines.append("")
+        if kind == "source":
+            lines.append(
+                f"<<< CODE SQUID SOURCE: {filename} lines {start}-{end} >>>"
+            )
+            lines.append(payload or "")
+        else:
+            lines.append(
+                f"<<< CODE SQUID OMITTED: {filename} lines {start}-{end}{payload or ''} >>>"
+            )
+
+    if not source_regions and was_trimmed:
+        lines.extend(("", "<<< CODE SQUID SOURCE OMITTED FROM OLDER RESULT >>>"))
+    return "\n".join(lines).rstrip()
+
+
+def _source_regions(
+    result: dict, visible_ranges: list[tuple[int, int]]
+) -> list[tuple[int, int, str]]:
+    """Extract exact visible subranges from the original canonical payload."""
+    content = result.get("content")
+    original_ranges = _read_ranges(result)
+    if not isinstance(content, str) or not original_ranges:
+        return []
+    segments = _read_content_segments(content, original_ranges)
+    if segments is None:
+        return []
+
+    regions = []
+    for (original_start, original_end), segment in zip(original_ranges, segments):
+        for visible_start, visible_end in visible_ranges:
+            start = max(original_start, visible_start)
+            end = min(original_end, visible_end)
+            if start > end:
+                continue
+            first = start - original_start
+            last = end - original_start + 1
+            regions.append((start, end, "".join(segment[first:last])))
+    return regions
+
+
+def _read_content_segments(
+    content: str, ranges: list[tuple[int, int]]
+) -> list[list[str]] | None:
+    """Split source payloads while accepting the built-in inter-range marker."""
+    lines = content.splitlines(keepends=True)
+    source_line_count = sum(end - start + 1 for start, end in ranges)
+    if len(lines) == source_line_count:
+        segments = []
+        offset = 0
+        for start, end in ranges:
+            length = end - start + 1
+            segments.append(lines[offset : offset + length])
+            offset += length
+        return segments
+
+    segments = []
+    offset = 0
+    previous_end = None
+    for start, end in ranges:
+        if previous_end is not None and start > previous_end + 1:
+            expected = (
+                f"<<< CODE SQUID: lines {previous_end + 1}-{start - 1} "
+                "omitted from this read >>>"
+            )
+            if offset >= len(lines) or lines[offset].rstrip("\r\n") != expected:
+                return None
+            offset += 1
+        length = end - start + 1
+        segment = lines[offset : offset + length]
+        if len(segment) != length:
+            return None
+        segments.append(segment)
+        offset += length
+        previous_end = end
+    return segments if offset == len(lines) else None
+
+
+def _format_command_result(result: dict) -> str:
+    ok = result.get("ok") is True
+    lines = [f"RUN_COMMAND {'OK' if ok else 'FAILED'}"]
+    _append_scalar(lines, "command", result.get("command"))
+    _append_scalar(lines, "exit_code", result.get("returncode"))
+    if result.get("timed_out") is True:
+        lines.append("timed_out: yes")
+    if not ok:
+        _append_scalar(lines, "reason", result.get("error"))
+        _append_scalar(lines, "failure_class", result.get("failure_class"))
+    if result.get("output_truncated") is True or result.get("model_output_truncated") is True:
+        lines.append("truncated: yes")
+    output = result.get("output")
+    if isinstance(output, str) and output:
+        lines.extend(("", "<<< OUTPUT >>>", output))
+    return "\n".join(lines).rstrip()
+
+
+def _format_patch_result(result: dict) -> str:
+    ok = result.get("ok") is True
+    lines = [f"APPLY_PATCH {'OK' if ok else 'FAILED'}"]
+    _append_scalar(lines, "path", result.get("path"))
+    if ok:
+        start = result.get("start_line")
+        end = result.get("end_line_after")
+        if _valid_line_range(start, end):
+            lines.append(f"changed: lines {start}-{end}")
+        _append_scalar(lines, "match_id", result.get("match_id"))
+        return "\n".join(lines)
+
+    _append_scalar(lines, "reason", result.get("error"))
+    _append_scalar(lines, "match_id", result.get("match_id"))
+    _append_scalar(lines, "occurrences", result.get("occurrences"))
+    _append_scalar(lines, "message", result.get("message"))
+    _append_scalar(lines, "guidance", result.get("guidance"))
+    candidates = result.get("candidates")
+    if isinstance(candidates, list):
+        diagnostic_groups = (("candidate", candidates),)
+    else:
+        _append_patch_diagnostic(
+            lines, "closest current text", result.get("closest_match")
+        )
+        diagnostic_groups = (("current match", result.get("matches")),)
+    for label, collection in diagnostic_groups:
+        if not isinstance(collection, list):
+            continue
+        for index, item in enumerate(collection, start=1):
+            if isinstance(item, dict):
+                _append_patch_diagnostic(lines, f"{label} {index}", item)
+    if result.get("model_diagnostic_truncated") is True:
+        lines.extend(("", "<<< OLDER PATCH DIAGNOSTIC TRUNCATED >>>"))
+    return "\n".join(lines).rstrip()
+
+
+def _append_patch_diagnostic(lines: list[str], label: str, item: object) -> None:
+    if not isinstance(item, dict):
+        return
+    lines.append("")
+    heading = label.upper()
+    match_id = item.get("match_id")
+    if isinstance(match_id, str):
+        heading += f" {match_id}"
+    start = item.get("start_line")
+    end = item.get("end_line")
+    if _valid_line_range(start, end):
+        heading += f" lines {start}-{end}"
+    lines.append(f"<<< {heading} >>>")
+    _append_scalar(lines, "similarity", item.get("similarity"))
+    text = item.get("text")
+    if not isinstance(text, str):
+        text = item.get("content")
+    if not isinstance(text, str):
+        text = item.get("context")
+        context_start = item.get("context_start_line")
+        context_end = item.get("context_end_line")
+        if isinstance(text, str) and _valid_line_range(context_start, context_end):
+            lines.append(f"context_lines: {context_start}-{context_end}")
+    if isinstance(text, str) and text:
+        lines.append(text)
+
+
+def _format_write_result(result: dict) -> str:
+    ok = result.get("ok") is True
+    lines = [f"WRITE_FILE {'OK' if ok else 'FAILED'}"]
+    _append_scalar(lines, "path", result.get("path"))
+    if not ok:
+        _append_scalar(lines, "reason", result.get("error"))
+        _append_scalar(lines, "message", result.get("message"))
+    return "\n".join(lines)
+
+
+def _format_simple_failure(prefix: str, result: dict, *, path: str) -> str:
+    lines = [f"{prefix} FAILED", f"path: {path}"]
+    _append_scalar(lines, "reason", result.get("error"))
+    _append_scalar(lines, "message", result.get("message"))
+    return "\n".join(lines)
+
+
+def _append_scalar(lines: list[str], label: str, value: object) -> None:
+    if value is not None and not isinstance(value, (dict, list)):
+        lines.append(f"{label}: {value}")
+
+
+def _text(value: object, fallback: str) -> str:
+    return value if isinstance(value, str) and value else fallback
+
+
+def _path_name(path: str) -> str:
+    normalized = path.replace("\\", "/").rstrip("/")
+    return normalized.rsplit("/", 1)[-1] or path
+
+
+def _format_ranges(ranges: list[tuple[int, int]]) -> str:
+    return ", ".join(
+        str(start) if start == end else f"{start}-{end}" for start, end in ranges
+    )
+
+
+def _read_ranges_from_field(result: dict, field: str) -> list[tuple[int, int]]:
+    raw_ranges = result.get(field)
+    if not isinstance(raw_ranges, list):
+        return []
+    ranges = []
+    for item in raw_ranges:
+        if not isinstance(item, dict):
+            continue
+        start = item.get("start_line")
+        end = item.get("end_line")
+        if _valid_line_range(start, end):
+            ranges.append((start, end))
+    return ranges
 
 
 def _tool_names_by_call_id(messages: list[dict]) -> dict[str, str]:
