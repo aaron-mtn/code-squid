@@ -34,10 +34,12 @@ class SessionStore:
     # A session folder currently contains:
     # - metadata.json: run-level facts like status, task, and active leaf
     # - session.jsonl: append-only transcript entries
+    # - model-view.jsonl: the final model-visible representation per request
     def __init__(self, session_dir: Path) -> None:
         self.session_dir = session_dir
         self.metadata_path = session_dir / "metadata.json"
         self.jsonl_path = session_dir / "session.jsonl"
+        self.model_view_path = session_dir / "model-view.jsonl"
 
     @classmethod
     def create(
@@ -74,10 +76,11 @@ class SessionStore:
             # needing to know where that host stores sessions.
             metadata["repo_root"] = str(Path(workspace_root).resolve())
 
-        # Write the initial metadata and create an empty JSONL transcript.
+        # Write the initial metadata and create the two append-only logs.
         store = cls(session_dir)
         store._write_metadata(metadata)
         store.jsonl_path.write_text("", encoding="utf-8")
+        store.model_view_path.write_text("", encoding="utf-8")
         return store
 
     # Open an existing session folder without creating or modifying files.
@@ -130,6 +133,20 @@ class SessionStore:
     # only: load_messages() deliberately ignores it, so it is never replayed.
     def append_model_reply(self, reply: dict) -> dict:
         return self._append_non_message_entry("model_reply", {"reply": reply})
+
+    def append_model_view(self, request: dict) -> dict:
+        """Append the exact finalized representation used for one model request."""
+        record = {
+            "request_index": self._next_model_request_number(),
+            "timestamp": _utc_now(),
+            **request,
+        }
+        # This log deliberately has its own linear sequence: unlike transcript
+        # events, model requests do not participate in the active-leaf chain.
+        with self.model_view_path.open("a", encoding="utf-8") as file:
+            file.write(json.dumps(record) + "\n")
+            file.flush()
+        return record
 
     # Append validation/rejection details linked to the model_reply snapshot.
     def append_reply_rejection(
@@ -281,6 +298,13 @@ class SessionStore:
                     count += 1
 
         return count + 1
+
+    def _next_model_request_number(self) -> int:
+        """Return the next request number, including requests from prior runs."""
+        if not self.model_view_path.exists():
+            return 1
+        with self.model_view_path.open(encoding="utf-8") as file:
+            return sum(1 for line in file if line.strip()) + 1
 
     def _append_non_message_entry(self, entry_type: str, fields: dict) -> dict:
         """Append a linked event that is not itself a transcript message."""

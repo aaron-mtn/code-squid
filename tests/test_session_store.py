@@ -33,11 +33,37 @@ def test_create_writes_initial_metadata_and_empty_jsonl(tmp_path: Path) -> None:
     assert store.metadata_path.exists()
     assert store.jsonl_path.exists()
     assert store.jsonl_path.read_text(encoding="utf-8") == ""
+    assert store.model_view_path == store.jsonl_path.with_name("model-view.jsonl")
+    assert store.model_view_path.exists()
+    assert store.model_view_path.read_text(encoding="utf-8") == ""
     assert metadata["status"] == "active"
     assert metadata["task"] == "Fix Formatter Underscore Bug"
     assert metadata["repo_root"] == str(tmp_path.resolve())
     assert metadata["session_id"]
     assert metadata["active_leaf_id"] is None
+
+
+def test_append_model_view_writes_one_numbered_record_per_request(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path, "model view")
+    request = {
+        "provider": "test-provider",
+        "model": "test-model",
+        "messages": [{"role": "user", "content": "final context"}],
+        "tools": [{"function": {"name": "read_file"}}],
+    }
+
+    first = store.append_model_view(request)
+    second = store.append_model_view(request)
+    records = [
+        json.loads(line)
+        for line in store.model_view_path.read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert records == [first, second]
+    assert [record["request_index"] for record in records] == [1, 2]
+    assert all(record["timestamp"] for record in records)
+    assert records[0]["messages"] == request["messages"]
+    assert records[0]["tools"] == request["tools"]
 
 
 def test_session_id_uses_sortable_24_hour_timestamp_and_task_slug(tmp_path: Path) -> None:

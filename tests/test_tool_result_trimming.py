@@ -563,7 +563,13 @@ def test_multi_range_read_omits_covered_regions_but_preserves_novel_regions(
 
     shaped = _observe_read(runner, path, "read-2", second).updated_tool_output
 
-    assert shaped["content"] == "".join((lines[4], *lines[14:17]))
+    assert shaped["content"] == "".join(
+        (
+            lines[4],
+            "<<< CODE SQUID: lines 6-14 omitted from this read >>>\n",
+            *lines[14:17],
+        )
+    )
     assert shaped["returned_line_ranges"] == [
         {"start_line": 5, "end_line": 5},
         {"start_line": 15, "end_line": 17},

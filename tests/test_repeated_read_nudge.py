@@ -11,6 +11,7 @@ from squid_core.hooks import (
     RepeatedReadNudge,
     ToolResultContext,
 )
+from squid_core.hooks.redundant_read import _partially_redundant_result
 from squid_core.tools.builtins.apply_patch import execute as apply_patch
 from squid_core.tools.builtins.read_file import execute as read_file
 
@@ -28,6 +29,40 @@ ESCALATED_ALREADY_COVERED_MESSAGE = (
     "being returned again. Reuse the existing context, stop rereading this "
     "section, and take the next useful action."
 )
+
+
+def test_partial_redundant_shaping_preserves_disjoint_read_markers() -> None:
+    result = {
+        "content": (
+            "line 1\n"
+            "line 2\n"
+            "<<< CODE SQUID: lines 3-8 omitted from this read >>>\n"
+            "line 9\n"
+            "line 10\n"
+        ),
+        "returned_line_ranges": [
+            {"start_line": 1, "end_line": 2},
+            {"start_line": 9, "end_line": 10},
+        ],
+    }
+
+    shaped = _partially_redundant_result(
+        result,
+        returned_ranges=[(1, 2), (9, 10)],
+        covered_ranges=[(2, 2), (9, 9)],
+        novel_ranges=[(1, 1), (10, 10)],
+    )
+
+    assert shaped is not None
+    assert shaped["content"] == (
+        "line 1\n"
+        "<<< CODE SQUID: lines 2-9 omitted from this read >>>\n"
+        "line 10\n"
+    )
+    assert shaped["returned_line_ranges"] == [
+        {"start_line": 1, "end_line": 1},
+        {"start_line": 10, "end_line": 10},
+    ]
 
 
 def _source(start: int, end: int) -> str:
@@ -447,7 +482,13 @@ def test_middle_and_multiple_covered_ranges_produce_novel_fragments(
         hook, path, returned_end=6, content=_source(1, 6)
     ).updated_tool_output
 
-    assert output["content"] == _source(1, 1) + _source(4, 4) + _source(6, 6)
+    assert output["content"] == (
+        _source(1, 1)
+        + "<<< CODE SQUID: lines 2-3 omitted from this read >>>\n"
+        + _source(4, 4)
+        + "<<< CODE SQUID: lines 5-5 omitted from this read >>>\n"
+        + _source(6, 6)
+    )
     assert output["returned_line_ranges"] == [
         {"start_line": 1, "end_line": 1},
         {"start_line": 4, "end_line": 4},
@@ -487,7 +528,11 @@ def test_truncated_multi_range_result_filters_each_segment_independently(
         content=result_content,
     ).updated_tool_output
 
-    assert output["content"] == _source(3, 4) + _source(7, 8)
+    assert output["content"] == (
+        _source(3, 4)
+        + "<<< CODE SQUID: lines 5-6 omitted from this read >>>\n"
+        + _source(7, 8)
+    )
     assert output["returned_line_ranges"] == [
         {"start_line": 3, "end_line": 4},
         {"start_line": 7, "end_line": 8},
@@ -560,7 +605,11 @@ def test_trimmed_partial_result_retracts_only_its_remaining_visible_source(
         returned_end=6,
         content=_source(4, 6),
     )
-    assert reread.updated_tool_output["content"] == _source(4, 4) + _source(6, 6)
+    assert reread.updated_tool_output["content"] == (
+        _source(4, 4)
+        + "<<< CODE SQUID: lines 5-5 omitted from this read >>>\n"
+        + _source(6, 6)
+    )
     assert reread.updated_tool_output["returned_line_ranges"] == [
         {"start_line": 4, "end_line": 4},
         {"start_line": 6, "end_line": 6},

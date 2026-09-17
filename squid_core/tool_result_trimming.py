@@ -182,12 +182,21 @@ def _retained_read_ranges(result: dict, limit: int) -> list[tuple[int, int]]:
     if tail_chars:
         retained_spans.append((len(content) - tail_chars, len(content)))
 
-    source_lines = [
-        line_number
-        for start, end in _read_ranges(result)
-        for line_number in range(start, end + 1)
-    ]
     payload_lines = content.splitlines(keepends=True)
+    has_gap_markers = any(
+        line.startswith("<<< CODE SQUID: lines ")
+        and line.rstrip().endswith("omitted from this read >>>")
+        for line in payload_lines
+    )
+    source_lines: list[int | None] = []
+    previous_end = None
+    for start, end in _read_ranges(result):
+        # read_file renders one non-source marker line between disjoint ranges.
+        # Keep it in the payload coordinate space without claiming coverage.
+        if has_gap_markers and previous_end is not None and start > previous_end + 1:
+            source_lines.append(None)
+        source_lines.extend(range(start, end + 1))
+        previous_end = end
     # Metadata from caller-defined read tools may not describe the payload
     # exactly. In that case, forgetting coverage is safer than blocking a read.
     if len(payload_lines) != len(source_lines):
@@ -197,7 +206,7 @@ def _retained_read_ranges(result: dict, limit: int) -> list[tuple[int, int]]:
     offset = 0
     for line_number, line in zip(source_lines, payload_lines):
         line_end = offset + len(line)
-        if any(
+        if line_number is not None and any(
             offset >= span_start and line_end <= span_end
             for span_start, span_end in retained_spans
         ):

@@ -113,7 +113,8 @@ def execute(
         head_lines = settings.default_max_lines // 2
         tail_lines = settings.default_max_lines - head_lines
         tail_start = total_lines - tail_lines + 1
-        content = "".join((*lines[:head_lines], *lines[-tail_lines:]))
+        returned_ranges = [(1, head_lines), (tail_start, total_lines)]
+        content = _render_ranges(lines, returned_ranges)
         content_metadata = {
             "truncated": True,
             "original_chars": original_chars,
@@ -134,10 +135,7 @@ def execute(
         "ranged": False,
     }
     if content_metadata["truncated"]:
-        result["returned_line_ranges"] = [
-            {"start_line": 1, "end_line": head_lines},
-            {"start_line": tail_start, "end_line": total_lines},
-        ]
+        result["returned_line_ranges"] = _range_dicts(returned_ranges)
         result["truncation_guidance"] = (
             f"Full-file read truncated to {settings.default_max_lines} of {total_lines} lines; "
             f"returned lines 1-{head_lines} and {tail_start}-{total_lines}. Use "
@@ -184,11 +182,7 @@ def _read_ranges(
             ),
         }
 
-    content = "".join(
-        line
-        for start_line, end_line in merged
-        for line in lines[start_line - 1 : end_line]
-    )
+    content = _render_ranges(lines, merged)
     if merged:
         actual_start = merged[0][0]
         actual_end = merged[-1][1]
@@ -303,3 +297,21 @@ def _merge_ranges(ranges: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:
 
 def _range_dicts(ranges: Sequence[tuple[int, int]]) -> list[dict[str, int]]:
     return [{"start_line": start, "end_line": end} for start, end in ranges]
+
+
+def _render_ranges(
+    lines: list[str],
+    ranges: Sequence[tuple[int, int]],
+) -> str:
+    """Render source regions with unmistakable markers at every line gap."""
+    parts: list[str] = []
+    previous_end = None
+    for start_line, end_line in ranges:
+        if previous_end is not None and start_line > previous_end + 1:
+            parts.append(
+                f"<<< CODE SQUID: lines {previous_end + 1}-{start_line - 1} "
+                "omitted from this read >>>\n"
+            )
+        parts.extend(lines[start_line - 1 : end_line])
+        previous_end = end_line
+    return "".join(parts)

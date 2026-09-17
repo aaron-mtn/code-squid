@@ -344,8 +344,9 @@ and application layer; `squid_core/` is the reusable agent runtime.
   - Generic durable persistence, discovery, and diagnostic mechanics with no
     Code Squid path policy.
   - `session_store.py` owns one explicitly located session directory,
-    `metadata.json`, append-only `session.jsonl`, replay loading, status updates,
-    compaction/run-context events, and model-reply/rejection diagnostics.
+    `metadata.json`, append-only `session.jsonl` and `model-view.jsonl`, replay
+    loading, status updates, compaction/run-context events, and model request/
+    reply/rejection diagnostics.
   - `undo_store.py` owns the explicitly located latest-only undo buffer.
   - `atomic_json.py` owns small same-directory atomic JSON replacement.
   - `session_index.py` owns generic inspection plus cross-location registration
@@ -386,14 +387,16 @@ and application layer; `squid_core/` is the reusable agent runtime.
 
 - Flat `squid_core/*.py` runtime concepts
   - `events.py` owns observation; `generation.py` owns one-shot generation;
-    `model_adapter.py` owns provider
-    normalization; `settings.py` owns generic provider/runtime/compaction
-    and tool-result trimming semantics; `tool_result_trimming.py` owns the
-    request-only rendering of older built-in Tool payloads and reports exact
-    retained source-line ranges when it trims a `read_file` result;
-    `platform_context.py` describes the environment;
-    `spawner.py` owns generic construction; `session.py` owns in-memory
-    transcript state; and `skills.py` owns standalone Skills.
+    `model_adapter.py` owns final provider request preparation, generic
+    best-effort request observation at the shared transport boundary, and
+    response normalization; `settings.py` owns generic provider/runtime/
+    compaction and tool-result trimming semantics; `tool_result_trimming.py`
+    owns the request-only rendering of older built-in Tool payloads and reports
+    exact retained source-line ranges when it trims a `read_file` result;
+    `platform_context.py` describes the environment; `spawner.py` owns generic
+    construction and wires finalized request observations to the active session
+    store; `session.py` owns in-memory transcript state; and `skills.py` owns
+    standalone Skills.
   - Resource modules accept explicit application homes or resource roots. They
     do not import Code Squid's application-home policy.
 
@@ -1629,12 +1632,27 @@ Each session folder contains:
 
 - `metadata.json`
 - `session.jsonl`
+- `model-view.jsonl`
 
 `metadata.json` stores run-level metadata: session id, timestamps, repo root,
 task, status, and active leaf id. `session.jsonl` stores append-only entries for
 messages, compaction events, run-context events, and model reply diagnostics.
 Message entries include `id`, `parent_id`, `type`, `timestamp`, `message`, and
 optional `usage`.
+
+`model-view.jsonl` records one object for every provider attempt. `ModelAdapter`
+finalizes each request, then its shared provider-transport boundary gives a
+generic observer that exact request object immediately before sending it.
+The Core composition root wires that observer to `SessionStore.append_model_view()`;
+the adapter knows nothing about sessions or JSONL, while `AgentLoop` and
+`Compactor` need no model-view-specific paths. Records include a session-local
+request index, timestamp, provider/model and reasoning metadata when available,
+estimated request tokens, final messages, and final Tool schemas. This naturally
+covers ordinary, streaming, retry, compaction, and other prepared-request calls.
+This is a request-observability log, not canonical history; request-only Hook
+context, compaction output, Tool-result trimming, and adapter message
+normalization are therefore visible here. Observer failures are swallowed at
+the adapter boundary and cannot fail an otherwise valid provider request.
 
 Every provider reply is captured before agent validation as a diagnostic-only
 `model_reply` entry:
@@ -1760,10 +1778,10 @@ root-level properties.
   then sorts and merges overlapping or adjacent effective regions before
   enforcing the 1,000-line total source-coverage budget; over-budget explicit
   multi-range requests fail instead of being partially returned
-- concatenates multi-range content in source order and reports each effective
-  region through the existing `returned_line_ranges` metadata, allowing
-  RepeatedReadNudge and request-only result trimming to keep their per-region
-  coverage and provenance behavior
+- renders multi-range content in source order with an explicit omitted-line
+  marker between every disjoint pair, while still reporting each effective
+  region through `returned_line_ranges`; RepeatedReadNudge and request-only
+  result trimming preserve those separators and per-region provenance
 - reports the effective expanded `start_line` and `end_line`, so runtime Hooks
   track the content actually returned rather than only the requested interval
 - preserves the existing content, character-count, truncation, ranged-read,

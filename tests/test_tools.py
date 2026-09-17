@@ -140,13 +140,15 @@ def test_read_file_truncates_large_full_read_by_lines_and_reports_ranges(
     file_path = tmp_path / "1001-lines.txt"
     lines = [f"line {number}\n" for number in range(1, 1002)]
     original_content = "".join(lines)
-    expected_content = "".join((*lines[:500], *lines[-500:]))
+    separator = "<<< CODE SQUID: lines 501-501 omitted from this read >>>\n"
+    expected_content = "".join((*lines[:500], separator, *lines[-500:]))
     file_path.write_text(original_content, encoding="utf-8")
 
     result = read_file(tmp_path, str(file_path))
 
     assert result["content"] == expected_content
-    assert len(result["content"].splitlines()) == 1000
+    assert len(result["content"].splitlines()) == 1001
+    assert "line 500\n" + separator + "line 502\n" in result["content"]
     assert result["content_truncated"] is True
     assert result["content_original_chars"] == len(original_content)
     assert result["content_returned_chars"] == len(expected_content)
@@ -259,7 +261,13 @@ def test_read_file_returns_disjoint_ranges_in_source_order(tmp_path: Path) -> No
         settings=ReadFileSettings(default_max_lines=10, minimum_range_lines=1),
     )
 
-    assert result["content"] == "".join((*lines[1:4], *lines[14:17]))
+    assert result["content"] == "".join(
+        (
+            *lines[1:4],
+            "<<< CODE SQUID: lines 5-14 omitted from this read >>>\n",
+            *lines[14:17],
+        )
+    )
     assert result["returned_line_ranges"] == [
         {"start_line": 2, "end_line": 4},
         {"start_line": 15, "end_line": 17},
@@ -305,7 +313,34 @@ def test_read_file_merges_overlapping_and_adjacent_ranges(
 
     assert result["ok"] is True
     assert result["content"] == "".join(lines[1:9])
+    assert "CODE SQUID" not in result["content"]
     assert result["returned_line_ranges"] == [expected]
+
+
+def test_read_file_separates_every_disjoint_returned_range(tmp_path: Path) -> None:
+    file_path = tmp_path / "three-regions.txt"
+    lines = [f"line {number}\n" for number in range(1, 31)]
+    file_path.write_text("".join(lines), encoding="utf-8")
+
+    result = read_file(
+        tmp_path,
+        str(file_path),
+        ranges=[
+            {"start_line": 2, "end_line": 3},
+            {"start_line": 12, "end_line": 13},
+            {"start_line": 25, "end_line": 26},
+        ],
+        settings=ReadFileSettings(default_max_lines=10, minimum_range_lines=1),
+    )
+
+    assert result["content"].count("omitted from this read") == 2
+    assert "lines 4-11 omitted" in result["content"]
+    assert "lines 14-24 omitted" in result["content"]
+    assert result["returned_line_ranges"] == [
+        {"start_line": 2, "end_line": 3},
+        {"start_line": 12, "end_line": 13},
+        {"start_line": 25, "end_line": 26},
+    ]
 
 
 def test_read_file_multi_range_budget_allows_exact_limit_and_rejects_excess(
@@ -336,7 +371,8 @@ def test_read_file_multi_range_budget_allows_exact_limit_and_rejects_excess(
     )
 
     assert exact["ok"] is True
-    assert len(exact["content"].splitlines()) == 10
+    assert len(exact["content"].splitlines()) == 11
+    assert "lines 6-20 omitted" in exact["content"]
     assert excess == {
         "ok": False,
         "tool": "read_file",
@@ -405,7 +441,8 @@ def test_read_file_expands_multi_ranges_before_merging_and_budgeting(
         {"start_line": 26, "end_line": 175},
         {"start_line": 326, "end_line": 475},
     ]
-    assert len(result["content"].splitlines()) == 300
+    assert len(result["content"].splitlines()) == 301
+    assert "lines 176-325 omitted" in result["content"]
 
 
 def test_read_file_uses_supplied_sizing_settings_and_keeps_truncation_metadata(
@@ -422,7 +459,13 @@ def test_read_file_uses_supplied_sizing_settings_and_keeps_truncation_metadata(
         settings=ReadFileSettings(default_max_lines=10, minimum_range_lines=4),
     )
 
-    assert result["content"] == "".join((*lines[:5], *lines[-5:]))
+    assert result["content"] == "".join(
+        (
+            *lines[:5],
+            "<<< CODE SQUID: lines 6-6 omitted from this read >>>\n",
+            *lines[-5:],
+        )
+    )
     assert result["content_truncated"] is True
     assert result["content_original_chars"] == len(original_content)
     assert result["content_returned_chars"] == len(result["content"])

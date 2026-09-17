@@ -434,7 +434,6 @@ def _partially_redundant_result(
 ) -> dict[str, Any] | None:
     """Return a copy containing only novel lines, or ``None`` if mapping is unsafe."""
     content = result["content"]
-    lines = content.splitlines(keepends=True)
     if returned_ranges != sorted(returned_ranges) or any(
         current_start <= previous_end
         for (_previous_start, previous_end), (current_start, _current_end) in zip(
@@ -442,28 +441,31 @@ def _partially_redundant_result(
         )
     ):
         return None
-    expected_lines = sum(end - start + 1 for start, end in returned_ranges)
-    if len(lines) != expected_lines:
+    returned_segments = _read_content_segments(content, returned_ranges)
+    if returned_segments is None:
         return None
 
-    kept_content: list[str] = []
-    content_offset = 0
-    for returned_start, returned_end in returned_ranges:
-        segment_length = returned_end - returned_start + 1
-        segment_lines = lines[content_offset : content_offset + segment_length]
-        content_offset += segment_length
+    kept_regions: list[tuple[int, int, list[str]]] = []
+    for (returned_start, returned_end), segment_lines in zip(
+        returned_ranges,
+        returned_segments,
+    ):
         for novel_start, novel_end in novel_ranges:
             kept_start = max(returned_start, novel_start)
             kept_end = min(returned_end, novel_end)
             if kept_start <= kept_end:
-                kept_content.extend(
-                    segment_lines[
-                        kept_start - returned_start : kept_end - returned_start + 1
-                    ]
+                segment_start = kept_start - returned_start
+                segment_end = kept_end - returned_start + 1
+                kept_regions.append(
+                    (
+                        kept_start,
+                        kept_end,
+                        segment_lines[segment_start:segment_end],
+                    )
                 )
 
     shaped = dict(result)
-    shaped["content"] = "".join(kept_content)
+    shaped["content"] = _render_read_regions(kept_regions)
     shaped["start_line"] = novel_ranges[0][0]
     shaped["end_line"] = novel_ranges[-1][1]
     shaped["returned_line_ranges"] = _range_dicts(novel_ranges)
@@ -481,6 +483,60 @@ def _partially_redundant_result(
             f"coverage, this result returns lines {_format_ranges(novel_ranges)}."
         )
     return shaped
+
+
+def _read_content_segments(
+    content: str,
+    returned_ranges: list[tuple[int, int]],
+) -> list[list[str]] | None:
+    """Map rendered read content back to source segments, skipping gap markers."""
+    lines = content.splitlines(keepends=True)
+    source_line_count = sum(end - start + 1 for start, end in returned_ranges)
+    if len(lines) == source_line_count:
+        # Preserve compatibility with caller-defined read tools that provide
+        # disjoint metadata but have not adopted Code Squid's marker rendering.
+        offset = 0
+        segments = []
+        for start, end in returned_ranges:
+            length = end - start + 1
+            segments.append(lines[offset : offset + length])
+            offset += length
+        return segments
+
+    offset = 0
+    segments = []
+    previous_end = None
+    for start, end in returned_ranges:
+        if previous_end is not None and start > previous_end + 1:
+            if offset >= len(lines) or lines[offset].rstrip("\r\n") != (
+                _omitted_lines_marker(previous_end + 1, start - 1).rstrip("\n")
+            ):
+                return None
+            offset += 1
+        length = end - start + 1
+        segment = lines[offset : offset + length]
+        if len(segment) != length:
+            return None
+        segments.append(segment)
+        offset += length
+        previous_end = end
+    return segments if offset == len(lines) else None
+
+
+def _render_read_regions(regions: list[tuple[int, int, list[str]]]) -> str:
+    """Keep transformed disjoint source regions visibly discontinuous."""
+    parts: list[str] = []
+    previous_end = None
+    for start, end, lines in regions:
+        if previous_end is not None and start > previous_end + 1:
+            parts.append(_omitted_lines_marker(previous_end + 1, start - 1))
+        parts.extend(lines)
+        previous_end = end
+    return "".join(parts)
+
+
+def _omitted_lines_marker(start: int, end: int) -> str:
+    return f"<<< CODE SQUID: lines {start}-{end} omitted from this read >>>\n"
 
 
 def _range_dicts(ranges: Sequence[tuple[int, int]]) -> list[dict[str, int]]:

@@ -1,3 +1,23 @@
+- 2026-09-16: Added always-on per-session `model-view.jsonl` request capture
+  beside `session.jsonl`. Refactored the initial loop-level implementation so
+  `ModelAdapter` exposes a generic request observer and invokes it from one
+  shared finalized-request transport boundary immediately before every real
+  provider attempt. The Core spawner wires that observer to the session store;
+  `AgentLoop` and `Compactor` contain no model-view-specific persistence or
+  observer plumbing. This captures ordinary, streaming, retry, compaction, and
+  direct prepared-request calls without reconstructing requests, while keeping
+  persistence failures non-fatal and storage knowledge out of the adapter.
+  Also made every disjoint `read_file` result render an explicit omitted-line
+  marker without changing
+  returned range selection or metadata, and taught old-result trimming not to
+  count marker lines as source coverage. Compaction requests use the same
+  shared adapter seam and repeated-read result shaping preserves separators
+  between remaining disjoint regions. Verification: 171 focused model-adapter,
+  model-view, agent-loop, compaction, session-store, and Core-spawner tests
+  passed. The full suite passed 1,244 tests with 31 unrelated existing
+  prompt-copy, repeated-read-guidance-copy, runner-guidance-copy, and Windows
+  TTY expectation failures. Production and test compilation plus
+  `git diff --check` passed; no live model inference was run.
 - 2026-09-16: Made model-request failures diagnosable and conservatively
   retryable without changing the agent/tool loop. `ModelAdapter` now retains
   precise, credential-redacted provider exception details and classifies

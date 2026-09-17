@@ -1,5 +1,7 @@
+import json
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,6 +16,7 @@ from squid_core.settings import (
 from squid_core.session import Session
 from squid_core.agent import Agent
 from squid_core.storage import SessionStore, UndoStore
+from squid_core.tools import ToolResults
 
 
 def _settings(*, provider: str = "openai_compatible") -> RuntimeSettings:
@@ -41,6 +44,12 @@ def _storage_paths(tmp_path: Path) -> dict:
         "sessions_dir": tmp_path / "sessions",
         "undo_dir": tmp_path / "undo",
     }
+
+
+def _provider_response(content: str = "done") -> SimpleNamespace:
+    message = SimpleNamespace(content=content, tool_calls=[])
+    choice = SimpleNamespace(message=message, finish_reason="stop")
+    return SimpleNamespace(choices=[choice], usage=None)
 
 
 def test_generic_module_has_no_coding_or_terminal_ui_dependency() -> None:
@@ -159,6 +168,122 @@ def test_supplied_provider_is_used_without_default_provider(
     )
 
     assert run.loop.model_adapter.provider is supplied_provider
+
+
+def test_runtime_wires_finalized_requests_to_session_model_view(tmp_path: Path) -> None:
+    class Provider:
+        reasoning_mode = "high"
+        reasoning_token_budget = 321
+
+        def __init__(self) -> None:
+            self.requests = []
+
+        def create_response(self, **request):
+            self.requests.append(request)
+            return _provider_response("summary")
+
+    provider = Provider()
+    settings = replace(
+        _settings(),
+        compaction=CompactionSettings(
+            enabled=True,
+            trigger_input_tokens=1,
+            compact_fraction=0.8,
+            min_recent_chunks=2,
+        ),
+    )
+    run = core_spawner.build_agent_run(
+        tmp_path,
+        "Observed requests",
+        settings=settings,
+        provider=provider,
+        **_storage_paths(tmp_path),
+    )
+    prepared = run.loop.model_adapter.prepare_request(
+        [{"role": "user", "content": "ordinary request"}],
+        [{"type": "function", "function": {"name": "inspect"}}],
+    )
+
+    run.loop.model_adapter.respond_prepared(prepared)
+    run.session.messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "task"},
+        {"role": "assistant", "content": "finding " * 80},
+        {"role": "tool", "content": "result " * 80},
+        {"role": "assistant", "content": "change " * 80},
+        {"role": "user", "content": "continue " * 80},
+    ]
+    run.loop.compactor.maybe_compact(run.session)
+
+    records = [
+        json.loads(line)
+        for line in run.session_store.model_view_path.read_text(
+            encoding="utf-8"
+        ).splitlines()
+    ]
+    assert [record["request_index"] for record in records] == [1, 2]
+    assert records[0]["messages"] == provider.requests[0]["messages"]
+    assert records[0]["tools"] == provider.requests[0]["tools"]
+    assert records[1]["messages"] == provider.requests[1]["messages"]
+    assert records[1]["tools"] == []
+    assert records[0]["reasoning_mode"] == "high"
+    assert records[0]["reasoning_token_budget"] == 321
+
+
+def test_each_real_retry_attempt_gets_its_own_model_view_record(
+    tmp_path: Path,
+) -> None:
+    class RetryProvider:
+        def __init__(self) -> None:
+            self.requests = []
+
+        def create_response(self, **request):
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                raise TimeoutError("try again")
+            return _provider_response()
+
+    class FinishingAgent:
+        def initial_messages(self):
+            return [{"role": "system", "content": "system"}]
+
+        def tool_definitions(self):
+            return []
+
+        def should_stop(self, session):
+            return any(message.get("content") == "done" for message in session.messages)
+
+        def validate_reply(self, _reply):
+            return {"ok": True, "reason": ""}
+
+    provider = RetryProvider()
+    run = core_spawner.build_agent_run(
+        tmp_path,
+        "Retry capture",
+        settings=replace(
+            _settings(),
+            model_request_max_retries=1,
+            model_request_retry_backoff_ms=0,
+        ),
+        provider=provider,
+        agent=FinishingAgent(),
+        tool_executor=object(),
+        tool_results=ToolResults(),
+        **_storage_paths(tmp_path),
+    )
+
+    result = run.loop.run()
+
+    records = [
+        json.loads(line)
+        for line in run.session_store.model_view_path.read_text(
+            encoding="utf-8"
+        ).splitlines()
+    ]
+    assert result.status == "complete"
+    assert len(provider.requests) == 2
+    assert [record["request_index"] for record in records] == [1, 2]
+    assert records[0]["messages"] == records[1]["messages"]
 
 
 def test_supplied_model_adapter_bypasses_provider_and_adapter_construction(

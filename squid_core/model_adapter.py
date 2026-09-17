@@ -2,6 +2,7 @@
 
 import json
 import re
+from collections.abc import Callable
 
 TOOL_CALL_CONTENT_MODES = {"omit", "empty", "null"}
 
@@ -239,6 +240,7 @@ class ModelAdapter:
         model_name: str,
         tool_call_content_mode: str = "empty",
         provider_name: str | None = None,
+        request_observer: Callable[[dict], object] | None = None,
     ) -> None:
         if tool_call_content_mode not in TOOL_CALL_CONTENT_MODES:
             valid_modes = ", ".join(sorted(TOOL_CALL_CONTENT_MODES))
@@ -257,27 +259,74 @@ class ModelAdapter:
             "reasoning_token_budget",
             None,
         )
+        self._request_observer = request_observer
 
-    # Send transcript messages and tool definitions to the provider,
-    # then normalize the raw provider response into the internal reply shape.
+    def set_request_observer(
+        self,
+        observer: Callable[[dict], object] | None,
+    ) -> None:
+        """Set a generic best-effort observer for finalized provider requests."""
+        self._request_observer = observer
+
+    def _observe_request(self, request: dict) -> None:
+        """Report the exact provider-bound object without affecting transport."""
+        if self._request_observer is None:
+            return
+        try:
+            self._request_observer(request)
+        except Exception:
+            # Diagnostics must never turn an otherwise valid request into a
+            # model failure. Hosts choose whether and where observations live.
+            pass
+
+    def _send_prepared_request(
+        self,
+        request: dict,
+        *,
+        streaming: bool = False,
+        **transport_options,
+    ):
+        """Observe once at the common boundary, then invoke provider transport."""
+        self._observe_request(request)
+        try:
+            transport = (
+                self.provider.stream_chat
+                if streaming
+                else self.provider.create_response
+            )
+            return transport(**request, **transport_options)
+        except Exception as exc:
+            # Provider-specific failures are wrapped at this boundary so the
+            # host can distinguish transport failures from application bugs.
+            raise _request_error(exc) from exc
+
+    def prepare_request(
+        self,
+        messages: list[dict],
+        tool_definitions: list[dict],
+    ) -> dict:
+        """Finalize the model-visible request before transport or observation."""
+        return {
+            "model": self.model_name,
+            "messages": self._messages_for_provider(messages),
+            "tools": tool_definitions,
+        }
+
+    # Send a finalized request to the provider, then normalize its reply into
+    # the internal shape used by the loop. Keeping preparation separate makes
+    # the provider-bound representation observable without reconstructing it.
+    def respond_prepared(self, request: dict) -> dict:
+        tool_metadata = self._tool_metadata_from_definitions(request["tools"])
+        raw_response = self._send_prepared_request(request)
+
+        return self._reply_from_response_or_error(raw_response, tool_metadata)
+
+    # Preserve the convenient public entry point for non-loop callers.
     #
     # If the provider returns malformed tool-call output, convert that into
     # a controlled format_error reply instead of crashing the loop.
     def respond(self, messages: list[dict], tool_definitions: list[dict]) -> dict:
-        tool_metadata = self._tool_metadata_from_definitions(tool_definitions)
-        try:
-            raw_response = self.provider.create_response(
-                model=self.model_name,
-                messages=self._messages_for_provider(messages),
-                tools=tool_definitions,
-            )
-        except Exception as exc:
-            # Provider-specific failures are wrapped at this boundary so the
-            # host can handle request failures without hiding bugs in
-            # normalization, validation, or the rest of the application.
-            raise _request_error(exc) from exc
-
-        return self._reply_from_response_or_error(raw_response, tool_metadata)
+        return self.respond_prepared(self.prepare_request(messages, tool_definitions))
 
     def supports_streaming(self) -> bool:
         return bool(getattr(self.provider, "supports_streaming", lambda: False)())
@@ -289,17 +338,26 @@ class ModelAdapter:
         on_text_delta,
         on_tool_preparing=None,
     ) -> dict:
-        tool_metadata = self._tool_metadata_from_definitions(tool_definitions)
-        try:
-            raw_response = self.provider.stream_chat(
-                model=self.model_name,
-                messages=self._messages_for_provider(messages),
-                tools=tool_definitions,
-                on_text_delta=on_text_delta,
-                on_tool_preparing=on_tool_preparing,
-            )
-        except Exception as exc:
-            raise _request_error(exc) from exc
+        return self.respond_streaming_prepared(
+            self.prepare_request(messages, tool_definitions),
+            on_text_delta=on_text_delta,
+            on_tool_preparing=on_tool_preparing,
+        )
+
+    def respond_streaming_prepared(
+        self,
+        request: dict,
+        on_text_delta,
+        on_tool_preparing=None,
+    ) -> dict:
+        """Stream one already-finalized provider request."""
+        tool_metadata = self._tool_metadata_from_definitions(request["tools"])
+        raw_response = self._send_prepared_request(
+            request,
+            streaming=True,
+            on_text_delta=on_text_delta,
+            on_tool_preparing=on_tool_preparing,
+        )
 
         return self._reply_from_response_or_error(raw_response, tool_metadata)
 
@@ -308,17 +366,14 @@ class ModelAdapter:
         messages: list[dict],
         please_stop_contemplating_the_void: bool = False,
     ) -> dict:
-        request_options = {
-            "model": self.model_name,
-            "messages": self._messages_for_provider(messages),
-            "tools": [],
-        }
+        request_options = self.prepare_request(messages, [])
         if please_stop_contemplating_the_void:
             request_options["please_stop_contemplating_the_void"] = True
-        try:
-            raw_response = self.provider.create_response(**request_options)
-        except Exception as exc:
-            raise _request_error(exc) from exc
+        return self.complete_text_prepared(request_options)
+
+    def complete_text_prepared(self, request: dict) -> dict:
+        """Complete one text-only request from its finalized representation."""
+        raw_response = self._send_prepared_request(request)
 
         raw_reply = self._raw_reply_from_response(raw_response)
         assistant = raw_reply["assistant"]
@@ -356,23 +411,18 @@ class ModelAdapter:
                 on_text_delta(content)
             return content
 
-        request_options = {
-            "model": self.model_name,
-            "messages": self._messages_for_provider(messages),
-            "tools": [],
-            "on_text_delta": on_text_delta,
-        }
+        request_options = self.prepare_request(messages, [])
+        transport_options = {"on_text_delta": on_text_delta}
         if trace_callback is not None:
-            request_options["trace_callback"] = trace_callback
+            transport_options["trace_callback"] = trace_callback
         if please_stop_contemplating_the_void:
             request_options["please_stop_contemplating_the_void"] = True
 
-        try:
-            raw_response = self.provider.stream_chat(
-                **request_options,
-            )
-        except Exception as exc:
-            raise _request_error(exc) from exc
+        raw_response = self._send_prepared_request(
+            request_options,
+            streaming=True,
+            **transport_options,
+        )
 
         try:
             assistant_message = raw_response.choices[0].message

@@ -124,6 +124,79 @@ def adapter_response(
     return adapter.respond(messages=[{"role": "user", "content": "hi"}], tool_definitions=tool_definitions)
 
 
+def test_prepared_request_is_the_representation_handed_to_provider() -> None:
+    provider = FakeProvider(FakeResponse(FakeMessage(content="done", tool_calls=[])))
+    observed = []
+    adapter = ModelAdapter(
+        provider=provider,
+        model_name="test-model",
+        tool_call_content_mode="null",
+        request_observer=observed.append,
+    )
+    tools = [tool_definition("local_tool", [])]
+    prepared = adapter.prepare_request(
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "call_1"}],
+            }
+        ],
+        tools,
+    )
+
+    adapter.respond_prepared(prepared)
+
+    assert prepared["messages"][0]["content"] is None
+    assert observed == [prepared]
+    assert observed[0] is prepared
+    assert provider.requests[0]["messages"] is prepared["messages"]
+    assert provider.requests[0]["tools"] is prepared["tools"]
+
+
+def test_prepared_text_request_is_the_representation_handed_to_provider() -> None:
+    provider = FakeProvider(FakeResponse(FakeMessage(content="summary", tool_calls=[])))
+    observed = []
+    adapter = ModelAdapter(
+        provider=provider,
+        model_name="test-model",
+        request_observer=observed.append,
+    )
+    prepared = adapter.prepare_request(
+        [{"role": "user", "content": "compact this"}],
+        [],
+    )
+
+    response = adapter.complete_text_prepared(prepared)
+
+    assert response["content"] == "summary"
+    assert observed == [prepared]
+    assert observed[0] is prepared
+    assert provider.requests[0]["messages"] is prepared["messages"]
+    assert provider.requests[0]["tools"] is prepared["tools"]
+
+
+def test_request_observer_failure_does_not_block_provider_transport() -> None:
+    provider = FakeProvider(FakeResponse(FakeMessage(content="done", tool_calls=[])))
+
+    def fail_observation(_request: dict) -> None:
+        raise OSError("diagnostic storage unavailable")
+
+    adapter = ModelAdapter(
+        provider=provider,
+        model_name="test-model",
+        request_observer=fail_observation,
+    )
+
+    reply = adapter.respond(
+        messages=[{"role": "user", "content": "continue"}],
+        tool_definitions=[],
+    )
+
+    assert reply["message"]["content"] == "done"
+    assert len(provider.requests) == 1
+
+
 def test_valid_tool_call_succeeds_when_tool_is_passed_in_definitions() -> None:
     reply = adapter_response(
         FakeToolCall("call_1", "local_tool", '{"path": "/tmp/input.txt"}'),
@@ -489,7 +562,12 @@ def test_complete_text_streaming_forwards_deltas_returns_content_and_disables_to
         FakeResponse(FakeMessage(content="hello world", tool_calls=[])),
         deltas=["hello ", "world"],
     )
-    adapter = ModelAdapter(provider=provider, model_name="test-model")
+    observed = []
+    adapter = ModelAdapter(
+        provider=provider,
+        model_name="test-model",
+        request_observer=observed.append,
+    )
     deltas = []
 
     content = adapter.complete_text_streaming(
@@ -500,6 +578,7 @@ def test_complete_text_streaming_forwards_deltas_returns_content_and_disables_to
     assert deltas == ["hello ", "world"]
     assert content == "hello world"
     assert provider.requests[0]["tools"] == []
+    assert observed == [provider.requests[0]]
 
 
 def test_complete_text_streaming_falls_back_to_completed_text() -> None:
@@ -553,11 +632,16 @@ def test_supports_streaming_delegates_to_provider() -> None:
 
 def test_respond_streaming_emits_deltas_and_returns_normalized_reply() -> None:
     deltas = []
+    observed = []
     provider = StreamingProvider(
         FakeResponse(FakeMessage(content="hello world", tool_calls=[])),
         deltas=["hello ", "world"],
     )
-    adapter = ModelAdapter(provider=provider, model_name="test-model")
+    adapter = ModelAdapter(
+        provider=provider,
+        model_name="test-model",
+        request_observer=observed.append,
+    )
 
     reply = adapter.respond_streaming(
         messages=[{"role": "user", "content": "hi"}],
@@ -568,6 +652,7 @@ def test_respond_streaming_emits_deltas_and_returns_normalized_reply() -> None:
     assert deltas == ["hello ", "world"]
     assert reply["message"]["content"] == "hello world"
     assert reply["actions"] == []
+    assert observed == [provider.requests[0]]
 
 
 def test_respond_streaming_forwards_tool_preparing_callback() -> None:

@@ -15,6 +15,7 @@ from squid_core.safety import ActionPreflight
 from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.safety import ApprovalPolicy
 from squid_core.compaction import Compactor
+from squid_core.compaction.token_estimate import estimate_messages_tokens
 from squid_core.events import EventCallback
 from squid_core.hooks import HookRunner
 from squid_core.model_adapter import ModelAdapter
@@ -72,6 +73,36 @@ class AgentRun:
     session: Session
     session_store: SessionStore
     loop: AgentLoop
+
+
+def _wire_model_view_observer(model_adapter, session_store: SessionStore) -> None:
+    """Connect generic request observation to best-effort session diagnostics."""
+    set_request_observer = getattr(model_adapter, "set_request_observer", None)
+    append_model_view = getattr(session_store, "append_model_view", None)
+    if not callable(set_request_observer) or not callable(append_model_view):
+        # Legacy/custom adapters remain valid; only adapters exposing the new
+        # finalized-request seam participate in automatic request capture.
+        return
+
+    def append_final_request(request: dict) -> None:
+        messages = request.get("messages", [])
+        record = {
+            "provider": getattr(model_adapter, "provider_name", None),
+            "reasoning_mode": getattr(model_adapter, "reasoning_mode", None),
+            "reasoning_token_budget": getattr(
+                model_adapter,
+                "reasoning_token_budget",
+                None,
+            ),
+            "message_count": len(messages),
+            "estimated_request_tokens": estimate_messages_tokens(messages),
+            **request,
+        }
+        append_model_view(
+            {name: value for name, value in record.items() if value is not None}
+        )
+
+    set_request_observer(append_final_request)
 
 
 def run_agent_task(
@@ -244,6 +275,7 @@ def build_agent_loop(
         )
     if compactor is None:
         compactor = Compactor(settings.compaction, model_adapter)
+    _wire_model_view_observer(model_adapter, session_store)
     if tool_executor is None:
         tool_executor = ToolExecutor(
             repo_root=repo_root,
