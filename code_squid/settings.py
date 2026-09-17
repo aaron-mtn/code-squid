@@ -42,6 +42,8 @@ VALID_APPROVAL_MODES = {"never", "always", "guarded"}
 DEFAULT_MAX_TOOL_STEPS = None
 DEFAULT_STREAM_ASSISTANT_TEXT = False
 DEFAULT_TOO_MANY_READS_ENABLED = True
+DEFAULT_MODEL_REQUEST_MAX_RETRIES = 2
+DEFAULT_MODEL_REQUEST_RETRY_BACKOFF_MS = 250
 
 DEFAULT_COMPACTION_ENABLED = True
 DEFAULT_COMPACTION_TRIGGER_INPUT_TOKENS = 25_000
@@ -72,6 +74,8 @@ class RuntimeSettings:
     max_tool_steps: int | None = DEFAULT_MAX_TOOL_STEPS
     stream_assistant_text: bool = DEFAULT_STREAM_ASSISTANT_TEXT
     too_many_reads_enabled: bool = DEFAULT_TOO_MANY_READS_ENABLED
+    model_request_max_retries: int = DEFAULT_MODEL_REQUEST_MAX_RETRIES
+    model_request_retry_backoff_ms: int = DEFAULT_MODEL_REQUEST_RETRY_BACKOFF_MS
 
 
 @dataclass(frozen=True)
@@ -116,6 +120,10 @@ class Settings:
             approval_mode=self.runtime.approval_mode,
             max_tool_steps=self.runtime.max_tool_steps,
             stream_assistant_text=self.runtime.stream_assistant_text,
+            model_request_max_retries=self.runtime.model_request_max_retries,
+            model_request_retry_backoff_ms=(
+                self.runtime.model_request_retry_backoff_ms
+            ),
             compaction=CoreCompactionSettings(
                 enabled=self.compaction.enabled,
                 trigger_input_tokens=self.compaction.trigger_input_tokens,
@@ -262,6 +270,39 @@ def _too_many_reads_enabled(
             "runtime.too_many_reads_enabled must be a boolean"
         )
     return enabled
+
+
+def _model_request_retry_settings(
+    runtime_settings: dict[str, Any],
+    settings_path: Path,
+) -> tuple[int, int]:
+    max_retries = runtime_settings.get(
+        "model_request_max_retries",
+        DEFAULT_MODEL_REQUEST_MAX_RETRIES,
+    )
+    backoff_ms = runtime_settings.get(
+        "model_request_retry_backoff_ms",
+        DEFAULT_MODEL_REQUEST_RETRY_BACKOFF_MS,
+    )
+    if (
+        isinstance(max_retries, bool)
+        or not isinstance(max_retries, int)
+        or not 0 <= max_retries <= 10
+    ):
+        raise ValueError(
+            f"Invalid settings JSON in {settings_path}: "
+            "runtime.model_request_max_retries must be an integer from 0 through 10"
+        )
+    if (
+        isinstance(backoff_ms, bool)
+        or not isinstance(backoff_ms, int)
+        or not 0 <= backoff_ms <= 10_000
+    ):
+        raise ValueError(
+            f"Invalid settings JSON in {settings_path}: "
+            "runtime.model_request_retry_backoff_ms must be an integer from 0 through 10000"
+        )
+    return max_retries, backoff_ms
 
 
 def _positive_int(value: Any, field_path: str, settings_path: Path) -> int:
@@ -525,6 +566,9 @@ def load_settings(repo_root: Path) -> Settings:
     max_tool_steps = _max_tool_steps(runtime_settings, settings_path)
     stream_assistant_text = _stream_assistant_text(runtime_settings, settings_path)
     too_many_reads_enabled = _too_many_reads_enabled(runtime_settings, settings_path)
+    model_request_max_retries, model_request_retry_backoff_ms = (
+        _model_request_retry_settings(runtime_settings, settings_path)
+    )
     compaction = _compaction_settings(compaction_settings, settings_path)
 
     debug_env = os.getenv("CODE_SQUID_DEBUG")
@@ -548,6 +592,8 @@ def load_settings(repo_root: Path) -> Settings:
             max_tool_steps=max_tool_steps,
             stream_assistant_text=stream_assistant_text,
             too_many_reads_enabled=too_many_reads_enabled,
+            model_request_max_retries=model_request_max_retries,
+            model_request_retry_backoff_ms=model_request_retry_backoff_ms,
         ),
         compaction=compaction,
         providers=providers,

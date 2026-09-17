@@ -1,6 +1,10 @@
 import pytest
 
-from squid_core.model_adapter import ModelAdapter, ModelRequestError
+from squid_core.model_adapter import (
+    ModelAdapter,
+    ModelRequestError,
+    model_request_error_details,
+)
 from squid_core.tools.builtins.apply_patch import tool_definition as apply_patch_definition
 
 
@@ -394,8 +398,24 @@ def test_provider_exception_is_wrapped_as_model_request_error() -> None:
     with pytest.raises(ModelRequestError) as exc_info:
         adapter.respond(messages=[{"role": "user", "content": "hi"}], tool_definitions=[])
 
-    assert str(exc_info.value) == "Model request failed"
+    assert str(exc_info.value) == (
+        "Model request failed: RuntimeError: provider unavailable"
+    )
     assert exc_info.value.__cause__ is provider_error
+
+
+def test_malformed_provider_response_has_precise_failure_class() -> None:
+    response = FakeResponse(FakeMessage(content="unused", tool_calls=[]))
+    response.choices = []
+    adapter = ModelAdapter(provider=FakeProvider(response), model_name="test-model")
+
+    with pytest.raises(ModelRequestError) as exc_info:
+        adapter.respond(messages=[{"role": "user", "content": "hi"}], tool_definitions=[])
+
+    details = model_request_error_details(exc_info.value)
+    assert details["failure_class"] == "malformed_response"
+    assert details["underlying_error_type"] == "IndexError"
+    assert details["_transient"] is False
 
 
 def test_complete_text_returns_assistant_content() -> None:
@@ -515,7 +535,9 @@ def test_complete_text_streaming_wraps_provider_error() -> None:
             on_text_delta=lambda _delta: None,
         )
 
-    assert str(exc_info.value) == "Model request failed"
+    assert str(exc_info.value) == (
+        "Model request failed: RuntimeError: provider unavailable"
+    )
     assert exc_info.value.__cause__ is provider_error
 
 

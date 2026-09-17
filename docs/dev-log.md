@@ -1,3 +1,17 @@
+- 2026-09-16: Made model-request failures diagnosable and conservatively
+  retryable without changing the agent/tool loop. `ModelAdapter` now retains
+  precise, credential-redacted provider exception details and classifies
+  timeout, connection, rate-limit, provider 5xx, stream, malformed-response,
+  authentication, configuration, and unknown failures. `AgentLoop` retries
+  only transient `ModelRequestError` failures from one unchanged rendered
+  message snapshot, records failed/scheduled/started attempt lifecycle in the
+  main session JSONL, and reports retry count on eventual success. Application
+  and Core runtime settings expose bounded retry-count and backoff values,
+  defaulting to 2 retries and 250 ms. Verification: 266 focused
+  adapter/agent-loop/settings/spawner tests passed; 243 broader
+  runtime/provider/logging tests passed; the full suite passed 1,258 tests with
+  the same nine unrelated baseline prompt/terminal failures recorded by
+  preceding patches. Compilation and `git diff --check` passed.
 - 2026-09-16: Added Core's optional `TooManyReadsNudge` to recognize successful
   `read_file` accumulation without a successful `apply_patch` or `write_file`.
   The advisory Hook nudges at three reads, escalates at five and later reads,

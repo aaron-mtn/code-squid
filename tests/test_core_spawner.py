@@ -88,6 +88,25 @@ def test_generic_run_passes_read_file_sizing_to_default_executor(tmp_path: Path)
     assert run.loop.tool_executor.read_file_settings is read_file_settings
 
 
+def test_generic_run_passes_model_request_retry_settings(tmp_path: Path) -> None:
+    settings = replace(
+        _settings(),
+        model_request_max_retries=4,
+        model_request_retry_backoff_ms=75,
+    )
+
+    run = core_spawner.build_agent_run(
+        tmp_path,
+        "Retry settings",
+        settings=settings,
+        model_adapter=object(),
+        **_storage_paths(tmp_path),
+    )
+
+    assert run.loop.model_request_max_retries == 4
+    assert run.loop.model_request_retry_backoff_ms == 75
+
+
 def test_generic_run_requires_explicit_storage_paths(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="sessions_dir is required"):
         core_spawner.build_agent_run(

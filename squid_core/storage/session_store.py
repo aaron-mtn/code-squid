@@ -17,6 +17,8 @@ RUNTIME_LIFECYCLE_EVENTS = {
     "hooks_configured",
     "hook_execution",
     "model_request_started",
+    "model_request_retry_scheduled",
+    "model_request_retry_started",
     "model_request_finished",
     "model_request_failed",
     "run_failed",

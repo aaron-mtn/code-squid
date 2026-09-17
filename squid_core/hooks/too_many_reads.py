@@ -16,9 +16,13 @@ TOO_MANY_READS_GUIDANCE = (
     "continue the task instead of gathering more context."
 )
 TOO_MANY_READS_STRONG_GUIDANCE = (
-    "Repeated inspection is not advancing the task.\n\n"
-    "Use another read only if specific missing information is required for the "
-    "next action. Otherwise, continue using the information already available."
+    "HIGH PRIORITY: Stop inspecting source.\n\n"
+    "You have already spent too many actions gathering context without making a "
+    "substantive change. Do not perform another read or source-search unless a "
+    "specific missing fact is required to make the next edit.\n\n"
+    "Do not read for reassurance, completeness, reconfirmation, or to build a "
+    "better mental model of the repository. Use the context already available and "
+    "make the next safe change now."
 )
 _MUTATION_TOOLS = {"apply_patch", "write_file"}
 

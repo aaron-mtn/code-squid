@@ -1,12 +1,230 @@
-"""Normalize model-provider requests and responses for Squid Core."""
+"""Normalize model-provider requests, responses, and safe failure details."""
 
 import json
+import re
 
 TOOL_CALL_CONTENT_MODES = {"omit", "empty", "null"}
 
 
+ERROR_TEXT_MAX_CHARS = 500
+RESPONSE_EXCERPT_MAX_CHARS = 1000
+_SECRET_PATTERNS = (
+    re.compile(
+        r'(?i)(authorization\s*["\']?\s*[:=]\s*["\']?)([^,"\';\s}]+(?:\s+[^,"\';\s}]+)?)'
+    ),
+    re.compile(
+        r'(?i)((?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|password|secret)\s*["\']?\s*[:=]\s*["\']?)([^"\',;\s}]+)'
+    ),
+    re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+"),
+    re.compile(r"(?i)(\b)sk-[A-Za-z0-9_-]{8,}"),
+)
+
+
 class ModelRequestError(RuntimeError):
-    """Raised when the configured model provider request fails."""
+    """Raised when provider transport or response handling fails."""
+
+
+def _safe_text(value, max_chars: int = ERROR_TEXT_MAX_CHARS) -> str:
+    """Bound provider text and redact common credential representations."""
+
+    text = str(value or "")
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub(r"\1[REDACTED]", text)
+    if len(text) > max_chars:
+        return f"{text[:max_chars]}..."
+    return text
+
+
+def _exception_chain(error: BaseException) -> list[BaseException]:
+    """Return a short, cycle-safe cause/context chain, outermost first."""
+
+    chain = []
+    current: BaseException | None = error
+    while current is not None and len(chain) < 5 and current not in chain:
+        chain.append(current)
+        if current.__cause__ is not None:
+            current = current.__cause__
+        elif not current.__suppress_context__:
+            current = current.__context__
+        else:
+            current = None
+    return chain
+
+
+def _safe_attr(value, name: str):
+    try:
+        return getattr(value, name, None)
+    except Exception:
+        return None
+
+
+def _status_from_chain(chain: list[BaseException]) -> int | None:
+    for error in chain:
+        response = _safe_attr(error, "response")
+        for value in (
+            _safe_attr(error, "status_code"),
+            _safe_attr(error, "status"),
+            _safe_attr(response, "status_code") if response is not None else None,
+            _safe_attr(response, "status") if response is not None else None,
+        ):
+            if isinstance(value, int) and not isinstance(value, bool):
+                return value
+    return None
+
+
+def _header_value(headers, name: str):
+    if headers is None:
+        return None
+    try:
+        return headers.get(name) or headers.get(name.lower()) or headers.get(name.title())
+    except (AttributeError, TypeError):
+        return None
+
+
+def _response_metadata(chain: list[BaseException]) -> dict:
+    fields = {}
+    for error in chain:
+        response = _safe_attr(error, "response")
+        headers = _safe_attr(response, "headers") if response is not None else None
+
+        request_id = _safe_attr(error, "request_id")
+        if request_id is None:
+            for name in ("x-request-id", "request-id", "cf-ray"):
+                request_id = _header_value(headers, name)
+                if request_id is not None:
+                    break
+        if request_id is not None and "provider_request_id" not in fields:
+            fields["provider_request_id"] = _safe_text(request_id)
+
+        retry_after = _safe_attr(error, "retry_after")
+        if retry_after is None:
+            retry_after = _header_value(headers, "retry-after")
+        if retry_after is not None and "retry_after" not in fields:
+            fields["retry_after"] = _safe_text(retry_after)
+
+        body = _safe_attr(error, "body")
+        if body is None and response is not None:
+            body = _safe_attr(response, "text")
+        if body is None and response is not None:
+            body = _safe_attr(response, "content")
+        if body is not None and "response_body_excerpt" not in fields:
+            if isinstance(body, (dict, list)):
+                try:
+                    body = json.dumps(body, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    body = str(body)
+            fields["response_body_excerpt"] = _safe_text(
+                body,
+                RESPONSE_EXCERPT_MAX_CHARS,
+            )
+    return fields
+
+
+def _failure_class(chain: list[BaseException], http_status: int | None) -> tuple[str, bool]:
+    names = {type(error).__name__.lower() for error in chain}
+    if http_status == 429 or any("ratelimit" in name for name in names):
+        return "rate_limit", True
+    if http_status in {401, 403} or any(
+        "authentication" in name or "permissiondenied" in name for name in names
+    ):
+        return "authentication", False
+    if http_status is not None and 500 <= http_status <= 599:
+        return "provider_server_error", True
+    if http_status in {400, 404, 405, 409, 422}:
+        return "configuration", False
+    if any(isinstance(error, TimeoutError) for error in chain) or any(
+        "timeout" in name for name in names
+    ):
+        return "timeout", True
+    if any(isinstance(error, ConnectionError) for error in chain) or any(
+        token in name
+        for name in names
+        for token in ("connectionerror", "connecterror", "networkerror")
+    ):
+        return "connection_error", True
+    if any(
+        token in name
+        for name in names
+        for token in ("streamerror", "incompleteread", "protocolerror")
+    ):
+        return "stream_error", True
+    if any(
+        token in name
+        for name in names
+        for token in ("jsondecodeerror", "responsevalidationerror", "decodeerror")
+    ):
+        return "malformed_response", False
+    if any(
+        token in name
+        for name in names
+        for token in ("badrequest", "invalidrequest", "configurationerror")
+    ):
+        return "configuration", False
+    return "unknown", False
+
+
+def model_request_error_details(error: BaseException) -> dict:
+    """Extract bounded, credential-redacted diagnostics from a request failure."""
+
+    chain = _exception_chain(error)
+    underlying = next(
+        (item for item in chain[1:] if not isinstance(item, ModelRequestError)),
+        None,
+    )
+    http_status = _status_from_chain(chain)
+    override = next(
+        (
+            _safe_attr(item, "_failure_class_override")
+            for item in chain
+            if _safe_attr(item, "_failure_class_override") is not None
+        ),
+        None,
+    )
+    failure_class, transient = (
+        (override, False)
+        if override is not None
+        else _failure_class(chain, http_status)
+    )
+    fields = {
+        "error_type": type(error).__name__,
+        "error_message": _safe_text(error or type(error).__name__),
+        "failure_class": failure_class,
+    }
+    if underlying is not None:
+        fields["underlying_error_type"] = type(underlying).__name__
+        fields["underlying_error_message"] = _safe_text(
+            underlying or type(underlying).__name__
+        )
+    if len(chain) > 2:
+        fields["exception_chain"] = [
+            {
+                "error_type": type(item).__name__,
+                "error_message": _safe_text(item or type(item).__name__),
+            }
+            for item in chain[1:]
+        ]
+    if http_status is not None:
+        fields["http_status"] = http_status
+    fields.update(_response_metadata(chain))
+    # Retry policy consumes this flag, but it is not provider evidence worth
+    # duplicating in the durable event; failure_class carries that evidence.
+    fields["_transient"] = transient
+    return fields
+
+
+def _request_error(
+    error: Exception,
+    *,
+    failure_class: str | None = None,
+) -> ModelRequestError:
+    details = model_request_error_details(error)
+    summary = details["error_message"] or type(error).__name__
+    wrapped = ModelRequestError(
+        f"Model request failed: {type(error).__name__}: {summary}"
+    )
+    if failure_class is not None:
+        wrapped._failure_class_override = failure_class
+    return wrapped
 
 
 class ModelAdapter:
@@ -55,11 +273,11 @@ class ModelAdapter:
             )
         except Exception as exc:
             # Provider-specific failures are wrapped at this boundary so the
-            # The host can handle request failures without hiding bugs in
+            # host can handle request failures without hiding bugs in
             # normalization, validation, or the rest of the application.
-            raise ModelRequestError("Model request failed") from exc
+            raise _request_error(exc) from exc
 
-        return self._reply_from_response(raw_response, tool_metadata)
+        return self._reply_from_response_or_error(raw_response, tool_metadata)
 
     def supports_streaming(self) -> bool:
         return bool(getattr(self.provider, "supports_streaming", lambda: False)())
@@ -81,9 +299,9 @@ class ModelAdapter:
                 on_tool_preparing=on_tool_preparing,
             )
         except Exception as exc:
-            raise ModelRequestError("Model request failed") from exc
+            raise _request_error(exc) from exc
 
-        return self._reply_from_response(raw_response, tool_metadata)
+        return self._reply_from_response_or_error(raw_response, tool_metadata)
 
     def complete_text(
         self,
@@ -100,7 +318,7 @@ class ModelAdapter:
         try:
             raw_response = self.provider.create_response(**request_options)
         except Exception as exc:
-            raise ModelRequestError("Model request failed") from exc
+            raise _request_error(exc) from exc
 
         raw_reply = self._raw_reply_from_response(raw_response)
         assistant = raw_reply["assistant"]
@@ -154,10 +372,13 @@ class ModelAdapter:
                 **request_options,
             )
         except Exception as exc:
-            raise ModelRequestError("Model request failed") from exc
+            raise _request_error(exc) from exc
 
-        assistant_message = raw_response.choices[0].message
-        return assistant_message.content or ""
+        try:
+            assistant_message = raw_response.choices[0].message
+            return assistant_message.content or ""
+        except (AttributeError, IndexError, KeyError, TypeError) as exc:
+            raise _request_error(exc, failure_class="malformed_response") from exc
 
     # Build the tiny metadata map the adapter needs for validation from the
     # active tool definitions passed into this request.
@@ -346,6 +567,14 @@ class ModelAdapter:
 
         reply["raw_reply"] = raw_reply
         return reply
+
+    def _reply_from_response_or_error(self, raw_response, tool_metadata: dict) -> dict:
+        """Identify structurally unusable provider responses at the adapter seam."""
+
+        try:
+            return self._reply_from_response(raw_response, tool_metadata)
+        except (AttributeError, IndexError, KeyError, TypeError) as exc:
+            raise _request_error(exc, failure_class="malformed_response") from exc
 
     def _value(self, value, name: str):
         if isinstance(value, dict):

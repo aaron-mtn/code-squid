@@ -65,6 +65,32 @@ def test_core_rejects_invalid_tool_step_semantics(max_tool_steps: object) -> Non
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("model_request_max_retries", -1),
+        ("model_request_max_retries", 11),
+        ("model_request_retry_backoff_ms", -1),
+        ("model_request_retry_backoff_ms", 10_001),
+    ],
+)
+def test_runtime_settings_reject_invalid_model_request_retry_values(
+    field: str,
+    value: int,
+) -> None:
+    values = {
+        "provider": None,
+        "approval_mode": "never",
+        "max_tool_steps": None,
+        "stream_assistant_text": False,
+        "compaction": CompactionSettings(),
+        field: value,
+    }
+
+    with pytest.raises(ValueError, match=field):
+        RuntimeSettings(**values)
+
+
 def test_core_rejects_invalid_temperature_semantics() -> None:
     with pytest.raises(ValueError, match="temperature"):
         ProviderSettings(

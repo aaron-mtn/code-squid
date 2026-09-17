@@ -2,6 +2,7 @@
 
 import inspect
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,6 +17,7 @@ from squid_core.hooks import (
     RepeatedReadNudge,
     ToolResultContext,
 )
+from squid_core.model_adapter import ModelRequestError
 from squid_core.session import Session
 from squid_core.tools import ToolResults
 from squid_core.storage import SessionStore
@@ -1985,6 +1987,168 @@ def test_failed_model_request_leaves_durable_failure_events(tmp_path) -> None:
     assert json.loads(session_store.metadata_path.read_text(encoding="utf-8"))["status"] == (
         "failed"
     )
+
+
+def _wrapped_model_error(error: Exception) -> ModelRequestError:
+    wrapped = ModelRequestError(f"Model request failed: {type(error).__name__}: {error}")
+    wrapped.__cause__ = error
+    return wrapped
+
+
+class SequencedRequestAdapter(FakeModelAdapter):
+    """Return replies or raise failures while retaining every request snapshot."""
+
+    def respond(self, messages: list[dict], tool_definitions: list[dict]) -> dict:
+        self.message_requests.append([dict(message) for message in messages])
+        outcome = self.replies[self.index]
+        self.index += 1
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+
+def test_transient_model_failure_retries_same_turn_then_succeeds(tmp_path) -> None:
+    session_store = SessionStore.create(tmp_path, "retry request")
+    model_adapter = SequencedRequestAdapter(
+        [_wrapped_model_error(TimeoutError("provider timed out")), reply("TASK COMPLETE")]
+    )
+    loop = AgentLoop(
+        session=Session(repo_root=tmp_path),
+        model_adapter=model_adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        session_store=session_store,
+        model_request_retry_backoff_ms=0,
+    )
+
+    assert loop.run() == RunResult(status="complete")
+    assert model_adapter.message_requests[0] == model_adapter.message_requests[1]
+    assert len(model_adapter.message_requests[0]) == 1
+
+    entries = [
+        json.loads(line)
+        for line in session_store.jsonl_path.read_text(encoding="utf-8").splitlines()
+    ]
+    lifecycle = [entry for entry in entries if entry["type"].startswith("model_request_")]
+    assert [entry["type"] for entry in lifecycle] == [
+        "model_request_started",
+        "model_request_failed",
+        "model_request_retry_scheduled",
+        "model_request_retry_started",
+        "model_request_finished",
+    ]
+    assert lifecycle[1]["failure_class"] == "timeout"
+    assert lifecycle[2]["attempt"] == 2
+    assert lifecycle[-1]["retry_count"] == 1
+
+
+def test_transient_model_failure_exhausts_retries_with_diagnostics(tmp_path) -> None:
+    response = SimpleNamespace(
+        status_code=503,
+        headers={"x-request-id": "req_123", "retry-after": "1"},
+        text='{"error":"temporarily unavailable"}',
+    )
+
+    class ProviderHTTPError(Exception):
+        def __init__(self) -> None:
+            super().__init__("service unavailable")
+            self.response = response
+
+    request_failures = [_wrapped_model_error(ProviderHTTPError()) for _ in range(3)]
+    session_store = SessionStore.create(tmp_path, "exhausted request")
+    model_adapter = SequencedRequestAdapter(request_failures)
+    loop = AgentLoop(
+        session=Session(repo_root=tmp_path),
+        model_adapter=model_adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        session_store=session_store,
+        model_request_retry_backoff_ms=0,
+    )
+
+    with pytest.raises(ModelRequestError, match="service unavailable"):
+        loop.run()
+
+    entries = [
+        json.loads(line)
+        for line in session_store.jsonl_path.read_text(encoding="utf-8").splitlines()
+    ]
+    failures = [entry for entry in entries if entry["type"] == "model_request_failed"]
+    assert len(failures) == 3
+    assert failures[-1]["failure_class"] == "provider_server_error"
+    assert failures[-1]["http_status"] == 503
+    assert failures[-1]["provider_request_id"] == "req_123"
+    assert failures[-1]["retry_after"] == "1"
+    assert failures[-1]["response_body_excerpt"] == response.text
+    run_failed = next(entry for entry in entries if entry["type"] == "run_failed")
+    assert run_failed["underlying_error_type"] == "ProviderHTTPError"
+    assert run_failed["http_status"] == 503
+
+
+def test_permanent_model_failure_does_not_retry(tmp_path) -> None:
+    class AuthenticationError(Exception):
+        status_code = 401
+
+    model_adapter = SequencedRequestAdapter(
+        [_wrapped_model_error(AuthenticationError("invalid credentials"))]
+    )
+    session_store = SessionStore.create(tmp_path, "permanent request")
+    loop = AgentLoop(
+        session=Session(repo_root=tmp_path),
+        model_adapter=model_adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        session_store=session_store,
+        model_request_retry_backoff_ms=0,
+    )
+
+    with pytest.raises(ModelRequestError):
+        loop.run()
+
+    assert len(model_adapter.message_requests) == 1
+    entries = (
+        json.loads(line)
+        for line in session_store.jsonl_path.read_text(encoding="utf-8").splitlines()
+    )
+    assert not any(
+        entry["type"].startswith("model_request_retry_") for entry in entries
+    )
+
+
+def test_model_failure_log_redacts_credentials(tmp_path) -> None:
+    secret = "sk-super-secret"
+
+    class RateLimitError(Exception):
+        status_code = 429
+        body = {"error": "slow down", "api_key": secret}
+
+    model_adapter = SequencedRequestAdapter(
+        [_wrapped_model_error(RateLimitError(f"Authorization: Bearer {secret}"))]
+    )
+    session_store = SessionStore.create(tmp_path, "redacted request")
+    loop = AgentLoop(
+        session=Session(repo_root=tmp_path),
+        model_adapter=model_adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        session_store=session_store,
+        model_request_max_retries=0,
+    )
+
+    with pytest.raises(ModelRequestError):
+        loop.run()
+
+    log_text = session_store.jsonl_path.read_text(encoding="utf-8")
+    assert secret not in log_text
+    assert "[REDACTED]" in log_text
 
 
 def test_keyboard_interrupt_leaves_durable_terminal_event_before_status(tmp_path) -> None:

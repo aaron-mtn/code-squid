@@ -153,6 +153,8 @@ class RuntimeSettings:
         default_factory=ToolResultTrimmingSettings
     )
     read_file: ReadFileSettings = field(default_factory=ReadFileSettings)
+    model_request_max_retries: int = 2
+    model_request_retry_backoff_ms: int = 250
 
     def __post_init__(self) -> None:
         if self.approval_mode not in VALID_APPROVAL_MODES:
@@ -169,3 +171,17 @@ class RuntimeSettings:
             raise ValueError("max_tool_steps must be null or a positive integer")
         if not isinstance(self.stream_assistant_text, bool):
             raise ValueError("stream_assistant_text must be a boolean")
+        if (
+            isinstance(self.model_request_max_retries, bool)
+            or not isinstance(self.model_request_max_retries, int)
+            or not 0 <= self.model_request_max_retries <= 10
+        ):
+            raise ValueError("model_request_max_retries must be an integer from 0 through 10")
+        if (
+            isinstance(self.model_request_retry_backoff_ms, bool)
+            or not isinstance(self.model_request_retry_backoff_ms, int)
+            or not 0 <= self.model_request_retry_backoff_ms <= 10_000
+        ):
+            raise ValueError(
+                "model_request_retry_backoff_ms must be an integer from 0 through 10000"
+            )

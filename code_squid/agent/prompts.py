@@ -56,7 +56,9 @@ TOOL_USAGE_GUIDANCE = """
 - If a full-file read returns content_truncated true, use returned_line_ranges to identify what source was actually returned and what relevant regions are still missing.
 - After a truncated whole-file read, use ranges only for the missing regions actually needed for the task. Do not reconstruct the entire file by reading every omitted section unless the task genuinely requires the complete file.
 - For every targeted read, use ranges with one or several regions of the same file.
-- When several relevant regions are already known, request them together in one read_file call rather than reading them sequentially.
+- Before calling read_file, consider whether you already know of other regions in the same file that will be needed next. If so, batch those regions into the same read_file call.
+- When several relevant regions are already known, request them together in one read_file call rather than reading them sequentially across several turns.
+- Do not make a sequence of single-range reads when the needed ranges are already known.
 - Prefer substantial coherent regions over tiny inchworm reads.
 - Do not use many scattered ranges for speculative broad exploration.
 - Do not broaden or repeat a read merely for extra confidence once the relevant code and surrounding context are already understood.

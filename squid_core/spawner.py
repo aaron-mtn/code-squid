@@ -286,4 +286,6 @@ def build_agent_loop(
         should_cancel=should_cancel,
         hook_runner=hook_runner,
         tool_result_trimming=settings.tool_result_trimming,
+        model_request_max_retries=settings.model_request_max_retries,
+        model_request_retry_backoff_ms=settings.model_request_retry_backoff_ms,
     )

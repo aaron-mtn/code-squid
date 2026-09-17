@@ -48,6 +48,8 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert settings.runtime.max_tool_steps is None
     assert settings.runtime.stream_assistant_text is False
     assert settings.runtime.too_many_reads_enabled is True
+    assert settings.runtime.model_request_max_retries == 2
+    assert settings.runtime.model_request_retry_backoff_ms == 250
     assert settings.compaction.enabled is True
     assert settings.compaction.trigger_input_tokens == 25_000
     assert settings.compaction.compact_fraction == 0.8
@@ -64,6 +66,30 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert runtime_settings.compaction.min_recent_chunks == 2
     assert runtime_settings.read_file.default_max_lines == 1000
     assert runtime_settings.read_file.minimum_range_lines == 150
+    assert runtime_settings.model_request_max_retries == 2
+    assert runtime_settings.model_request_retry_backoff_ms == 250
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("model_request_max_retries", -1),
+        ("model_request_max_retries", 11),
+        ("model_request_max_retries", True),
+        ("model_request_retry_backoff_ms", -1),
+        ("model_request_retry_backoff_ms", 10_001),
+        ("model_request_retry_backoff_ms", False),
+    ],
+)
+def test_invalid_model_request_retry_settings_raise(
+    tmp_path: Path,
+    name: str,
+    value: object,
+) -> None:
+    write_settings(tmp_path, {"runtime": {name: value}})
+
+    with pytest.raises(ValueError, match=name):
+        load_settings(tmp_path)
 
 
 def test_too_many_reads_hook_can_be_disabled_in_runtime_settings(
@@ -287,6 +313,8 @@ def test_settings_file_overrides_defaults(tmp_path: Path) -> None:
                 "approval_mode": "always",
                 "max_tool_steps": 3,
                 "stream_assistant_text": True,
+                "model_request_max_retries": 4,
+                "model_request_retry_backoff_ms": 75,
             },
             "compaction": {
                 "enabled": False,
@@ -309,6 +337,8 @@ def test_settings_file_overrides_defaults(tmp_path: Path) -> None:
     assert settings.runtime.approval_mode == "always"
     assert settings.runtime.max_tool_steps == 3
     assert settings.runtime.stream_assistant_text is True
+    assert settings.runtime.model_request_max_retries == 4
+    assert settings.runtime.model_request_retry_backoff_ms == 75
     assert settings.compaction.enabled is False
     assert settings.compaction.trigger_input_tokens == 24000
     assert settings.compaction.compact_fraction == 0.65

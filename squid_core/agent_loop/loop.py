@@ -1,7 +1,7 @@
 """Generic AgentLoop state machine and public run result."""
 
 from dataclasses import dataclass
-from time import perf_counter
+import time
 from typing import Callable, Literal
 
 from squid_core.agent_loop.event_emitter import (
@@ -34,13 +34,13 @@ from squid_core.hooks import (
     RunFinishedContext,
     ToolResultContext,
 )
+from squid_core.model_adapter import ModelRequestError, model_request_error_details
 from squid_core.safety import ActionPreflight, ApprovalPolicy, denied_result
 from squid_core.settings import ToolResultTrimmingSettings
 from squid_core.tool_result_trimming import render_messages_for_model
 
 MAX_CONSECUTIVE_INVALID_REPLIES = 3
 REJECTION_REASON_EVENT_MAX_CHARS = 500
-ERROR_EVENT_MAX_CHARS = 500
 
 
 class _CancellationRequested(Exception):
@@ -83,6 +83,8 @@ class AgentLoop:
         hook_runner: HookRunner | None = None,
         action_preflight: ActionPreflight | None = None,
         tool_result_trimming: ToolResultTrimmingSettings | None = None,
+        model_request_max_retries: int = 2,
+        model_request_retry_backoff_ms: int = 250,
     ) -> None:
         self.session = session
         self.model_adapter = model_adapter
@@ -107,6 +109,8 @@ class AgentLoop:
             if tool_result_trimming is not None
             else ToolResultTrimmingSettings()
         )
+        self.model_request_max_retries = model_request_max_retries
+        self.model_request_retry_backoff_ms = model_request_retry_backoff_ms
         self._run_context_blocks: list[PromptContextBlock] = []
 
     def _check_cancelled(self) -> None:
@@ -247,62 +251,113 @@ class AgentLoop:
             name: value for name, value in request_event.items() if value is not None
         }
         self._emit_runtime_event({"type": "model_request_started", **request_event})
-        started_at = perf_counter()
+        started_at = time.perf_counter()
+        max_attempts = self.model_request_max_retries + 1
+        attempt = 1
 
-        try:
-            if not self._should_stream_assistant_text():
-                reply = self.model_adapter.respond(
-                    messages=messages,
-                    tool_definitions=tool_definitions,
-                )
-            else:
-                self._emit_event(
-                    {
-                        "type": "assistant_message_started",
-                        "phase": "narration",
-                    }
-                )
-
-                def on_text_delta(delta: str) -> None:
+        while True:
+            attempt_started_at = time.perf_counter()
+            try:
+                if not self._should_stream_assistant_text():
+                    reply = self.model_adapter.respond(
+                        messages=messages,
+                        tool_definitions=tool_definitions,
+                    )
+                else:
                     self._emit_event(
                         {
-                            "type": "assistant_delta",
+                            "type": "assistant_message_started",
                             "phase": "narration",
-                            "delta": delta,
                         }
                     )
 
-                def on_tool_preparing(tool_call: dict) -> None:
-                    self._emit_event(tool_preparing_event(tool_call))
+                    def on_text_delta(delta: str) -> None:
+                        self._emit_event(
+                            {
+                                "type": "assistant_delta",
+                                "phase": "narration",
+                                "delta": delta,
+                            }
+                        )
 
-                reply = self.model_adapter.respond_streaming(
-                    messages=messages,
-                    tool_definitions=tool_definitions,
-                    on_text_delta=on_text_delta,
-                    on_tool_preparing=on_tool_preparing,
+                    def on_tool_preparing(tool_call: dict) -> None:
+                        self._emit_event(tool_preparing_event(tool_call))
+
+                    reply = self.model_adapter.respond_streaming(
+                        messages=messages,
+                        tool_definitions=tool_definitions,
+                        on_text_delta=on_text_delta,
+                        on_tool_preparing=on_tool_preparing,
+                    )
+            except BaseException as error:
+                details = model_request_error_details(error)
+                transient = details.pop("_transient")
+                self._emit_runtime_event_preserving_error(
+                    {
+                        "type": "model_request_failed",
+                        **request_event,
+                        "attempt": attempt,
+                        "max_attempts": max_attempts,
+                        "duration_ms": round(
+                            (time.perf_counter() - attempt_started_at) * 1000
+                        ),
+                        **details,
+                    }
                 )
-        except BaseException as error:
-            self._emit_runtime_event_preserving_error(
-                {
-                    "type": "model_request_failed",
-                    **request_event,
-                    "duration_ms": round((perf_counter() - started_at) * 1000),
-                    "error_type": type(error).__name__,
-                    "error_message": compact_event_text(
-                        error or type(error).__name__, ERROR_EVENT_MAX_CHARS
-                    ),
-                }
-            )
-            raise
+                if (
+                    not isinstance(error, ModelRequestError)
+                    or not transient
+                    or attempt >= max_attempts
+                ):
+                    raise
 
-        self._emit_runtime_event(
-            {
+                next_attempt = attempt + 1
+                backoff_ms = min(
+                    self.model_request_retry_backoff_ms * (2 ** (attempt - 1)),
+                    10_000,
+                )
+                previous_error_type = details.get(
+                    "underlying_error_type", details["error_type"]
+                )
+                previous_error_message = details.get(
+                    "underlying_error_message", details["error_message"]
+                )
+                retry_event = {
+                    **request_event,
+                    "attempt": next_attempt,
+                    "max_attempts": max_attempts,
+                    "failure_class": details["failure_class"],
+                    "previous_error_type": previous_error_type,
+                    "previous_error_message": previous_error_message,
+                    "backoff_ms": backoff_ms,
+                }
+                self._emit_runtime_event(
+                    {"type": "model_request_retry_scheduled", **retry_event}
+                )
+                if backoff_ms:
+                    time.sleep(backoff_ms / 1000)
+                self._check_cancelled()
+                attempt = next_attempt
+                self._emit_runtime_event(
+                    {"type": "model_request_retry_started", **retry_event}
+                )
+                continue
+
+            finished_event = {
                 "type": "model_request_finished",
                 **request_event,
-                "duration_ms": round((perf_counter() - started_at) * 1000),
+                "duration_ms": round((time.perf_counter() - started_at) * 1000),
             }
-        )
-        return reply
+            if attempt > 1:
+                finished_event.update(
+                    {
+                        "attempt": attempt,
+                        "max_attempts": max_attempts,
+                        "retry_count": attempt - 1,
+                    }
+                )
+            self._emit_runtime_event(finished_event)
+            return reply
 
     def _handle_trimmed_read_result(self, trimmed: ReadResultTrimmedContext) -> None:
         """Keep reread coverage aligned with the request-visible transcript."""
@@ -854,15 +909,14 @@ class AgentLoop:
             self._update_status_preserving_error("interrupted")
             raise
         except Exception as error:
+            details = model_request_error_details(error)
+            details.pop("_transient")
             self._emit_runtime_event_preserving_error(
                 {
                     "type": "run_failed",
                     "status": "failed",
                     "stage": run_stage,
-                    "error_type": type(error).__name__,
-                    "error_message": compact_event_text(
-                        error or type(error).__name__, ERROR_EVENT_MAX_CHARS
-                    ),
+                    **details,
                 }
             )
             self._update_status_preserving_error("failed")

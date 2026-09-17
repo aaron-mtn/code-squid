@@ -430,6 +430,8 @@ Current loop-level event types include:
 - `hooks_configured`
 - `hook_execution`
 - `model_request_started`
+- `model_request_retry_scheduled`
+- `model_request_retry_started`
 - `model_request_finished`
 - `model_request_failed`
 - `assistant_message_started`
@@ -457,7 +459,10 @@ full command output, prompts, duplicated message bodies, provider payloads, API
 keys, headers, or secrets. Model-request lifecycle events retain only
 provider/model identity when available, effective normalized reasoning mode and
 token budget when configured, message count, a rough request-token estimate,
-duration, and bounded error details. These events, plus `run_failed`
+duration, attempt counts, conservative failure classification, and bounded,
+credential-redacted underlying provider details when available. Retry events
+share this same main run log; no retry transcript or separate log exists. These
+events, plus `run_failed`
 and `run_interrupted`, are appended to the session's existing linked JSONL log
 before terminal status changes; they remain diagnostic entries and are never
 replayed as model transcript messages.
@@ -1166,6 +1171,7 @@ Missing settings are allowed. Defaults keep the CLI usable with LM Studio:
 - approval mode: `never`
 - max tool steps: unlimited
 - assistant text streaming: disabled
+- model-request retries: 2, with a 250 ms initial backoff
 - compaction: enabled at an estimated 25,000 input tokens, compacting about 80%
   of eligible token weight while preserving at least 2 recent chunks verbatim
 
@@ -1183,6 +1189,8 @@ Supported settings sections and fields:
 - `runtime.approval_mode`
 - `runtime.max_tool_steps`
 - `runtime.stream_assistant_text`
+- `runtime.model_request_max_retries`
+- `runtime.model_request_retry_backoff_ms`
 - `compaction.enabled`
 - `compaction.trigger_input_tokens`
 - `compaction.compact_fraction`
@@ -1216,6 +1224,13 @@ provider, the loop emits `assistant_message_started` before generation and
 validated. These events carry the `narration` or `final` phase described in
 Events And External Wrappers. Streamed deltas are UI events only; tool execution
 still waits for the full validated assistant response.
+`runtime.model_request_max_retries` is an integer from 0 through 10 and counts
+retries after the initial request. `runtime.model_request_retry_backoff_ms` is
+an integer from 0 through 10,000. The loop exponentially increases that base
+delay, capped at 10 seconds, and retries only classified timeouts, connection
+failures, rate limits, provider 5xx responses, and clearly identified stream
+transport failures. Authentication, configuration, malformed-response, and
+unknown failures do not retry.
 `model.temperature` is `null` or a number from 0 through 2.
 `model.reasoning_mode` is `null`, `off`, `low`, `medium`, or `high`. `null`
 means the provider request receives no persistent reasoning-specific setting,
@@ -1393,9 +1408,14 @@ shape, omits `parallel_tool_calls`, and adapts the response back to the
 OpenAI-like shape consumed by `ModelAdapter`.
 
 Provider request failures are wrapped at the model-adapter boundary as
-`ModelRequestError`. The CLI run orchestration in
-`code_squid/console/cli/session_runner.py` catches that error, marks the session
-failed, and writes diagnostic traceback details to `.code-squid/logs/latest.log`.
+`ModelRequestError` with the underlying exception retained as its cause. The
+adapter extracts only bounded, credential-redacted diagnostics such as HTTP
+status, provider request ID, retry hint, and response-body excerpt. `AgentLoop`
+retries a transient failure from the already-rendered request messages, before
+any assistant message, tool action, or transcript mutation can occur. The CLI
+run orchestration in `code_squid/console/cli/session_runner.py` catches that
+error, marks the session failed, and writes diagnostic traceback details to
+`.code-squid/logs/latest.log`.
 
 ## Runtime Contracts
 

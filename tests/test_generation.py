@@ -214,7 +214,9 @@ def test_model_request_failure_preserves_model_request_error(monkeypatch) -> Non
     with pytest.raises(ModelRequestError) as exc_info:
         generation.generate_text("Hello", settings=settings())
 
-    assert str(exc_info.value) == "Model request failed"
+    assert str(exc_info.value) == (
+        "Model request failed: RuntimeError: provider unavailable"
+    )
     assert exc_info.value.__cause__ is provider_error
 
 
@@ -321,7 +323,9 @@ def test_stream_text_preserves_model_request_error_chaining(monkeypatch) -> None
     with pytest.raises(ModelRequestError) as exc_info:
         generation.stream_text("Hello", lambda _delta: None, settings=settings())
 
-    assert str(exc_info.value) == "Model request failed"
+    assert str(exc_info.value) == (
+        "Model request failed: RuntimeError: provider unavailable"
+    )
     assert exc_info.value.__cause__ is provider_error
 
 
