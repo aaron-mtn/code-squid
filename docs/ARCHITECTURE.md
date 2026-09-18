@@ -92,7 +92,11 @@ and application layer; `squid_core/` is the reusable agent runtime.
     plus the already-read selected metadata until the CLI consumes its
     one-time status notice; `prompt_loop.py` routes submitted text through the
     existing new-run or follow-up runner, and `session_runner.py` remains the
-    sole owner of opening the store and loading a resumed transcript.
+    sole owner of opening the store and loading a resumed transcript. The
+    session runner also owns the application boundary for exhausted model
+    requests: it records the run as failed, writes and displays the existing
+    error log, and returns control to the persistent prompt. Other exceptions
+    retain their existing propagation behavior.
   - `console/ui/` owns terminal presentation and input. `display.py` keeps
     `TerminalDisplay` as the lifecycle coordinator used by the Agent loop.
     `header_layout.py` owns the explicit startup-scene geometry: safe draw
@@ -1327,7 +1331,10 @@ Shell `resume` selects the saved session and enters the same persistent
 interactive loop as a fresh invocation. Each authored follow-up loads the
 saved conversation, appends a user message, marks the session active, creates
 a fresh latest-only undo buffer, and continues that session. Slash commands
-remain available before and between follow-ups.
+remain available before and between follow-ups. If model communication
+ultimately raises `ModelRequestError`, the current run is marked failed and its
+existing error report is shown, but the active session and interactive prompt
+remain available for retry, another follow-up, `/new`, or `/exit`.
 
 `safety` prints or writes the configured approval mode. Friendly CLI safety
 names map to settings values this way:

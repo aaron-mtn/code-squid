@@ -75,7 +75,10 @@ def _run_loop(
         except ValueError:
             display_path = log_path
         display.model_request_failed(display_path)
-        return 1
+        # The run failed, as recorded above, but the application boundary has
+        # handled that failure. Returning success here keeps the persistent
+        # prompt alive without weakening handling for any other exception.
+        return 0
 
     display.loop_finished(session, run_result)
     return 1 if run_result.status == "failed" else 0

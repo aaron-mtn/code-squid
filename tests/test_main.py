@@ -507,13 +507,28 @@ def test_run_loop_handles_model_request_error_with_log_and_status(tmp_path) -> N
     log_path = tmp_path / ".code-squid" / "logs" / "latest.log"
     log_text = log_path.read_text(encoding="utf-8")
 
-    assert status == 1
+    assert status == 0
     assert display.starts == 0
     assert display.failure_path == Path(".code-squid/logs/latest.log")
     assert display.finished is False
     assert session_store.statuses == ["failed"]
     assert "RuntimeError: provider unavailable" in log_text
     assert "squid_core.model_adapter.ModelRequestError: Model request failed" in log_text
+
+
+def test_run_loop_does_not_swallow_unrelated_exception(tmp_path) -> None:
+    class UnexpectedFailingLoop:
+        def run(self) -> None:
+            raise RuntimeError("unexpected run failure")
+
+    with pytest.raises(RuntimeError, match="unexpected run failure"):
+        _run_loop(
+            tmp_path,
+            UnexpectedFailingLoop(),
+            FakeDisplay(),
+            session=object(),
+            session_store=FakeSessionStore(),
+        )
 
 
 def test_run_loop_returns_zero_for_complete_result(tmp_path) -> None:
@@ -1155,6 +1170,56 @@ def test_interactive_second_input_uses_follow_up_path(monkeypatch, tmp_path) -> 
 
     assert new_tasks == ["first task"]
     assert follow_up_tasks == [("active-session", "follow up")]
+
+
+def test_interactive_model_failure_keeps_session_active_and_accepts_follow_up(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    display = BannerDisplay()
+    session_store = FakeSessionStore()
+    follow_up_tasks = []
+
+    def failing_new(repo_root, task, settings, run_display, skill_name=None):
+        status = _run_loop(
+            repo_root,
+            ModelFailingLoop(),
+            run_display,
+            session=object(),
+            session_store=session_store,
+        )
+        return status, "preserved-session"
+
+    def successful_follow_up(
+        repo_root,
+        session_id,
+        task,
+        settings,
+        run_display,
+        skill_name=None,
+    ):
+        follow_up_tasks.append((session_id, task))
+        return 0, session_id
+
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._run_display", lambda *args: display
+    )
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._prompt_task",
+        _fake_prompt_tasks(["first task", "retry", "/exit"]),
+    )
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._run_new_session_task", failing_new
+    )
+    monkeypatch.setattr(
+        "code_squid.console.cli.prompt_loop._run_follow_up_task",
+        successful_follow_up,
+    )
+
+    assert _run_interactive(tmp_path) == 0
+    assert session_store.statuses == ["failed"]
+    assert follow_up_tasks == [("preserved-session", "retry")]
+    assert display.failure_path == Path(".code-squid/logs/latest.log")
 
 
 def test_interactive_skill_command_lists_current_and_available_skills(

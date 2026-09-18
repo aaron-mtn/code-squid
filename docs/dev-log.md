@@ -1,3 +1,18 @@
+- 2026-09-18: Kept the persistent Code Squid prompt alive after an exhausted
+  model request. The application-owned session runner still marks the current
+  run failed and uses the existing error log/display path, but now treats that
+  specifically handled `ModelRequestError` as consumed at the run boundary so
+  the active session can receive another follow-up. Unrelated exceptions retain
+  their prior propagation behavior. Added focused coverage for reporting,
+  preserved interactive session selection, retry usability, successful runs,
+  and unrelated failures. Provider, retry, timeout, HTTP, AgentLoop, and Squid
+  Browser behavior were not changed. The focused runner/interactive selection
+  passed 6 tests, and all 61 tests in `test_main.py` passed. Broader console/UI
+  coverage passed 393 tests with the one pre-existing Windows TTY rendering
+  expectation failure; the full suite passed 1,283 tests with the same 29
+  unrelated prompt-copy, repeated-read-guidance-copy, and Windows TTY
+  expectation failures recorded by preceding patches. Compilation, direct
+  imports, and `git diff --check` passed; no live model inference was run.
 - 2026-09-17: Request-only history trimming now removes only the before/after
   previews from old successful `apply_patch` results. Recent successful results
   retain both previews, failed-result diagnostic trimming is unchanged, and
