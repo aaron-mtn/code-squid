@@ -25,7 +25,7 @@ class Compactor:
         self,
         settings,
         model_adapter,
-        context_provider: Callable[[], str | None] | None = None,
+        context_provider: Callable[[list[dict]], str | None] | None = None,
     ) -> None:
         self.settings = settings
         self.model_adapter = model_adapter
@@ -58,6 +58,7 @@ class Compactor:
                 recent_chunks,
                 selection,
             ) = self._select_compaction_chunks(chunks)
+            preserved_messages = self._flatten(recent_chunks)
             will_compact = threshold_crossed and bool(compacted_chunks)
 
             stage = "persistence"
@@ -88,6 +89,9 @@ class Compactor:
 
             stage = "prepare"
             prior_context = json.dumps(compacted_chunks, ensure_ascii=False, indent=2)
+            # Generate deterministic context once so the summarizer and the
+            # retained backstop see exactly the same cutoff-scoped facts.
+            context = self._provided_context(preserved_messages)
             request_messages = [
                 {
                     "role": "system",
@@ -95,7 +99,7 @@ class Compactor:
                 },
                 {
                     "role": "user",
-                    "content": compaction_prompt(prior_context),
+                    "content": compaction_prompt(prior_context, context),
                 },
             ]
             request_event = {
@@ -136,7 +140,6 @@ class Compactor:
                 )
 
             stage = "session_rebuild"
-            context = self._provided_context()
             # The assistant role accurately identifies the summary as model output.
             # The explicit preamble remains necessary because a summary can contain
             # quoted user turns or invented imperative text despite that provenance.
@@ -150,7 +153,7 @@ class Compactor:
             session.messages = [
                 *protected_messages,
                 compacted_message,
-                *self._flatten(recent_chunks),
+                *preserved_messages,
             ]
             metadata = {
                 "estimated_tokens_before": estimated_tokens_before,
@@ -183,12 +186,12 @@ class Compactor:
                 pass
             raise
 
-    def _provided_context(self) -> str:
+    def _provided_context(self, preserved_messages: list[dict]) -> str:
         """Return optional app context without allowing its failure to abort compaction."""
         if self.context_provider is None:
             return ""
         try:
-            context = self.context_provider()
+            context = self.context_provider(preserved_messages)
         except Exception:
             # The model summary is still useful when supplementary app context
             # cannot be produced. Compaction has historically been best effort.

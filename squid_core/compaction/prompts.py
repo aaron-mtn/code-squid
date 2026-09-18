@@ -8,7 +8,19 @@ COMPACTION_SYSTEM_PROMPT = (
 )
 
 
-def compaction_prompt(prior_context: str) -> str:
+def compaction_prompt(
+    prior_context: str,
+    authoritative_context: str = "",
+) -> str:
+    authoritative_section = ""
+    if authoritative_context:
+        authoritative_section = f"""
+
+Authoritative host/runtime facts describing the state as of the end of the history being summarized:
+{authoritative_context}
+
+These host/runtime facts are authoritative. Do not contradict them in the summary.
+"""
     return f"""
 Summarize this prior interaction context so a later turn can continue safely.
 
@@ -19,4 +31,5 @@ Do not include a title or top-level heading. Return only the summary body.
 
 Prior context:
 {prior_context}
+{authoritative_section}
 """.strip()

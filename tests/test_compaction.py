@@ -153,22 +153,41 @@ def test_no_context_provider_preserves_existing_compacted_output_exactly() -> No
 
 def test_provider_context_is_appended_after_generated_summary() -> None:
     current_session = session(compactable_messages())
+    context = "# Deterministic Facts\nexact fact"
 
+    model_adapter = FakeModelAdapter("model summary")
     Compactor(
         settings(),
-        FakeModelAdapter("model summary"),
-        context_provider=lambda: "# Deterministic Facts\nexact fact",
+        model_adapter,
+        context_provider=lambda preserved: context,
     ).maybe_compact(current_session)
 
     content = current_session.messages[2]["content"]
     assert content.index("model summary") < content.index("# Deterministic Facts")
-    assert content.endswith("# Deterministic Facts\nexact fact")
+    assert content.endswith(context)
+    summarizer_prompt = model_adapter.requests[0][1]["content"]
+    assert context in summarizer_prompt
+    assert "Authoritative host/runtime facts" in summarizer_prompt
+    assert "Do not contradict them" in summarizer_prompt
+
+
+def test_provider_receives_exact_flattened_preserved_tail() -> None:
+    messages = compactable_messages()
+    received = []
+
+    Compactor(
+        settings(),
+        FakeModelAdapter(),
+        context_provider=lambda preserved: received.append(preserved) or None,
+    ).maybe_compact(session(messages))
+
+    assert received == [messages[-2:]]
 
 
 def test_provider_failure_does_not_destroy_successful_compaction() -> None:
     current_session = session(compactable_messages())
 
-    def fail_context() -> str:
+    def fail_context(preserved_messages: list[dict]) -> str:
         raise RuntimeError("context unavailable")
 
     result = Compactor(

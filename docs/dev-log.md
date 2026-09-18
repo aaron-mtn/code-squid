@@ -1,3 +1,18 @@
+- 2026-09-17: Scoped authoritative compaction facts to the exact canonical
+  history represented by each summary. Core now passes the flattened preserved
+  message tail to its optional application context provider, generates the
+  returned text once, and supplies that identical text both to the summarizer
+  as authoritative host/runtime facts and after the generated summary as the
+  deterministic backstop. Code Squid validates that the tail exactly matches
+  the canonical session-message suffix and fails closed on mismatch, then
+  derives facts from the remaining prefix without cumulative state. The facts
+  now include mechanical success/failure counts for the four built-in Tools and
+  explicit careful absence statements for known direct mutation and
+  verification. Focused compaction/context/session/runner/spawner verification
+  passed 94 tests; the full suite passed 1,275 tests with the same 29 unrelated
+  existing prompt-copy, repeated-read-guidance-copy, and Windows TTY expectation
+  failures recorded by preceding patches. Production and test compilation,
+  direct imports, and `git diff --check` passed; no live model inference was run.
 - 2026-09-17: Added a small optional Core compaction-context callback that
   appends deterministic application text only after a model-written summary.
   Missing, empty, invalid, or failing callbacks preserve summary-only

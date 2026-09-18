@@ -8,6 +8,12 @@ from typing import Callable
 
 
 _DIRECT_MUTATION_TOOLS = {"apply_patch", "write_file"}
+_BUILT_IN_ACTIVITY_TOOLS = (
+    "read_file",
+    "apply_patch",
+    "write_file",
+    "run_command",
+)
 _MAX_OUTPUT_EXCERPT_CHARS = 600
 _OUTPUT_OMISSION_MARKER = "\n... omitted ...\n"
 
@@ -28,8 +34,19 @@ class CodeSquidCompactionContextProvider:
     def __init__(self, load_messages: Callable[[], list[dict]]) -> None:
         self._load_messages = load_messages
 
-    def __call__(self) -> str | None:
-        return authoritative_compaction_context(self._load_messages())
+    def __call__(self, preserved_messages: list[dict]) -> str | None:
+        canonical_messages = self._load_messages()
+        if len(preserved_messages) > len(canonical_messages):
+            return None
+        if (
+            preserved_messages
+            and canonical_messages[-len(preserved_messages) :] != preserved_messages
+        ):
+            # The cutoff must be exact. Whole-run facts would be chronologically
+            # misleading if the active tail cannot be matched to durable history.
+            return None
+        cutoff = len(canonical_messages) - len(preserved_messages)
+        return authoritative_compaction_context(canonical_messages[:cutoff])
 
 
 def authoritative_compaction_context(messages: list[dict]) -> str | None:
@@ -48,14 +65,19 @@ def authoritative_compaction_context(messages: list[dict]) -> str | None:
     )
     unresolved_failure = _latest_unresolved_failure(events)
 
-    if latest_mutation is None and latest_verification is None and unresolved_failure is None:
-        return None
-
-    sections = ["# Authoritative Runtime Facts"]
+    sections = [
+        "# Authoritative Runtime Facts",
+        "Tool activity:\n\n" + "\n".join(_render_activity(events)),
+    ]
     if latest_mutation is not None:
         sections.append(
             "Latest known direct mutation:\n\n"
             f"- {_render_mutation(latest_mutation)}"
+        )
+    else:
+        sections.append(
+            "Latest known direct mutation:\n\n"
+            "- No known direct mutation occurred."
         )
     if latest_verification is not None:
         sections.append(
@@ -66,16 +88,29 @@ def authoritative_compaction_context(messages: list[dict]) -> str | None:
             "Verification status:\n\n"
             f"- {_verification_status(latest_verification, latest_mutation)}"
         )
+    else:
+        sections.append("Latest verification:\n\n- No verification occurred.")
     if unresolved_failure is not None:
         sections.append(
             "Latest unresolved tool failure:\n\n"
             f"- {_render_failure(unresolved_failure)}"
         )
     sections.append(
-        "These runtime facts supersede conflicting statements in the compacted "
-        "summary above."
+        "These facts describe the canonical run state at the end of the history "
+        "represented by this compacted summary."
     )
     return "\n\n".join(sections)
+
+
+def _render_activity(events: list[_ToolEvent]) -> list[str]:
+    """Render mechanical success/failure counts for Code Squid's built-ins."""
+    lines = []
+    for tool in _BUILT_IN_ACTIVITY_TOOLS:
+        tool_events = [event for event in events if event.tool == tool]
+        successful = sum(event.result.get("ok") is True for event in tool_events)
+        failed = sum(event.result.get("ok") is False for event in tool_events)
+        lines.append(f"- {tool}: {successful} successful, {failed} failed")
+    return lines
 
 
 def _tool_events(messages: list[dict]) -> list[_ToolEvent]:

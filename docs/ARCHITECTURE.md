@@ -55,8 +55,9 @@ and application layer; `squid_core/` is the reusable agent runtime.
     does not import the console frontend.
   - `compaction_context.py` owns Code Squid's deterministic authoritative
     compaction facts. It reads the session store's canonical messages at
-    compaction time and understands only the application's direct-mutation,
-    verification, and recoverable-failure Tool semantics.
+    compaction time, removes the exact preserved-tail suffix supplied by Core,
+    and understands only the application's built-in Tool activity,
+    direct-mutation, verification, and recoverable-failure semantics.
   - `app_paths.py` owns Code Squid application-home policy, the application-wide
     settings path, repository-local
     session/undo/error-log locations, the global session-index and recent-
@@ -1576,10 +1577,12 @@ When triggered, compaction:
 - selects oldest whole chunks in order until their cumulative estimate reaches
   that target or the minimum recent-chunk boundary prevents further selection
 - summarizes older chunks with `ModelAdapter.complete_text(...)`
-- asks an optional zero-argument application provider for deterministic
-  model-visible context after the model summary has been generated; an absent,
-  empty, invalid, or failing provider leaves the prior summary-only behavior
-  unchanged
+- gives an optional application provider the exact flattened recent-message
+  tail that will remain verbatim; the resulting deterministic context is
+  generated once, supplied to the summarizer as authoritative host/runtime
+  facts for the end of the summarized history, and appended unchanged after
+  the model summary; an absent, empty, invalid, or failing provider leaves the
+  prior summary-only behavior unchanged
 - replaces those older chunks with one assistant message headed
   `# Compacted Working Context`; the assistant role marks it as model-generated,
   while its preamble explicitly says it is lossy, context-only, non-authoritative,
@@ -1597,20 +1600,30 @@ next summary without a separate memory mechanism. The removed
 `keep_recent_turns` JSON field is ignored if it remains in an older settings
 file; users who customized it must replace it with `min_recent_chunks`.
 
-The Core provider seam is deliberately text-only and has no knowledge of Code
-Squid Tools, source files, verification commands, task state, or filesystem
-truth. `code_squid.compaction_context.CodeSquidCompactionContextProvider` is
-wired only by the Code Squid application builder. It reloads the complete
-append-only canonical message history from `SessionStore` at compaction time,
-pairs Tool calls with their JSON results, and reports only the latest successful
-known direct `apply_patch`/`write_file` mutation, latest explicitly marked
-verification, whether a later known direct mutation makes that verification
-stale, and the latest concrete Tool failure not clearly superseded by a later
-success. It does not infer changes made by commands or external Tools, inspect
-the filesystem, maintain planner state, or derive facts from the model summary.
-Successful verification output is omitted. Failure output is retained verbatim
-when short, or as a fixed-size raw head and tail separated by an omission marker
-when long; the provider does not parse or rank failure lines.
+The Core provider seam has no knowledge of Code Squid Tools, source files,
+verification commands, task state, or filesystem truth. It communicates only
+the exact preserved message tail and accepts optional text in return.
+`code_squid.compaction_context.CodeSquidCompactionContextProvider` is wired only
+by the Code Squid application builder. It reloads the complete append-only
+canonical message history from `SessionStore` at compaction time and requires
+the supplied preserved tail to equal its exact suffix. A mismatch fails closed
+without authoritative context; a match removes that suffix so facts describe
+only the canonical prefix represented by the summary. This remains correct
+across repeated compactions because storage retains the original messages rather
+than the synthetic in-memory summary.
+
+For that canonical prefix, the provider pairs Tool calls with their JSON results
+and reports mechanical successful/failed call counts for `read_file`,
+`apply_patch`, `write_file`, and `run_command`; the latest successful known
+direct `apply_patch`/`write_file` mutation or an explicit absence; the latest
+explicitly marked verification or an explicit absence; whether a later known
+direct mutation makes that verification stale; and the latest concrete Tool
+failure not clearly superseded by a later success. It does not infer changes
+made by commands or external Tools, inspect the filesystem, maintain cumulative
+or planner state, or derive facts from the model summary. Successful
+verification output is omitted. Failure output is retained verbatim when short,
+or as a fixed-size raw head and tail separated by an omission marker when long;
+the provider does not parse or rank failure lines.
 
 `AgentLoop` supplies one callback that persists each lifecycle event through
 `SessionStore.append_compaction_event(...)` when storage is wired in, publishes
