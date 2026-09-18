@@ -1,3 +1,16 @@
+- 2026-09-17: Added the protected original system and user messages to the
+  compaction summarizer request as separately labeled authoritative reference
+  context. They remain verbatim outside the generated summary; selected older
+  history, the preserved recent tail, and the authoritative runtime-facts
+  cutoff are unchanged. Added regressions for concrete original requirements,
+  pre-cutoff user instructions, post-cutoff exclusion, verbatim retention, and
+  the existing provider/no-provider paths. Focused compaction/context tests
+  passed 43 tests, and the broader loop/runner/spawner/storage/adapter/boundary
+  suite passed 184 tests. The full suite passed 1,278 tests with the same 29
+  unrelated existing prompt-copy, repeated-read-guidance-copy, and Windows TTY
+  expectation failures recorded by preceding patches. Production and test
+  compilation, direct imports, and `git diff --check` passed; no live model
+  inference was run.
 - 2026-09-17: Scoped authoritative compaction facts to the exact canonical
   history represented by each summary. Core now passes the flattened preserved
   message tail to its optional application context provider, generates the

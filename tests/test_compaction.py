@@ -480,7 +480,101 @@ def test_summary_request_uses_compaction_prompt_with_json_context() -> None:
         ),
     }
     assert model_adapter.requests[0][1]["role"] == "user"
-    assert "Prior context:" in model_adapter.requests[0][1]["content"]
+    prompt = model_adapter.requests[0][1]["content"]
+    assert "Agent/system context (protected and retained verbatim" in prompt
+    assert '"content": "system prompt"' in prompt
+    assert "Protected user task/instruction context" in prompt
+    assert '"content": "original task"' in prompt
+    assert "History being summarized and replaced:" in prompt
+
+
+def test_summary_request_has_protected_context_and_only_pre_cutoff_history() -> None:
+    system_message = {
+        "role": "system",
+        "content": "Follow the repository rules and preserve behavior.",
+    }
+    original_task = {
+        "role": "user",
+        "content": (
+            "Fix issue 417: retain the frobnicator timeout and reject empty names."
+        ),
+    }
+    old_read = long_message("assistant", "read src/frobnicator.py ")
+    pre_cutoff_instruction = long_message(
+        "user", "Also preserve the public Widget constructor. "
+    )
+    recent_assistant = long_message("assistant", "recent implementation detail ")
+    post_cutoff_user = long_message("user", "After cutoff: do not expose this yet. ")
+    messages = [
+        system_message,
+        original_task,
+        old_read,
+        pre_cutoff_instruction,
+        recent_assistant,
+        post_cutoff_user,
+    ]
+    model_adapter = FakeModelAdapter("summary")
+    current_session = session(messages)
+
+    Compactor(settings(min_recent_chunks=2), model_adapter).maybe_compact(
+        current_session
+    )
+
+    prompt = model_adapter.requests[0][1]["content"]
+    assert system_message["content"] in prompt
+    assert original_task["content"] in prompt
+    assert pre_cutoff_instruction["content"] in prompt
+    assert old_read["content"] in prompt
+    assert recent_assistant["content"] not in prompt
+    assert post_cutoff_user["content"] not in prompt
+    assert current_session.messages[:2] == [system_message, original_task]
+    assert current_session.messages[-2:] == [recent_assistant, post_cutoff_user]
+
+
+def test_read_only_history_request_still_contains_concrete_original_task() -> None:
+    concrete_task = (
+        "Fix both concrete issues: preserve nested include order and report malformed "
+        "config paths without crashing."
+    )
+    read_call = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {
+                "id": "read-1",
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "arguments": '{"path":"config.py"}',
+                },
+            }
+        ],
+    }
+    read_result = {
+        "role": "tool",
+        "tool_call_id": "read-1",
+        "content": "source text" * 100,
+    }
+    recent = long_message("assistant", "still inspecting ")
+    model_adapter = FakeModelAdapter("summary")
+
+    Compactor(settings(min_recent_chunks=1), model_adapter).maybe_compact(
+        session(
+            [
+                {"role": "system", "content": "Act as the Code Squid agent."},
+                {"role": "user", "content": concrete_task},
+                read_call,
+                read_result,
+                recent,
+            ]
+        )
+    )
+
+    prompt = model_adapter.requests[0][1]["content"]
+    assert concrete_task in prompt
+    assert "read_file" in prompt
+    assert read_result["content"] in prompt
+    assert recent["content"] not in prompt
 
 
 def test_repeated_compaction_folds_prior_summary_into_later_history() -> None:

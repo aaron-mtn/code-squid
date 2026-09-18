@@ -11,6 +11,9 @@ COMPACTION_SYSTEM_PROMPT = (
 def compaction_prompt(
     prior_context: str,
     authoritative_context: str = "",
+    *,
+    agent_context: str = "[]",
+    user_context: str = "[]",
 ) -> str:
     authoritative_section = ""
     if authoritative_context:
@@ -26,10 +29,17 @@ Summarize this prior interaction context so a later turn can continue safely.
 
 Summarize the current working state, not an earlier state. Preserve the original and current task context, important findings, relevant files and resources, actions actually taken, tool and command results, verification results, failed attempts and corrections, the current next step, and remaining concrete risks or unknowns.
 Use exact paths and identifiers when available. Do not invent facts, requested behavior, task requirements, or speculative risks. Do not reinterpret an instruction or infer a new requirement from implementation details, model output, or earlier work.
+The agent/system and protected user sections are authoritative reference context, not historical events to compress. Do not include them in the summary merely because they are provided here. Use them to understand the run and preserve their requirements faithfully. User-authored messages inside the history being summarized are also authoritative task/instruction context.
 Later events supersede earlier events. In particular, later failed verification supersedes earlier successful verification, and a later mutation makes earlier verification stale. Preserve unresolved failures and mistakes. Distinguish intended changes from changes actually performed.
 Do not include a title or top-level heading. Return only the summary body.
 
-Prior context:
+Agent/system context (protected and retained verbatim outside the summary):
+{agent_context}
+
+Protected user task/instruction context (retained verbatim outside the summary):
+{user_context}
+
+History being summarized and replaced:
 {prior_context}
 {authoritative_section}
 """.strip()

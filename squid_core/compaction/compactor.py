@@ -89,6 +89,12 @@ class Compactor:
 
             stage = "prepare"
             prior_context = json.dumps(compacted_chunks, ensure_ascii=False, indent=2)
+            # Protected messages remain outside the replacement, but the
+            # summarizer still needs them to understand what the run is doing.
+            # Keep them separate from historical events so they retain their
+            # instruction/reference meaning instead of becoming summary fodder.
+            agent_context = self._json_messages(protected_messages, "system")
+            user_context = self._json_messages(protected_messages, "user")
             # Generate deterministic context once so the summarizer and the
             # retained backstop see exactly the same cutoff-scoped facts.
             context = self._provided_context(preserved_messages)
@@ -99,7 +105,12 @@ class Compactor:
                 },
                 {
                     "role": "user",
-                    "content": compaction_prompt(prior_context, context),
+                    "content": compaction_prompt(
+                        prior_context,
+                        context,
+                        agent_context=agent_context,
+                        user_context=user_context,
+                    ),
                 },
             ]
             request_event = {
@@ -197,6 +208,11 @@ class Compactor:
             # cannot be produced. Compaction has historically been best effort.
             return ""
         return context.strip() if isinstance(context, str) else ""
+
+    def _json_messages(self, messages: list[dict], role: str) -> str:
+        """Serialize protected messages of one role for request reference context."""
+        selected = [message for message in messages if message.get("role") == role]
+        return json.dumps(selected, ensure_ascii=False, indent=2)
 
     def _emit(self, callback: Callable[[dict], object] | None, event: dict) -> None:
         if callback is not None:

@@ -146,6 +146,62 @@ def test_preserved_recent_tool_activity_is_excluded_from_facts() -> None:
     assert "No known direct mutation occurred." in context
 
 
+def test_summarizer_reference_history_and_runtime_facts_share_cutoff() -> None:
+    class Adapter:
+        def __init__(self) -> None:
+            self.requests = []
+
+        def complete_text(self, messages: list[dict]) -> dict:
+            self.requests.append(messages)
+            return {"content": "summary", "usage": None}
+
+    system_message = {"role": "system", "content": "Follow agent policy."}
+    original_task = {"role": "user", "content": "Fix the concrete parser issue."}
+    pre_cutoff_instruction = {
+        "role": "user",
+        "content": "Preserve the public parser API. " * 80,
+    }
+    summarized = [
+        *_mutation("patch-old", "old.py"),
+        pre_cutoff_instruction,
+    ]
+    preserved = [
+        *_mutation("patch-recent", "recent.py"),
+        {"role": "user", "content": "Post-cutoff direction. " * 80},
+    ]
+    canonical_messages = [
+        system_message,
+        original_task,
+        *summarized,
+        *preserved,
+    ]
+    adapter = Adapter()
+    current_session = SimpleNamespace(messages=list(canonical_messages))
+
+    Compactor(
+        SimpleNamespace(
+            enabled=True,
+            trigger_input_tokens=1,
+            compact_fraction=0.5,
+            min_recent_chunks=2,
+        ),
+        adapter,
+        context_provider=CodeSquidCompactionContextProvider(
+            lambda: canonical_messages
+        ),
+    ).maybe_compact(current_session)
+
+    prompt = adapter.requests[0][1]["content"]
+    assert system_message["content"] in prompt
+    assert original_task["content"] in prompt
+    assert pre_cutoff_instruction["content"] in prompt
+    assert "`old.py`" in prompt
+    assert "recent.py" not in prompt
+    assert "Post-cutoff direction" not in prompt
+    assert current_session.messages[:2] == [system_message, original_task]
+    assert current_session.messages[-3:] == preserved
+
+
 def test_repeated_compactions_use_original_canonical_messages() -> None:
     class Adapter:
         def __init__(self) -> None:

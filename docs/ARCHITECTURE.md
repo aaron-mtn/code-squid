@@ -1577,6 +1577,10 @@ When triggered, compaction:
 - selects oldest whole chunks in order until their cumulative estimate reaches
   that target or the minimum recent-chunk boundary prevents further selection
 - summarizes older chunks with `ModelAdapter.complete_text(...)`
+- supplies the protected original system and user messages to the summarizer in
+  separately labeled reference sections; they remain outside the history being
+  replaced, while later user messages selected before the cutoff remain visible
+  in that history
 - gives an optional application provider the exact flattened recent-message
   tail that will remain verbatim; the resulting deterministic context is
   generated once, supplied to the summarizer as authoritative host/runtime
