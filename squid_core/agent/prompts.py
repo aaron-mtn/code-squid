@@ -219,9 +219,15 @@ If work remains, choose exactly one real tool call for the immediate next step. 
 Do not restate the plan or do extra work unless concrete work remains.
 """.strip(),
     "non_final_too_many_tool_calls": """
-Format error: your last response requested too many tool calls.
+Format error: your last response contained multiple tool calls.
 
-Only one tool call is allowed per turn. Do not batch reads, writes, or commands. Choose the single most important immediate action and call only that tool now. Brief visible narration is strongly preferred.
+Exactly ONE tool call is allowed per response.
+
+Choose the single most useful next action and issue only that tool call now.
+Do not batch reads, writes, commands, or independent actions.
+Do not include a second tool call.
+
+Brief visible narration is strongly preferred.
 """.strip(),
     "malformed_tool_call": """
 Format error: your last response included an invalid tool call.
