@@ -85,10 +85,15 @@ def render_tool_result_for_model(
             settings.command_old_output_chars,
             name,
         )
-    if name == "apply_patch" and canonical_result.get("ok") is False:
-        return _trim_patch_diagnostics(
-            canonical_result, settings.patch_old_diagnostic_chars
-        )
+    if name == "apply_patch":
+        if canonical_result.get("ok") is False:
+            return _trim_patch_diagnostics(
+                canonical_result, settings.patch_old_diagnostic_chars
+            )
+        rendered = dict(canonical_result)
+        rendered.pop("before_preview", None)
+        rendered.pop("after_preview", None)
+        return rendered
     if name == "write_file":
         return _trim_payload(
             canonical_result,
@@ -342,6 +347,8 @@ def _format_patch_result(result: dict) -> str:
         if _valid_line_range(start, end):
             lines.append(f"changed: lines {start}-{end}")
         _append_scalar(lines, "match_id", result.get("match_id"))
+        _append_scalar(lines, "before_preview", result.get("before_preview"))
+        _append_scalar(lines, "after_preview", result.get("after_preview"))
         return "\n".join(lines)
 
     _append_scalar(lines, "reason", result.get("error"))

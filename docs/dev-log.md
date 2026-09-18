@@ -1,3 +1,15 @@
+- 2026-09-17: Request-only history trimming now removes only the before/after
+  previews from old successful `apply_patch` results. Recent successful results
+  retain both previews, failed-result diagnostic trimming is unchanged, and
+  canonical results remain untouched. The 27 focused trimming/model-history
+  tests passed, as did compilation and `git diff --check`.
+- 2026-09-17: Added exact, 300-character-bounded before/after replacement
+  previews to both successful `apply_patch` paths and exposed them in the
+  model-facing result. Short replacements remain complete; longer replacements
+  use visible symmetric head/tail truncation. Matching, candidate selection,
+  failure results, schemas, and existing success metadata are unchanged.
+  Focused Tool, executor, and model-result rendering verification passed 114
+  tests. Production compilation and `git diff --check` passed.
 - 2026-09-17: Added the protected original system and user messages to the
   compaction summarizer request as separately labeled authoritative reference
   context. They remain verbatim outside the generated summary; selected older

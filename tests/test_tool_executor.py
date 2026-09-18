@@ -145,6 +145,8 @@ def test_duplicate_candidate_selection_edits_only_selected_occurrence(
     ]
     result = _select(executor, diagnostic["candidates"][candidate_index]["match_id"])
     assert result["ok"] is True
+    assert result["before_preview"] == "same"
+    assert result["after_preview"] == "changed"
     assert target.read_text(encoding="utf-8") == expected
 
 

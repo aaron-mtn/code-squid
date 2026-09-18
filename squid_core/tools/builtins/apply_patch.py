@@ -12,6 +12,8 @@ TOOL_NAME = "apply_patch"
 MAX_REPORTED_MATCHES = 3
 CONTEXT_LINES = 2
 CLOSEST_MATCH_THRESHOLD = 0.8
+PREVIEW_LIMIT = 300
+PREVIEW_OMISSION = " ... omitted ... "
 
 
 @dataclass(frozen=True)
@@ -260,6 +262,8 @@ def execute(
         # Keep the original compact size metadata for existing consumers.
         "chars_before": len(content),
         "chars_after": len(updated),
+        "before_preview": _replacement_preview(old_text),
+        "after_preview": _replacement_preview(new_text),
     }
 
 
@@ -321,6 +325,8 @@ def _apply_candidate(
         "end_line_after": end_line_after,
         "chars_before": len(content),
         "chars_after": len(updated),
+        "before_preview": _replacement_preview(candidate.candidate_text),
+        "after_preview": _replacement_preview(candidate.new_text),
     }
 
 
@@ -348,6 +354,16 @@ def _invalid_arguments(message: str) -> dict:
 def _path_identity(path: str) -> str:
     """Normalize path spellings so aliases cannot evade file invalidation."""
     return os.path.normcase(str(Path(path).expanduser().resolve()))
+
+
+def _replacement_preview(text: str) -> str:
+    """Keep short replacement text whole and visibly bound longer text."""
+    if len(text) <= PREVIEW_LIMIT:
+        return text
+    retained = PREVIEW_LIMIT - len(PREVIEW_OMISSION)
+    head = (retained + 1) // 2
+    tail = retained - head
+    return text[:head] + PREVIEW_OMISSION + text[-tail:]
 
 
 def _line_range(content: str, start: int, matched_text: str) -> tuple[int, int]:

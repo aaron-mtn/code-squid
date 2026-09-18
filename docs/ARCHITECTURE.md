@@ -1881,8 +1881,11 @@ root-level properties.
 - invalidates all outstanding candidates for a file after any successful
   `write_file` or `apply_patch` mutation of that file, while other-file and
   failed mutations leave them available
-- returns affected before/after line ranges plus the existing compact
-  character-count metadata after a successful replacement
+- returns affected before/after line ranges, the existing compact
+  character-count metadata, and exact replacement previews after success;
+  previews preserve short text and symmetrically truncate long text to 300
+  characters without adding surrounding file context. Request-only history
+  trimming drops only those previews once a successful result becomes old
 - is preferred for small localized edits to existing files
 - is checked against the workspace boundary before execution unless trusted
   outside-workspace access is configured or approved

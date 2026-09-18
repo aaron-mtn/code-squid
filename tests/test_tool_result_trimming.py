@@ -12,7 +12,10 @@ from squid_core.hooks import (
     ToolResultContext,
 )
 from squid_core.settings import ToolResultTrimmingSettings
-from squid_core.tool_result_trimming import render_messages_for_model
+from squid_core.tool_result_trimming import (
+    render_messages_for_model,
+    render_tool_result_for_model,
+)
 from squid_core.tools import ToolResults
 
 
@@ -389,6 +392,71 @@ def test_old_failed_patch_bounds_diagnostics_without_losing_candidate_ids() -> N
     assert "<<< CANDIDATE 1 m1 lines 10-12 >>>" in observation
     assert "[older payload truncated]" in observation
     assert "<<< OLDER PATCH DIAGNOSTIC TRUNCATED >>>" in observation
+
+
+def test_successful_patch_preview_is_visible_to_the_model() -> None:
+    observation = _observation(
+        render_messages_for_model(
+            _tool_turn(
+                "patch",
+                "apply_patch",
+                {
+                    "ok": True,
+                    "tool": "apply_patch",
+                    "path": "C:/repo/example.py",
+                    "start_line": 2,
+                    "end_line_after": 2,
+                    "before_preview": "old exact text",
+                    "after_preview": "new exact text",
+                },
+            ),
+            ToolResultTrimmingSettings(),
+        )[-1]
+    )
+
+    assert observation.endswith(
+        "before_preview: old exact text\nafter_preview: new exact text"
+    )
+
+
+def test_old_successful_patch_drops_only_previews_without_mutating_result() -> None:
+    canonical_result = {
+        "ok": True,
+        "tool": "apply_patch",
+        "path": "C:/repo/example.py",
+        "start_line": 2,
+        "end_line_after": 3,
+        "match_id": "m1",
+        "before_preview": "old exact text",
+        "after_preview": "new exact text",
+    }
+    before = copy.deepcopy(canonical_result)
+
+    rendered_result = render_tool_result_for_model(
+        canonical_result,
+        is_recent=False,
+        settings=ToolResultTrimmingSettings(recent_full_results=0),
+    )
+
+    observation = _observation(
+        render_messages_for_model(
+            _tool_turn("patch", "apply_patch", canonical_result),
+            ToolResultTrimmingSettings(recent_full_results=0),
+        )[-1]
+    )
+
+    assert observation == (
+        "APPLY_PATCH OK\npath: C:/repo/example.py\nchanged: lines 2-3\nmatch_id: m1"
+    )
+    assert rendered_result == {
+        "ok": True,
+        "tool": "apply_patch",
+        "path": "C:/repo/example.py",
+        "start_line": 2,
+        "end_line_after": 3,
+        "match_id": "m1",
+    }
+    assert canonical_result == before
 
 
 def test_rendering_never_mutates_canonical_messages_or_results() -> None:

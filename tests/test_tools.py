@@ -647,9 +647,29 @@ def test_apply_patch_replaces_one_exact_occurrence_and_is_compact(tmp_path: Path
         "end_line_after": 1,
         "chars_before": 19,
         "chars_after": 19,
+        "before_preview": "middle",
+        "after_preview": "center",
     }
     assert file_path.read_text(encoding="utf-8") == "before center after"
     assert "content" not in result
+
+
+def test_apply_patch_bounds_long_replacement_previews(tmp_path: Path) -> None:
+    file_path = tmp_path / "input.txt"
+    old_text = "a" * 200 + "b" * 200
+    new_text = "c" * 200 + "d" * 200
+    file_path.write_text(old_text, encoding="utf-8")
+
+    result = apply_patch(tmp_path, str(file_path), old_text, new_text)
+
+    assert len(result["before_preview"]) == 300
+    assert len(result["after_preview"]) == 300
+    assert " ... omitted ... " in result["before_preview"]
+    assert " ... omitted ... " in result["after_preview"]
+    assert result["before_preview"].startswith("a")
+    assert result["before_preview"].endswith("b")
+    assert result["after_preview"].startswith("c")
+    assert result["after_preview"].endswith("d")
 
 
 def test_apply_patch_fails_when_old_text_missing_and_does_not_modify_file(tmp_path: Path) -> None:
