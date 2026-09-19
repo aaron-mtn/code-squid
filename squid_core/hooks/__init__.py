@@ -36,7 +36,9 @@ from .runner import (
     ToolResultContext,
 )
 from .too_many_reads import (
+    DEFAULT_FIRST_NUDGE_LINES,
     DEFAULT_FIRST_NUDGE_READS,
+    DEFAULT_STRONG_NUDGE_LINES,
     DEFAULT_STRONG_NUDGE_READS,
     TOO_MANY_READS_GUIDANCE,
     TOO_MANY_READS_STRONG_GUIDANCE,
@@ -65,7 +67,9 @@ __all__ = [
     "RepeatedReadNudge",
     "RunFinishedContext",
     "ToolResultContext",
+    "DEFAULT_FIRST_NUDGE_LINES",
     "DEFAULT_FIRST_NUDGE_READS",
+    "DEFAULT_STRONG_NUDGE_LINES",
     "DEFAULT_STRONG_NUDGE_READS",
     "TOO_MANY_READS_GUIDANCE",
     "TOO_MANY_READS_STRONG_GUIDANCE",

@@ -646,8 +646,10 @@ def test_read_file_range_past_eof_is_empty_and_sets_empty_range_end_line(tmp_pat
 
 
 def test_read_file_definition_exposes_only_path_and_optional_ranges() -> None:
-    parameters = read_file_definition()["function"]["parameters"]
+    function = read_file_definition()["function"]
+    parameters = function["parameters"]
 
+    assert "Omit ranges only when file-wide context is needed" in function["description"]
     assert parameters["required"] == ["path"]
     assert set(parameters["properties"]) == {"path", "ranges"}
     assert parameters["additionalProperties"] is False

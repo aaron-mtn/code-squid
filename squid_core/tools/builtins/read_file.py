@@ -17,15 +17,13 @@ def tool_definition() -> dict:
         "function": {
             "name": TOOL_NAME,
             "description": (
-                "Read a UTF-8 file at an absolute path. Full-file reads return at most "
-                f"{DEFAULT_SETTINGS.default_max_lines} lines. For every targeted read, use "
-                "ranges with one or several known 1-based inclusive regions of the same "
-                "file. Request known regions together, prefer substantial coherent regions, "
-                "and avoid speculative scattered reads. Small ranges may include surrounding "
-                "context, and total normalized coverage must stay within the normal "
-                f"{DEFAULT_SETTINGS.default_max_lines}-line limit. Example: "
-                "{\"path\": \"...\", \"ranges\": [{\"start_line\": 160, "
-                "\"end_line\": 260}, {\"start_line\": 620, \"end_line\": 780}]}"
+                "Read a UTF-8 file at an absolute path. Use ranges for one or several "
+                "known relevant 1-based inclusive regions of the same file, combining "
+                "regions needed for the same decision. Omit ranges only when file-wide "
+                "context is needed; full-file reads return at most "
+                f"{DEFAULT_SETTINGS.default_max_lines} lines. Small ranges may include "
+                "surrounding context, and total normalized coverage must stay within the "
+                f"{DEFAULT_SETTINGS.default_max_lines}-line limit."
             ),
             "parameters": {
                 "type": "object",

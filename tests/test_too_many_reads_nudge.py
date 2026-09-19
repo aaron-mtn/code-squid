@@ -26,11 +26,17 @@ def _result(
     *,
     ok: bool = True,
     output: str = "source",
+    result_metadata: dict | None = None,
 ):
     return hook.tool_result(
         _Context(
             action={"tool": tool, "args": {}},
-            result={"ok": ok, "tool": tool, "output": output},
+            result={
+                "ok": ok,
+                "tool": tool,
+                "output": output,
+                **(result_metadata or {}),
+            },
         )
     )
 
@@ -52,6 +58,99 @@ def test_fifth_and_later_successful_reads_produce_strong_nudge() -> None:
 
     assert responses[4].additional_context == TOO_MANY_READS_STRONG_GUIDANCE
     assert responses[5].additional_context == TOO_MANY_READS_STRONG_GUIDANCE
+
+
+def test_broad_reads_nudge_earlier_by_returned_line_volume() -> None:
+    hook = TooManyReadsNudge()
+
+    first = _result(
+        hook,
+        "read_file",
+        result_metadata={"start_line": 1, "end_line": 1_000},
+    )
+    second = _result(
+        hook,
+        "read_file",
+        result_metadata={"start_line": 1, "end_line": 500},
+    )
+
+    assert first is None
+    assert second.additional_context == TOO_MANY_READS_GUIDANCE
+
+
+def test_only_novel_ranges_from_shaped_result_add_read_volume() -> None:
+    hook = TooManyReadsNudge()
+    ranges = [{"start_line": 1, "end_line": 400}]
+
+    assert _result(
+        hook,
+        "read_file",
+        result_metadata={"returned_line_ranges": ranges},
+    ) is None
+    assert _result(
+        hook,
+        "read_file",
+        result_metadata={"returned_line_ranges": ranges},
+    ) is None
+
+    # The count threshold still applies even though shaped novel coverage has
+    # not reached the independent 1,500-line threshold.
+    third = _result(
+        hook,
+        "read_file",
+        result_metadata={"returned_line_ranges": ranges},
+    )
+    assert third.additional_context == TOO_MANY_READS_GUIDANCE
+
+
+def test_already_covered_result_counts_as_an_action_but_not_source_volume() -> None:
+    hook = TooManyReadsNudge(first_nudge_reads=4, strong_nudge_reads=6)
+
+    assert _result(
+        hook,
+        "read_file",
+        result_metadata={"start_line": 1, "end_line": 1_000},
+    ) is None
+    assert _result(
+        hook,
+        "read_file",
+        result_metadata={
+            "already_covered": True,
+            "start_line": 1,
+            "end_line": 1_000,
+        },
+    ) is None
+    third = _result(
+        hook,
+        "read_file",
+        result_metadata={"start_line": 1, "end_line": 500},
+    )
+
+    assert third.additional_context == TOO_MANY_READS_GUIDANCE
+
+
+def test_broad_reads_reach_strong_volume_guidance_before_fifth_read() -> None:
+    hook = TooManyReadsNudge()
+    results = [
+        _result(
+            hook,
+            "read_file",
+            result_metadata={"start_line": 1, "end_line": 1_000},
+        )
+        for _ in range(3)
+    ]
+
+    assert results[1].additional_context == TOO_MANY_READS_GUIDANCE
+    assert results[2].additional_context == TOO_MANY_READS_STRONG_GUIDANCE
+
+
+def test_successful_mutation_resets_returned_line_volume() -> None:
+    hook = TooManyReadsNudge()
+    broad_result = {"start_line": 1, "end_line": 1_000}
+
+    assert _result(hook, "read_file", result_metadata=broad_result) is None
+    assert _result(hook, "apply_patch") is None
+    assert _result(hook, "read_file", result_metadata=broad_result) is None
 
 
 def test_neutral_commands_do_not_make_reads_consecutive() -> None:
@@ -125,9 +224,16 @@ def test_hook_does_not_modify_read_tool_output() -> None:
 
 
 @pytest.mark.parametrize(
-    ("first", "strong"),
-    [(0, 2), (2, 2), (3, 2)],
+    "kwargs",
+    [
+        {"first_nudge_reads": 0, "strong_nudge_reads": 2},
+        {"first_nudge_reads": 2, "strong_nudge_reads": 2},
+        {"first_nudge_reads": 3, "strong_nudge_reads": 2},
+        {"first_nudge_lines": 0, "strong_nudge_lines": 2},
+        {"first_nudge_lines": 2, "strong_nudge_lines": 2},
+        {"first_nudge_lines": 3, "strong_nudge_lines": 2},
+    ],
 )
-def test_thresholds_are_validated(first: int, strong: int) -> None:
+def test_thresholds_are_validated(kwargs: dict) -> None:
     with pytest.raises(ValueError):
-        TooManyReadsNudge(first_nudge_reads=first, strong_nudge_reads=strong)
+        TooManyReadsNudge(**kwargs)

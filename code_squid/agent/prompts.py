@@ -44,13 +44,11 @@ TOOL_USAGE_GUIDANCE = """
 
 ### Reading files
 
-- Prefer one information-dense read over several small reads.
-- Before every read_file call, collect all currently known source regions from that file that are likely needed for the next decision or edit and request them together using read_file.
 - Prefer read_file for reading known files.
-- Read the whole file when broad context is useful.
+- Read only the source needed for the next decision or edit. When several relevant regions of the same file are already known, request them together in one information-dense read_file call.
+- Omit ranges only when understanding the file as a whole is necessary for the next decision.
 - If a full-file read returns content_truncated true, you can use returned_line_ranges to identify what source was actually returned and what relevant regions are still missing.
 - For every targeted read, use ranges with one or several regions of the same file.
-- When several relevant regions of the same file are already known, request them together in one read_file call rather than reading them sequentially across several turns.
 - Prefer substantial coherent regions over tiny inchworm reads.
 - Do not use many scattered ranges for speculative broad exploration.
 - Do not broaden or repeat a read merely for extra confidence once the relevant code and surrounding context are already understood.

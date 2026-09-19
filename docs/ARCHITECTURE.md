@@ -616,15 +616,27 @@ hosts; it no longer controls prompt rendering.
 
 Code Squid wires Core's `RepeatedReadNudge`, `TooManyReadsNudge`, and
 `PostVerificationNudge` immediately before the repeated-failure Hook.
-`TooManyReadsNudge` counts successful `read_file` results since the last
-successful `write_file` or `apply_patch`. Commands, other Tools, and all failed
-results are neutral: they neither increment nor reset the count. It supplies
-one-turn advisory context on the third successful read, stronger context on the
-fifth and every later read, and never blocks or transforms the read result.
-Unlike source coverage, this behavioral count intentionally survives transcript
-compaction; only a successful built-in mutation or `before_run` resets it. The
-thresholds remain constructor arguments in Core, while Code Squid enables the
-Hook by default and exposes the independent boolean
+`TooManyReadsNudge` counts successful `read_file` results and the source lines
+they returned since the last successful `write_file` or `apply_patch`.
+Commands, other Tools, and all failed results are neutral: they neither
+increment nor reset either counter. It supplies one-turn advisory context on
+the third successful read or after 1,500 returned source lines, whichever comes
+first. Stronger context begins on the fifth read or after 3,000 returned lines
+and continues on later reads. These are advisory thresholds rather than a read
+budget: the Hook never blocks or transforms a result, so investigations can
+continue when another specific fact is needed.
+
+The volume counter consumes the result left by earlier Hooks. Because
+`RepeatedReadNudge` runs first, partially overlapping reads contribute only
+their novel `returned_line_ranges`, while a fully covered `already_covered`
+result contributes no source lines but still counts as a read action. This
+reuses the existing coverage decision without exposing or duplicating its
+private state. Malformed or missing range metadata contributes no volume and
+leaves the action-count behavior intact. Unlike source coverage, both
+behavioral counters intentionally survive transcript compaction; only a
+successful built-in mutation or `before_run` resets them. The thresholds remain
+constructor arguments in Core, while Code Squid enables the Hook by default and
+exposes the independent boolean
 `runtime.too_many_reads_enabled` application setting. Disabling it does not
 disable any other built-in Hook.
 
@@ -1842,6 +1854,8 @@ root-level properties.
 
 - requires an absolute path
 - reads UTF-8 text
+- describes ranged reads as the default for known relevant source and reserves
+  range omission for decisions that genuinely need file-wide context
 - uses an optional `ranges` list for every targeted read; it accepts one to
   eight regions of the same file, and every item requires inclusive
   `start_line` and `end_line` values

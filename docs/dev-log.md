@@ -1,3 +1,21 @@
+- 2026-09-19: Audited the remaining read-exploration behavior. The system prompt
+  already stopped exploration once the next action was clear, but repeated that
+  policy while also broadly inviting whole-file and "substantial" reads; the
+  `read_file` schema reinforced that framing, and `TooManyReadsNudge` treated a
+  150-line read and a 1,000-line read identically. Tightened the prompt and Tool
+  description so full-file reads are reserved for a concrete need for file-wide
+  context, while preserving coherent multi-range reads. Extended the existing
+  nudge with advisory 1,500/3,000 returned-line thresholds alongside its unchanged
+  3/5 action thresholds. It consumes the result already shaped by
+  `RepeatedReadNudge`, so partial overlap contributes only novel ranges and a
+  fully covered reread contributes no volume; no coverage state, new Hook, hard
+  limit, command parsing, progress score, or application settings were added.
+  Focused nudge, prompt, Tool, and runner coverage passed 86 tests. A broader
+  focused command passed 110 tests with six unrelated stale prompt-copy failures.
+  The full suite passed 1,310 tests with 30 unrelated existing failures: nine
+  stale prompt-copy assertions, one Markdown-formatting expectation, and 20
+  stale repeated-read guidance-copy assertions. Python compilation and
+  `git diff --check` passed. No live model inference was run.
 - 2026-09-19: Widened the CLI run panel border from 61 to 65 cells while
   preserving its established 56-cell narration/final-response Markdown width.
   The panel renderer now treats content width separately from physical width,
