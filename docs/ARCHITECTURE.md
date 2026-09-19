@@ -96,7 +96,9 @@ and application layer; `squid_core/` is the reusable agent runtime.
     session runner also owns the application boundary for exhausted model
     requests: it records the run as failed, writes and displays the existing
     error log, and returns control to the persistent prompt. Other exceptions
-    retain their existing propagation behavior.
+    escaping an active run are marked failed when storage remains available,
+    written to the same diagnostic log, rendered as one concise run-stopped
+    message, and returned as a nonzero result without a terminal traceback.
   - `console/ui/` owns terminal presentation and input. `display.py` keeps
     `TerminalDisplay` as the lifecycle coordinator used by the Agent loop.
     `header_layout.py` owns the explicit startup-scene geometry: safe draw
@@ -370,7 +372,11 @@ and application layer; `squid_core/` is the reusable agent runtime.
     loading, status updates, compaction/run-context events, and model request/
     reply/rejection diagnostics.
   - `undo_store.py` owns the explicitly located latest-only undo buffer.
-  - `atomic_json.py` owns small same-directory atomic JSON replacement.
+  - `atomic_json.py` owns small same-directory atomic JSON replacement. It
+    serializes and syncs once, then retries only `PermissionError` from the
+    final replacement across a bounded 140 ms window to tolerate transient
+    Windows destination locks. Exhausted and non-permission failures propagate,
+    with the temporary file removed while the prior destination stays intact.
   - `session_index.py` owns generic inspection plus cross-location registration
     and discovery using explicit index and session-root paths.
   - `error_log.py` writes timestamped traceback-only diagnostics to an explicit
@@ -1830,7 +1836,13 @@ Ctrl+C marks the current session `interrupted` and prints the normal final
 session display. Model request failures mark the session `failed` and write a
 diagnostic log to `.code-squid/logs/latest.log`. The diagnostic log is narrow:
 it stores traceback details, not prompts, payloads, tool outputs, file contents,
-headers, or API keys.
+headers, or API keys. An unexpected exception escaping an active agent run uses
+that same traceback log and returns status 1. The normal CLI shows a concise
+run-stopped message, the preserved session and log paths, and an explicit note
+that prior repository changes were not rolled back; it does not print the raw
+traceback. A failing status write is best-effort in this path so it cannot hide
+the original persistence/runtime failure. `KeyboardInterrupt` retains its
+separate interrupted-session behavior.
 
 There is no permanent undo history, branching UI, tree navigation, or advanced
 session workflow in the current MVP.

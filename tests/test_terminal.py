@@ -1000,6 +1000,32 @@ def test_terminal_model_request_failure_remains_red_in_tty(
     )
 
 
+def test_run_failed_prints_concise_persistence_error_without_traceback(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    error = PermissionError(5, "Access is denied", "metadata.json")
+
+    TerminalDisplay().run_failed(
+        error,
+        Path(".code-squid/logs/latest.log"),
+        Path(".code-squid/sessions/example"),
+    )
+
+    output = capsys.readouterr().out
+    assert output == (
+        "🛑 Run stopped\n"
+        "\n"
+        "Session state could not be saved:\n"
+        "The operating system denied access to `metadata.json` after several retries.\n"
+        "\n"
+        "Repository changes made before the failure were not rolled back.\n"
+        "Session: .code-squid/sessions/example\n"
+        "Details saved to: .code-squid/logs/latest.log\n"
+    )
+    assert "Traceback" not in output
+    assert "PermissionError" not in output
+
+
 def test_read_write_action_started_is_quiet_in_debug_mode(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

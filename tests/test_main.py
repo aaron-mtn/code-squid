@@ -50,6 +50,7 @@ class FakeDisplay:
         self.starts = 0
         self.run_starts = 0
         self.failure_path = None
+        self.run_failure = None
         self.finished = False
         self.run_result = None
         self.header = None
@@ -71,6 +72,9 @@ class FakeDisplay:
     def model_request_failed(self, log_path: Path) -> None:
         self.failure_path = log_path
 
+    def run_failed(self, error, log_path: Path, session_path: Path) -> None:
+        self.run_failure = (error, log_path, session_path)
+
     def loop_finished(self, session, run_result=None) -> None:
         self.finished = True
         self.run_result = run_result
@@ -86,6 +90,7 @@ class FakeDisplay:
 class FakeSessionStore:
     def __init__(self) -> None:
         self.statuses = []
+        self.session_dir = Path("session-dir")
 
     def update_status(self, status: str) -> None:
         self.statuses.append(status)
@@ -516,19 +521,99 @@ def test_run_loop_handles_model_request_error_with_log_and_status(tmp_path) -> N
     assert "squid_core.model_adapter.ModelRequestError: Model request failed" in log_text
 
 
-def test_run_loop_does_not_swallow_unrelated_exception(tmp_path) -> None:
+def test_run_loop_handles_unrecoverable_exception_with_log_and_failure_status(
+    tmp_path,
+) -> None:
     class UnexpectedFailingLoop:
         def run(self) -> None:
             raise RuntimeError("unexpected run failure")
 
-    with pytest.raises(RuntimeError, match="unexpected run failure"):
-        _run_loop(
-            tmp_path,
-            UnexpectedFailingLoop(),
-            FakeDisplay(),
-            session=object(),
-            session_store=FakeSessionStore(),
-        )
+    display = FakeDisplay()
+    session_store = FakeSessionStore()
+    session_store.session_dir = tmp_path / ".code-squid" / "sessions" / "example"
+
+    status = _run_loop(
+        tmp_path,
+        UnexpectedFailingLoop(),
+        display,
+        session=object(),
+        session_store=session_store,
+    )
+
+    log_text = (tmp_path / ".code-squid" / "logs" / "latest.log").read_text(
+        encoding="utf-8"
+    )
+    assert status == 1
+    assert session_store.statuses == ["failed"]
+    assert display.run_failure is not None
+    error, log_path, session_path = display.run_failure
+    assert str(error) == "unexpected run failure"
+    assert log_path == Path(".code-squid/logs/latest.log")
+    assert session_path == Path(".code-squid/sessions/example")
+    assert "RuntimeError: unexpected run failure" in log_text
+
+
+def test_run_loop_preserves_keyboard_interrupt_behavior(tmp_path) -> None:
+    class InterruptedLoop:
+        def run(self) -> None:
+            raise KeyboardInterrupt
+
+    display = FakeDisplay()
+    display.interrupted = lambda: None
+    session_store = FakeSessionStore()
+
+    status = _run_loop(
+        tmp_path,
+        InterruptedLoop(),
+        display,
+        session=object(),
+        session_store=session_store,
+    )
+
+    assert status == 0
+    assert session_store.statuses == ["interrupted"]
+    assert display.run_result == RunResult(
+        status="interrupted", reason="user interrupted"
+    )
+    assert display.run_failure is None
+
+
+def test_run_loop_persistence_failure_is_concise_and_preserves_original_log(
+    tmp_path,
+    capsys,
+) -> None:
+    original = PermissionError(5, "Access is denied", "metadata.json")
+
+    class PersistenceFailingLoop:
+        def run(self) -> None:
+            raise original
+
+    class LockedSessionStore(FakeSessionStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.session_dir = tmp_path / ".code-squid" / "sessions" / "example"
+
+        def update_status(self, status: str) -> None:
+            raise PermissionError(5, "Access is denied", "metadata.json")
+
+    status = _run_loop(
+        tmp_path,
+        PersistenceFailingLoop(),
+        TerminalDisplay(),
+        session=object(),
+        session_store=LockedSessionStore(),
+    )
+
+    output = capsys.readouterr().out
+    log_text = (tmp_path / ".code-squid" / "logs" / "latest.log").read_text(
+        encoding="utf-8"
+    )
+    assert status == 1
+    assert "🛑 Run stopped" in output
+    assert "denied access to `metadata.json`" in output
+    assert "Traceback" not in output
+    assert "PermissionError" not in output
+    assert "PermissionError: [Errno 5] Access is denied: 'metadata.json'" in log_text
 
 
 def test_run_loop_returns_zero_for_complete_result(tmp_path) -> None:

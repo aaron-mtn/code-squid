@@ -352,6 +352,35 @@ class TerminalDisplay:
         print(f"Details saved to: {log_path.as_posix()}")
         self._has_run_output = True
 
+    def run_failed(
+        self,
+        error: Exception,
+        log_path: Path,
+        session_path: Path,
+    ) -> None:
+        """Render one unrecoverable run failure without exposing a traceback."""
+        self._finish_startup_before_output()
+        self._streaming_narration.discard()
+        self._stop_spinner()
+        self._print_leading_blank_if_needed()
+        print(styled_text("🛑 Run stopped", SOFT_RED_STYLE))
+        print()
+        if isinstance(error, PermissionError):
+            denied_path = getattr(error, "filename2", None) or error.filename
+            denied_name = Path(denied_path).name if denied_path else "session state"
+            print("Session state could not be saved:")
+            print(
+                f"The operating system denied access to `{denied_name}` "
+                "after several retries."
+            )
+        else:
+            print("Code Squid encountered an unrecoverable run error.")
+        print()
+        print("Repository changes made before the failure were not rolled back.")
+        print(f"Session: {session_path.as_posix()}")
+        print(f"Details saved to: {log_path.as_posix()}")
+        self._has_run_output = True
+
     def loop_finished(self, session, run_result=None) -> None:
         self._finish_startup_before_output()
         self._streaming_narration.discard()

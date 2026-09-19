@@ -70,18 +70,39 @@ def _run_loop(
     except ModelRequestError as error:
         session_store.update_status("failed")
         log_path = write_error_log(workspace_error_log_path(repo_root), error)
-        try:
-            display_path = log_path.resolve().relative_to(repo_root.resolve())
-        except ValueError:
-            display_path = log_path
-        display.model_request_failed(display_path)
+        display.model_request_failed(_display_path(repo_root, log_path))
         # The run failed, as recorded above, but the application boundary has
         # handled that failure. Returning success here keeps the persistent
         # prompt alive without weakening handling for any other exception.
         return 0
+    except Exception as error:
+        # This is the outer boundary for one active run. Unexpected runtime and
+        # persistence failures are still non-successful and fully logged, but
+        # they should not tear through the terminal with Python internals.
+        try:
+            session_store.update_status("failed")
+        except Exception:
+            # A storage failure may make even the best-effort status update
+            # impossible. Preserve the original exception as the useful cause.
+            pass
+        log_path = write_error_log(workspace_error_log_path(repo_root), error)
+        display.run_failed(
+            error,
+            _display_path(repo_root, log_path),
+            _display_path(repo_root, session_store.session_dir),
+        )
+        return 1
 
     display.loop_finished(session, run_result)
     return 1 if run_result.status == "failed" else 0
+
+
+def _display_path(repo_root: Path, path: Path) -> Path:
+    """Prefer a concise workspace-relative path for terminal output."""
+    try:
+        return path.resolve().relative_to(repo_root.resolve())
+    except ValueError:
+        return path
 
 
 def _run_new_session_task(

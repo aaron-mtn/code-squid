@@ -3,8 +3,29 @@
 import json
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
+
+
+# Windows can briefly deny replacement while another process (for example, an
+# indexer or antivirus scanner) has the destination open. Keep this window
+# deliberately short: durable permission problems still need to reach callers.
+_REPLACE_RETRY_DELAYS = (0.02, 0.04, 0.08)
+
+
+def _replace_with_permission_retry(source: Path, destination: Path) -> None:
+    """Atomically replace ``destination``, retrying only transient denial."""
+    for delay in _REPLACE_RETRY_DELAYS:
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            time.sleep(delay)
+
+    # Use one final ordinary replace so an exhausted retry window re-raises the
+    # filesystem's original exception type and details without wrapping it.
+    os.replace(source, destination)
 
 
 def atomic_write_json(path: Path, value: Any) -> None:
@@ -22,7 +43,12 @@ def atomic_write_json(path: Path, value: Any) -> None:
             file.write("\n")
             file.flush()
             os.fsync(file.fileno())
-        os.replace(temporary_path, path)
+        _replace_with_permission_retry(temporary_path, path)
     except BaseException:
-        temporary_path.unlink(missing_ok=True)
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            # Cleanup must not hide the serialization or replacement failure
+            # that explains why the requested write did not complete.
+            pass
         raise

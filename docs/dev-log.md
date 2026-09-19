@@ -1,3 +1,21 @@
+- 2026-09-19: Hardened small atomic JSON writes against transient Windows
+  destination locks without changing their same-directory replacement model.
+  JSON is serialized and fsynced once; only a `PermissionError` from
+  `os.replace` is retried, for four total attempts over 140 ms. Exhaustion
+  propagates the filesystem failure, cleans the temporary file, and leaves the
+  prior destination intact; other replacement errors still fail immediately.
+  Auditing `SessionStore` found no retained `metadata.json` handle: every read
+  and write handle is context-managed and closed before replacement. The CLI's
+  outer active-run boundary now records unexpected runtime/storage tracebacks
+  in `.code-squid/logs/latest.log`, best-effort marks the session failed,
+  renders a concise non-traceback failure with session/log paths and the
+  no-rollback warning, and returns status 1. Provider failures, successful runs,
+  and Ctrl+C retain their existing behavior. Focused atomic, runner, and
+  terminal coverage passed 246 tests; broader storage/session/console coverage
+  passed 126 tests. The full suite passed 1,316 tests with the same 30 unrelated
+  existing prompt-copy, Markdown-heading, and repeated-read-guidance failures.
+  Python compilation and `git diff --check` passed. No live model inference was
+  run.
 - 2026-09-19: Audited the remaining read-exploration behavior. The system prompt
   already stopped exploration once the next action was clear, but repeated that
   policy while also broadly inviting whole-file and "substantial" reads; the
