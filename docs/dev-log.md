@@ -1,3 +1,20 @@
+- 2026-09-18: Moved active compaction presentation onto the existing terminal
+  pulse. `compaction_started` now selects the exact `Compacting...` label
+  without writing to the permanent feed; the existing authoritative
+  `compaction_applied` boundary clears it and prints the compact, indented
+  `🌀 Compacted context` result. Existing compaction failure and run
+  termination boundaries clear the same spinner without adding failure copy.
+  Core now exposes the existing applied/failed lifecycle boundaries to its
+  observer so presentation can settle the status without new compaction state
+  or timing logic. Added focused coverage for exact labeling, transient versus
+  permanent output, successful completion, failure, and termination cleanup.
+  Focused terminal/narration/loop coverage passed 20 tests. The broader
+  console/UI suite passed 412 tests with its one pre-existing Windows debug-path
+  assertion failure. The full suite passed 1,289 tests with the same 29
+  unrelated prompt-copy, repeated-read-guidance-copy, and Windows TTY
+  expectation failures recorded by preceding patches. Compilation, a direct
+  display/loop import check, and `git diff --check` passed; no live model
+  inference was run.
 - 2026-09-18: Kept the existing tool-specific CLI pulse active across the
   accepted-action/`tool_started` boundary. Previously `tool_preparing` selected
   labels such as `Running...`, but `action_started` and the immediately

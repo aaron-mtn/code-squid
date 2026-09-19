@@ -201,8 +201,8 @@ class AgentLoop:
 
     def _handle_compaction_event(self, event: dict) -> None:
         """Persist compaction diagnostics and dispatch successful application."""
-        # Persistence retains the complete lifecycle. Only the authoritative
-        # start belongs on the compact observer path used by presentation.
+        # Persistence retains the complete lifecycle. Presentation observes
+        # only boundaries needed to own and settle its transient status line.
         if self.session_store is not None:
             self.session_store.append_compaction_event(event)
         event_type = event.get("type")
@@ -216,7 +216,11 @@ class AgentLoop:
                 ),
                 event_sink=self._emit_hook_event,
             )
-        if event_type == "compaction_started":
+        if event_type in {
+            "compaction_started",
+            "compaction_applied",
+            "compaction_failed",
+        }:
             self._emit_event(event)
 
     def _should_stream_assistant_text(self) -> bool:

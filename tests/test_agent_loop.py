@@ -310,6 +310,7 @@ class LifecycleCompactor:
     def maybe_compact(self, session: Session, *, event_callback=None) -> None:
         event_callback({"type": "compaction_check", "will_compact": True})
         event_callback({"type": "compaction_started", "messages_before": 4})
+        event_callback({"type": "compaction_applied", "messages_after": 2})
 
 
 class StopImmediatelyAgent(FakeAgent):
@@ -931,8 +932,31 @@ def test_compaction_lifecycle_is_published_through_loop_events() -> None:
     compaction_events = [
         event for event in events if event["type"].startswith("compaction_")
     ]
-    assert [event["type"] for event in compaction_events] == ["compaction_started"]
+    assert [event["type"] for event in compaction_events] == [
+        "compaction_started",
+        "compaction_applied",
+    ]
     assert compaction_events[0]["messages_before"] == 4
+    assert compaction_events[1]["messages_after"] == 2
+
+
+def test_failed_compaction_boundary_is_published_through_loop_events() -> None:
+    events = []
+    loop = AgentLoop(
+        session=Session(repo_root=None),
+        model_adapter=FakeModelAdapter([]),
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=StopImmediatelyAgent(),
+        display=NullDisplay(),
+        on_event=events.append,
+    )
+
+    loop._handle_compaction_event(
+        {"type": "compaction_failed", "stage": "model_request"}
+    )
+
+    assert [event["type"] for event in events] == ["compaction_failed"]
 
 
 def test_only_applied_compaction_resets_repeated_read_state(tmp_path) -> None:

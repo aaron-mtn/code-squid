@@ -56,9 +56,11 @@ class FakeSpinner:
     def __init__(self) -> None:
         self.starts = 0
         self.stops = 0
+        self.labels: list[str] = []
 
     def start(self, label: str = "Thinking...") -> None:
         self.starts += 1
+        self.labels.append(label)
 
     def stop(self) -> None:
         self.stops += 1
@@ -707,17 +709,47 @@ def test_previous_session_notice_is_one_indented_dim_neutral_line(
     )
 
 
-def test_compaction_started_is_one_indented_dim_notification(
+def test_compaction_started_uses_transient_status_instead_of_feed(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    spinner = FakeSpinner()
+
+    TerminalDisplay(_spinner=spinner).handle_event({"type": "compaction_started"})
+
+    assert spinner.labels == ["Compacting..."]
+    assert capsys.readouterr().out == ""
+
+
+def test_compaction_applied_stops_status_and_prints_compact_result(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    spinner = FakeSpinner()
+    display = TerminalDisplay(_spinner=spinner)
 
-    TerminalDisplay().handle_event({"type": "compaction_started"})
+    display.handle_event({"type": "compaction_started"})
+    display.handle_event({"type": "compaction_applied"})
 
+    assert spinner.labels == ["Compacting..."]
+    assert spinner.stops == 1
     assert capsys.readouterr().out == (
-        f"{DIM_STYLE}{RUN_DETAIL_INDENT}🌀 Compacting context...{RESET_STYLE}\n"
+        f"{DIM_STYLE}{RUN_DETAIL_INDENT}🌀 Compacted context{RESET_STYLE}\n"
     )
+
+
+def test_compaction_failed_stops_status_without_printing_result(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    spinner = FakeSpinner()
+    display = TerminalDisplay(_spinner=spinner)
+
+    display.handle_event({"type": "compaction_started"})
+    display.handle_event({"type": "compaction_failed", "stage": "model_request"})
+
+    assert spinner.labels == ["Compacting..."]
+    assert spinner.stops == 1
+    assert capsys.readouterr().out == ""
 
 
 def test_compaction_check_does_not_print_notification(

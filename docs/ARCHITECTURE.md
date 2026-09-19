@@ -1665,9 +1665,14 @@ result fields and additionally exposes normalized `reasoning` and
 `finish_reason` when the provider supplies them. Compaction events are
 diagnostic, not transcript messages: `SessionStore.load_messages()` continues
 to ignore them and replay only message and system-reconciliation entries.
-The CLI reacts only to the authoritative `compaction_started` event, rendering
-`🌀 Compacting context...` through the same indented, dim notification path
-used by neutral tool/status activity. Checks that do not compact stay silent.
+The CLI observes the authoritative `compaction_started`, `compaction_applied`,
+and `compaction_failed` boundaries. Start transfers the existing animated
+status line to `Compacting...`, using the same position, pulse, and ownership as
+Thinking and Tool activity rather than adding permanent feed output. Successful
+application clears that transient line and emits the indented, dim
+`🌀 Compacted context` result alongside other run results. Failure and the
+existing run termination boundaries clear the transient line without adding a
+new compaction failure message; checks that do not compact stay silent.
 
 Compaction is transcript compression for continuation context. It does not
 provide durable workspace memory.

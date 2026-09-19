@@ -399,8 +399,19 @@ class TerminalDisplay:
         event_type = event.get("type")
         if event_type == "compaction_started":
             self._finish_startup_before_output()
+            self._print_leading_blank_if_needed()
+            # Compaction owns the same transient status line as model and Tool
+            # work; successful application replaces it with permanent output.
+            self._spinner.start("Compacting...")
+            return
+        if event_type == "compaction_applied":
+            self._finish_startup_before_output()
             self._stop_spinner()
-            self._print_notification("🌀 Compacting context...")
+            self._print_notification("🌀 Compacted context")
+            return
+        if event_type == "compaction_failed":
+            # The surrounding run retains ownership of failure reporting.
+            self._stop_spinner()
             return
         if event_type == "assistant_message_started":
             self._streaming_narration.begin()

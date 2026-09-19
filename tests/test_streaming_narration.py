@@ -429,6 +429,23 @@ def test_tool_completion_and_run_boundaries_stop_thinking(
     assert spinner.stops == 1
 
 
+@pytest.mark.parametrize(
+    "event_type", ["run_cancelled", "run_failed", "run_finished"]
+)
+def test_run_boundaries_clear_active_compaction_status(
+    monkeypatch, event_type: str
+) -> None:
+    spinner = CountingSpinner()
+    display, _stream = interactive_display(monkeypatch, spinner=spinner)
+
+    display.handle_event({"type": "compaction_started"})
+    display.handle_event({"type": event_type})
+
+    assert spinner.labels == ["Compacting..."]
+    assert spinner.stops == 1
+    assert spinner.active is False
+
+
 @pytest.mark.parametrize("cleanup", ["interrupted", "failed", "finished"])
 def test_terminal_exit_paths_clear_streaming_state(monkeypatch, cleanup: str) -> None:
     display, stream = interactive_display(monkeypatch)
