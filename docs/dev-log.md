@@ -1,3 +1,20 @@
+- 2026-09-19: Unified narration and final-response Markdown rendering in the
+  application-owned console formatter. A small inline token layer now supports
+  bold, italic, strikethrough, inline code, OSC-8 links, and practical escapes;
+  the shared block renderer supports level 1-3 headings, unordered and numbered
+  lists with one nested level, blockquotes, fenced code, horizontal rules, and
+  constrained pipe tables with left/center/right alignment markers. Wrapping is
+  decided from visible Unicode cell widths before ANSI/OSC decoration, keeping
+  the fixed narration panel and streaming redraw lifecycle unchanged. Unclosed
+  inline markup remains literal, and an incomplete fence remains readable.
+  Added focused formatter coverage and updated terminal expectations for code
+  styling and nested lists. Focused formatting/display/streaming coverage passed
+  222 tests; the broader console/UI suite passed 313 tests. The full suite
+  passed 1,300 tests with the same 29 unrelated prompt-copy and repeated-read-
+  guidance-copy failures already recorded by preceding patches. Compilation
+  and `git diff --check` passed. Full CommonMark, HTML, images, footnotes,
+  definition lists, and arbitrary nesting remain deliberately unsupported; no
+  live model inference was run.
 - 2026-09-18: Made Squid Core's `run_command` process capture decode merged
   stdout/stderr explicitly as UTF-8 with replacement for malformed bytes,
   instead of inheriting the host locale (and Windows code page). Timeout byte

@@ -2,11 +2,9 @@
 
 from dataclasses import replace
 from pathlib import Path
-import re
 from typing import TextIO
 
 from prompt_toolkit.output.base import Output
-from wcwidth import wcswidth
 
 from squid_core.safety import ApprovalDecision, USER_DENIED_TOOL_ACTION
 from squid_core.mods import discover_mods
@@ -45,9 +43,11 @@ from code_squid.console.ui.formatting import (
     SOFT_YELLOW_HEX,
     SOFT_YELLOW_STYLE,
     ansi_fg,
+    display_width,
     file_link,
     format_final_summary,
     mod_accent_hex,
+    render_markdown_lines,
     short_path,
     structural_prefix,
     structural_text,
@@ -77,9 +77,6 @@ PREVIOUS_SESSION_TITLE_MAX_LENGTH = 40
 INPUT_IDENTITY_LINE = "@code-squid"
 PANEL_LEFT_PADDING = "  "
 PANEL_CONTENT_WIDTH = RUN_PANEL_WIDTH - 2 - len(PANEL_LEFT_PADDING) - 1
-ANSI_ESCAPE_PATTERN = re.compile(
-    r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x1b]*(?:\x1b\\|\x07))"
-)
 TOOL_PREPARING_LABELS = {
     "read_file": "Reading...",
     "write_file": "Writing...",
@@ -615,24 +612,25 @@ class TerminalDisplay:
         # clip it to the truthful (smaller) physical viewport.
         panel_width = max(min(RUN_PANEL_WIDTH, viewport_width), 9)
         content_width = panel_width - 2 - len(PANEL_LEFT_PADDING) - 1
-        source_lines = content.splitlines() or [""]
-        panel_lines: list[str] = []
         narration_indent = " " * (_display_width(SQUID_GLYPH) + 1)
-        for index, source_line in enumerate(source_lines):
-            if not source_line:
-                panel_lines.append("")
+        panel_lines = render_markdown_lines(
+            content,
+            width=content_width,
+            indent=narration_indent,
+        )
+        # Markdown owns relative block indentation; the panel owns the mascot.
+        # Equal-width prefixes let us swap it onto the first visible row without
+        # changing wrapping or any later continuation alignment.
+        for index, line in enumerate(panel_lines):
+            if not line:
                 continue
-            prefix = f"{SQUID_GLYPH} " if index == 0 else narration_indent
-            panel_lines.extend(
-                wrapped_display_lines(
-                    source_line,
-                    initial_indent=prefix,
-                    subsequent_indent=narration_indent,
-                    width=content_width,
-                )
+            panel_lines[index] = line.replace(
+                narration_indent,
+                f"{SQUID_GLYPH} ",
+                1,
             )
-        if panel_lines:
-            panel_lines[0] = self._accent_first_squid(panel_lines[0])
+            panel_lines[index] = self._accent_first_squid(panel_lines[index])
+            break
         return self._render_panel_lines(panel_lines, panel_width=panel_width)
 
     def _prepare_assistant_narration(self) -> None:
@@ -797,7 +795,5 @@ class TerminalDisplay:
 
 
 def _display_width(value: str) -> int:
-    """Return terminal cell width after removing local ANSI/OSC styling."""
-    plain = ANSI_ESCAPE_PATTERN.sub("", value)
-    width = wcswidth(plain)
-    return len(plain) if width < 0 else width
+    """Return terminal cell width through the shared formatting seam."""
+    return display_width(value)

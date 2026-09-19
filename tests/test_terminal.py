@@ -2163,7 +2163,9 @@ def test_debug_loop_finished_keeps_file_paths_plain_in_tty(
     TerminalDisplay(debug=True).loop_finished(session)
 
     output = capsys.readouterr().out
-    assert all(part in output for part in ("C:\\Users", "calcula", "tor.py"))
+    plain_output = formatting.ANSI_ESCAPE_PATTERN.sub("", output)
+    content = "".join(line.strip("│ ") for line in plain_output.splitlines())
+    assert all(part in content for part in ("C:\\Users", "calculator.py"))
     assert "\033]8" not in output
 
 
@@ -2258,7 +2260,7 @@ def test_final_summary_headings_are_bold_in_tty(
 
     output = capsys.readouterr().out
     assert f"{FINAL_SUMMARY_INDENT}{BOLD_STYLE}Files changed{RESET_STYLE}" in output
-    assert f"{FINAL_SUMMARY_INDENT}• `ui/terminal.py`" in output
+    assert f"{FINAL_SUMMARY_INDENT}• {SOFT_CYAN_STYLE}ui/terminal.py{RESET_STYLE}" in output
     assert f"{FINAL_SUMMARY_INDENT}{BOLD_STYLE}What changed{RESET_STYLE}" in output
     assert f"{FINAL_SUMMARY_INDENT}• Polished display." in output
     assert f"{FINAL_SUMMARY_INDENT}{BOLD_STYLE}Verification{RESET_STYLE}" in output
@@ -2433,11 +2435,11 @@ def test_final_summary_indented_bullets_rendered_as_bullets_get_spacing() -> Non
         f"{FINAL_SUMMARY_INDENT}What changed\n"
         f"{FINAL_SUMMARY_INDENT}• Parent item:\n"
         "\n"
-        f"{FINAL_SUMMARY_INDENT}• Child one\n"
+        f"{FINAL_SUMMARY_INDENT}  • Child one\n"
         "\n"
-        f"{FINAL_SUMMARY_INDENT}• Child two\n"
+        f"{FINAL_SUMMARY_INDENT}  • Child two\n"
         "\n"
-        f"{FINAL_SUMMARY_INDENT}• Child three"
+        f"{FINAL_SUMMARY_INDENT}  • Child three"
     ) == formatted
 
 

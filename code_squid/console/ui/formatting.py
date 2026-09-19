@@ -1,5 +1,6 @@
 """Low-level terminal formatting shared by Code Squid console presentation."""
 
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 import re
 import shutil
@@ -15,6 +16,8 @@ DISPLAY_WRAP_WIDTH = 64
 FINAL_SUMMARY_INDENT = "  "
 DIM_STYLE = "\033[2m"
 BOLD_STYLE = "\033[1m"
+ITALIC_STYLE = "\033[3m"
+STRIKETHROUGH_STYLE = "\033[9m"
 RESET_STYLE = "\033[0m"
 RECOVERABLE_STATUS_ICON = "🌀"
 # Force text presentation so terminal foreground color applies to the squid.
@@ -60,6 +63,12 @@ SOFT_CYAN_STYLE = ansi_fg(SOFT_CYAN_HEX)
 SOFT_GREEN_STYLE = ansi_fg(SOFT_GREEN_HEX)
 SOFT_YELLOW_STYLE = ansi_fg(SOFT_YELLOW_HEX)
 SOFT_RED_STYLE = ansi_fg(SOFT_RED_HEX)
+
+# Keep terminal control sequences out of every cell-width calculation. OSC 8
+# links are especially important here because their URI can dwarf the label.
+ANSI_ESCAPE_PATTERN = re.compile(
+    r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x1b]*(?:\x1b\\|\x07))"
+)
 
 
 def terminal_link(label: str, uri: str) -> str:
@@ -221,89 +230,477 @@ def _take_display_cells(text: str, width: int) -> tuple[str, str]:
     return text, ""
 
 
-def render_inline_markdown(text: str) -> str:
-    """Render the small inline Markdown subset supported by final reports."""
-    if "**" not in text or not sys.stdout.isatty():
-        return text
+def display_width(value: str) -> int:
+    """Return terminal cell width after removing ANSI and OSC sequences."""
+    plain = ANSI_ESCAPE_PATTERN.sub("", value)
+    width = wcswidth(plain)
+    return len(plain) if width < 0 else width
 
-    parts = re.split(r"(\*\*[^*\n]+\*\*)", text)
-    rendered_parts: list[str] = []
-    for part in parts:
-        if part.startswith("**") and part.endswith("**") and len(part) > 4:
-            rendered_parts.append(styled_text(part[2:-2], BOLD_STYLE))
+
+@dataclass(frozen=True)
+class _InlineRun:
+    """A visible inline fragment plus presentation applied after wrapping."""
+
+    text: str
+    styles: tuple[str, ...] = ()
+    link: str | None = None
+
+
+_ESCAPABLE_MARKDOWN = r"\`*_{}[]()#+-.!|>~"
+
+
+def _inline_runs(text: str) -> list[_InlineRun]:
+    """Parse a deliberately small, streaming-safe inline Markdown subset."""
+    if not sys.stdout.isatty():
+        # Redirected output historically retained inline Markdown source. Keep
+        # that useful transcript behavior while interactive terminals style it.
+        return [_InlineRun(text)]
+
+    runs: list[_InlineRun] = []
+    plain: list[str] = []
+
+    def flush() -> None:
+        if plain:
+            runs.append(_InlineRun("".join(plain)))
+            plain.clear()
+
+    index = 0
+    while index < len(text):
+        if (
+            text[index] == "\\"
+            and index + 1 < len(text)
+            and text[index + 1] in _ESCAPABLE_MARKDOWN
+        ):
+            plain.append(text[index + 1])
+            index += 2
             continue
-        rendered_parts.append(part)
-    return "".join(rendered_parts)
+
+        link_match = re.match(r"\[([^\]\n]+)\]\(([^)\s]+)\)", text[index:])
+        if link_match:
+            flush()
+            label, uri = link_match.groups()
+            runs.append(_InlineRun(label, link=uri))
+            index += link_match.end()
+            continue
+
+        matched = False
+        for delimiter, style in (
+            ("**", BOLD_STYLE),
+            ("~~", STRIKETHROUGH_STYLE),
+            ("`", SOFT_CYAN_STYLE),
+            ("*", ITALIC_STYLE),
+            ("_", ITALIC_STYLE),
+        ):
+            if not text.startswith(delimiter, index):
+                continue
+            end = text.find(delimiter, index + len(delimiter))
+            if end <= index + len(delimiter):
+                continue
+            if delimiter == "_" and (
+                (index > 0 and text[index - 1].isalnum())
+                or (end + 1 < len(text) and text[end + 1].isalnum())
+            ):
+                continue
+            flush()
+            runs.append(
+                _InlineRun(text[index + len(delimiter) : end], styles=(style,))
+            )
+            index = end + len(delimiter)
+            matched = True
+            break
+        if not matched:
+            plain.append(text[index])
+            index += 1
+    flush()
+    return runs
 
 
-def markdown_display_lines(line: str, width: int | None = None) -> list[str]:
-    """Render and wrap one final-report Markdown line."""
-    heading_match = re.match(r"^\s{0,3}(#{2,3})\s+(.+?)\s*#*\s*$", line)
-    if heading_match:
-        level, heading = heading_match.groups()
-        indent = FINAL_SUMMARY_INDENT if level == "##" else f"{FINAL_SUMMARY_INDENT}  "
-        if width is None:
-            return [f"{indent}{styled_text(heading, BOLD_STYLE)}"]
-        return [
-            f"{indent}{styled_text(part.removeprefix(indent), BOLD_STYLE)}"
-            for part in wrapped_display_lines(
-                heading,
+def _run_units(runs: list[_InlineRun]) -> list[tuple[str, tuple[str, ...], str | None]]:
+    """Expand runs to wrap-safe visible characters and normalize whitespace."""
+    units: list[tuple[str, tuple[str, ...], str | None]] = []
+    pending_space: tuple[tuple[str, ...], str | None] | None = None
+    for run in runs:
+        for character in run.text:
+            if character.isspace():
+                if units:
+                    pending_space = (run.styles, run.link)
+                continue
+            if pending_space is not None:
+                units.append((" ", *pending_space))
+                pending_space = None
+            units.append((character, run.styles, run.link))
+    return units
+
+
+def _render_units(
+    units: list[tuple[str, tuple[str, ...], str | None]],
+    extra_styles: tuple[str, ...] = (),
+) -> str:
+    """Render adjacent units together so control sequences stay compact."""
+    rendered: list[str] = []
+    start = 0
+    while start < len(units):
+        _, styles, link = units[start]
+        end = start + 1
+        while end < len(units) and units[end][1:] == (styles, link):
+            end += 1
+        label = "".join(unit[0] for unit in units[start:end])
+        combined_styles = tuple(dict.fromkeys((*extra_styles, *styles)))
+        label = styled_text(label, *combined_styles)
+        if link is not None:
+            label = terminal_link(label, link)
+        rendered.append(label)
+        start = end
+    return "".join(rendered)
+
+
+def render_inline_markdown(text: str) -> str:
+    """Render supported inline Markdown without interpreting partial syntax."""
+    return _render_units(_run_units(_inline_runs(text)))
+
+
+def _wrapped_inline_lines(
+    text: str,
+    *,
+    initial_indent: str,
+    subsequent_indent: str,
+    width: int | None,
+    extra_styles: tuple[str, ...] = (),
+    break_long_words: bool = True,
+) -> list[str]:
+    """Wrap inline content by visible cells, then add ANSI/OSC decoration."""
+    if width is None:
+        width = min(
+            DISPLAY_WRAP_WIDTH,
+            shutil.get_terminal_size(fallback=(DISPLAY_WRAP_WIDTH, 24)).columns,
+        )
+    units = _run_units(_inline_runs(text))
+    if not units:
+        return [initial_indent]
+
+    lines: list[str] = []
+    current_indent = initial_indent
+    while units:
+        available = max(width - display_width(current_indent), 1)
+        used = 0
+        split_at = 0
+        last_space = -1
+        for unit_index, (character, _styles, _link) in enumerate(units):
+            character_width = max(wcwidth(character), 0)
+            if unit_index and used + character_width > available:
+                break
+            used += character_width
+            split_at = unit_index + 1
+            if character == " ":
+                last_space = unit_index
+        if split_at < len(units) and last_space > 0:
+            split_at = last_space
+        elif split_at < len(units) and not break_long_words:
+            next_space = next(
+                (
+                    unit_index
+                    for unit_index in range(split_at, len(units))
+                    if units[unit_index][0] == " "
+                ),
+                len(units),
+            )
+            split_at = next_space
+        line_units = units[:split_at]
+        units = units[split_at:]
+        while units and units[0][0] == " ":
+            units.pop(0)
+        lines.append(f"{current_indent}{_render_units(line_units, extra_styles)}")
+        current_indent = subsequent_indent
+    return lines
+
+
+def _wrapped_literal_lines(text: str, *, indent: str, width: int) -> list[str]:
+    """Wrap code without collapsing whitespace or interpreting Markdown."""
+    available = max(width - display_width(indent), 1)
+    if not text:
+        return [indent]
+    lines: list[str] = []
+    remaining = text
+    while remaining:
+        chunk, remaining = _take_display_cells(remaining, available)
+        lines.append(f"{indent}{chunk}")
+    return lines
+
+
+def _parse_table_row(line: str) -> list[str]:
+    """Split one simple pipe row, accepting optional outer pipes."""
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _table_alignments(line: str, columns: int) -> list[str] | None:
+    cells = _parse_table_row(line)
+    if len(cells) != columns:
+        return None
+    alignments: list[str] = []
+    for cell in cells:
+        if not re.fullmatch(r":?-{3,}:?", cell):
+            return None
+        alignments.append(
+            "center"
+            if cell.startswith(":") and cell.endswith(":")
+            else "right"
+            if cell.endswith(":")
+            else "left"
+        )
+    return alignments
+
+
+def _fit_inline_cell(text: str, width: int, alignment: str, *, bold: bool) -> str:
+    units = _run_units(_inline_runs(text))
+    visible_width = sum(max(wcwidth(unit[0]), 0) for unit in units)
+    if visible_width > width:
+        kept: list[tuple[str, tuple[str, ...], str | None]] = []
+        used = 0
+        ellipsis_width = 1 if width > 1 else 0
+        for unit in units:
+            unit_width = max(wcwidth(unit[0]), 0)
+            if used + unit_width > width - ellipsis_width:
+                break
+            kept.append(unit)
+            used += unit_width
+        if ellipsis_width:
+            kept.append(("…", (), None))
+        units = kept
+        visible_width = sum(max(wcwidth(unit[0]), 0) for unit in units)
+    padding = max(width - visible_width, 0)
+    left = (
+        padding
+        if alignment == "right"
+        else padding // 2
+        if alignment == "center"
+        else 0
+    )
+    right = padding - left
+    styles = (BOLD_STYLE,) if bold else ()
+    return f"{' ' * left}{_render_units(units, styles)}{' ' * right}"
+
+
+def _render_table(
+    rows: list[list[str]],
+    alignments: list[str],
+    *,
+    indent: str,
+    width: int,
+) -> list[str]:
+    columns = len(rows[0])
+    content_width = max(width - display_width(indent), 1)
+    if content_width < (2 * columns) - 1:
+        # Extremely narrow live viewports cannot express even one cell per
+        # column plus separators. Keep every value readable as wrapped text.
+        fallback: list[str] = []
+        for row in rows:
+            fallback.extend(
+                _wrapped_inline_lines(
+                    " | ".join(row),
+                    initial_indent=indent,
+                    subsequent_indent=indent,
+                    width=width,
+                )
+            )
+        return fallback
+
+    separator = " │ " if content_width >= (4 * columns) - 3 else "│"
+    available = max(content_width - display_width(separator) * (columns - 1), columns)
+    natural = [
+        max(display_width(render_inline_markdown(row[column])) for row in rows)
+        for column in range(columns)
+    ]
+    column_widths = [max(value, 1) for value in natural]
+    while sum(column_widths) > available:
+        largest = max(range(columns), key=lambda item: column_widths[item])
+        if column_widths[largest] <= 1:
+            break
+        column_widths[largest] -= 1
+
+    rendered: list[str] = []
+    for row_index, row in enumerate(rows):
+        cells = [
+            _fit_inline_cell(
+                row[column],
+                column_widths[column],
+                alignments[column],
+                bold=row_index == 0,
+            )
+            for column in range(columns)
+        ]
+        rendered.append(f"{indent}{separator.join(cells)}")
+        if row_index == 0:
+            rule_separator = "─┼─" if separator == " │ " else "┼"
+            rendered.append(
+                f"{indent}{rule_separator.join('─' * size for size in column_widths)}"
+            )
+    return rendered
+
+
+def render_markdown_lines(
+    content: str,
+    *,
+    width: int | None = None,
+    indent: str = "",
+    blank_between_list_items: bool = False,
+) -> list[str]:
+    """Render the shared lightweight Markdown block subset to physical rows."""
+    break_long_words = width is not None
+    if width is None:
+        width = min(
+            DISPLAY_WRAP_WIDTH,
+            shutil.get_terminal_size(fallback=(DISPLAY_WRAP_WIDTH, 24)).columns,
+        )
+    source = content.splitlines()
+    rendered: list[str] = []
+    index = 0
+    previous_list_item = False
+    while index < len(source):
+        line = source[index]
+
+        if line.startswith("```"):
+            closing = next(
+                (
+                    candidate
+                    for candidate in range(index + 1, len(source))
+                    if source[candidate].startswith("```")
+                ),
+                None,
+            )
+            if closing is not None:
+                code_indent = f"{indent}  "
+                for code_line in source[index + 1 : closing] or [""]:
+                    parts = _wrapped_literal_lines(
+                        code_line,
+                        indent=code_indent,
+                        width=width,
+                    )
+                    rendered.extend(
+                        styled_text(part, SOFT_CYAN_STYLE) for part in parts
+                    )
+                index = closing + 1
+                previous_list_item = False
+                continue
+            # A partial stream must keep its opening fence and body readable.
+            rendered.extend(wrapped_display_lines(line, indent, indent, width=width))
+            index += 1
+            previous_list_item = False
+            continue
+
+        if index + 1 < len(source) and "|" in line:
+            header = _parse_table_row(line)
+            alignments = _table_alignments(source[index + 1], len(header))
+            if len(header) > 1 and alignments is not None:
+                rows = [header]
+                index += 2
+                while index < len(source) and "|" in source[index]:
+                    row = _parse_table_row(source[index])
+                    if len(row) != len(header):
+                        break
+                    rows.append(row)
+                    index += 1
+                rendered.extend(
+                    _render_table(rows, alignments, indent=indent, width=width)
+                )
+                previous_list_item = False
+                continue
+
+        if not line.strip():
+            rendered.append("")
+            index += 1
+            previous_list_item = False
+            continue
+
+        heading = re.match(r"^\s{0,3}(#{1,3})\s+(.+?)\s*#*\s*$", line)
+        if heading:
+            level, text = heading.groups()
+            heading_indent = indent 
+            rendered.extend(
+                _wrapped_inline_lines(
+                    text,
+                    initial_indent=heading_indent,
+                    subsequent_indent=heading_indent,
+                    width=width,
+                    extra_styles=(BOLD_STYLE,),
+                    break_long_words=break_long_words,
+                )
+            )
+            index += 1
+            previous_list_item = False
+            continue
+
+        if re.fullmatch(r"\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*", line):
+            rule_width = max(width - display_width(indent), 1)
+            rendered.append(f"{indent}{styled_text('─' * rule_width, DIM_STYLE)}")
+            index += 1
+            previous_list_item = False
+            continue
+
+        quote = re.match(r"^\s{0,3}>\s?(.*)$", line)
+        if quote:
+            quote_prefix = f"{indent}│ "
+            rendered.extend(
+                _wrapped_inline_lines(
+                    quote.group(1),
+                    initial_indent=quote_prefix,
+                    subsequent_indent=quote_prefix,
+                    width=width,
+                    break_long_words=break_long_words,
+                )
+            )
+            index += 1
+            previous_list_item = False
+            continue
+
+        item = re.match(
+            r"^(\s*)(?:(?P<bullet>[-+*])|(?P<number>\d+\.))\s+(.+)$", line
+        )
+        if item:
+            nested = len(item.group(1).expandtabs(2)) >= 2
+            marker = "•" if item.group("bullet") else item.group("number")
+            item_indent = f"{indent}{'  ' if nested else ''}"
+            prefix = f"{item_indent}{marker} "
+            continuation = f"{item_indent}{' ' * (display_width(marker) + 1)}"
+            if blank_between_list_items and previous_list_item:
+                rendered.append("")
+            rendered.extend(
+                _wrapped_inline_lines(
+                    item.group(4),
+                    initial_indent=prefix,
+                    subsequent_indent=continuation,
+                    width=width,
+                    break_long_words=break_long_words,
+                )
+            )
+            index += 1
+            previous_list_item = True
+            continue
+
+        rendered.extend(
+            _wrapped_inline_lines(
+                line.strip(),
                 initial_indent=indent,
                 subsequent_indent=indent,
                 width=width,
+                break_long_words=break_long_words,
             )
-        ]
-
-    stripped = line.lstrip()
-    unordered_bullet_match = re.match(r"^([-*+])\s+(.+)$", stripped)
-    if unordered_bullet_match:
-        return [
-            render_inline_markdown(part)
-            for part in wrapped_display_lines(
-                unordered_bullet_match.group(2),
-                initial_indent=f"{FINAL_SUMMARY_INDENT}• ",
-                subsequent_indent=f"{FINAL_SUMMARY_INDENT}  ",
-                width=width,
-            )
-        ]
-
-    numbered_bullet_match = re.match(r"^(\d+\.\s+)(.+)$", stripped)
-    if numbered_bullet_match:
-        marker = numbered_bullet_match.group(1)
-        rendered = f"{marker}{numbered_bullet_match.group(2)}"
-        return [
-            render_inline_markdown(part)
-            for part in wrapped_display_lines(
-                rendered,
-                initial_indent=FINAL_SUMMARY_INDENT,
-                subsequent_indent=f"{FINAL_SUMMARY_INDENT}{' ' * len(marker)}",
-                width=width,
-            )
-        ]
-
-    return [
-        render_inline_markdown(part)
-        for part in wrapped_display_lines(
-            stripped,
-            initial_indent=FINAL_SUMMARY_INDENT,
-            subsequent_indent=FINAL_SUMMARY_INDENT,
-            width=width,
         )
-    ]
+        index += 1
+        previous_list_item = False
+    return rendered
+
+
+def markdown_display_lines(line: str, width: int | None = None) -> list[str]:
+    """Render one Markdown source line through the shared block renderer."""
+    return render_markdown_lines(line, width=width, indent=FINAL_SUMMARY_INDENT)
 
 
 def format_final_summary(content: str, width: int | None = None) -> str:
-    """Render the supported final-report Markdown while preserving its layout."""
-    formatted_lines: list[str] = []
-    previous_rendered_bullet = False
-    for line in content.splitlines():
-        rendered_lines = markdown_display_lines(line, width=width)
-        is_rendered_bullet = bool(rendered_lines) and rendered_lines[0].startswith(
-            f"{FINAL_SUMMARY_INDENT}• "
-        )
-        if is_rendered_bullet and previous_rendered_bullet:
-            formatted_lines.append("")
-        formatted_lines.extend(rendered_lines)
-        previous_rendered_bullet = is_rendered_bullet
-
-    return "\n".join(formatted_lines).strip("\n")
+    """Render final-report Markdown with its established outer indentation."""
+    lines = render_markdown_lines(
+        content,
+        width=width,
+        indent=FINAL_SUMMARY_INDENT,
+        blank_between_list_items=True,
+    )
+    return "\n".join(lines).strip("\n")

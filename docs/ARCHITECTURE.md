@@ -109,7 +109,12 @@ and application layer; `squid_core/` is the reusable agent runtime.
     owns approval panels, prompts, and compact results; `tool_display.py` owns
     tool/action labels, command recognition, and debug result projection; and
     `formatting.py` owns shared styles, links, path shortening, wrapping, and
-    final-summary Markdown rendering. `binary_header.py` is a terminal-I/O-free
+    the lightweight Markdown interpretation used by narration and final
+    responses. Its inline token layer chooses line breaks from visible Unicode
+    cells before applying ANSI styles or OSC-8 links. Its block layer supports
+    headings, one-level lists, blockquotes, fenced code, horizontal rules, and
+    constrained pipe tables. Panel-specific mascot placement and final-report
+    indentation remain in `display.py`. `binary_header.py` is a terminal-I/O-free
     rain model and semantic compositor. It excludes the panel rectangle while
     placing rain, then overlays the title and panel into prompt_toolkit styled
     fragments.
@@ -237,7 +242,9 @@ and application layer; `squid_core/` is the reusable agent runtime.
     prevents this presentation-only Application from consuming stdin, while
     its real terminal `Output` remains the sole source of viewport and cursor
     geometry. The live panel contracts and rewraps from the current output
-    width, and its `Window` hides the cursor while it owns the region. An
+    width, rerenders the shared Markdown subset from each complete buffered
+    snapshot, and leaves unmatched inline delimiters readable until later
+    tokens complete them. Its `Window` hides the cursor while it owns the region. An
     accepted message exits with the authoritative last frame retained as
     ordinary scrollback. When `tool_preparing` arrives during live narration,
     the CLI synchronously retains the current provisional frame and releases
