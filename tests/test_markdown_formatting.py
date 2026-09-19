@@ -5,7 +5,13 @@ import sys
 
 import pytest
 
-from code_squid.console.ui.display import RUN_PANEL_WIDTH, TerminalDisplay, _display_width
+from code_squid.console.ui.display import (
+    PANEL_CONTENT_WIDTH,
+    PANEL_LEFT_PADDING,
+    RUN_PANEL_WIDTH,
+    TerminalDisplay,
+    _display_width,
+)
 from code_squid.console.ui.formatting import (
     BOLD_STYLE,
     ITALIC_STYLE,
@@ -149,3 +155,34 @@ def test_inline_ansi_and_osc_do_not_break_panel_wrapping(
 
     assert len(lines) > 3
     assert all(_display_width(line) == RUN_PANEL_WIDTH for line in lines)
+
+
+def test_wider_panel_preserves_established_narration_wrapping_and_adds_padding(
+) -> None:
+    display = TerminalDisplay()
+    content = "word " * 20
+
+    wide_lines = display._assistant_narration_panel_lines(content)
+    baseline_lines = display._assistant_narration_panel_lines(content, viewport_width=61)
+
+    wide_content = [
+        line[len(PANEL_LEFT_PADDING) + 1 :].rstrip(" │")
+        for line in wide_lines[1:-1]
+    ]
+    baseline_content = [
+        line[len(PANEL_LEFT_PADDING) + 1 :].rstrip(" │")
+        for line in baseline_lines[1:-1]
+    ]
+    assert wide_content == baseline_content
+    assert _display_width(wide_lines[1]) == RUN_PANEL_WIDTH
+    wide_padding = len(wide_lines[1][:-1]) - len(wide_lines[1][:-1].rstrip(" "))
+    baseline_padding = len(baseline_lines[1][:-1]) - len(
+        baseline_lines[1][:-1].rstrip(" ")
+    )
+    assert wide_padding == baseline_padding + 4
+    assert PANEL_CONTENT_WIDTH == 56
+
+
+def test_panel_rejects_content_beyond_its_intended_width() -> None:
+    with pytest.raises(ValueError, match="content exceeds its fixed width"):
+        TerminalDisplay()._render_panel_lines(["x" * (PANEL_CONTENT_WIDTH + 1)])

@@ -967,8 +967,8 @@ def test_run_started_uses_blank_spacing_without_a_divider(
     assert ansi_fg(DEFAULT_MOD_ACCENT_HEX) not in output
 
 
-def test_run_panel_uses_the_existing_canonical_rail_width() -> None:
-    assert RUN_PANEL_WIDTH == 61
+def test_run_panel_uses_the_wider_physical_rail_width() -> None:
+    assert RUN_PANEL_WIDTH == 65
 
 
 def test_model_request_failed_prints_short_message_with_log_path(
@@ -2040,6 +2040,21 @@ def test_no_tool_final_wraps_and_aligns_continuation_lines_with_narration(
     assert all(
         _display_width(line) == RUN_PANEL_WIDTH for line in lines[1:] if line
     )
+
+
+def test_wider_final_panel_preserves_established_summary_wrapping(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    display = TerminalDisplay()
+    display.run_started()
+    finish_display(display, "word " * 20)
+
+    content_lines = [
+        line for line in capsys.readouterr().out.splitlines() if "│" in line
+    ]
+    assert content_lines[0].count("word") == 10
+    assert content_lines[1].count("word") == 10
+    assert all(_display_width(line) == RUN_PANEL_WIDTH for line in content_lines)
 
 
 def test_tool_using_run_keeps_report_label(

@@ -32,6 +32,7 @@ from code_squid.console.ui.formatting import (
     FINAL_SUMMARY_INDENT,
     DEFAULT_MOD_ACCENT_HEX,
     RESET_STYLE,
+    RUN_PANEL_CONTENT_WIDTH,
     RUN_PANEL_WIDTH,
     SQUID_GLYPH,
     SOFT_CYAN_HEX,
@@ -76,7 +77,9 @@ RUN_DETAIL_INDENT = "    "
 PREVIOUS_SESSION_TITLE_MAX_LENGTH = 40
 INPUT_IDENTITY_LINE = "@code-squid"
 PANEL_LEFT_PADDING = "  "
-PANEL_CONTENT_WIDTH = RUN_PANEL_WIDTH - 2 - len(PANEL_LEFT_PADDING) - 1
+# Any physical width beyond this established content column belongs to
+# right-side breathing room and must never feed back into Markdown wrapping.
+PANEL_CONTENT_WIDTH = RUN_PANEL_CONTENT_WIDTH
 TOOL_PREPARING_LABELS = {
     "read_file": "Reading...",
     "write_file": "Writing...",
@@ -611,7 +614,10 @@ class TerminalDisplay:
         # a valid panel. Keep valid internal geometry and let prompt_toolkit
         # clip it to the truthful (smaller) physical viewport.
         panel_width = max(min(RUN_PANEL_WIDTH, viewport_width), 9)
-        content_width = panel_width - 2 - len(PANEL_LEFT_PADDING) - 1
+        content_width = min(
+            PANEL_CONTENT_WIDTH,
+            panel_width - 2 - len(PANEL_LEFT_PADDING) - 1,
+        )
         narration_indent = " " * (_display_width(SQUID_GLYPH) + 1)
         panel_lines = render_markdown_lines(
             content,
@@ -631,7 +637,11 @@ class TerminalDisplay:
             )
             panel_lines[index] = self._accent_first_squid(panel_lines[index])
             break
-        return self._render_panel_lines(panel_lines, panel_width=panel_width)
+        return self._render_panel_lines(
+            panel_lines,
+            panel_width=panel_width,
+            content_width=content_width,
+        )
 
     def _prepare_assistant_narration(self) -> None:
         """Transfer terminal ownership from the spinner to the live panel."""
@@ -746,9 +756,12 @@ class TerminalDisplay:
         lines: list[str],
         *,
         panel_width: int = RUN_PANEL_WIDTH,
+        content_width: int = PANEL_CONTENT_WIDTH,
     ) -> list[str]:
         """Build fixed-width physical rows without taking terminal ownership."""
-        content_width = panel_width - 2 - len(PANEL_LEFT_PADDING) - 1
+        available_width = panel_width - 2 - len(PANEL_LEFT_PADDING) - 1
+        if content_width > available_width:
+            raise ValueError("run panel content width exceeds its physical width")
         horizontal = "─" * (panel_width - 2)
         rendered = [styled_text(f"╭{horizontal}╮", DIM_STYLE)]
         for line in lines:
@@ -757,7 +770,11 @@ class TerminalDisplay:
             # geometry seam; fail close to the violating caller if that changes.
             if visible_width > content_width:
                 raise ValueError("run panel content exceeds its fixed width")
-            padding = " " * (content_width - visible_width + 1)
+            # The renderer reserves all physical width beyond the stable content
+            # column as right padding; it never feeds that space back to wrapping.
+            padding = " " * (
+                panel_width - 2 - len(PANEL_LEFT_PADDING) - visible_width
+            )
             left = styled_text("│", DIM_STYLE)
             right = styled_text("│", DIM_STYLE)
             rendered.append(f"{left}{PANEL_LEFT_PADDING}{line}{padding}{right}")

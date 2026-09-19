@@ -1,3 +1,12 @@
+- 2026-09-19: Widened the CLI run panel border from 61 to 65 cells while
+  preserving its established 56-cell narration/final-response Markdown width.
+  The panel renderer now treats content width separately from physical width,
+  uses surplus cells only as right padding, and retains viewport-safe live
+  narration contraction. Markdown semantics, left indentation, marker placement,
+  streaming behavior, final-summary formatting, and styling remain unchanged.
+  Compilation passed. Focused formatting/display/streaming coverage reached 224
+  passing tests, and the broader console/UI suite reached 329 passing tests;
+  both retain one unrelated existing level-three-heading indentation failure.
 - 2026-09-19: Unified narration and final-response Markdown rendering in the
   application-owned console formatter. A small inline token layer now supports
   bold, italic, strikethrough, inline code, OSC-8 links, and practical escapes;

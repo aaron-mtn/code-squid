@@ -10,7 +10,8 @@ import textwrap
 from wcwidth import wcwidth, wcswidth
 
 
-RUN_PANEL_WIDTH = 61
+RUN_PANEL_WIDTH = 65
+RUN_PANEL_CONTENT_WIDTH = 56
 PATH_LABEL_MAX = 56
 DISPLAY_WRAP_WIDTH = 64
 FINAL_SUMMARY_INDENT = "  "

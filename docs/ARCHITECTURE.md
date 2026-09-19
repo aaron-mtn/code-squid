@@ -283,7 +283,9 @@ and application layer; `squid_core/` is the reusable agent runtime.
     to use the shared unboxed input helper. Shift+Enter and Alt+Enter normalize
     to the multiline Ctrl+J action, while ordinary Enter submits. Its marker is
     hidden without changing input alignment while the startup menu owns focus.
-    Normal run output uses ordinary scrollback and 61-column panels. While
+    Normal run output uses ordinary scrollback and 65-column panels. Their
+    Markdown content retains the original 56-cell wrapping width, with the
+    additional physical width rendered only as right-side padding. While
     streaming is enabled, one provisional narration panel grows in place and
     becomes ordinary scrollback when the validated assistant callback settles
     it; non-streamed narration remains a static print. The final report and an
