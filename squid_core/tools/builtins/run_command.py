@@ -82,6 +82,8 @@ def execute(
             shell=use_shell,
             cwd=repo_root,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             timeout=DEFAULT_TIMEOUT_SECONDS,
@@ -89,7 +91,7 @@ def execute(
     except subprocess.TimeoutExpired as exc:
         output = exc.stdout or ""
         if isinstance(output, bytes):
-            output = output.decode(errors="replace")
+            output = output.decode(encoding="utf-8", errors="replace")
         output, output_metadata = truncate_head_tail(output)
 
         return {

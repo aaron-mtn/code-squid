@@ -1,3 +1,16 @@
+- 2026-09-18: Made Squid Core's `run_command` process capture decode merged
+  stdout/stderr explicitly as UTF-8 with replacement for malformed bytes,
+  instead of inheriting the host locale (and Windows code page). Timeout byte
+  output now uses the same explicit fallback. Added real-subprocess regressions
+  covering Unicode-heavy stdout and stderr, an ordinary non-zero process exit,
+  and invalid UTF-8 bytes without reader-thread or secondary result-shaping
+  failures. Focused regressions passed 2 tests; the full built-in Tool module
+  passed 54 tests; broader Tool executor, result rendering, schema, safety, and
+  workspace-boundary coverage passed 121 tests. The full suite passed 1,291
+  tests with the same 29 unrelated prompt-copy, repeated-read-guidance-copy,
+  and Windows TTY expectation failures recorded by preceding patches. Core and
+  focused-test compilation, a direct `run_command` import check, and
+  `git diff --check` passed; no live model inference was run.
 - 2026-09-18: Moved active compaction presentation onto the existing terminal
   pulse. `compaction_started` now selects the exact `Compacting...` label
   without writing to the permanent feed; the existing authoritative

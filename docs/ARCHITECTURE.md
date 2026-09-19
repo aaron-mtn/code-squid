@@ -1925,6 +1925,8 @@ editing.
 - on other platforms, executes through the system shell with `shell=True`
 - uses `repo_root` as the working directory
 - merges stderr into stdout
+- decodes the merged process stream as UTF-8 with replacement for malformed
+  bytes, independent of the host platform's locale
 - times out after 15 seconds
 - returns `ok` based on process return code
 - attaches `failure_class` to every failed execution using only timeout state,

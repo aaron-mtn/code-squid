@@ -19,6 +19,15 @@ from squid_core.settings import ReadFileSettings
 run_command_module = importlib.import_module("squid_core.tools.builtins.run_command")
 
 
+def _python_script_command(script_path: Path) -> str:
+    """Return a shell-safe command that runs one Python regression fixture."""
+    if sys.platform == "win32":
+        executable = sys.executable.replace("'", "''")
+        path = str(script_path).replace("'", "''")
+        return f"& '{executable}' '{path}'"
+    return f"{shlex.quote(sys.executable)} {shlex.quote(str(script_path))}"
+
+
 def test_read_file_rejects_relative_path_and_succeeds_with_absolute_path(tmp_path: Path) -> None:
     file_path = tmp_path / "input.txt"
     file_path.write_text("hello", encoding="utf-8")
@@ -110,6 +119,56 @@ def test_run_command_preserves_explicit_non_verification_intent(tmp_path: Path) 
 
     assert result["ok"] is True
     assert result["verification"] is False
+
+
+def test_run_command_captures_utf8_stdout_stderr_and_nonzero_exit(
+    tmp_path: Path,
+) -> None:
+    script_path = tmp_path / "unicode_output.py"
+    script_path.write_text(
+        """import sys
+
+sys.stdout.buffer.write("日本語🦑—\\n".encode("utf-8"))
+sys.stdout.buffer.flush()
+sys.stderr.buffer.write("標準エラー🦑—\\n".encode("utf-8"))
+sys.stderr.buffer.flush()
+raise SystemExit(1)
+""",
+        encoding="utf-8",
+    )
+
+    result = run_command(
+        tmp_path,
+        _python_script_command(script_path),
+        verification=False,
+    )
+
+    assert result["ok"] is False
+    assert result["returncode"] == 1
+    assert result["output"] == "日本語🦑—\n標準エラー🦑—\n"
+    assert result["failure_class"] == "process_failed"
+
+
+def test_run_command_replaces_malformed_utf8_without_crashing(tmp_path: Path) -> None:
+    script_path = tmp_path / "malformed_output.py"
+    script_path.write_text(
+        """import sys
+
+sys.stdout.buffer.write(b"valid\\xfftail\\n")
+sys.stdout.buffer.flush()
+""",
+        encoding="utf-8",
+    )
+
+    result = run_command(
+        tmp_path,
+        _python_script_command(script_path),
+        verification=False,
+    )
+
+    assert result["ok"] is True
+    assert result["returncode"] == 0
+    assert result["output"] == "valid\ufffdtail\n"
 
 
 def test_read_file_supports_one_targeted_range(tmp_path: Path) -> None:
