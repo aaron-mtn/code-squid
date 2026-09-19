@@ -1,3 +1,18 @@
+- 2026-09-18: Kept the existing tool-specific CLI pulse active across the
+  accepted-action/`tool_started` boundary. Previously `tool_preparing` selected
+  labels such as `Running...`, but `action_started` and the immediately
+  following observer event both cleared that pulse before synchronous Tool
+  execution; long commands therefore exposed a blank activity line. The
+  accepted action now reasserts the existing label (also covering non-streamed
+  and static-narration paths), while Tool results and run finalization retain
+  ownership of clearing it. Added a focused compaction -> streamed narration ->
+  `run_command` regression. Focused narration/spinner coverage passed 44 tests.
+  Broader console/UI coverage passed 351 tests with the one pre-existing
+  Windows debug-path assertion failure. The full suite passed 1,283 tests with
+  the same 29 unrelated prompt-copy, repeated-read-guidance-copy, and Windows
+  TTY expectation failures recorded by preceding patches. Production/test
+  compilation, a direct display import check, and `git diff --check` passed; no
+  live model inference was run.
 - 2026-09-18: Kept the persistent Code Squid prompt alive after an exhausted
   model request. The application-owned session runner still marks the current
   run failed and uses the existing error log/display path, but now treats that

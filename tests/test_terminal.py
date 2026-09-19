@@ -1950,7 +1950,8 @@ def test_completion_panel_keeps_edges_aligned_across_unicode_and_styling(
         files_written={path},
         messages=[],
     )
-    display = TerminalDisplay()
+    # This test owns static panel geometry, not the active Tool-status line.
+    display = TerminalDisplay(_spinner=FakeSpinner())
     display.action_started({"tool": "write_file", "args": {"path": path}})
     display.final_message("## What changed\n- **Styled report** with 🚫 content.")
     display.loop_finished(session)

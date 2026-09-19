@@ -33,13 +33,16 @@ class CountingSpinner:
         self.stops = 0
         self.style = ""
         self.labels: list[str] = []
+        self.active = False
 
     def start(self, label: str = "Thinking...") -> None:
         self.starts += 1
         self.labels.append(label)
+        self.active = True
 
     def stop(self) -> None:
         self.stops += 1
+        self.active = False
 
 
 def interactive_display(
@@ -241,7 +244,7 @@ def test_tool_preparing_uses_tool_specific_pulse(
     assert spinner.labels == ["Thinking...", label]
 
 
-def test_tool_started_stops_active_tool_preparation_pulse(monkeypatch) -> None:
+def test_tool_started_preserves_active_tool_pulse(monkeypatch) -> None:
     spinner = CountingSpinner()
     display, _stream = interactive_display(monkeypatch, spinner=spinner)
 
@@ -250,7 +253,39 @@ def test_tool_started_stops_active_tool_preparation_pulse(monkeypatch) -> None:
     display.handle_event({"type": "tool_started", "tool": "read_file"})
 
     assert spinner.labels == ["Thinking...", "Reading..."]
-    assert spinner.stops == 1
+    assert spinner.stops == 0
+    assert spinner.active is True
+
+
+def test_compaction_narration_to_run_command_keeps_running_pulse(
+    monkeypatch,
+) -> None:
+    """Protect the lifecycle that previously blanked during a long command."""
+    spinner = CountingSpinner()
+    display, _stream = interactive_display(monkeypatch, spinner=spinner)
+
+    display.handle_event({"type": "compaction_started"})
+    display.thinking()
+    display.handle_event({"type": "assistant_message_started"})
+    display.handle_event({"type": "assistant_delta", "delta": "Running tests."})
+    display.handle_event({"type": "tool_preparing", "tool": "run_command"})
+    display.assistant_message("Running tests.")
+    display.handle_event(
+        {"type": "assistant_message", "message": "Running tests."}
+    )
+    action = {
+        "tool": "run_command",
+        "args": {"command": "python -m pytest -q"},
+    }
+    display.action_started(action)
+    display.handle_event({"type": "tool_started", "tool": "run_command"})
+
+    assert spinner.labels[-1] == "Running..."
+    assert spinner.active is True
+
+    display.tool_result(action, {"ok": True, "output": "1 passed"})
+
+    assert spinner.active is False
 
 
 def test_authoritative_narration_settles_without_duplicate_or_spinner_restart(
@@ -285,7 +320,7 @@ def test_authoritative_narration_settles_without_duplicate_or_spinner_restart(
     display.handle_event({"type": "tool_started", "tool": "write_file"})
 
     assert spinner.starts == 2
-    assert spinner.stops == 2
+    assert spinner.stops == 1
 
 
 def test_display_callback_consumes_retained_narration_without_stopping_thinking(
@@ -334,15 +369,19 @@ def test_repeated_model_and_tool_turns_leave_no_orphan_thinking(monkeypatch) -> 
     display, _stream = interactive_display(monkeypatch, spinner=spinner)
 
     for text in ("Reading now.", "Writing now."):
+        action = {"tool": "read_file", "args": {"path": "app.py"}}
         display.thinking()
         display.handle_event({"type": "assistant_message_started"})
         display.handle_event({"type": "assistant_delta", "delta": text})
         display.handle_event({"type": "tool_preparing", "tool": "read_file"})
         display.assistant_message(text)
+        display.action_started(action)
         display.handle_event({"type": "tool_started", "tool": "read_file"})
+        display.tool_result(action, {"ok": True, "content": "contents"})
 
-    assert spinner.starts == 4
+    assert spinner.starts == 6
     assert spinner.stops == 4
+    assert spinner.active is False
 
 
 def test_visible_tool_output_never_competes_with_thinking(monkeypatch) -> None:
@@ -375,9 +414,9 @@ def test_final_reply_does_not_restart_thinking_after_narration(monkeypatch) -> N
 
 @pytest.mark.parametrize(
     "event_type",
-    ["tool_started", "tool_finished", "run_cancelled", "run_failed", "run_finished"],
+    ["tool_finished", "run_cancelled", "run_failed", "run_finished"],
 )
-def test_tool_lifecycle_and_run_boundaries_stop_thinking(
+def test_tool_completion_and_run_boundaries_stop_thinking(
     monkeypatch, event_type: str
 ) -> None:
     spinner = CountingSpinner()

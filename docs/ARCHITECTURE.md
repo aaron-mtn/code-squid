@@ -255,8 +255,10 @@ and application layer; `squid_core/` is the reusable agent runtime.
     this is the presentation boundary that transfers ownership from the live
     panel back to the existing pulse. Known built-in tools use `Reading...`,
     `Writing...`, `Patching...`, or `Running...`; other tools use
-    `Using tool...`. `tool_started` and all existing
-    output/finalization boundaries stop any active pulse. Code Squid owns no
+    `Using tool...`. The accepted action reasserts the same label so the pulse
+    remains owned throughout synchronous Tool execution, even when settling
+    static narration cleared its preparation state. Tool-result and existing
+    run finalization boundaries stop the active pulse. Code Squid owns no
     raw cursor-up or clear-row repaint geometry for live narration.
 
     `prompt_input.py`, `sessions.py`, and `spinner.py` retain their focused
@@ -293,7 +295,8 @@ and application layer; `squid_core/` is the reusable agent runtime.
     Normal thinking uses one neutral, CLI-owned four-frame dot pulse; neither
     its symbol nor its active label receives the current Mod accent. The label
     remains `Thinking...` until a specific tool is known, when the same spinner
-    line and timing switch to the CLI-owned preparation label. Narration and
+    line and timing switch to the CLI-owned Tool activity label and retains it
+    through execution. Narration and
     report markers share the canonical U+1F991 U+FE0E text-presentation squid
     glyph. The active Mod accent wraps only that two-code-point sequence and
     resets immediately, leaving adjacent text and the dim neutral panel borders

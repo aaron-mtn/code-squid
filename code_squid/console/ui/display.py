@@ -89,7 +89,7 @@ TOOL_PREPARING_LABELS = {
 
 
 def tool_preparing_label(tool: object) -> str:
-    """Return the active CLI label for a tool whose call is still forming."""
+    """Return the active CLI label for Tool preparation and execution."""
     if not isinstance(tool, str):
         return "Using tool..."
     return TOOL_PREPARING_LABELS.get(tool, "Using tool...")
@@ -215,11 +215,19 @@ class TerminalDisplay:
 
     def action_started(self, action: dict) -> None:
         self._tool_used_in_run = True
-        self._stop_spinner()
-        if self.debug and action.get("tool") not in FILE_TOOLS:
-            self._finish_startup_before_output()
-            print(self._action_text(action))
-            self._has_run_output = True
+        if self.debug:
+            if action.get("tool") not in FILE_TOOLS:
+                self._finish_startup_before_output()
+                print(self._action_text(action))
+                self._has_run_output = True
+            return
+
+        # Tool preparation and execution are one continuous active interval.
+        # Reassert the label here because static narration may have cleared the
+        # preparation pulse after the provider finished streaming the reply.
+        self._finish_startup_before_output()
+        self._print_leading_blank_if_needed()
+        self._spinner.start(tool_preparing_label(action.get("tool")))
 
     def approve_action(self, action: dict) -> ApprovalDecision:
         self._finish_startup_before_output()
@@ -430,8 +438,11 @@ class TerminalDisplay:
             content = str(event.get("message", "")).strip()
             self._commit_streamed_narration(content)
             return
+        if event_type == "tool_started":
+            # action_started already established the execution pulse. The
+            # observer event must not clear it immediately before a slow Tool.
+            return
         if event_type in {
-            "tool_started",
             "tool_finished",
             "run_cancelled",
             "run_failed",
