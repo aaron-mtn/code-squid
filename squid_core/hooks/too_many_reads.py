@@ -13,19 +13,21 @@ DEFAULT_FIRST_NUDGE_LINES = 1_500
 DEFAULT_STRONG_NUDGE_LINES = 3_000
 TOO_MANY_READS_GUIDANCE = (
     "You have already spent several read actions or gathered substantial source "
-    "without a substantive change in task state.\n\n"
-    "Before inspecting more context, identify what specific new information is "
-    "still required. If the information needed to continue is already available, "
-    "continue the task instead of gathering more context."
+    "without a successful built-in file edit. This does not mean an edit is required.\n\n"
+    "Before inspecting more context, identify a specific missing fact, unmet task "
+    "requirement, or required verification step. Read-only tasks and recovery of "
+    "needed context after compaction can require further reading. If no such need "
+    "remains, move forward with the task instead of gathering more context."
 )
 TOO_MANY_READS_STRONG_GUIDANCE = (
-    "HIGH PRIORITY: Stop inspecting source.\n\n"
-    "You have already spent too many actions gathering context without making a "
-    "substantive change. Do not perform another read or source-search unless a "
-    "specific missing fact is required to make the next edit.\n\n"
-    "Do not read for reassurance, completeness, reconfirmation, or to build a "
-    "better mental model of the repository. Use the context already available and "
-    "make the next safe change now."
+    "HIGH PRIORITY: Stop broad, speculative, or reassurance reading.\n\n"
+    "Repeated read actions or substantial source have accumulated without a "
+    "successful built-in file edit. Before another read or source-search, identify "
+    "the specific missing fact, unmet task requirement, or required verification "
+    "step it will address. This also applies to read-only tasks and recovery of "
+    "needed context after compaction; an edit is not required merely to reset this "
+    "guidance. If no concrete need remains, use the available context and move "
+    "forward with the task now."
 )
 _MUTATION_TOOLS = {"apply_patch", "write_file"}
 

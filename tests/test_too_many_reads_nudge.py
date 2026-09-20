@@ -237,3 +237,15 @@ def test_hook_does_not_modify_read_tool_output() -> None:
 def test_thresholds_are_validated(kwargs: dict) -> None:
     with pytest.raises(ValueError):
         TooManyReadsNudge(**kwargs)
+
+
+def test_read_guidance_names_concrete_needs_without_requiring_an_edit() -> None:
+    for guidance in (TOO_MANY_READS_GUIDANCE, TOO_MANY_READS_STRONG_GUIDANCE):
+        assert "missing fact" in guidance
+        assert "unmet task requirement" in guidance
+        assert "required verification" in guidance
+        assert "compaction" in guidance
+        assert "read-only tasks" in guidance.lower()
+        assert "make the next safe change now" not in guidance
+    assert "an edit is not required" in TOO_MANY_READS_STRONG_GUIDANCE
+    assert "Stop broad, speculative, or reassurance reading" in TOO_MANY_READS_STRONG_GUIDANCE

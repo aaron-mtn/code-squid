@@ -9,13 +9,14 @@ from .runner import HookResponse
 
 DEFAULT_POST_VERIFICATION_THRESHOLD = 2
 POST_VERIFICATION_GUIDANCE = (
-    "HIGH PRIORITY: Stop using tools unless you have identified a concrete defect.\n\n"
-    "Verification has already succeeded for the current implementation, and no "
-    "file-changing action has occurred since. Further inspection or verification "
-    "without a specific problem is unnecessary.\n\n"
-    "If a concrete defect remains, address it now. Otherwise finalize the task now. "
-    "Do not perform another read, search, or verification command merely to gain "
-    "additional confidence."
+    "HIGH PRIORITY: Identify concrete remaining work before using more tools.\n\n"
+    "An explicitly marked verification succeeded, and no successful built-in "
+    "file edit or failed explicit verification has been observed since. This "
+    "does not establish that every task requirement or validation is complete.\n\n"
+    "Continue only for an unfinished task requirement (including required "
+    "documentation), a concrete issue, or another required validation step. "
+    "If none remains, finalize the task now. Do not perform another read, search, "
+    "or verification command merely for reassurance."
 )
 _MUTATION_TOOLS = {"apply_patch", "write_file"}
 

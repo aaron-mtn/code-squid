@@ -17,17 +17,16 @@ from squid_core.tools.builtins.read_file import execute as read_file
 
 
 GUIDANCE = (
-    "You already read this unchanged section and it is still current. The requested "
-    "range substantially overlaps information already in context. Reuse that context "
-    "instead of rereading for confidence. If the intended edit is clear, make the "
-    "focused edit now. Read again only if you need information that was not previously "
-    "returned. Otherwise go back over the information you already have in your context "
-    "and move on to the next step."
+    "You already read this unchanged source and it is still available in context. "
+    "The overlapping content is being omitted rather than returned again. "
+    "Reuse the existing context. If the next edit is already clear, make it now. "
+    "Only read again for genuinely new information that is required for the next action."
 )
 ESCALATED_ALREADY_COVERED_MESSAGE = (
-    "You already read this unchanged section of the file. No file content is "
-    "being returned again. Reuse the existing context, stop rereading this "
-    "section, and take the next useful action."
+    "HIGH PRIORITY: Stop rereading this source. The requested unchanged content "
+    "is already available in context and will not be returned again. "
+    "Do not request this section again for confirmation, reassurance, or completeness. "
+    "Use the existing context and take the next non-read action now."
 )
 
 
@@ -1175,3 +1174,55 @@ def test_escalated_mask_persists_until_coverage_is_invalidated(
     assert still_escalated.updated_tool_output["message"] == (
         ESCALATED_ALREADY_COVERED_MESSAGE
     )
+
+
+def test_expansion_only_overlap_filters_without_a_strike(tmp_path: Path) -> None:
+    """New requested lines remain useful even when Tool-added context overlaps."""
+    hook = RepeatedReadNudge()
+    path = tmp_path / "nearby.py"
+    path.write_text(_source(1, 700), encoding="utf-8")
+
+    def read(start: int):
+        action = {"tool": "read_file", "args": {
+            "path": str(path),
+            "ranges": [{"start_line": start, "end_line": start + 9}],
+        }}
+        return hook.tool_result(_Context(
+            action=action, result=read_file(tmp_path, **action["args"])
+        ))
+
+    assert read(100) is None  # Returned coverage is 30-179.
+    for start, novel_start, novel_end in [(200, 180, 279), (300, 280, 379)]:
+        response = read(start)
+        assert response.additional_context == ""
+        assert response.updated_tool_output["content"] == _source(novel_start, novel_end)
+        assert response.updated_tool_output["returned_line_ranges"] == [
+            {"start_line": novel_start, "end_line": novel_end}
+        ]
+        assert not hook._redundant_counts
+
+    # Deliberately asking for visible source still earns the first strike,
+    # then escalates. Incidental overlaps must not have advanced that state.
+    _assert_first_reread_is_masked(read(200))
+    assert read(200).updated_tool_output["message"] == ESCALATED_ALREADY_COVERED_MESSAGE
+
+
+def test_disjoint_request_with_one_deliberate_overlap_earns_strike(tmp_path: Path) -> None:
+    hook = RepeatedReadNudge()
+    path = tmp_path / "multiple.py"
+    path.write_text(_source(1, 700), encoding="utf-8")
+    _read(hook, path, returned_start=1, returned_end=150, content=_source(1, 150))
+    action = {"tool": "read_file", "args": {
+        "path": str(path), "ranges": [
+            {"start_line": 100, "end_line": 109},
+            {"start_line": 500, "end_line": 509},
+        ],
+    }}
+    response = hook.tool_result(_Context(
+        action=action, result=read_file(tmp_path, **action["args"])
+    ))
+    assert response.additional_context == GUIDANCE
+    assert response.updated_tool_output["returned_line_ranges"] == [
+        {"start_line": 151, "end_line": 179},
+        {"start_line": 430, "end_line": 579},
+    ]

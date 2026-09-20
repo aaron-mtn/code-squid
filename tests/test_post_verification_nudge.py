@@ -213,7 +213,7 @@ def test_repeated_read_guidance_is_not_stacked_with_post_verification() -> None:
 
     assert repeated_read.updated_tool_output["already_covered"] is True
     assert (
-        "You already read this unchanged section"
+        "You already read this unchanged source"
         in repeated_read.additional_context
     )
     assert POST_VERIFICATION_GUIDANCE not in repeated_read.additional_context
@@ -289,3 +289,12 @@ def test_failed_non_verification_action_does_not_count() -> None:
     assert response.additional_context == ""
     assert nudge._verification_current is True
     assert nudge._post_verification_action_count == 0
+
+
+def test_guidance_allows_remaining_requirements_and_validation() -> None:
+    assert "unfinished task requirement" in POST_VERIFICATION_GUIDANCE
+    assert "documentation" in POST_VERIFICATION_GUIDANCE
+    assert "concrete issue" in POST_VERIFICATION_GUIDANCE
+    assert "another required validation step" in POST_VERIFICATION_GUIDANCE
+    assert "If none remains, finalize the task now" in POST_VERIFICATION_GUIDANCE
+    assert "does not establish that every task requirement" in POST_VERIFICATION_GUIDANCE

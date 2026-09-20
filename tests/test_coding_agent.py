@@ -1,3 +1,5 @@
+"""Agent response protocol and application prompt assembly regressions."""
+
 from pathlib import Path
 
 from code_squid.agent.coding import CodingAgent
@@ -270,10 +272,10 @@ def test_initial_prompts_encourage_compact_markdown_narration() -> None:
     ).initial_messages()
     combined_prompt = "\n".join(message["content"] for message in messages)
 
-    assert "Write visible action notes in concise lightweight Markdown." in combined_prompt
-    assert "keep narration to 2-4 sentences" in combined_prompt
+    assert "Strongly prefer a short note before each tool call." in combined_prompt
+    assert "Usually 1-2 short sentences is enough." in combined_prompt
     assert "Use inline code for file names, paths, commands" in combined_prompt
-    assert "Do not use `#` headings" in combined_prompt
+    assert "Keep formatting light." in combined_prompt
 
 
 def test_initial_prompts_keep_markdown_final_summary_guidance() -> None:
@@ -322,13 +324,13 @@ def test_read_guidance_prefers_coherent_reads_over_incremental_ranges() -> None:
 
 def test_baseline_policy_uses_corrective_failures_and_changes_stalled_approaches() -> None:
     assert (
-        "When a tool failure returns exact corrective information, use it directly "
-        "before doing more discovery."
+        "A failed tool result is a learning opportunity. Use any corrective details "
+        "it provides before taking another action."
         in BASELINE_CODING_POLICY
     )
     assert (
-        "If repeated actions fail for the same underlying reason, stop repeating that "
-        "approach and choose a materially different next step."
+        "Do not retry an unsuccessful action unchanged. The next attempt must address "
+        "the reported cause or use a materially different approach."
         in BASELINE_CODING_POLICY
     )
 
@@ -343,13 +345,13 @@ def test_baseline_policy_requires_behavioral_verification_against_the_request() 
 
 def test_baseline_policy_requires_explicit_run_command_verification_intent() -> None:
     assert "Every run_command call must explicitly set verification" in (
-        BASELINE_CODING_POLICY
+        TOOL_USAGE_GUIDANCE
     )
     assert "tests, syntax checks, validation builds, lint or type checks" in (
-        BASELINE_CODING_POLICY
+        TOOL_USAGE_GUIDANCE
     )
     assert "repository discovery, file listings, code searches" in (
-        BASELINE_CODING_POLICY
+        TOOL_USAGE_GUIDANCE
     )
     assert "Classify the command by its purpose" in BASELINE_CODING_POLICY
 
@@ -374,8 +376,7 @@ def test_apply_patch_guidance_prefers_diagnostics_over_unconditional_rereads() -
 
 def test_tool_guidance_prevents_shell_workarounds_for_editing_tool_failures() -> None:
     assert (
-        "Do not use run_command to work around a dedicated file-editing tool failure "
-        "unless shell behavior is genuinely required by the task."
+        "Do not use run_command to read, patch, or write files when the dedicated file tools are available."
         in TOOL_USAGE_GUIDANCE
     )
     assert (
@@ -400,7 +401,7 @@ def test_windows_environment_prompt_includes_workspace_and_powershell_guidance()
     assert "Preferred shell: PowerShell" in prompt
     assert "Path separator: \\" in prompt
     assert f"Workspace: {workspace}" in prompt
-    assert "Use PowerShell syntax for run_command." in prompt
+    assert "Use PowerShell syntax and separators." in prompt
     assert "Prefer Get-ChildItem" in prompt
 
 
@@ -409,8 +410,8 @@ def test_non_windows_environment_prompt_omits_powershell_guidance() -> None:
 
     prompt = system_prompt(platform_context=context, workspace="/home/user/project")
 
-    assert "Use commands compatible with bash." in prompt
-    assert "PowerShell" not in prompt
+    assert "Use commands and separators compatible with bash." in prompt
+    assert "run_command already executes in PowerShell" not in prompt
     assert "Get-ChildItem" not in prompt
 
 
@@ -439,7 +440,7 @@ def test_skill_override_does_not_remove_environment_block() -> None:
     assert "## Active Skill: custom" in prompt
 
 
-def test_active_skill_without_tool_usage_guidance_omits_default_guidance_from_system_prompt() -> None:
+def test_active_skill_without_tool_usage_guidance_keeps_default_guidance_from_system_prompt() -> None:
     skill = Skill(
         name="bug-fix",
         description="Fix bugs with small targeted edits.",
@@ -450,8 +451,8 @@ def test_active_skill_without_tool_usage_guidance_omits_default_guidance_from_sy
 
     prompt = system_prompt(skill)
 
-    assert "## Tool usage guidance" not in prompt
-    assert TOOL_USAGE_GUIDANCE not in prompt
+    assert "## Tool usage guidance" in prompt
+    assert TOOL_USAGE_GUIDANCE in prompt
 
 
 def test_selected_skill_can_override_prompt_sections() -> None:
@@ -475,11 +476,11 @@ def test_selected_skill_can_override_prompt_sections() -> None:
         },
     )
 
-    messages = CodingAgent(task="agent/", skill=skill).initial_messages()
+    messages = CodingAgent(task="agent/", skill=skill, prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS).initial_messages()
 
     assert messages[1]["content"] == "agent/"
     assert "Use inspection tools only." in messages[0]["content"]
-    assert TOOL_USAGE_GUIDANCE not in messages[0]["content"]
+    assert TOOL_USAGE_GUIDANCE in messages[0]["content"]
     assert "Write an architecture review." in messages[0]["content"]
     assert "write the final summary in simple Markdown" not in messages[0]["content"]
 
@@ -505,7 +506,7 @@ def test_active_skill_tool_usage_replace_includes_only_custom_guidance() -> None
     assert TOOL_USAGE_GUIDANCE not in system
 
 
-def test_active_skill_tool_usage_append_includes_only_custom_guidance() -> None:
+def test_active_skill_tool_usage_append_keeps_default_guidance() -> None:
     skill = Skill(
         name="focused-review",
         description="Review with custom guidance.",
@@ -523,4 +524,21 @@ def test_active_skill_tool_usage_append_includes_only_custom_guidance() -> None:
 
     system = system_prompt(skill)
     assert "Use appended inspection guidance." in system
-    assert TOOL_USAGE_GUIDANCE not in system
+    assert TOOL_USAGE_GUIDANCE in system
+
+
+def test_failed_patch_example_uses_candidates_before_rereading() -> None:
+    from squid_core.agent.prompts import PROTECTED_RESPONSE_EXAMPLES
+
+    assert "retry the patch using that candidate's match_id" in PROTECTED_RESPONSE_EXAMPLES
+    assert "Reread after a failed patch only when" in PROTECTED_RESPONSE_EXAMPLES
+    assert "do not provide enough context to choose safely" in PROTECTED_RESPONSE_EXAMPLES
+    assert "read a tighter section" not in PROTECTED_RESPONSE_EXAMPLES
+
+
+def test_windows_guidance_keeps_dedicated_source_reading_default() -> None:
+    context = PlatformContext("Windows", "PowerShell", "powershell", "\\", True)
+    prompt = system_prompt(platform_context=context, workspace="C:/repo")
+    assert "Use read_file for known source files when available" in prompt
+    assert "For appropriate shell inspection, Get-Content" in prompt
+    assert "Prefer Get-Content for reading text files" not in prompt

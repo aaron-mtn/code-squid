@@ -82,8 +82,10 @@ The fix is in. I’m going to run the relevant check now and make sure I didn’
 [exactly one real tool call to run verification]
 
 Valid non-final response after a failed patch:
-That patch was too broad and matched more than one place. I’m going to read a tighter section and target it properly.
-[exactly one real tool call to read the relevant file section]
+The returned candidate diagnostics identify the intended current text. I’ll retry the patch using that candidate's match_id.
+[exactly one real tool call to apply_patch with the selected match_id]
+
+Reread after a failed patch only when the returned candidate diagnostics do not provide enough context to choose safely.
 
 Valid non-final response after a failed command:
 That command isn’t right for this setup. I’m going to check what this project actually uses instead of guessing again.
@@ -112,14 +114,8 @@ def prompt_section(section_name: str, default: str, skill: Skill | None = None) 
 
 
 def tool_usage_guidance(default: str, skill: Skill | None = None) -> str:
-    """Preserve the existing Skill opt-in behavior for tool guidance."""
-
-    if skill is None:
-        return default
-    override = skill.prompt_sections.get("TOOL_USAGE_GUIDANCE")
-    if override is None:
-        return ""
-    return override.content
+    """Retain application discipline unless a Skill explicitly replaces it."""
+    return prompt_section("TOOL_USAGE_GUIDANCE", default, skill)
 
 
 def skill_prompt_block(skill: Skill | None = None) -> str:
@@ -159,7 +155,7 @@ def execution_environment_prompt(
                 "Use PowerShell syntax and separators. Do not use Bash operators such as `&&` or `||`.",
                 "Do not assume Unix commands such as ls, cat, grep, find, cp, mv, rm, wc, or python3 are available.",
                 "Prefer Get-ChildItem for listing files and directories.",
-                "Prefer Get-Content for reading text files.",
+                "Use read_file for known source files when available. For appropriate shell inspection, Get-Content is the PowerShell text-reading utility.",
                 "Prefer Select-String for searching text.",
                 "Prefer Copy-Item, Move-Item, and Remove-Item for file operations.",
                 "Quote Windows paths when they contain spaces.",

@@ -147,6 +147,24 @@ class RepeatedReadNudge:
             self._mark_stale_ranges_fresh(path, returned_ranges)
             return None
 
+        # Filtering follows everything the Tool returned, but a behavioral
+        # strike follows the model's request. Automatically added context can
+        # overlap a prior read without the model asking to reread any source.
+        args = action.get("args", {})
+        requested_ranges = (
+            _returned_ranges({"returned_line_ranges": args.get("ranges")})
+            if isinstance(args, dict) and args.get("ranges") is not None
+            else []
+        )
+        # Full-file requests (or missing usable request metadata) retain the
+        # existing returned-range judgment; never infer intent from shell text.
+        judgment_ranges = requested_ranges or returned_ranges
+        requested_overlap = any(
+            start <= covered_end and covered_start <= end
+            for start, end in judgment_ranges
+            for covered_start, covered_end in covered_ranges
+        )
+
         if novel_ranges:
             shaped_result = _partially_redundant_result(
                 result,
@@ -164,10 +182,17 @@ class RepeatedReadNudge:
             self._record_read_coverage(path, action, visible_ranges)
             self._mark_stale_ranges_fresh(path, returned_ranges)
 
-            count = self._record_redundant_strike(path)
+            count = self._record_redundant_strike(path) if requested_overlap else 0
             return HookResponse(
                 updated_tool_output=shaped_result,
                 additional_context=_GUIDANCE if count == self.threshold else "",
+            )
+
+        if not requested_overlap:
+            return HookResponse(
+                updated_tool_output=_already_covered_result(
+                    action, result, message=_current_result_message(action, result)
+                )
             )
 
         count = self._record_redundant_strike(path)

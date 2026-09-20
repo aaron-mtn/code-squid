@@ -630,7 +630,10 @@ the third successful read or after 1,500 returned source lines, whichever comes
 first. Stronger context begins on the fifth read or after 3,000 returned lines
 and continues on later reads. These are advisory thresholds rather than a read
 budget: the Hook never blocks or transforms a result, so investigations can
-continue when another specific fact is needed.
+continue for a specific missing fact, unmet requirement, or required verification.
+The wording reports reads without a successful built-in edit, not inferred lack
+of progress; read-only work and needed context recovery after compaction remain
+legitimate reasons to read.
 
 The volume counter consumes the result left by earlier Hooks. Because
 `RepeatedReadNudge` runs first, partially overlapping reads contribute only
@@ -661,7 +664,9 @@ persisted.
 After verification is current, every successful non-mutation Tool result counts,
 including reads, searches, commands, other Tool activity, and repeated explicit
 verification. At the default threshold of two actions, the Hook supplies direct
-one-turn advisory guidance to act on a concrete remaining problem or finalize,
+one-turn advisory guidance to identify an unfinished requirement (including
+required documentation), concrete issue, or required validation, and finalize
+when none remains. A successful check does not establish task completion. It
 then resets the counter so the message does not repeat forever. The first
 successful verification after a mutation, successful structured mutation,
 failed explicit verification, and the start of a run reset the counter. It does
@@ -699,8 +704,12 @@ original result when the payload's line count cannot be mapped safely to its
 metadata; it never rereads the filesystem to reconstruct source. A fully
 covered result becomes the existing small successful `already_covered` result
 with no file contents; targeted requests retain their requested regions as
-`requested_line_ranges`. Partial and full redundancy both advance the same
-persistent per-file strike system, while useful source is never discarded.
+`requested_line_ranges`. Partial and full redundancy advance the existing
+persistent per-file strike system only when covered returned source overlaps
+the model's explicitly requested ranges. Overlap introduced solely by automatic
+context expansion is filtered without a strike or behavioral nudge. Full-file
+reads and requests without usable range metadata retain returned-range judgment.
+This uses current action arguments, adds no state, and never discards useful source.
 At the configured threshold the Hook also returns action-oriented one-turn
 guidance through `HookResponse.additional_context`, directing the model to reuse
 the current context and make a focused edit when the intended change is clear.
@@ -731,7 +740,7 @@ merged union of prior returned ranges for that normalized path, bounded to 100
 files and 64 ranges per file. Per-result provenance records the source the Hook
 actually left visible, so later `read_result_trimmed` notifications retract only
 those ranges. The default threshold is one redundant read, so an original
-useful read followed by one overlap emits guidance while filtering or masking
+useful read followed by one requested overlap emits guidance while filtering or masking
 that read; the following redundant read receives
 the stronger masked correction. Strikes are per file rather than globally
 adjacent: non-redundant reads add coverage without resetting them, and unrelated
@@ -1028,11 +1037,14 @@ runtime contract:
 - `CORRECTION_MESSAGES`
 - `COMPACTION_PROMPT`
 
-`replace` and `append` have their literal meanings for `SYSTEM_PROMPT_INTRO` and
-`FINAL_SUMMARY_REQUIREMENTS`. Active Skills omit Code Squid's default
-`TOOL_USAGE_GUIDANCE`; when a Skill supplies that section, its content is used
-as the Tool guidance. The parser accepts either mode on that section, but the
-current prompt assembly does not prepend the application default for `append`.
+`replace` and `append` have their literal meanings for `SYSTEM_PROMPT_INTRO`,
+`FINAL_SUMMARY_REQUIREMENTS`, and `TOOL_USAGE_GUIDANCE`. Active Skills retain
+application tool guidance when they omit that section; `append` adds to it and
+only explicit `replace` substitutes custom guidance. Protected patch-recovery
+examples prefer selectable diagnostic candidates, with rereading as a fallback
+when candidate context is insufficient. Windows environment guidance preserves
+`read_file` as the default for known source and mentions `Get-Content` only for
+appropriate shell inspection.
 
 Skills can change specialization instructions, inspection style, optional Tool
 guidance, and final-summary shape. They cannot override the Core one-tool-call

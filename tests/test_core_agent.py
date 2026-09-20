@@ -1,3 +1,5 @@
+"""Core protocol and protected application-policy prompt regressions."""
+
 from pathlib import Path
 
 from code_squid.agent.coding import CodingAgent
@@ -63,7 +65,7 @@ def test_skill_replacements_cannot_erase_core_protocol_or_narration() -> None:
 
     assert "exactly one real tool call" in prompt
     assert "A final response uses no tool call" in prompt
-    assert "Strongly prefer a brief visible action note" in prompt
+    assert "Strongly prefer a short note before each tool call." in prompt
     assert "exactly one real tool call to read the implementation file" in prompt
 
 
@@ -73,7 +75,7 @@ def test_skill_replacements_cannot_erase_code_squid_baseline_policy() -> None:
     ).initial_messages()[0]["content"]
 
     assert BASELINE_CODING_POLICY in prompt
-    assert "Inspect the relevant code, tests, and repository guidance" in prompt
+    assert "Inspect just enough relevant code, tests, repository guidance, and project configuration" in prompt
     assert "Make the smallest clean change" in prompt
     assert "Run the strongest practical verification" in prompt
     assert "Specialized intro." in prompt
@@ -88,5 +90,5 @@ def test_prompt_encourages_narration_but_validation_does_not_require_it() -> Non
         "actions": [{"tool": "read_file", "args": {}, "tool_call_id": "call_1"}],
     }
 
-    assert "Strongly prefer a brief visible action note" in prompt
+    assert "Strongly prefer a short note before each tool call." in prompt
     assert agent.validate_reply(reply) == {"ok": True, "reason": ""}

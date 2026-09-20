@@ -1,3 +1,27 @@
+- 2026-09-19: Applied the three scoped harness-guidance cleanups. Read nudges
+  now report accumulated reads without a successful built-in edit and allow a
+  specific missing fact, unmet requirement, required verification, read-only
+  work, or needed context recovery. Post-verification guidance allows unfinished
+  requirements (including documentation), concrete issues, and required validation;
+  it asks for finalization only when none remains and does not infer completion.
+  Protected failed-patch examples use selectable candidate diagnostics before
+  rereading, and Windows guidance keeps read_file as the normal source-reading
+  tool. Skill prompt assembly now retains default tool guidance when absent,
+  honors append by appending, and preserves explicit replacement using the existing
+  section assembler. RepeatedReadNudge still filters returned coverage, but only
+  overlapping explicitly requested source earns a strike; expansion-only overlap
+  adds neither strikes nor behavioral guidance. Full-file/missing-range fallback,
+  state structures, lifecycle resets, hook order, and 3/5 and 1,500/3,000 thresholds
+  are unchanged. Added regressions for nearby expanded reads and mixed requested
+  ranges, and reconciled stale reread and prompt-copy expectations. No hooks,
+  planner, shell parser, provider-specific behavior, or further tuning were added.
+  Verification: focused hook, prompt, skill/wiring, and trimming coverage passed
+  236 tests. The full suite passed 1,351 tests with one existing unrelated failure:
+  test_headings_lists_quotes_fence_and_rule_render_as_blocks expects indentation
+  for a third-level Markdown heading. That rendering mismatch is intentionally
+  outside this patch. Python compilation and git diff --check passed.
+  No live model inference was run.
+
 - 2026-09-19: Hardened small atomic JSON writes against transient Windows
   destination locks without changing their same-directory replacement model.
   JSON is serialized and fsynced once; only a `PermissionError` from
