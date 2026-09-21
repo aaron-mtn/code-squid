@@ -73,13 +73,24 @@ def test_headings_lists_quotes_fence_and_rule_render_as_blocks() -> None:
         width=32,
     )
 
-    assert lines[:3] == ["Heading one", "Heading two", "  Heading three"]
+    assert lines[:3] == ["Heading one", "Heading two", "Heading three"]
     assert "• parent" in lines
     assert "  • child" in lines
     assert "1. first" in lines
     assert "│ quoted words" in lines
     assert "    print('hello')" in lines
     assert lines[-1] == "─" * 32
+
+
+@pytest.mark.parametrize("marker", ["#", "##", "###"])
+def test_heading_levels_preserve_caller_indent_when_wrapped(marker: str) -> None:
+    lines = render_markdown_lines(
+        f"{marker} alpha beta gamma delta",
+        width=14,
+        indent="  ",
+    )
+
+    assert lines == ["  alpha beta", "  gamma delta"]
 
 
 def test_incomplete_fence_keeps_source_visible() -> None:
