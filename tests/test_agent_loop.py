@@ -129,7 +129,10 @@ class FakeToolExecutor:
 
 class FakeToolResults:
     def messages_from_action_results(self, actions: list[dict], results: list[dict]) -> list[dict]:
-        return [{"role": "tool", "content": result["tool"]} for result in results]
+        return [
+            {"role": "tool", "content": result.get("tool", action["tool"])}
+            for action, result in zip(actions, results)
+        ]
 
 
 class FakePrompter:
@@ -385,6 +388,286 @@ def run_loop_with_store(
     loop.run()
 
     return session, tool_executor, session_store, model_adapter, display
+
+
+def run_loop_with_final_hook(
+    replies: list[dict],
+    hook: object,
+    *,
+    max_tool_steps: int | None = None,
+    on_event=None,
+    should_cancel=None,
+) -> tuple[
+    RunResult,
+    Session,
+    FakeToolExecutor,
+    FakeSessionStore,
+    FakeModelAdapter,
+    NullDisplay,
+]:
+    """Run focused final-acceptance scenarios with observable loop state."""
+    session = Session(repo_root=None)
+    tool_executor = FakeToolExecutor()
+    session_store = FakeSessionStore()
+    model_adapter = FakeModelAdapter(replies)
+    display = NullDisplay()
+    loop = AgentLoop(
+        session=session,
+        model_adapter=model_adapter,
+        tool_executor=tool_executor,
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=display,
+        session_store=session_store,
+        max_tool_steps=max_tool_steps,
+        on_event=on_event,
+        should_cancel=should_cancel,
+        hook_runner=HookRunner([hook]),
+    )
+
+    result = loop.run()
+    return (
+        result,
+        session,
+        tool_executor,
+        session_store,
+        model_adapter,
+        display,
+    )
+
+
+@pytest.mark.parametrize("blocked_count", [1, 2])
+def test_blocked_finals_below_limit_can_recover(blocked_count: int) -> None:
+    class BlockingCandidateHook:
+        def before_accept_final(self, context) -> HookResponse:
+            if context.content.startswith("blocked"):
+                return HookResponse(
+                    block=True,
+                    reason="missing verification",
+                    guidance="Run verification before finalizing.",
+                )
+            return HookResponse()
+
+    result, session, _, store, adapter, display = run_loop_with_final_hook(
+        [
+            *[reply(f"blocked {index}") for index in range(blocked_count)],
+            reply("TASK COMPLETE"),
+        ],
+        BlockingCandidateHook(),
+    )
+
+    assert result == RunResult(status="complete")
+    assert adapter.index == blocked_count + 1
+    assert store.statuses == ["complete"]
+    assert display.final_messages == ["TASK COMPLETE"]
+    assert session.messages[-1] == {"role": "assistant", "content": "TASK COMPLETE"}
+    assert adapter.message_requests[-1][-1] == {
+        "role": "user",
+        "content": "Run verification before finalizing.",
+    }
+
+
+def test_repeated_blocked_finals_stop_at_limit_without_another_request() -> None:
+    events = []
+
+    class AlwaysBlockingHook:
+        def before_accept_final(self, context) -> HookResponse:
+            return HookResponse(
+                block=True,
+                reason="requirement still unmet",
+                guidance="Address the requirement before finalizing.",
+            )
+
+    result, session, _, store, adapter, display = run_loop_with_final_hook(
+        [reply(f"blocked {index}") for index in range(10)],
+        AlwaysBlockingHook(),
+        # Blocked finals are deliberately independent of the Tool-step budget.
+        max_tool_steps=1,
+        on_event=events.append,
+    )
+
+    assert result.status == "failed"
+    assert "before_accept_final rejected 3 consecutive final responses" in result.reason
+    assert "requirement still unmet" in result.reason
+    assert "Address the requirement before finalizing." in result.reason
+    assert adapter.index == 3
+    assert len(adapter.message_requests) == 3
+    assert store.statuses == ["failed"]
+    assert display.step_limits_reached == []
+    assert session.messages == [{"role": "system", "content": "system"}]
+    rejected = [event for event in events if event["type"] == "reply_rejected"]
+    assert [event["consecutive_blocked_finals"] for event in rejected] == [1, 2, 3]
+    assert all(event["limit"] == 3 for event in rejected)
+    run_failed = [event for event in events if event["type"] == "run_failed"]
+    run_finished = [event for event in events if event["type"] == "run_finished"]
+    assert len(run_failed) == 1
+    assert run_failed[0]["stage"] == "before_accept_final_limit"
+    assert len(run_finished) == 1
+    assert run_finished[0]["status"] == "failed"
+
+
+def test_successful_tool_actions_reset_blocked_final_streak() -> None:
+    class BlockingCandidateHook:
+        def before_accept_final(self, context) -> HookResponse:
+            if context.content.startswith("blocked"):
+                return HookResponse(block=True, reason="more work needed")
+            return HookResponse()
+
+    replies = [
+        reply("blocked 1"),
+        reply("work 1", actions=[{"tool": "read_file"}]),
+        reply("blocked 2"),
+        reply("work 2", actions=[{"tool": "read_file"}]),
+        reply("blocked 3"),
+        reply("TASK COMPLETE"),
+    ]
+    result, _, tool_executor, store, adapter, _ = run_loop_with_final_hook(
+        replies,
+        BlockingCandidateHook(),
+    )
+
+    assert result == RunResult(status="complete")
+    assert adapter.index == len(replies)
+    assert tool_executor.actions == [{"tool": "read_file"}, {"tool": "read_file"}]
+    assert store.statuses == ["complete"]
+
+
+def test_tool_action_blocked_before_execution_does_not_reset_final_streak() -> None:
+    class BlockingFinalAndToolHook:
+        def before_accept_final(self, context) -> HookResponse:
+            return HookResponse(block=True, reason="more work needed")
+
+        def before_tool_execute(self, context) -> HookResponse:
+            return HookResponse(block=True, reason="tool unavailable")
+
+    replies = [
+        reply("blocked 1"),
+        reply("attempt 1", actions=[{"tool": "read_file"}]),
+        reply("blocked 2"),
+        reply("attempt 2", actions=[{"tool": "read_file"}]),
+        reply("blocked 3"),
+        reply("unused"),
+    ]
+    result, _, tool_executor, _, adapter, _ = run_loop_with_final_hook(
+        replies,
+        BlockingFinalAndToolHook(),
+    )
+
+    assert result.status == "failed"
+    assert "3 consecutive final responses" in result.reason
+    assert adapter.index == 5
+    assert tool_executor.actions == []
+
+
+def test_invalid_reply_limit_is_independent_from_blocked_final_streak() -> None:
+    class BlockingCandidateHook:
+        def before_accept_final(self, context) -> HookResponse:
+            return HookResponse(block=True, reason="more work needed")
+
+    result, _, _, store, adapter, _ = run_loop_with_final_hook(
+        [
+            reply("blocked final"),
+            reply("bad 1", reason="empty_final_reply"),
+            reply("bad 2", reason="empty_final_reply"),
+            reply("bad 3", reason="empty_final_reply"),
+            reply("unused"),
+        ],
+        BlockingCandidateHook(),
+    )
+
+    assert result == RunResult(status="failed", reason="empty_final_reply")
+    assert adapter.index == 4
+    assert len(store.reply_rejections) == 3
+    assert store.statuses == ["failed"]
+
+
+def test_many_successful_tool_calls_are_not_a_global_request_limit() -> None:
+    class AllowingHook:
+        def before_accept_final(self, context) -> HookResponse:
+            return HookResponse()
+
+    tool_replies = [
+        reply(f"work {index}", actions=[{"tool": "read_file"}])
+        for index in range(8)
+    ]
+    result, _, tool_executor, _, adapter, _ = run_loop_with_final_hook(
+        [*tool_replies, reply("TASK COMPLETE")],
+        AllowingHook(),
+    )
+
+    assert result == RunResult(status="complete")
+    assert len(tool_executor.actions) == 8
+    assert adapter.index == 9
+
+
+def test_final_hook_exception_keeps_existing_failure_unwind() -> None:
+    events = []
+
+    class FailingHook:
+        def before_accept_final(self, context) -> HookResponse:
+            raise RuntimeError("hook exploded")
+
+    with pytest.raises(RuntimeError, match="hook exploded"):
+        run_loop_with_final_hook(
+            [reply("candidate")],
+            FailingHook(),
+            on_event=events.append,
+        )
+
+    assert [event["type"] for event in events][-2:] == [
+        "run_failed",
+        "run_finished",
+    ]
+
+
+def test_cancellation_after_blocked_final_does_not_retry() -> None:
+    cancelled = False
+
+    class CancellingBlockingHook:
+        def before_accept_final(self, context) -> HookResponse:
+            nonlocal cancelled
+            cancelled = True
+            return HookResponse(block=True, reason="more work needed")
+
+    result, _, _, store, adapter, _ = run_loop_with_final_hook(
+        [reply("blocked"), reply("unused")],
+        CancellingBlockingHook(),
+        should_cancel=lambda: cancelled,
+    )
+
+    assert result == RunResult(status="interrupted", reason="cancelled")
+    assert adapter.index == 1
+    assert store.statuses == ["interrupted"]
+
+
+def test_blocked_final_limit_leaves_durable_session_replayable(tmp_path) -> None:
+    class AlwaysBlockingHook:
+        def before_accept_final(self, context) -> HookResponse:
+            return HookResponse(block=True, reason="verification missing")
+
+    session = Session(repo_root=tmp_path)
+    session_store = SessionStore.create(tmp_path, "blocked finals")
+    adapter = FakeModelAdapter([reply("candidate") for _ in range(5)])
+    loop = AgentLoop(
+        session=session,
+        model_adapter=adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        session_store=session_store,
+        hook_runner=HookRunner([AlwaysBlockingHook()]),
+    )
+
+    result = loop.run()
+
+    reopened = SessionStore.open(session_store.session_dir)
+    assert result.status == "failed"
+    assert reopened.load_messages() == [{"role": "system", "content": "system"}]
+    assert json.loads(reopened.metadata_path.read_text(encoding="utf-8"))["status"] == (
+        "failed"
+    )
+    assert adapter.index == 3
 
 
 def test_valid_reply_resets_consecutive_invalid_reply_counter() -> None:

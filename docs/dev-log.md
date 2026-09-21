@@ -1,3 +1,16 @@
+- 2026-09-20: Bounded consecutive `before_accept_final` rejections at three.
+  Earlier blocks retain the Hook's guidance/reason correction path, while the
+  third stops through the existing failed-run lifecycle without another model
+  request. A successfully executed Tool action resets the streak; invalid-reply,
+  failed-Tool, provider-retry, and `max_tool_steps` accounting remain separate.
+  Added focused regression coverage for acceptance below the limit, exact request
+  bounds, diagnostics/lifecycle persistence, progress resets, counter isolation,
+  Tool-step behavior, long Tool runs, Hook exceptions, and cancellation. The 123
+  focused AgentLoop/Hook tests passed. The full suite passed 1,386 tests with the
+  existing unrelated third-level Markdown-heading indentation failure. Production
+  and test packages compiled successfully, and `git diff --check` passed. No live
+  model inference was run.
+
 - 2026-09-20: Fixed streamed response integrity for native Ollama and
   OpenAI-compatible providers. Native Ollama now requires its `done: true`
   terminal record, and OpenAI-compatible chat completions require a non-null

@@ -41,6 +41,7 @@ from squid_core.settings import ToolResultTrimmingSettings
 from squid_core.tool_result_trimming import render_messages_for_model
 
 MAX_CONSECUTIVE_INVALID_REPLIES = 3
+MAX_CONSECUTIVE_BLOCKED_FINALS = 3
 REJECTION_REASON_EVENT_MAX_CHARS = 500
 
 
@@ -556,7 +557,9 @@ class AgentLoop:
             self._run_context_blocks = list(before_run.context_blocks)
 
             consecutive_invalid_replies = 0
+            consecutive_blocked_finals = 0
             stopped_after_repeated_invalid_replies = False
+            stopped_after_repeated_blocked_finals = False
             stopped_after_step_limit = False
             failure_reason = ""
             final_message = ""
@@ -697,6 +700,7 @@ class AgentLoop:
                         event_sink=self._emit_hook_event,
                     )
                     if final_decision.block:
+                        consecutive_blocked_finals += 1
                         guidance = (
                             final_decision.guidance
                             or final_decision.reason
@@ -711,8 +715,42 @@ class AgentLoop:
                                     guidance,
                                     REJECTION_REASON_EVENT_MAX_CHARS,
                                 ),
+                                "consecutive_blocked_finals": (
+                                    consecutive_blocked_finals
+                                ),
+                                "limit": MAX_CONSECUTIVE_BLOCKED_FINALS,
                             }
                         )
+                        if (
+                            consecutive_blocked_finals
+                            >= MAX_CONSECUTIVE_BLOCKED_FINALS
+                        ):
+                            # A structurally valid final can be rejected for runtime
+                            # policy reasons, so keep this guard distinct from invalid
+                            # reply and Tool-step accounting.
+                            reason_detail = compact_event_text(
+                                final_decision.reason,
+                                REJECTION_REASON_EVENT_MAX_CHARS,
+                            )
+                            guidance_detail = compact_event_text(
+                                final_decision.guidance,
+                                REJECTION_REASON_EVENT_MAX_CHARS,
+                            )
+                            failure_reason = (
+                                "before_accept_final rejected "
+                                f"{consecutive_blocked_finals} consecutive final responses"
+                            )
+                            if reason_detail:
+                                failure_reason += (
+                                    f"; latest hook reason: {reason_detail}"
+                                )
+                            if guidance_detail:
+                                failure_reason += (
+                                    f"; latest hook guidance: {guidance_detail}"
+                                )
+                            run_stage = "before_accept_final_limit"
+                            stopped_after_repeated_blocked_finals = True
+                            break
                         pending_runtime_messages.append(
                             user_instruction_message(guidance)
                         )
@@ -767,6 +805,7 @@ class AgentLoop:
                 executed_actions = []
                 results = []
                 approval_instructions = []
+                successful_tool_action = False
                 for action in reply["actions"]:
                     run_stage = "tool_execution"
                     self._check_cancelled()
@@ -845,6 +884,8 @@ class AgentLoop:
                             )
                         )
                     pending_tool_result = result
+                    if result.get("ok", False):
+                        successful_tool_action = True
                     self.display.tool_result(approval_action, result)
                     self._check_cancelled()
                     self._emit_event(
@@ -877,8 +918,16 @@ class AgentLoop:
 
                 if reply["actions"]:
                     tool_steps_used += 1
+                    # Only completed useful work breaks a blocked-final streak;
+                    # a Hook block, approval denial, or failed Tool is not progress.
+                    if successful_tool_action:
+                        consecutive_blocked_finals = 0
 
-            if stopped_after_repeated_invalid_replies or stopped_after_step_limit:
+            if (
+                stopped_after_repeated_invalid_replies
+                or stopped_after_repeated_blocked_finals
+                or stopped_after_step_limit
+            ):
                 self._emit_runtime_event(
                     {
                         "type": "run_failed",

@@ -766,7 +766,11 @@ as a final candidate, before final display, `final_message` event, transcript
 storage, and completion.
 
 Can block finalization by adding guidance for the model to continue. Can append
-a report note to an accepted final.
+a report note to an accepted final. Core stops a run as failed after three
+consecutive final candidates are blocked, preventing an unbounded model-request
+loop. A successfully executed Tool action resets this streak; invalid replies,
+failed or rejected Tool actions, provider failures, and Tool-step accounting
+remain independent.
 
 ### run_finished
 
