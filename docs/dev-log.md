@@ -1,3 +1,15 @@
+- 2026-09-20: Fixed native Ollama fallback Tool-call identity collisions.
+  Missing provider IDs now receive a response-unique UUID prefix plus the
+  response-local call index in both streaming and non-streaming adaptation;
+  real provider IDs remain unchanged. Added focused coverage for cross-response
+  and same-response uniqueness, provider IDs, streaming, message conversion,
+  and historical result rendering/trimming. No Tool semantics or trimming
+  policy changed. The focused Ollama/trimming suite passed 60 tests, and the
+  broader provider/model/agent suite passed 216 tests. The full suite passed
+  1,391 tests with the existing unrelated third-level Markdown-heading
+  indentation failure. Production and test packages compiled successfully,
+  and `git diff --check` passed. No live Ollama inference was run.
+
 - 2026-09-20: Bounded consecutive `before_accept_final` rejections at three.
   Earlier blocks retain the Hook's guidance/reason correction path, while the
   third stops through the existing failed-run lifecycle without another model

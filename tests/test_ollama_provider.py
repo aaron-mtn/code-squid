@@ -1,3 +1,5 @@
+"""Tests for native Ollama transport, adaptation, and transcript replay."""
+
 import json
 
 import pytest
@@ -7,7 +9,8 @@ from squid_core.providers import build_provider, tool_call_content_mode
 from squid_core.providers.base import StreamCancelled
 from squid_core.providers.ollama import OllamaProvider, adapt_response, convert_messages
 from squid_core.providers.openai_compatible import OpenAICompatibleProvider
-from squid_core.settings import ProviderSettings
+from squid_core.settings import ProviderSettings, ToolResultTrimmingSettings
+from squid_core.tool_result_trimming import render_messages_for_model
 
 
 class CapturingOllamaProvider(OllamaProvider):
@@ -18,6 +21,17 @@ class CapturingOllamaProvider(OllamaProvider):
     def _post_chat(self, payload: dict) -> dict:
         self.payloads.append(payload)
         return {"message": {"role": "assistant", "content": "Done."}}
+
+
+class RespondingOllamaProvider(OllamaProvider):
+    """Return a fixed sequence of native responses without network access."""
+
+    def __init__(self, responses: list[dict]) -> None:
+        super().__init__()
+        self.responses = iter(responses)
+
+    def _post_chat(self, payload: dict) -> dict:
+        return next(self.responses)
 
 
 class StreamingOllamaProvider(OllamaProvider):
@@ -221,9 +235,67 @@ def test_native_tool_calls_get_generated_ids_and_json_string_arguments() -> None
 
     tool_call = response.choices[0].message.tool_calls[0]
 
-    assert tool_call.id == "ollama_call_0"
+    assert tool_call.id.startswith("ollama_call_")
+    assert tool_call.id.endswith("_0")
     assert tool_call.function.name == "read_file"
     assert json.loads(tool_call.function.arguments) == {"path": "/tmp/input.py"}
+
+
+def test_missing_ids_are_unique_across_non_streaming_responses() -> None:
+    native_response = {
+        "message": {
+            "role": "assistant",
+            "tool_calls": [
+                {"function": {"name": "read_file", "arguments": {}}},
+            ],
+        }
+    }
+    provider = RespondingOllamaProvider([native_response, native_response])
+
+    first = provider.create_response("test-model", [], [])
+    second = provider.create_response("test-model", [], [])
+
+    first_id = first.choices[0].message.tool_calls[0].id
+    second_id = second.choices[0].message.tool_calls[0].id
+    assert first_id != second_id
+
+
+def test_multiple_missing_ids_share_a_response_prefix_but_not_an_id() -> None:
+    response = adapt_response(
+        {
+            "message": {
+                "role": "assistant",
+                "tool_calls": [
+                    {"function": {"name": "read_file", "arguments": {}}},
+                    {"function": {"name": "run_command", "arguments": {}}},
+                ],
+            }
+        }
+    )
+
+    first, second = response.choices[0].message.tool_calls
+    assert first.id != second.id
+    assert first.id.rsplit("_", 1)[0] == second.id.rsplit("_", 1)[0]
+    assert first.id.endswith("_0")
+    assert second.id.endswith("_1")
+
+
+def test_provider_supplied_tool_call_id_is_preserved_exactly() -> None:
+    response = adapt_response(
+        {
+            "message": {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "provider-call-123",
+                        "function": {"name": "read_file", "arguments": {}},
+                    }
+                ],
+            }
+        }
+    )
+
+    assert response.choices[0].message.tool_calls[0].id == "provider-call-123"
 
 
 def test_temperature_none_omits_options_temperature_from_payload() -> None:
@@ -335,17 +407,20 @@ def test_native_ollama_streaming_accumulates_text_and_tool_calls_once() -> None:
     assert provider.payloads[0]["stream"] is True
     assert deltas == ["I will ", "read the file."]
     assert reply["message"]["content"] == "I will read the file."
+    call_id = reply["message"]["tool_calls"][0]["id"]
+    assert call_id.startswith("ollama_call_")
+    assert call_id.endswith("_0")
     assert reply["actions"] == [
         {
             "tool": "read_file",
             "args": {"path": "/tmp/example.py"},
-            "tool_call_id": "ollama_call_0",
+            "tool_call_id": call_id,
             "raw_arguments": '{"path": "/tmp/example.py"}',
         }
     ]
     assert reply["message"]["tool_calls"] == [
         {
-            "id": "ollama_call_0",
+            "id": call_id,
             "type": "function",
             "function": {
                 "name": "read_file",
@@ -354,6 +429,103 @@ def test_native_ollama_streaming_accumulates_text_and_tool_calls_once() -> None:
         }
     ]
     assert preparing_events == [{"tool": "read_file", "tool_call_index": 0}]
+
+
+def test_streamed_missing_ids_are_unique_across_responses() -> None:
+    provider = StreamingOllamaProvider(
+        [
+            {
+                "message": {
+                    "tool_calls": [
+                        {"function": {"name": "read_file", "arguments": {}}},
+                    ]
+                },
+                "done": True,
+            }
+        ]
+    )
+
+    first = provider.stream_chat("test-model", [], [], lambda _delta: None)
+    second = provider.stream_chat("test-model", [], [], lambda _delta: None)
+
+    first_id = first.choices[0].message.tool_calls[0].id
+    second_id = second.choices[0].message.tool_calls[0].id
+    assert first_id != second_id
+
+
+def test_distinct_fallback_ids_preserve_historical_rendering_and_conversion() -> None:
+    provider = RespondingOllamaProvider(
+        [
+            {
+                "message": {
+                    "tool_calls": [
+                        {"function": {"name": "read_file", "arguments": {}}},
+                    ]
+                }
+            },
+            {
+                "message": {
+                    "tool_calls": [
+                        {"function": {"name": "run_command", "arguments": {}}},
+                    ]
+                }
+            },
+        ]
+    )
+    adapter = ModelAdapter(provider, model_name="test-model")
+    definitions = [
+        {
+            "type": "function",
+            "function": {
+                "name": name,
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+        for name in ("read_file", "run_command")
+    ]
+
+    first = adapter.respond([], definitions)
+    second = adapter.respond([], definitions)
+    first_id = first["actions"][0]["tool_call_id"]
+    second_id = second["actions"][0]["tool_call_id"]
+    messages = [
+        first["message"],
+        {
+            "role": "tool",
+            "tool_call_id": first_id,
+            "content": json.dumps(
+                {"ok": True, "tool": "read_file", "content": "old source"}
+            ),
+        },
+        second["message"],
+        {
+            "role": "tool",
+            "tool_call_id": second_id,
+            "content": json.dumps(
+                {"ok": True, "tool": "run_command", "output": "new output"}
+            ),
+        },
+    ]
+
+    rendered = render_messages_for_model(
+        messages,
+        ToolResultTrimmingSettings(
+            recent_full_results=0,
+            read_old_content_chars=1,
+            command_old_output_chars=1,
+        ),
+    )
+    converted = convert_messages(rendered)
+
+    assert first_id != second_id
+    assert rendered[0]["tool_calls"][0]["id"] == first_id
+    assert rendered[1]["tool_call_id"] == first_id
+    assert rendered[1]["content"].startswith("READ_FILE OK")
+    assert rendered[2]["tool_calls"][0]["id"] == second_id
+    assert rendered[3]["tool_call_id"] == second_id
+    assert rendered[3]["content"].startswith("RUN_COMMAND OK")
+    assert converted[1]["tool_name"] == "read_file"
+    assert converted[3]["tool_name"] == "run_command"
 
 
 @pytest.mark.parametrize(

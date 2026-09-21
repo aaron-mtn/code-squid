@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from types import SimpleNamespace
 from urllib import request
 from urllib.error import HTTPError, URLError
@@ -345,8 +346,11 @@ def _parse_arguments(arguments):
 
 def adapt_response(raw_response: dict) -> object:
     message = raw_response.get("message", {})
+    # Ollama may omit call IDs. One prefix per completed response keeps calls
+    # readable by index without letting equal indexes in later turns collide.
+    fallback_id_prefix = f"ollama_call_{uuid.uuid4().hex}"
     tool_calls = [
-        _adapt_tool_call(index, tool_call)
+        _adapt_tool_call(index, tool_call, fallback_id_prefix)
         for index, tool_call in enumerate(message.get("tool_calls") or [])
     ]
 
@@ -370,14 +374,14 @@ def adapt_response(raw_response: dict) -> object:
     )
 
 
-def _adapt_tool_call(index: int, tool_call: dict) -> object:
+def _adapt_tool_call(index: int, tool_call: dict, fallback_id_prefix: str) -> object:
     function = tool_call.get("function", {})
     arguments = function.get("arguments", {})
     if not isinstance(arguments, str):
         arguments = json.dumps(arguments)
 
     return SimpleNamespace(
-        id=tool_call.get("id") or f"ollama_call_{index}",
+        id=tool_call.get("id") or f"{fallback_id_prefix}_{index}",
         function=SimpleNamespace(
             name=function.get("name"),
             arguments=arguments,

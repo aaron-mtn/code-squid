@@ -1471,7 +1471,10 @@ validates the reply.
 The native Ollama provider exists and is experimental. `squid_core/providers/ollama.py`
 uses Ollama `/api/chat`, converts replayed messages into Ollama's expected
 shape, omits `parallel_tool_calls`, and adapts the response back to the
-OpenAI-like shape consumed by `ModelAdapter`.
+OpenAI-like shape consumed by `ModelAdapter`. Provider-supplied Tool-call IDs
+are preserved exactly. When Ollama omits an ID, adaptation assigns a
+response-unique fallback prefix plus the response-local call index so distinct
+historical calls cannot collide during transcript replay or result trimming.
 
 Provider request failures are wrapped at the model-adapter boundary as
 `ModelRequestError` with the underlying exception retained as its cause. The
