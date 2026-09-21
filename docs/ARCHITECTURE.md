@@ -1508,6 +1508,8 @@ The runtime enforces:
 - malformed tool-call output is rejected
 - unknown tool names are rejected during model-adapter validation
 - missing required tool arguments are rejected during model-adapter validation
+- non-boolean values for boolean Tool schema properties are rejected during
+  model-adapter validation without coercion
 - empty replies with zero tool actions are rejected
 - replies with more than one tool action are rejected
 
@@ -2001,8 +2003,8 @@ editing.
 `run_command`:
 
 - requires an explicit boolean `verification` intent and returns that intent
-  with every process result; missing intent is rejected through normal Tool
-  schema validation
+  with every process result; missing or non-boolean intent is rejected through
+  normal Tool schema validation before command execution, without coercion
 - does not infer verification from command text, languages, or test frameworks
 - on Windows, invokes the detected PowerShell executable with `-NoProfile` and
   `-Command`, without `shell=True`

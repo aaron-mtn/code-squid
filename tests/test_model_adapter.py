@@ -285,6 +285,45 @@ def test_run_command_without_verification_is_rejected() -> None:
     )
 
 
+@pytest.mark.parametrize("verification", [True, False])
+def test_run_command_accepts_boolean_verification(verification: bool) -> None:
+    arguments = f'{{"command": "pytest -q", "verification": {str(verification).lower()}}}'
+
+    reply = adapter_response(
+        FakeToolCall("call_1", "run_command", arguments),
+        [run_command_definition()],
+    )
+
+    assert reply["format_error"] == ""
+    assert reply["actions"][0]["args"]["verification"] is verification
+
+
+@pytest.mark.parametrize(
+    "invalid_verification",
+    ['"true"', '"false"', "1", "0", "null", "[]", "{}"],
+)
+def test_run_command_rejects_non_boolean_verification_before_execution(
+    invalid_verification: str,
+) -> None:
+    arguments = (
+        '{"command": "must-not-execute", '
+        f'"verification": {invalid_verification}}}'
+    )
+
+    reply = adapter_response(
+        FakeToolCall("call_1", "run_command", arguments),
+        [run_command_definition()],
+    )
+
+    # The normal malformed-tool-call shape carries no executable action.
+    assert reply["actions"] == []
+    assert reply["format_error"] == (
+        "Invalid argument type for run_command.verification: expected boolean"
+    )
+    assert reply["recoverable_tool_name"] == "run_command"
+    assert reply["recoverable_raw_arguments"] == arguments
+
+
 @pytest.mark.parametrize(
     "arguments",
     [

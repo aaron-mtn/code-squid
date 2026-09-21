@@ -1,3 +1,15 @@
+- 2026-09-20: Tightened model-adapter Tool validation so boolean schema
+  properties accept only actual JSON booleans. `run_command.verification` now
+  rejects strings, numbers (including `0` and `1`), null, arrays, and objects
+  through the existing malformed-tool-call path before execution; required-field
+  and verification semantics are unchanged. Added focused regression coverage
+  for both accepted booleans, omission, every representative invalid value, the
+  normal diagnostic error shape, and absence of an executable action. The
+  focused model-adapter suite passed 43 tests, and the related Tool/executor/Agent
+  suite passed 228 tests. The full suite passed 1,408 tests with the existing
+  unrelated third-level Markdown-heading indentation failure. Production and
+  test packages compiled successfully, and `git diff --check` passed.
+
 - 2026-09-20: Made `RepeatedReadNudge` associate successful `read_file`
   coverage with each file's `(st_mtime_ns, size)` metadata and invalidate that
   file's coverage, trim provenance, patch-stale spans, and reread strikes when

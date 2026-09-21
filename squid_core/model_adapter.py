@@ -454,6 +454,13 @@ class ModelAdapter:
             )
             metadata[function["name"]] = {
                 "required_variants": required_variants,
+                "property_types": {
+                    name: property_schema.get("type")
+                    for name, property_schema in parameters.get(
+                        "properties", {}
+                    ).items()
+                    if isinstance(property_schema, dict)
+                },
             }
         return metadata
 
@@ -698,23 +705,42 @@ class ModelAdapter:
     # This is intentionally shallow for now:
     # - known tool name
     # - required argument presence
+    # - exact JSON boolean values for boolean schema properties
     #
-    # That gets us much closer to mini-swe's parser mindset without adding
-    # a bunch of schema machinery too early.
-    def _validate_tool_action(self, tool_name: str, args: dict, tool_metadata: dict) -> None:
+    # Boolean validation is kept at this protocol boundary so malformed model
+    # output cannot reach execution. In particular, Python's bool/int
+    # relationship makes equality or membership checks unsafe here.
+    def _validate_tool_action(
+        self,
+        tool_name: str,
+        args: dict,
+        tool_metadata: dict,
+    ) -> None:
         if tool_name not in tool_metadata:
             raise ValueError(f"Unknown tool: {tool_name}")
 
         required_variants = tool_metadata[tool_name]["required_variants"]
-        if any(all(name in args for name in required) for required in required_variants):
-            return
-
-        if len(required_variants) == 1:
-            missing_args = [name for name in required_variants[0] if name not in args]
-            missing = ", ".join(missing_args)
-            raise ValueError(f"Missing required arguments for {tool_name}: {missing}")
-
-        expected = " or ".join(
-            f"({', '.join(required)})" for required in required_variants
+        has_required_variant = any(
+            all(name in args for name in required)
+            for required in required_variants
         )
-        raise ValueError(f"Arguments for {tool_name} must include one of: {expected}")
+        if not has_required_variant:
+            if len(required_variants) == 1:
+                missing_args = [name for name in required_variants[0] if name not in args]
+                missing = ", ".join(missing_args)
+                raise ValueError(f"Missing required arguments for {tool_name}: {missing}")
+
+            expected = " or ".join(
+                f"({', '.join(required)})" for required in required_variants
+            )
+            raise ValueError(f"Arguments for {tool_name} must include one of: {expected}")
+
+        for name, expected_type in tool_metadata[tool_name]["property_types"].items():
+            if (
+                expected_type == "boolean"
+                and name in args
+                and not isinstance(args[name], bool)
+            ):
+                raise ValueError(
+                    f"Invalid argument type for {tool_name}.{name}: expected boolean"
+                )
