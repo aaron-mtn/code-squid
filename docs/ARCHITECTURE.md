@@ -409,7 +409,8 @@ and application layer; `squid_core/` is the reusable agent runtime.
   - Core-owned provider contract and first-party provider transports.
   - `openai_compatible.py` owns OpenAI-compatible chat-completions transport,
     including OpenRouter request quirks already supported by that path.
-  - `ollama.py` owns native Ollama `/api/chat` transport and response adaptation.
+  - `ollama.py` owns native Ollama `/api/chat` transport, its finite request
+    timeout default, and response adaptation.
   - `__init__.py` contains the small built-in construction helper and backend
     replay choice. It consumes effective `ProviderSettings` and has no Code
     Squid defaults, settings loading, environment, or presentation policy.
@@ -1482,6 +1483,12 @@ OpenAI-like shape consumed by `ModelAdapter`. Provider-supplied Tool-call IDs
 are preserved exactly. When Ollama omits an ID, adaptation assigns a
 response-unique fallback prefix plus the response-local call index so distinct
 historical calls cannot collide during transcript replay or result trimming.
+Both normal and streaming chat opens use the provider-owned request timeout,
+which defaults to 300 seconds and can be overridden with
+`model.ollama_request_timeout`. The application passes the optional effective
+value through `ProviderSettings`; timeout enforcement remains inside the native
+Ollama transport. Timeout exceptions follow the ordinary `ModelRequestError`
+boundary and therefore retain the existing generic transient-failure policy.
 
 Provider request failures are wrapped at the model-adapter boundary as
 `ModelRequestError` with the underlying exception retained as its cause. The

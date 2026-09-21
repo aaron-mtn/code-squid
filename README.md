@@ -228,7 +228,8 @@ Set `provider` to `ollama` to use the native Ollama provider:
 {
   "model": {
     "provider": "ollama",
-    "name": "your-tool-capable-model"
+    "name": "your-tool-capable-model",
+    "ollama_request_timeout": 300
   },
   "providers": {
     "ollama": {
@@ -239,7 +240,8 @@ Set `provider` to `ollama` to use the native Ollama provider:
 ```
 
 The native Ollama provider is experimental and works best with tool-capable
-models.
+models. `model.ollama_request_timeout` is an optional positive number of
+seconds; native Ollama inference defaults to 300 seconds when it is omitted.
 
 ## Commands
 

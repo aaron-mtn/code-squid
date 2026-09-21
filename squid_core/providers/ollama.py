@@ -13,6 +13,9 @@ from .base import BaseProvider, StreamCancelled
 
 
 DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+# Local inference can legitimately take minutes, but it must still have a
+# finite transport boundary so a stalled Ollama process cannot hang the agent.
+DEFAULT_OLLAMA_REQUEST_TIMEOUT = 300.0
 
 
 class OllamaProvider(BaseProvider):
@@ -22,9 +25,19 @@ class OllamaProvider(BaseProvider):
         self,
         base_url: str = DEFAULT_OLLAMA_BASE_URL,
         temperature: float | int | None = None,
+        request_timeout: float | int | None = None,
     ) -> None:
         self.base_url = _native_base_url(base_url)
         self.temperature = temperature
+        if request_timeout is None:
+            request_timeout = DEFAULT_OLLAMA_REQUEST_TIMEOUT
+        if (
+            isinstance(request_timeout, bool)
+            or not isinstance(request_timeout, int | float)
+            or request_timeout <= 0
+        ):
+            raise ValueError("Ollama request_timeout must be a positive number")
+        self.request_timeout = float(request_timeout)
 
     def supports_streaming(self) -> bool:
         return True
@@ -236,13 +249,19 @@ class OllamaProvider(BaseProvider):
         )
 
         try:
-            with request.urlopen(http_request) as response:
+            with request.urlopen(
+                http_request,
+                timeout=self.request_timeout,
+            ) as response:
                 return json.loads(response.read().decode("utf-8"))
         except HTTPError as error:
             details = error.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"Ollama request failed with HTTP {error.code}: {details}") from error
         except URLError as error:
-            raise RuntimeError(f"Ollama request failed: {error.reason}") from error
+            # urllib nests socket timeouts in URLError.reason. Preserve that
+            # concrete cause so the shared failure classifier sees a timeout.
+            cause = error.reason if isinstance(error.reason, BaseException) else error
+            raise RuntimeError(f"Ollama request failed: {error.reason}") from cause
 
     def _post_chat_stream(self, payload: dict):
         body = json.dumps(payload).encode("utf-8")
@@ -254,7 +273,10 @@ class OllamaProvider(BaseProvider):
         )
 
         try:
-            with request.urlopen(http_request) as response:
+            with request.urlopen(
+                http_request,
+                timeout=self.request_timeout,
+            ) as response:
                 for line in response:
                     line = line.strip()
                     if not line:
@@ -264,7 +286,8 @@ class OllamaProvider(BaseProvider):
             details = error.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"Ollama request failed with HTTP {error.code}: {details}") from error
         except URLError as error:
-            raise RuntimeError(f"Ollama request failed: {error.reason}") from error
+            cause = error.reason if isinstance(error.reason, BaseException) else error
+            raise RuntimeError(f"Ollama request failed: {error.reason}") from cause
 
 
 def _native_base_url(base_url: str | None) -> str:

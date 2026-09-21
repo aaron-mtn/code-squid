@@ -43,6 +43,7 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert settings.model.temperature is None
     assert settings.model.reasoning_mode is None
     assert settings.model.reasoning_token_budget is None
+    assert settings.model.ollama_request_timeout is None
     assert settings.display.debug is False
     assert settings.runtime.approval_mode == "never"
     assert settings.runtime.max_tool_steps is None
@@ -61,6 +62,7 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert runtime_settings.provider.api_key == "lm-studio"
     assert runtime_settings.provider.reasoning_mode is None
     assert runtime_settings.provider.reasoning_token_budget is None
+    assert runtime_settings.provider.ollama_request_timeout is None
     assert runtime_settings.approval_mode == "never"
     assert runtime_settings.compaction.compact_fraction == 0.8
     assert runtime_settings.compaction.min_recent_chunks == 2
@@ -404,6 +406,26 @@ def test_settings_file_accepts_reasoning_token_budget(
         settings.to_runtime_settings().provider.reasoning_token_budget
         == reasoning_token_budget
     )
+
+
+def test_settings_file_accepts_ollama_request_timeout(tmp_path: Path) -> None:
+    write_settings(tmp_path, {"model": {"ollama_request_timeout": 45.5}})
+
+    settings = load_settings(tmp_path)
+
+    assert settings.model.ollama_request_timeout == 45.5
+    assert settings.to_runtime_settings().provider.ollama_request_timeout == 45.5
+
+
+@pytest.mark.parametrize("value", [0, -1, True, False, "45", []])
+def test_invalid_ollama_request_timeout_raises(
+    tmp_path: Path,
+    value: object,
+) -> None:
+    write_settings(tmp_path, {"model": {"ollama_request_timeout": value}})
+
+    with pytest.raises(ValueError, match=r"model\.ollama_request_timeout"):
+        load_settings(tmp_path)
 
 
 def test_settings_file_allows_null_max_tool_steps(tmp_path: Path) -> None:

@@ -1,7 +1,11 @@
 """First-party provider transports and simple settings-based construction."""
 
 from squid_core.providers.base import BaseProvider
-from squid_core.providers.ollama import DEFAULT_OLLAMA_BASE_URL, OllamaProvider
+from squid_core.providers.ollama import (
+    DEFAULT_OLLAMA_BASE_URL,
+    DEFAULT_OLLAMA_REQUEST_TIMEOUT,
+    OllamaProvider,
+)
 from squid_core.providers.openai_compatible import OpenAICompatibleProvider
 from squid_core.settings import ProviderSettings
 
@@ -22,6 +26,7 @@ def build_provider(
         return OllamaProvider(
             base_url=settings.base_url or DEFAULT_OLLAMA_BASE_URL,
             temperature=settings.temperature,
+            request_timeout=getattr(settings, "ollama_request_timeout", None),
         )
 
     if settings.provider in OPENAI_COMPATIBLE_PROVIDERS:
@@ -49,6 +54,7 @@ def tool_call_content_mode(settings: ProviderSettings) -> str:
 
 __all__ = [
     "BaseProvider",
+    "DEFAULT_OLLAMA_REQUEST_TIMEOUT",
     "OllamaProvider",
     "OpenAICompatibleProvider",
     "build_provider",

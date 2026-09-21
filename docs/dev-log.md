@@ -1,3 +1,17 @@
+- 2026-09-20: Added a finite, provider-owned timeout to native Ollama inference.
+  Normal and streaming `/api/chat` transports now use the same configurable
+  `model.ollama_request_timeout`, with a 300-second provider default. Timeout
+  failures continue through the existing `ModelRequestError` boundary and
+  generic transient retry policy; reasoning, model selection, and provider
+  request semantics are unchanged. Added focused coverage for configured and
+  default timeout propagation, normal and streaming failures, successful
+  responses, settings translation, and invalid configuration. No live Ollama
+  inference was run. The focused Ollama/provider/settings suite passed 159
+  tests, and the related model-adapter/Agent/generation/runner suite passed 167
+  tests. The full suite passed 1,421 tests with the existing unrelated
+  third-level Markdown-heading indentation failure. Production and test
+  packages compiled successfully, and `git diff --check` passed.
+
 - 2026-09-20: Tightened model-adapter Tool validation so boolean schema
   properties accept only actual JSON booleans. `run_command.verification` now
   rejects strings, numbers (including `0` and `1`), null, arrays, and objects

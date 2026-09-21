@@ -1,13 +1,23 @@
 """Tests for native Ollama transport, adaptation, and transcript replay."""
 
 import json
+from urllib.error import URLError
 
 import pytest
 
-from squid_core.model_adapter import ModelAdapter
+from squid_core.model_adapter import (
+    ModelAdapter,
+    ModelRequestError,
+    model_request_error_details,
+)
 from squid_core.providers import build_provider, tool_call_content_mode
 from squid_core.providers.base import StreamCancelled
-from squid_core.providers.ollama import OllamaProvider, adapt_response, convert_messages
+from squid_core.providers.ollama import (
+    DEFAULT_OLLAMA_REQUEST_TIMEOUT,
+    OllamaProvider,
+    adapt_response,
+    convert_messages,
+)
 from squid_core.providers.openai_compatible import OpenAICompatibleProvider
 from squid_core.settings import ProviderSettings, ToolResultTrimmingSettings
 from squid_core.tool_result_trimming import render_messages_for_model
@@ -69,6 +79,105 @@ class ClosableStreamingOllamaProvider(OllamaProvider):
 
     def _post_chat_stream(self, payload: dict):
         return self.stream
+
+
+class FakeHTTPResponse:
+    """Minimal context-managed HTTP response for transport-focused tests."""
+
+    def __init__(self, body: bytes, lines: list[bytes] | None = None) -> None:
+        self.body = body
+        self.lines = lines or []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self.body
+
+    def __iter__(self):
+        return iter(self.lines)
+
+
+def test_configured_timeout_is_passed_to_normal_and_streaming_transports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+    responses = iter(
+        [
+            FakeHTTPResponse(b'{"message":{"content":"Done."}}'),
+            FakeHTTPResponse(
+                b"",
+                [b'{"message":{"content":"Streamed."},"done":true}\n'],
+            ),
+        ]
+    )
+
+    def urlopen(http_request, *, timeout):
+        calls.append((http_request.full_url, timeout))
+        return next(responses)
+
+    monkeypatch.setattr("squid_core.providers.ollama.request.urlopen", urlopen)
+    provider = OllamaProvider(request_timeout=12.5)
+
+    normal = provider.create_response("test-model", [], [])
+    streamed = provider.stream_chat("test-model", [], [], lambda _delta: None)
+
+    assert calls == [
+        ("http://127.0.0.1:11434/api/chat", 12.5),
+        ("http://127.0.0.1:11434/api/chat", 12.5),
+    ]
+    assert normal.choices[0].message.content == "Done."
+    assert streamed.choices[0].message.content == "Streamed."
+
+
+def test_default_timeout_is_finite_and_provider_owned() -> None:
+    provider = OllamaProvider()
+
+    assert provider.request_timeout == DEFAULT_OLLAMA_REQUEST_TIMEOUT
+
+
+@pytest.mark.parametrize("streaming", [False, True], ids=["normal", "streaming"])
+def test_timeout_uses_model_request_failure_path(
+    monkeypatch: pytest.MonkeyPatch,
+    streaming: bool,
+) -> None:
+    def urlopen(_http_request, *, timeout):
+        assert timeout == 4.0
+        raise TimeoutError("Ollama stalled")
+
+    monkeypatch.setattr("squid_core.providers.ollama.request.urlopen", urlopen)
+    adapter = ModelAdapter(
+        OllamaProvider(request_timeout=4),
+        model_name="test-model",
+    )
+
+    with pytest.raises(ModelRequestError, match="Ollama stalled") as exc_info:
+        if streaming:
+            adapter.respond_streaming([], [], lambda _delta: None)
+        else:
+            adapter.respond([], [])
+
+    assert isinstance(exc_info.value.__cause__, TimeoutError)
+
+
+def test_nested_urllib_timeout_remains_a_transient_timeout_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def urlopen(_http_request, *, timeout):
+        raise URLError(TimeoutError(f"stalled after {timeout} seconds"))
+
+    monkeypatch.setattr("squid_core.providers.ollama.request.urlopen", urlopen)
+    adapter = ModelAdapter(OllamaProvider(request_timeout=3), "test-model")
+
+    with pytest.raises(ModelRequestError) as exc_info:
+        adapter.respond([], [])
+
+    details = model_request_error_details(exc_info.value)
+    assert details["failure_class"] == "timeout"
+    assert details["_transient"] is True
 
 
 def test_stream_trace_reports_native_raw_thinking_and_summary() -> None:
@@ -662,6 +771,22 @@ def test_provider_selection_uses_native_ollama_default_base_url() -> None:
 
     assert isinstance(provider, OllamaProvider)
     assert provider.base_url == "http://127.0.0.1:11434"
+    assert provider.request_timeout == DEFAULT_OLLAMA_REQUEST_TIMEOUT
+
+
+def test_provider_selection_threads_configured_timeout_to_ollama() -> None:
+    settings = ProviderSettings(
+        provider="ollama",
+        model_name="model",
+        base_url=None,
+        api_key=None,
+        ollama_request_timeout=45,
+    )
+
+    provider = build_provider(settings)
+
+    assert isinstance(provider, OllamaProvider)
+    assert provider.request_timeout == 45.0
 
 
 def test_provider_selection_threads_temperature() -> None:

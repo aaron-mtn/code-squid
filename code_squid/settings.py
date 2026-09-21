@@ -31,6 +31,7 @@ DEFAULT_DEBUG = False
 DEFAULT_TEMPERATURE = None
 DEFAULT_REASONING_MODE = None
 DEFAULT_REASONING_TOKEN_BUDGET = None
+DEFAULT_OLLAMA_REQUEST_TIMEOUT = None
 
 # Approval mode is parsed here, but enforcement belongs in the runtime/tool
 # execution path. "never" is the current trusted-local behavior.
@@ -61,6 +62,7 @@ class ModelSettings:
     temperature: float | int | None = DEFAULT_TEMPERATURE
     reasoning_mode: str | None = DEFAULT_REASONING_MODE
     reasoning_token_budget: int | None = DEFAULT_REASONING_TOKEN_BUDGET
+    ollama_request_timeout: float | int | None = DEFAULT_OLLAMA_REQUEST_TIMEOUT
 
 
 @dataclass(frozen=True)
@@ -116,6 +118,7 @@ class Settings:
                 temperature=self.model.temperature,
                 reasoning_mode=self.model.reasoning_mode,
                 reasoning_token_budget=self.model.reasoning_token_budget,
+                ollama_request_timeout=self.model.ollama_request_timeout,
             ),
             approval_mode=self.runtime.approval_mode,
             max_tool_steps=self.runtime.max_tool_steps,
@@ -474,6 +477,30 @@ def _reasoning_token_budget(
     )
 
 
+def _ollama_request_timeout(
+    model_settings: dict[str, Any],
+    settings_path: Path,
+) -> float | int | None:
+    """Read an optional Ollama-only timeout; the provider owns its default."""
+
+    timeout = model_settings.get(
+        "ollama_request_timeout",
+        DEFAULT_OLLAMA_REQUEST_TIMEOUT,
+    )
+    if timeout is None:
+        return None
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, int | float)
+        or timeout <= 0
+    ):
+        raise ValueError(
+            f"Invalid settings JSON in {settings_path}: "
+            "model.ollama_request_timeout must be null or a positive number"
+        )
+    return timeout
+
+
 def _provider(model_settings: dict[str, Any], settings_path: Path) -> str:
     provider = os.getenv("CODE_SQUID_PROVIDER", model_settings.get("provider", DEFAULT_PROVIDER))
     if provider not in VALID_PROVIDERS:
@@ -561,6 +588,7 @@ def load_settings(repo_root: Path) -> Settings:
     temperature = _temperature(model_settings, settings_path)
     reasoning_mode = _reasoning_mode(model_settings, settings_path)
     reasoning_token_budget = _reasoning_token_budget(model_settings, settings_path)
+    ollama_request_timeout = _ollama_request_timeout(model_settings, settings_path)
     debug = display_settings.get("debug", DEFAULT_DEBUG)
     approval_mode = _approval_mode(runtime_settings, settings_path)
     max_tool_steps = _max_tool_steps(runtime_settings, settings_path)
@@ -585,6 +613,7 @@ def load_settings(repo_root: Path) -> Settings:
             temperature=temperature,
             reasoning_mode=reasoning_mode,
             reasoning_token_budget=reasoning_token_budget,
+            ollama_request_timeout=ollama_request_timeout,
         ),
         display=DisplaySettings(debug=bool(debug)),
         runtime=RuntimeSettings(

@@ -20,6 +20,8 @@ class ProviderSettings:
     temperature: float | int | None = None
     reasoning_mode: str | None = None
     reasoning_token_budget: int | None = None
+    # This remains provider-specific: only native Ollama construction consumes it.
+    ollama_request_timeout: float | int | None = None
 
     def __post_init__(self) -> None:
         if not self.provider:
@@ -56,6 +58,17 @@ class ProviderSettings:
         ):
             raise ValueError(
                 "reasoning_token_budget must be null or a non-negative integer"
+            )
+        if (
+            self.ollama_request_timeout is not None
+            and (
+                isinstance(self.ollama_request_timeout, bool)
+                or not isinstance(self.ollama_request_timeout, int | float)
+                or self.ollama_request_timeout <= 0
+            )
+        ):
+            raise ValueError(
+                "ollama_request_timeout must be null or a positive number"
             )
 
 
