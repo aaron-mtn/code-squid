@@ -2023,3 +2023,11 @@
   `git diff --check` passed. The full suite passed 1,428 tests and retained the
   unrelated pre-existing Markdown heading indentation failure in
   `tests/test_markdown_formatting.py`.
+- 2026-09-21: Removed Code Squid branding from dynamic module identities
+  synthesized by Squid Core's Hook and user Tool loaders. Hook names retain
+  their stable source-path digest, while Tool names retain a fresh UUID per
+  execution, preserving repeat-load behavior and isolation without adding a
+  loader abstraction. Focused tests cover successful imports, neutral names,
+  distinct Hook identities, stable Hook reloads, and fresh Tool identities.
+  Verification: 114 focused loader/Mod/Skill/runner/Core-boundary tests passed;
+  compilation and `git diff --check` passed; the full suite passed 1,434 tests.

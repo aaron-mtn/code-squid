@@ -259,7 +259,7 @@ def _resolve_entrypoint(tool_dir: Path, entrypoint: str) -> Path:
 
 
 def _load_user_tool_module(tool_name: str, entrypoint: Path):
-    module_name = f"_code_squid_user_tool_{tool_name}_{uuid.uuid4().hex}"
+    module_name = f"squid_core_dynamic_user_tool_{tool_name}_{uuid.uuid4().hex}"
     spec = importlib.util.spec_from_file_location(module_name, entrypoint)
     if spec is None or spec.loader is None:
         raise UserToolError(f"{entrypoint}: could not load user tool module")

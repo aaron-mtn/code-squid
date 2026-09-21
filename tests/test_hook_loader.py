@@ -1,3 +1,5 @@
+"""Tests for metadata discovery and dynamic loading of user hooks."""
+
 from pathlib import Path
 
 import pytest
@@ -92,6 +94,31 @@ def create_hook(config=None):
 
     assert len(hooks) == 1
     assert hooks[0].marker == "loaded"
+
+
+def test_hook_module_names_are_core_owned_stable_and_isolated(tmp_path: Path) -> None:
+    hooks_dir = tmp_path / "hooks"
+    source = "def create_hook(config=None):\n    return __name__\n"
+    _write_hook(
+        hooks_dir,
+        "first",
+        "name: first-hook\nenabled: true\n",
+        source,
+    )
+    _write_hook(
+        hooks_dir,
+        "second",
+        "name: second-hook\nenabled: true\n",
+        source,
+    )
+
+    first_load = load_user_hooks(hooks_dir)
+    second_load = load_user_hooks(hooks_dir)
+
+    assert first_load == second_load
+    assert len(set(first_load)) == 2
+    assert all(name.startswith("squid_core_dynamic_user_hook_") for name in first_load)
+    assert all("code_squid" not in name for name in first_load)
 
 
 def test_selected_hook_info_loads_through_public_api(tmp_path: Path) -> None:

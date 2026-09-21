@@ -229,7 +229,7 @@ def _module_name(info: HookInfo) -> str:
     safe_name = "".join(
         character if character.isalnum() else "_" for character in info.name
     )
-    return f"code_squid_user_hook_{safe_name}_{digest}"
+    return f"squid_core_dynamic_user_hook_{safe_name}_{digest}"
 
 
 def _accepts_config(factory: Any) -> bool:

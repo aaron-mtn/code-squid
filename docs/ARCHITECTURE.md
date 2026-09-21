@@ -1198,6 +1198,13 @@ are:
 - `mods/<mod-name>/mod.yaml` stores canonical user Mod packages with optional
   package-local Skills, Tools, and Hooks.
 
+Core imports executable Hook and Tool source under neutral
+`squid_core_dynamic_*` module identities. Hook identities are stable for a
+Hook name and resolved source path so reloading the same Hook retains its
+existing behavior; Tool executions receive fresh identities so separately
+executed dynamic modules remain isolated. These internal names do not encode
+the embedding application's identity.
+
 Mod metadata supports an optional top-level semantic accent, for example
 `accent: purple`. The effective default is `cyan`; allowed names are `cyan`,
 `blue`, `green`, `yellow`, `orange`, `red`, `pink`, `purple`, `white`, and

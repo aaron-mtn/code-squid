@@ -1,3 +1,5 @@
+"""Tests for discovery and lazy execution of user-defined tools."""
+
 from pathlib import Path
 
 import pytest
@@ -226,6 +228,26 @@ def run(args, context=None):
     assert not marker.exists()
     assert registry["lazy"]["execute"](tmp_path)["message"] == "done"
     assert marker.read_text(encoding="utf-8") == "imported"
+
+
+def test_user_tool_module_names_are_core_owned_fresh_and_isolated(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    _write_tool(
+        home,
+        "module_identity",
+        "name: module_identity\n",
+        "def run(args, context=None):\n    return __name__\n",
+    )
+    execute = build_user_tool_registry(app_home=home)["module_identity"]["execute"]
+
+    first_name = execute(tmp_path)["message"]
+    second_name = execute(tmp_path)["message"]
+
+    assert first_name.startswith("squid_core_dynamic_user_tool_module_identity_")
+    assert "code_squid" not in first_name
+    assert second_name != first_name
 
 
 def test_explicit_user_tool_metadata_builds_executable_registry_without_discovery(
