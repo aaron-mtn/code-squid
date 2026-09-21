@@ -1346,6 +1346,16 @@ unrelated JSON settings. Workspace switching reloads that same application
 file while rebuilding only workspace-bound session, undo, display, and
 discovery state.
 
+Settings readers and writers continue to expose filesystem and validation
+exceptions. The console application contains expected `OSError` and settings
+`ValueError` failures at the user-facing operation that owns them: interactive
+runtime commands print a concise failure and retain their last known-good
+settings, the startup menu renders the failure inside its prompt-toolkit panel,
+and launch-time setup or standalone `safety` returns a nonzero status. Success
+text is emitted only after the corresponding write returns. Other exception
+types continue to escape these boundaries so implementation defects are not
+mistaken for ordinary persistence failures.
+
 Invalid settings JSON, invalid section shapes, invalid provider names, unknown
 approval modes, missing configured API-key environment variables, invalid
 temperatures, invalid compaction settings, and invalid step limits fail during

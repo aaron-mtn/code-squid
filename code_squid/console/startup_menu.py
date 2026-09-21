@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import textwrap
 from typing import Callable, Sequence
 
 from code_squid.app_paths import code_squid_home, load_recent_workspaces
@@ -90,6 +91,7 @@ class StartupMenu:
         self._workspace_paths: tuple[Path, ...] = ()
         self._workspace_handoff: Path | None = None
         self._provider_statuses: dict[str, bool] = {}
+        self._settings_error: str | None = None
         # Only an explicit saved-session choice arms the one-time CLI notice.
         # Initial ``--resume`` state and later follow-ups must remain silent.
         self._selected_session_notice: dict | None = None
@@ -239,18 +241,27 @@ class StartupMenu:
             return False
 
         selected = self._options[self.selected_index]
+        self._settings_error = None
         saved_session_activated = False
-        if self.mode == "provider":
-            self.settings, _ = select_provider(self.repo_root, selected)
-            # The prompt-toolkit Application still owns stdout here. Provider
-            # explanations are informational, and this menu has no message
-            # surface, so leave them to the slash-command path instead of
-            # writing through the live renderer.
-        elif self.mode == "model":
-            self.settings = apply_model(self.repo_root, selected)
-        elif self.mode == "safety":
-            self.settings = apply_safety(self.repo_root, selected)
-        elif self.mode == "mod":
+        try:
+            if self.mode == "provider":
+                self.settings, _ = select_provider(self.repo_root, selected)
+                # The prompt-toolkit Application still owns stdout here.
+                # Provider explanations are informational, so leave them to
+                # the slash-command path instead of writing through the live
+                # renderer.
+            elif self.mode == "model":
+                self.settings = apply_model(self.repo_root, selected)
+            elif self.mode == "safety":
+                self.settings = apply_safety(self.repo_root, selected)
+        except (OSError, ValueError) as error:
+            # Menu callbacks run inside prompt-toolkit's renderer thread. Keep
+            # expected persistence failures on its existing panel surface;
+            # other exception types must still escape as programming errors.
+            self._settings_error = f"Settings change failed: {error}"
+            return False
+
+        if self.mode == "mod":
             self.mod_name, self.skill_name = apply_mod_selection(
                 selected,
                 self.skill_name,
@@ -287,6 +298,7 @@ class StartupMenu:
         next_mode = MAIN_ROWS[self.selected_index].lower()
         self.selected_index = 0
         self._model_message = ()
+        self._settings_error = None
         # Prepare the selected submenu before publishing its mode. Rendering can
         # occur from discovery callbacks and must not pair a new mode with the
         # preceding submenu's shared state.
@@ -391,6 +403,17 @@ class StartupMenu:
             return self._workspace_panel_lines(layout)
 
         title = self.mode.title()
+        if self._settings_error is not None:
+            # Error feedback takes over the compact panel so even the minimum
+            # layout can show both its context and the underlying OS message.
+            width = max(layout.panel.width - 4, 1)
+            return _framed_rows(
+                [
+                    f"{title} error",
+                    *textwrap.wrap(self._settings_error, width=width),
+                ],
+                layout,
+            )
         if self.mode == "model" and self._model_message:
             return _submenu_rows(title, self._model_message, layout)
 

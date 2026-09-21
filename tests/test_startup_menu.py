@@ -9,6 +9,7 @@ from pathlib import Path
 import threading
 from types import SimpleNamespace
 
+import pytest
 from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
@@ -352,6 +353,61 @@ def test_provider_selection_without_explanation_returns_to_focused_main_menu(
 
     menu.move(1)
     assert menu.selected_index == MAIN_ROWS.index("Model")
+
+
+def test_startup_settings_failure_stays_in_panel_without_claiming_success(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    initial = load_settings(tmp_path)
+
+    def deny_write(*_args) -> None:
+        raise PermissionError("read-only storage")
+
+    monkeypatch.setattr(
+        "code_squid.console.startup_menu.apply_model",
+        deny_write,
+    )
+    menu = StartupMenu(
+        tmp_path,
+        initial,
+        model_discovery=lambda _settings: ["next-model"],
+    )
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Model")
+    menu.activate()
+
+    assert menu.activate() is False
+    assert menu.settings is initial
+    assert menu.mode == "model"
+    rendered = "\n".join(menu.panel_lines(startup_scene_layout(80)))
+    assert "Model error" in rendered
+    assert "Settings change failed: read-only" in rendered
+    assert "storage" in rendered
+
+
+def test_startup_settings_does_not_swallow_programming_errors(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    def fail_unexpectedly(*_args) -> None:
+        raise RuntimeError("broken menu callback")
+
+    monkeypatch.setattr(
+        "code_squid.console.startup_menu.apply_model",
+        fail_unexpectedly,
+    )
+    menu = StartupMenu(
+        tmp_path,
+        load_settings(tmp_path),
+        model_discovery=lambda _settings: ["next-model"],
+    )
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Model")
+    menu.activate()
+
+    with pytest.raises(RuntimeError, match="broken menu callback"):
+        menu.activate()
 
 
 def test_provider_menu_uses_friendly_names_and_only_two_status_labels(

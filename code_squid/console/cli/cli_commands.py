@@ -45,7 +45,11 @@ def _undo(repo_root: Path) -> int:
 
 def _safety(repo_root: Path, args: list[str]) -> int:
     if not args:
-        settings = load_settings(repo_root)
+        try:
+            settings = load_settings(repo_root)
+        except (OSError, ValueError) as error:
+            print(f"Safety settings could not be loaded: {error}")
+            return 1
         approval_mode = settings.runtime.approval_mode
         friendly_mode = FRIENDLY_APPROVAL_MODES[approval_mode]
         print(f"Current safety mode: {friendly_mode} (approval_mode={approval_mode})")
@@ -60,7 +64,11 @@ def _safety(repo_root: Path, args: list[str]) -> int:
 
     friendly_mode = args[0]
     approval_mode = APPROVAL_MODES[friendly_mode]
-    write_approval_mode(repo_root, approval_mode)
+    try:
+        write_approval_mode(repo_root, approval_mode)
+    except (OSError, ValueError) as error:
+        print(f"Safety mode was not saved: {error}")
+        return 1
 
     if friendly_mode == "strict":
         print(
@@ -127,6 +135,9 @@ def run_cli(args: list[str]) -> int:
         except FileNotFoundError as error:
             print(error)
             return 1
+        except OSError as error:
+            print(f"Code Squid setup failed: {error}")
+            return 1
 
     if args:
         print(SHELL_HELP, end="")
@@ -136,4 +147,7 @@ def run_cli(args: list[str]) -> int:
         return _run_interactive(repo_root, skill_name)
     except ValueError as error:
         print(error)
+        return 1
+    except OSError as error:
+        print(f"Code Squid setup failed: {error}")
         return 1

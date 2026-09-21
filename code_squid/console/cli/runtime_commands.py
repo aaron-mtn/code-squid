@@ -67,18 +67,25 @@ def handle_runtime_command(
     }:
         return False, settings
 
-    if parts[0] == "/provider":
-        _handle_provider(repo_root, parts[1:])
-    elif parts[0] == "/model":
-        _handle_model(repo_root, parts[1:])
-    elif parts[0] == "/safety":
-        _handle_safety(repo_root, parts[1:])
-    else:
-        _handle_compact_at(repo_root, parts[1:])
+    try:
+        if parts[0] == "/provider":
+            _handle_provider(repo_root, parts[1:])
+        elif parts[0] == "/model":
+            _handle_model(repo_root, parts[1:])
+        elif parts[0] == "/safety":
+            _handle_safety(repo_root, parts[1:])
+        else:
+            _handle_compact_at(repo_root, parts[1:])
 
-    # Reloading keeps later runs current without adding mutable settings state
-    # or a settings-manager lifecycle to this deliberately small CLI.
-    return True, load_settings(repo_root)
+        # Reloading keeps later runs current without adding mutable settings
+        # state or a settings-manager lifecycle to this deliberately small CLI.
+        return True, load_settings(repo_root)
+    except (OSError, ValueError) as error:
+        # Settings helpers deliberately expose operational and validation
+        # failures. This command boundary owns turning them into ordinary CLI
+        # feedback while retaining the last known-good in-memory settings.
+        print(f"Settings change failed: {error}")
+        return True, settings
 
 
 def _handle_compact_at(repo_root: Path, args: list[str]) -> None:

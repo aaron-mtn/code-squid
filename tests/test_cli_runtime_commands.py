@@ -507,6 +507,64 @@ def test_model_status_and_selection_persist_without_losing_settings(tmp_path, ca
     assert persisted["runtime"] == {"max_tool_steps": 4}
 
 
+def test_model_write_failure_is_reported_without_success_or_state_change(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    current = load_settings(tmp_path)
+
+    def deny_write(*_args, **_kwargs) -> None:
+        raise PermissionError("settings directory is read-only")
+
+    monkeypatch.setattr("code_squid.settings.write_model_name", deny_write)
+
+    handled, settings = handle_runtime_command(
+        tmp_path,
+        "/model unavailable-model",
+        current,
+    )
+
+    output = capsys.readouterr().out
+    assert handled is True
+    assert settings is current
+    assert "Settings change failed: settings directory is read-only" in output
+    assert "Model set to:" not in output
+    assert not settings_path().exists()
+
+
+def test_runtime_settings_validation_failure_uses_command_error_surface(
+    tmp_path,
+    capsys,
+) -> None:
+    current = load_settings(tmp_path)
+    path = settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"model": []}', encoding="utf-8")
+
+    handled, settings = handle_runtime_command(tmp_path, "/model next", current)
+
+    assert handled is True
+    assert settings is current
+    assert "Invalid settings JSON" in capsys.readouterr().out
+
+
+def test_runtime_settings_does_not_swallow_programming_errors(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    def fail_unexpectedly(*_args, **_kwargs) -> None:
+        raise RuntimeError("broken command implementation")
+
+    monkeypatch.setattr(
+        "code_squid.console.cli.runtime_commands._handle_model",
+        fail_unexpectedly,
+    )
+
+    with pytest.raises(RuntimeError, match="broken command implementation"):
+        handle_runtime_command(tmp_path, "/model next", load_settings(tmp_path))
+
+
 def test_model_environment_override_is_reported_but_saved(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CODE_SQUID_MODEL", "environment-model")
 

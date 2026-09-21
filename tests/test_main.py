@@ -365,6 +365,44 @@ def test_safety_strict_creates_minimal_settings_file(tmp_path, capsys) -> None:
     capsys.readouterr()
 
 
+def test_shell_safety_write_failure_returns_nonzero_without_success(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    def deny_write(*_args) -> None:
+        raise PermissionError("atomic replace denied")
+
+    monkeypatch.setattr(
+        "code_squid.console.cli.cli_commands.write_approval_mode",
+        deny_write,
+    )
+
+    assert _safety(tmp_path, ["strict"]) == 1
+    assert capsys.readouterr().out == (
+        "Safety mode was not saved: atomic replace denied\n"
+    )
+
+
+def test_cli_startup_filesystem_failure_is_concise(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    def fail_setup(*_args) -> int:
+        raise OSError("settings path is unavailable")
+
+    monkeypatch.setattr(
+        "code_squid.console.cli.cli_commands._run_interactive",
+        fail_setup,
+    )
+
+    assert run_cli(["--cwd", str(tmp_path)]) == 1
+    assert capsys.readouterr().out == (
+        "Code Squid setup failed: settings path is unavailable\n"
+    )
+
+
 def test_safety_invalid_value_does_not_modify_settings(tmp_path, capsys) -> None:
     settings_path = _write_settings(tmp_path, {"runtime": {"approval_mode": "always"}})
     original = settings_path.read_text(encoding="utf-8")

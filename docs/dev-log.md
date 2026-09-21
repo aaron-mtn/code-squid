@@ -2008,3 +2008,18 @@
   compilation and `git diff --check` passed. The full suite passed 1,399 tests
   and retained the unrelated Markdown heading indentation failure in
   `tests/test_markdown_formatting.py`.
+- 2026-09-21: Contained expected settings persistence and setup failures at the
+  console application boundaries. Slash-command mutations now report
+  `OSError` and settings-validation `ValueError` failures while retaining the
+  last known-good in-memory settings; startup-menu mutations show the same
+  context inside the menu panel without crossing the renderer thread; and the
+  standalone safety/startup dispatch paths return a concise nonzero failure.
+  Core atomic/settings helpers remain exception-transparent, success output is
+  still emitted only after a completed write, and unexpected exception types
+  still propagate. Regression coverage includes successful persistence,
+  denied writes, malformed settings, suppressed success output, startup-panel
+  feedback, and propagation of programming errors. Focused verification: 256
+  CLI/startup/settings/atomic-write tests passed. Compilation and
+  `git diff --check` passed. The full suite passed 1,428 tests and retained the
+  unrelated pre-existing Markdown heading indentation failure in
+  `tests/test_markdown_formatting.py`.
