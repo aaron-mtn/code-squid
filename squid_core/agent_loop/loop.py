@@ -13,7 +13,7 @@ from squid_core.agent_loop.event_emitter import (
 from squid_core.agent_loop.transcript_recording import (
     record_message,
     record_messages,
-    record_pending_tool_result,
+    record_pending_tool_results,
     reconcile_system_message,
     turn_context_message,
     user_instruction_message,
@@ -135,19 +135,20 @@ class AgentLoop:
         status: Literal["failed", "interrupted"],
         reason: str,
         run_stage: str,
-        pending_tool_action: dict | None,
-        pending_tool_result: dict | None,
+        pending_tool_actions: list[dict],
+        pending_tool_results: list[dict],
+        tool_steps_used: int,
         runtime_event: dict,
         preserve_error: bool,
     ) -> HookResponse:
         """Repair transcript state and publish one incomplete-run lifecycle."""
         def repair() -> None:
-            record_pending_tool_result(
+            record_pending_tool_results(
                 self.session,
                 self.session_store,
                 self.tool_results,
-                pending_tool_action,
-                pending_tool_result,
+                pending_tool_actions,
+                pending_tool_results,
                 interrupted=status == "interrupted",
             )
 
@@ -160,7 +161,11 @@ class AgentLoop:
             self._update_status(status)
 
         def finish_hook() -> HookResponse:
-            decision = self._run_finished_decision(status=status, reason=reason)
+            decision = self._run_finished_decision(
+                status=status,
+                reason=reason,
+                tool_steps_used=tool_steps_used,
+            )
             self._emit_event({"type": "run_finished", "status": status})
             return decision
 
@@ -488,12 +493,12 @@ class AgentLoop:
     # 8. converts tool results into transcript messages
     # 9. stores those result messages in the session
     def run(self) -> RunResult:
-        # Once an assistant tool call is committed, keep enough information to
-        # close that transcript pair if cancellation wins before normal result
-        # persistence. A completed/denied/blocked result always takes priority
-        # over the synthetic interrupted result.
-        pending_tool_action = None
-        pending_tool_result = None
+        # Once an assistant tool turn is committed, retain the whole ordered
+        # batch plus its completed prefix. Recovery can then close every emitted
+        # call ID without pretending that an untouched suffix was executed.
+        pending_tool_actions: list[dict] = []
+        pending_tool_results: list[dict] = []
+        tool_steps_used = 0
         run_stage = "startup"
 
         try:
@@ -563,7 +568,6 @@ class AgentLoop:
             stopped_after_step_limit = False
             failure_reason = ""
             final_message = ""
-            tool_steps_used = 0
             pending_runtime_messages = []
 
             # Keep going until the agent says the task is complete.
@@ -790,10 +794,10 @@ class AgentLoop:
                     final_message = assistant_content
                 self._check_cancelled()
                 if reply["actions"]:
-                    # Establish repair ownership before persistence: a store
-                    # append can succeed and still fail while advancing metadata.
-                    pending_tool_action = reply["actions"][0]
-                    pending_tool_result = None
+                    # Establish repair ownership before persistence: the
+                    # assistant message commits every emitted tool-call ID.
+                    pending_tool_actions = list(reply["actions"])
+                    pending_tool_results = []
                 record_message(
                     self.session,
                     self.session_store,
@@ -802,25 +806,41 @@ class AgentLoop:
                 )
 
                 # Execute each requested tool action and collect the raw results.
-                executed_actions = []
                 results = []
                 approval_instructions = []
                 successful_tool_action = False
-                for action in reply["actions"]:
+                latest_tool_guidance = ""
+                for action_index, action in enumerate(reply["actions"]):
+                    if (
+                        self.max_tool_steps is not None
+                        and tool_steps_used >= self.max_tool_steps
+                    ):
+                        self.display.step_limit_reached(self.max_tool_steps)
+                        run_stage = "tool_step_limit"
+                        stopped_after_step_limit = True
+                        failure_reason = (
+                            f"reached tool step limit: {self.max_tool_steps}"
+                        )
+                        break
+
                     run_stage = "tool_execution"
                     self._check_cancelled()
+                    # Entering the per-action pipeline is an attempt, including
+                    # actions later blocked by a Hook or denied by approval.
+                    hook_tool_steps_used = tool_steps_used
+                    tool_steps_used += 1
                     tool_decision = self.hook_runner.before_tool_execute(
                         BeforeToolExecuteContext(
                             session_id=self._session_id(),
                             repo_root=str(self.session.repo_root),
                             action=action,
-                            tool_steps_used=tool_steps_used,
+                            tool_steps_used=hook_tool_steps_used,
                         ),
                         event_sink=self._emit_hook_event,
                     )
                     if tool_decision.block:
                         action = tool_decision.action or action
-                        pending_tool_action = action
+                        pending_tool_actions[action_index] = action
                         reason = (
                             tool_decision.reason
                             or tool_decision.guidance
@@ -832,11 +852,10 @@ class AgentLoop:
                             "reason": reason,
                             "guidance": tool_decision.guidance,
                         }
-                        pending_tool_result = result
                         approval_action = action
                     else:
                         action = tool_decision.action or action
-                        pending_tool_action = action
+                        pending_tool_actions[action_index] = action
                         preflight = self.action_preflight.check(
                             action,
                             additional_approval_reason=tool_decision.approval_reason,
@@ -858,13 +877,16 @@ class AgentLoop:
                             result = self.tool_executor.execute(
                                 preflight.execution_action
                             )
-                            pending_tool_result = result
+                            pending_tool_results.append(result)
                             self._check_cancelled()
                         else:
                             result = denied_result(action, decision.reason)
-                            pending_tool_result = result
                             if decision.instruction.strip():
                                 approval_instructions.append(decision.instruction)
+                    if len(pending_tool_results) <= action_index:
+                        # Preserve blocked and denied results if their result
+                        # Hook raises before it can return an updated output.
+                        pending_tool_results.append(result)
                     tool_result_response = self.hook_runner.tool_result(
                         ToolResultContext(
                             session_id=self._session_id(),
@@ -875,15 +897,11 @@ class AgentLoop:
                         event_sink=self._emit_hook_event,
                     )
                     result = tool_result_response.updated_tool_output
-                    # Hook guidance uses the same one-request-only path as other
-                    # runtime corrections and never enters canonical history.
-                    if tool_result_response.additional_context:
-                        pending_runtime_messages.append(
-                            user_instruction_message(
-                                tool_result_response.additional_context
-                            )
-                        )
-                    pending_tool_result = result
+                    # Only guidance from the final attempted action is carried
+                    # into the next model request. A later action can make an
+                    # earlier per-result nudge stale.
+                    latest_tool_guidance = tool_result_response.additional_context
+                    pending_tool_results[action_index] = result
                     if result.get("ok", False):
                         successful_tool_action = True
                     self.display.tool_result(approval_action, result)
@@ -895,18 +913,45 @@ class AgentLoop:
                             **action_event_fields(action),
                         }
                     )
-                    executed_actions.append(action)
                     results.append(result)
+                    if not result.get("ok", False):
+                        break
+
+                if latest_tool_guidance:
+                    pending_runtime_messages.append(
+                        user_instruction_message(latest_tool_guidance)
+                    )
+
+                # The assistant message retains the complete emitted batch.
+                # Close untouched call IDs explicitly so the next request and
+                # saved transcript remain valid for strict providers.
+                for action in pending_tool_actions[len(results) :]:
+                    if stopped_after_step_limit:
+                        reason = "tool step limit reached before this action"
+                        error = "tool_step_limit"
+                    else:
+                        reason = "an earlier tool action in this batch did not succeed"
+                        error = "earlier_action_failed"
+                    results.append(
+                        {
+                            "ok": False,
+                            "tool": action.get("tool", ""),
+                            "error": error,
+                            "reason": reason,
+                            "skipped": True,
+                        }
+                    )
+                pending_tool_results = results
 
                 # Convert tool results into transcript messages and store them.
                 result_messages = self.tool_results.messages_from_action_results(
-                    executed_actions,
+                    pending_tool_actions,
                     results,
                 )
                 self._check_cancelled()
                 record_messages(self.session, self.session_store, *result_messages)
-                pending_tool_action = None
-                pending_tool_result = None
+                pending_tool_actions = []
+                pending_tool_results = []
                 record_messages(
                     self.session,
                     self.session_store,
@@ -917,11 +962,12 @@ class AgentLoop:
                 )
 
                 if reply["actions"]:
-                    tool_steps_used += 1
                     # Only completed useful work breaks a blocked-final streak;
                     # a Hook block, approval denial, or failed Tool is not progress.
                     if successful_tool_action:
                         consecutive_blocked_finals = 0
+                    if stopped_after_step_limit:
+                        break
 
             if (
                 stopped_after_repeated_invalid_replies
@@ -984,8 +1030,9 @@ class AgentLoop:
                 status="interrupted",
                 reason="cancelled",
                 run_stage=run_stage,
-                pending_tool_action=pending_tool_action,
-                pending_tool_result=pending_tool_result,
+                pending_tool_actions=pending_tool_actions,
+                pending_tool_results=pending_tool_results,
+                tool_steps_used=tool_steps_used,
                 runtime_event={
                     "type": "run_interrupted",
                     "reason": "cancelled",
@@ -1006,8 +1053,9 @@ class AgentLoop:
                 status="interrupted",
                 reason="KeyboardInterrupt",
                 run_stage=run_stage,
-                pending_tool_action=pending_tool_action,
-                pending_tool_result=pending_tool_result,
+                pending_tool_actions=pending_tool_actions,
+                pending_tool_results=pending_tool_results,
+                tool_steps_used=tool_steps_used,
                 runtime_event={
                     "type": "run_interrupted",
                     "interruption_type": "KeyboardInterrupt",
@@ -1022,8 +1070,9 @@ class AgentLoop:
                 status="failed",
                 reason=details["error_message"],
                 run_stage=run_stage,
-                pending_tool_action=pending_tool_action,
-                pending_tool_result=pending_tool_result,
+                pending_tool_actions=pending_tool_actions,
+                pending_tool_results=pending_tool_results,
+                tool_steps_used=tool_steps_used,
                 runtime_event={"type": "run_failed", **details},
                 preserve_error=True,
             )
@@ -1033,8 +1082,9 @@ class AgentLoop:
                 status="interrupted",
                 reason=type(error).__name__,
                 run_stage=run_stage,
-                pending_tool_action=pending_tool_action,
-                pending_tool_result=pending_tool_result,
+                pending_tool_actions=pending_tool_actions,
+                pending_tool_results=pending_tool_results,
+                tool_steps_used=tool_steps_used,
                 runtime_event={
                     "type": "run_interrupted",
                     "interruption_type": type(error).__name__,

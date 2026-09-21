@@ -621,7 +621,6 @@ class TerminalDisplay:
             return f"{formatting.RECOVERABLE_STATUS_ICON} Reply rejected: {reason}"
         messages = {
             "empty_final_reply": "Asking model to continue or finalize…",
-            "non_final_too_many_tool_calls": "Reply rejected: expected exactly one tool call.",
             "malformed_tool_call": "Reply rejected: could not read the requested tool call.",
         }
         message = messages.get(reason, "Reply rejected: invalid assistant reply.")

@@ -1,3 +1,18 @@
+- 2026-09-21: Added sequential multi-tool turns through the existing AgentLoop
+  and one-action `ToolExecutor` path. `reply["actions"]` is now the canonical
+  ordered batch for both single- and multi-call turns; failed, Hook-blocked,
+  approval-denied, and step-limited batches stop immediately and close their
+  unattempted call IDs with explicit skipped results. Tool-step accounting is
+  per attempted action, repair state retains partial-batch results across
+  cancellation and exceptions, and only the final attempted action's transient
+  Hook guidance reaches the next model request. Removed the one-tool validation
+  and prompt restriction, and documented when dependent calls must wait for a
+  later turn. The focused Agent/protocol/Tool-result/AgentLoop/Hook/terminal
+  suite passed 353 tests; after the final recovery-accounting adjustment, the
+  AgentLoop/Hook subset passed 131 tests. The full suite passed 1,441 tests.
+  Production and test packages compiled successfully, Core imports passed, and
+  `git diff --check` passed. No live model inference was run.
+
 - 2026-09-20: Added a finite, provider-owned timeout to native Ollama inference.
   Normal and streaming `/api/chat` transports now use the same configurable
   `model.ollama_request_timeout`, with a 300-second provider default. Timeout

@@ -124,7 +124,7 @@ def test_validate_reply_accepts_one_tool_call_with_blank_content() -> None:
     }
 
 
-def test_validate_reply_rejects_more_than_one_tool_call() -> None:
+def test_validate_reply_accepts_more_than_one_tool_call() -> None:
     agent = CodingAgent("demo task")
     reply = {
         "message": {
@@ -146,10 +146,7 @@ def test_validate_reply_rejects_more_than_one_tool_call() -> None:
 
     validation = agent.validate_reply(reply)
 
-    assert validation == {
-        "ok": False,
-        "reason": "non_final_too_many_tool_calls",
-    }
+    assert validation == {"ok": True, "reason": ""}
 
 
 def test_validate_reply_rejects_malformed_tool_call() -> None:

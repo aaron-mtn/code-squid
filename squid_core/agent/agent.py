@@ -8,7 +8,6 @@ from squid_core.tools.builtins import TOOLS
 
 INVALID_REPLY_EXPLANATIONS = {
     "empty_final_reply": "the model replied with no tool call and no final content",
-    "non_final_too_many_tool_calls": "the model used too many tool calls",
     "malformed_tool_call": "the model produced an invalid tool call payload",
 }
 
@@ -72,8 +71,6 @@ class Agent:
             if content:
                 return {"ok": True, "reason": ""}
             return {"ok": False, "reason": "empty_final_reply"}
-        if len(actions) != 1:
-            return {"ok": False, "reason": "non_final_too_many_tool_calls"}
         return {"ok": True, "reason": ""}
 
     def correction_message_for(self, reason: str) -> dict:

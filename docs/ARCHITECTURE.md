@@ -321,7 +321,7 @@ and application layer; `squid_core/` is the reusable agent runtime.
     platform/workspace context, raw initial and follow-up message construction,
     tool definitions, reply validation, completion detection, reason-specific
     corrections, and repeated-invalid-reply failure construction.
-  - `prompts.py` owns protected one-tool/final-response protocol, strong but
+  - `prompts.py` owns the protected tool-batch/final-response protocol, strong but
     non-enforced narration guidance, generic response examples, active-Skill
     insertion, execution-environment insertion, and prompt assembly.
   - Core consumes application defaults through `PromptDefaults` and does not
@@ -1063,8 +1063,8 @@ when candidate context is insufficient. Windows environment guidance preserves
 appropriate shell inspection.
 
 Skills can change specialization instructions, inspection style, optional Tool
-guidance, and final-summary shape. They cannot override the Core one-tool-call
-contract, final-response/no-tool mechanics, narration guidance, response
+guidance, and final-summary shape. They cannot override the Core sequential
+tool-batch contract, final-response/no-tool mechanics, narration guidance, response
 examples, active-Skill/environment insertion, or correction mechanics. They
 also cannot remove Code Squid's baseline coding discipline, because that policy
 is outside the replaceable sections. That baseline directs agents to use exact
@@ -1484,9 +1484,9 @@ or approximate them with total-generation limits; Squid Models retains only its
 existing `chat_template_kwargs.enable_thinking = false` request override.
 
 The OpenAI-compatible provider sends `parallel_tool_calls: false` whenever tools
-are present. OpenRouter may still return multiple tool calls. Code Squid handles
-that by rejecting invalid multi-tool replies before they enter normal assistant
-history and retrying with correction messages.
+are present. Providers may still return multiple tool calls. Code Squid retains
+those calls as one ordered assistant turn and executes them sequentially through
+the same per-action `ToolExecutor` path used by a one-call turn.
 
 The OpenAI-compatible provider also supports optional assistant text streaming.
 Streaming assembles text and tool-call fragments into the same raw response
@@ -1522,7 +1522,7 @@ error, marks the session failed, and writes diagnostic traceback details to
 ### Turn Contract
 
 Before completion, prompts strongly encourage a brief visible action note and
-demonstrate it alongside exactly one tool call. An action note is user-facing
+demonstrate it alongside one or more independent tool calls. An action note is user-facing
 text that explains why the tool call is the immediate next action. Narration is
 a behavior-shaping preference, especially for smaller models, not a runtime
 invariant.
@@ -1535,19 +1535,22 @@ The runtime enforces:
 - non-boolean values for boolean Tool schema properties are rejected during
   model-adapter validation without coercion
 - empty replies with zero tool actions are rejected
-- replies with more than one tool action are rejected
 
 Invalid replies are rejected before entering normal assistant history. The loop
 stores a correction user message instead. A valid reply resets the invalid-reply
 counter. Repeated invalid replies stop after the configured hard-coded loop
 limit, currently 3 consecutive invalid replies.
 
-Runtime validation accepts a one-tool non-final reply even when assistant
-content is blank. It does not independently enforce action-note presence or
-quality.
+Runtime validation accepts a non-final reply with one or more tool actions even
+when assistant content is blank. The prompt permits a batch only when every
+call can be determined from current context; calls that depend on an earlier
+result wait for a later turn. The runtime does not infer dependencies or impose
+a separate per-turn batch-size limit.
 
-If `runtime.max_tool_steps` is set, reaching the limit records a failed session
-status and stops the loop.
+Each action that enters the per-action Hook/preflight/approval/execution path
+counts toward `runtime.max_tool_steps`, including blocked and denied actions.
+The limit is checked between actions, so reaching it can close and stop a batch
+partway through without executing its remaining calls.
 
 ### Final Contract
 
@@ -1565,9 +1568,18 @@ finalization does not depend on that marker.
 Assistant messages that used tools preserve provider `tool_calls` metadata.
 Tool-result messages include the matching `tool_call_id`.
 
+`reply["actions"]` is the canonical ordered batch for every tool turn; a
+single-tool turn is simply a batch of length one. `ToolExecutor.execute()` still
+owns exactly one action. The loop stops a batch after the first failed,
+Hook-blocked, or approval-denied result. Unattempted suffix calls receive
+explicit skipped results so every preserved assistant call ID remains closed,
+without invoking the executor or consuming a Tool step.
+
 Assistant tool-call/result pairs must stay replayable. This matters for strict
 OpenAI-compatible model templates and for provider adapters that need to
-reconstruct prior tool turns.
+reconstruct prior tool turns. Cancellation and exception repair retain the
+completed result prefix and synthesize interruption/failure results for the
+unfinished suffix before unwinding.
 
 `squid_core/tools/results.py` guards against action/result length mismatches. Invalid
 assistant replies are excluded from normal assistant history; correction

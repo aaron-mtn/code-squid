@@ -30,15 +30,16 @@ Use inline code for file names, paths, commands, functions, selectors, IDs, symb
 
 Make sure the note matches the tool call that follows and doesn’t claim something happened before it actually did.
 
-Visible narration is preferred but not required for runtime validity. A turn with exactly one valid tool call may still be accepted when the assistant text is blank.
+Visible narration is preferred but not required for runtime validity. A turn with one or more valid tool calls may still be accepted when the assistant text is blank.
 """.strip()
 
 
 PROTECTED_RESPONSE_PROTOCOL = """
 ## Response protocol
 
-- A non-final turn uses exactly one real tool call for the immediate next step.
-- Never batch multiple tool calls in one response.
+- A non-final turn uses one or more real tool calls for the immediate next step.
+- Multiple tool calls are allowed when every call can be fully determined from the current context.
+- Tool calls execute sequentially in the order emitted. If constructing a later call depends on an earlier call's result, wait for the next turn before issuing it.
 - A final response uses no tool call and contains non-empty human-readable content.
 - Finish only when the task is complete and you have run the verification that is appropriate and practical for the task, or when further verification honestly cannot be performed.
 """.strip()
@@ -71,29 +72,29 @@ PROTECTED_RESPONSE_EXAMPLES = """
 
 Valid non-final response:
 I found where this is going wrong. I’m going to read the surrounding code before I touch it.
-[exactly one real tool call to read the implementation file]
+[one or more independent real tool calls to read the relevant implementation files]
 
 Valid non-final response:
 There it is. This should only need a small patch.
-[exactly one real tool call to apply the patch]
+[one real tool call to apply the patch]
 
 Valid non-final response:
 The fix is in. I’m going to run the relevant check now and make sure I didn’t break anything nearby.
-[exactly one real tool call to run verification]
+[one or more independent real tool calls to run verification]
 
 Valid non-final response after a failed patch:
 The returned candidate diagnostics identify the intended current text. I’ll retry the patch using that candidate's match_id.
-[exactly one real tool call to apply_patch with the selected match_id]
+[one real tool call to apply_patch with the selected match_id]
 
 Reread after a failed patch only when the returned candidate diagnostics do not provide enough context to choose safely.
 
 Valid non-final response after a failed command:
 That command isn’t right for this setup. I’m going to check what this project actually uses instead of guessing again.
-[exactly one real tool call to inspect project configuration or tooling]
+[one real tool call to inspect project configuration or tooling]
 
 Valid non-final response after enough investigation:
 I’ve got enough context now. More digging isn’t going to help, so I’m making the change.
-[exactly one real tool call to edit the relevant file]
+[one or more independent real tool calls to edit the relevant files]
 
 Valid final response:
 Fixed the issue and ran the relevant checks. The syntax check passed and the focused tests passed. I did not exercise the change interactively, so runtime behavior beyond those checks was not directly verified.
@@ -211,24 +212,13 @@ CORRECTION_MESSAGES = {
 Format error: your last response had no tool call and no final content.
 
 If the task is complete, reply with a concise non-empty final response and no tool call.
-If work remains, choose exactly one real tool call for the immediate next step. Brief visible narration is strongly preferred.
+If work remains, choose one or more real tool calls for the immediate next step. Batch calls only when each one can be fully determined without seeing an earlier call's result. Brief visible narration is strongly preferred.
 Do not restate the plan or do extra work unless concrete work remains.
-""".strip(),
-    "non_final_too_many_tool_calls": """
-Format error: your last response contained multiple tool calls.
-
-Exactly ONE tool call is allowed per response.
-
-Choose the single most useful next action and issue only that tool call now.
-Do not batch reads, writes, commands, or independent actions.
-Do not include a second tool call.
-
-Brief visible narration is strongly preferred.
 """.strip(),
     "malformed_tool_call": """
 Format error: your last response included an invalid tool call.
 
-Use one available tool with valid arguments for the immediate next step. Brief visible narration is strongly preferred.
+Use one or more available tools with valid arguments for the immediate next step. Batch calls only when none depends on an earlier call's result. Brief visible narration is strongly preferred.
 """.strip(),
 }
 
@@ -236,5 +226,5 @@ Use one available tool with valid arguments for the immediate next step. Brief v
 def correction_message(reason: str) -> str:
     return CORRECTION_MESSAGES.get(
         reason,
-        "Your last response was invalid. Reply with either exactly one valid tool call for the immediate next step or a non-empty final response with no tool call.",
+        "Your last response was invalid. Reply with one or more valid tool calls for the immediate next step, or a non-empty final response with no tool call.",
     )

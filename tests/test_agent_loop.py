@@ -297,6 +297,31 @@ def tool_call_reply(
     }
 
 
+def multi_tool_call_reply(*calls: tuple[str, str]) -> dict:
+    """Build one assistant turn whose actions and call metadata share order."""
+    tool_calls = [
+        {
+            "id": call_id,
+            "type": "function",
+            "function": {"name": tool, "arguments": "{}"},
+        }
+        for call_id, tool in calls
+    ]
+    return {
+        "message": {
+            "role": "assistant",
+            "content": "Running independent tools.",
+            "tool_calls": tool_calls,
+        },
+        "actions": [
+            {"tool": tool, "args": {}, "tool_call_id": call_id}
+            for call_id, tool in calls
+        ],
+        "reason": "",
+        "raw_reply": {"assistant": {"content": "Running independent tools."}},
+    }
+
+
 class FakeCompactor:
     def __init__(self, metadata: dict | None = None, events: list[str] | None = None) -> None:
         self.metadata = metadata
@@ -2839,6 +2864,321 @@ def test_default_max_tool_steps_does_not_stop_normal_behavior() -> None:
     assert tool_executor.actions == [{"tool": "read_file"}]
     assert model_adapter.index == 2
     assert display.step_limits_reached == []
+
+
+def test_multiple_successful_tool_calls_execute_and_record_in_order() -> None:
+    session = Session(repo_root=None)
+    executor = FakeToolExecutor()
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter(
+            [
+                multi_tool_call_reply(
+                    ("call_1", "read_file"),
+                    ("call_2", "run_command"),
+                    ("call_3", "write_file"),
+                ),
+                reply("TASK COMPLETE"),
+            ]
+        ),
+        tool_executor=executor,
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+    )
+
+    assert loop.run() == RunResult(status="complete")
+    assert [action["tool"] for action in executor.actions] == [
+        "read_file",
+        "run_command",
+        "write_file",
+    ]
+    assistant_index = next(
+        index for index, message in enumerate(session.messages) if message.get("tool_calls")
+    )
+    assistant = session.messages[assistant_index]
+    tool_messages = session.messages[assistant_index + 1 : assistant_index + 4]
+    assert [call["id"] for call in assistant["tool_calls"]] == [
+        "call_1",
+        "call_2",
+        "call_3",
+    ]
+    assert [message["tool_call_id"] for message in tool_messages] == [
+        "call_1",
+        "call_2",
+        "call_3",
+    ]
+
+
+def test_first_failed_action_stops_batch_and_closes_unattempted_calls() -> None:
+    class FailingExecutor(FakeToolExecutor):
+        def execute(self, action: dict) -> dict:
+            self.actions.append(action)
+            return {"ok": False, "tool": action["tool"], "error": "failed"}
+
+    session = Session(repo_root=None)
+    executor = FailingExecutor()
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter(
+            [
+                multi_tool_call_reply(
+                    ("call_1", "read_file"),
+                    ("call_2", "run_command"),
+                ),
+                reply("TASK COMPLETE"),
+            ]
+        ),
+        tool_executor=executor,
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+    )
+
+    assert loop.run() == RunResult(status="complete")
+    assert [action["tool_call_id"] for action in executor.actions] == ["call_1"]
+    tool_messages = [message for message in session.messages if message["role"] == "tool"]
+    assert [message["tool_call_id"] for message in tool_messages] == ["call_1", "call_2"]
+    assert json.loads(tool_messages[0]["content"])["ok"] is False
+    assert json.loads(tool_messages[1]["content"])["skipped"] is True
+
+
+def test_denied_action_stops_remaining_batch() -> None:
+    class DenyFirstPolicy:
+        mode = "never"
+
+        def check(self, action: dict) -> ApprovalDecision:
+            return ApprovalDecision(approved=False, reason="denied")
+
+    session = Session(repo_root=None)
+    executor = FakeToolExecutor()
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter(
+            [
+                multi_tool_call_reply(
+                    ("call_1", "read_file"),
+                    ("call_2", "run_command"),
+                ),
+                reply("TASK COMPLETE"),
+            ]
+        ),
+        tool_executor=executor,
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        approval_policy=DenyFirstPolicy(),
+    )
+
+    assert loop.run() == RunResult(status="complete")
+    assert executor.actions == []
+    tool_messages = [message for message in session.messages if message["role"] == "tool"]
+    assert json.loads(tool_messages[0]["content"])["ok"] is False
+    assert json.loads(tool_messages[1]["content"])["skipped"] is True
+
+
+def test_hook_blocked_action_stops_remaining_batch() -> None:
+    class BlockingHook:
+        def before_tool_execute(self, context) -> HookResponse:
+            return HookResponse(block=True, reason="blocked")
+
+    session = Session(repo_root=None)
+    executor = FakeToolExecutor()
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter(
+            [
+                multi_tool_call_reply(
+                    ("call_1", "read_file"),
+                    ("call_2", "run_command"),
+                ),
+                reply("TASK COMPLETE"),
+            ]
+        ),
+        tool_executor=executor,
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        hook_runner=HookRunner([BlockingHook()]),
+    )
+
+    assert loop.run() == RunResult(status="complete")
+    assert executor.actions == []
+    tool_messages = [message for message in session.messages if message["role"] == "tool"]
+    assert json.loads(tool_messages[0]["content"])["error"] == "blocked_by_hook"
+    assert json.loads(tool_messages[1]["content"])["skipped"] is True
+
+
+def test_tool_step_limit_stops_partway_through_batch() -> None:
+    session = Session(repo_root=None)
+    executor = FakeToolExecutor()
+    adapter = FakeModelAdapter(
+        [
+            multi_tool_call_reply(
+                ("call_1", "read_file"),
+                ("call_2", "run_command"),
+                ("call_3", "write_file"),
+            ),
+            reply("TASK COMPLETE"),
+        ]
+    )
+    display = NullDisplay()
+    loop = AgentLoop(
+        session=session,
+        model_adapter=adapter,
+        tool_executor=executor,
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=display,
+        max_tool_steps=2,
+    )
+
+    assert loop.run() == RunResult(
+        status="failed", reason="reached tool step limit: 2"
+    )
+    assert [action["tool_call_id"] for action in executor.actions] == [
+        "call_1",
+        "call_2",
+    ]
+    assert adapter.index == 1
+    assert display.step_limits_reached == [2]
+    tool_messages = [message for message in session.messages if message["role"] == "tool"]
+    assert [message["tool_call_id"] for message in tool_messages] == [
+        "call_1",
+        "call_2",
+        "call_3",
+    ]
+    assert json.loads(tool_messages[-1]["content"])["error"] == "tool_step_limit"
+
+
+def test_multi_action_hooks_receive_per_attempt_step_counts_and_latest_guidance() -> None:
+    before_counts = []
+    finished_counts = []
+
+    class RecordingHook:
+        def before_tool_execute(self, context) -> None:
+            before_counts.append(context.tool_steps_used)
+
+        def tool_result(self, context) -> HookResponse:
+            return HookResponse(additional_context=f"guidance:{context.action['tool']}")
+
+        def run_finished(self, context) -> None:
+            finished_counts.append(context.tool_steps_used)
+
+    adapter = FakeModelAdapter(
+        [
+            multi_tool_call_reply(
+                ("call_1", "read_file"),
+                ("call_2", "run_command"),
+            ),
+            reply("TASK COMPLETE"),
+        ]
+    )
+    loop = AgentLoop(
+        session=Session(repo_root=None),
+        model_adapter=adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        hook_runner=HookRunner([RecordingHook()]),
+    )
+
+    assert loop.run() == RunResult(status="complete")
+    assert before_counts == [0, 1]
+    assert finished_counts == [2]
+    assert adapter.message_requests[1][-1] == {
+        "role": "user",
+        "content": "guidance:run_command",
+    }
+
+
+def test_cancellation_during_partial_batch_closes_every_tool_call() -> None:
+    cancelled = False
+
+    class CancellingExecutor(FakeToolExecutor):
+        def execute(self, action: dict) -> dict:
+            nonlocal cancelled
+            result = super().execute(action)
+            cancelled = True
+            return result
+
+    session = Session(repo_root=None)
+    executor = CancellingExecutor()
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter(
+            [
+                multi_tool_call_reply(
+                    ("call_1", "read_file"),
+                    ("call_2", "run_command"),
+                    ("call_3", "write_file"),
+                )
+            ]
+        ),
+        tool_executor=executor,
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        should_cancel=lambda: cancelled,
+    )
+
+    assert loop.run() == RunResult(status="interrupted", reason="cancelled")
+    assert [action["tool_call_id"] for action in executor.actions] == ["call_1"]
+    tool_messages = [message for message in session.messages if message["role"] == "tool"]
+    assert [message["tool_call_id"] for message in tool_messages] == [
+        "call_1",
+        "call_2",
+        "call_3",
+    ]
+    assert json.loads(tool_messages[0]["content"])["ok"] is True
+    assert json.loads(tool_messages[1]["content"])["interrupted"] is True
+    assert json.loads(tool_messages[2]["content"])["skipped"] is True
+
+
+def test_exception_during_partial_batch_closes_every_tool_call_and_reraises() -> None:
+    class ExplodingExecutor(FakeToolExecutor):
+        def execute(self, action: dict) -> dict:
+            self.actions.append(action)
+            if action["tool_call_id"] == "call_2":
+                raise RuntimeError("tool exploded")
+            return {"ok": True, "tool": action["tool"]}
+
+    session = Session(repo_root=None)
+    executor = ExplodingExecutor()
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter(
+            [
+                multi_tool_call_reply(
+                    ("call_1", "read_file"),
+                    ("call_2", "run_command"),
+                    ("call_3", "write_file"),
+                )
+            ]
+        ),
+        tool_executor=executor,
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+    )
+
+    with pytest.raises(RuntimeError, match="tool exploded"):
+        loop.run()
+
+    assert [action["tool_call_id"] for action in executor.actions] == [
+        "call_1",
+        "call_2",
+    ]
+    tool_messages = [message for message in session.messages if message["role"] == "tool"]
+    assert [message["tool_call_id"] for message in tool_messages] == [
+        "call_1",
+        "call_2",
+        "call_3",
+    ]
+    assert json.loads(tool_messages[0]["content"])["ok"] is True
+    assert json.loads(tool_messages[1]["content"])["failed"] is True
+    assert json.loads(tool_messages[2]["content"])["skipped"] is True
 
 
 def test_max_tool_steps_one_stops_before_next_model_reply() -> None:

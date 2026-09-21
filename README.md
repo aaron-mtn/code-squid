@@ -35,11 +35,12 @@ OpenRouter is supported, but can be noisier than local OpenAI-compatible
 servers.
 
 OpenRouter may return multiple tool calls even when `parallel_tool_calls=false`
-is sent. Code Squid rejects those replies and retries with a correction message.
+is sent. Code Squid executes valid independent calls sequentially in response
+order and stops the batch at the first unsuccessful action.
 
 ## Features
 
-- Strict one-tool-at-a-time coding loop
+- Sequential single- and multi-tool coding loop
 - Visible narration plus terminal tool-event display
 - Local tools: `apply_patch`, `read_file`, `write_file`, and `run_command`
 - Sessions saved under `.code-squid/sessions`
@@ -217,8 +218,9 @@ An empty `CODE_SQUID_REASONING_TOKEN_BUDGET` unsets a saved budget. Zero remains
 a valid Core value but is not sent to OpenRouter because its API does not
 document zero as a valid direct reasoning budget.
 
-Known issue: OpenRouter may emit multiple tool calls in one reply. Code Squid
-rejects those replies and retries.
+OpenRouter may emit multiple tool calls in one reply. Code Squid preserves the
+batch and executes its calls sequentially; calls that depend on earlier results
+belong in a later model turn.
 
 ### Ollama Native
 

@@ -63,10 +63,11 @@ def test_skill_replacements_cannot_erase_core_protocol_or_narration() -> None:
         "review", skill=_skill_with_replacements(), prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS
     ).initial_messages()[0]["content"]
 
-    assert "exactly one real tool call" in prompt
+    assert "Multiple tool calls are allowed" in prompt
+    assert "depends on an earlier call's result" in prompt
     assert "A final response uses no tool call" in prompt
     assert "Strongly prefer a short note before each tool call." in prompt
-    assert "exactly one real tool call to read the implementation file" in prompt
+    assert "one or more independent real tool calls" in prompt
 
 
 def test_skill_replacements_cannot_erase_code_squid_baseline_policy() -> None:

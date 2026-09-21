@@ -74,42 +74,57 @@ def turn_context_message(blocks: Iterable) -> dict[str, str] | None:
     return {"role": "user", "content": content}
 
 
-def record_pending_tool_result(
+def record_pending_tool_results(
     session,
     session_store,
     tool_results,
-    pending_tool_action: dict | None,
-    pending_tool_result: dict | None,
+    pending_tool_actions: list[dict],
+    pending_tool_results: list[dict],
     *,
     interrupted: bool = True,
 ) -> None:
-    """Close a committed tool-call pair before an incomplete run unwinds."""
-    if pending_tool_action is None:
+    """Close every call in a committed tool turn before a run unwinds."""
+    if not pending_tool_actions:
         return
 
-    if pending_tool_result is not None:
-        result = pending_tool_result
-    elif interrupted:
-        result = {
-            "ok": False,
-            "tool": pending_tool_action.get("tool", ""),
-            "error": "tool action interrupted",
-            "reason": "interrupted before a tool result was available",
-            "interrupted": True,
-        }
-    else:
-        result = {
-            "ok": False,
-            "tool": pending_tool_action.get("tool", ""),
-            "error": "tool action failed",
-            "reason": "run failed before a tool result was available",
-            "failed": True,
-        }
+    results = list(pending_tool_results)
+    first_missing_index = len(results)
+    for action_index, action in enumerate(
+        pending_tool_actions[first_missing_index:],
+        start=first_missing_index,
+    ):
+        if interrupted:
+            result = {
+                "ok": False,
+                "tool": action.get("tool", ""),
+                "error": "tool action interrupted",
+                "reason": (
+                    "interrupted before a tool result was available"
+                    if action_index == first_missing_index
+                    else "batch interrupted before this tool action was attempted"
+                ),
+                "interrupted": True,
+            }
+        else:
+            result = {
+                "ok": False,
+                "tool": action.get("tool", ""),
+                "error": "tool action failed",
+                "reason": (
+                    "run failed before a tool result was available"
+                    if action_index == first_missing_index
+                    else "run failed before this tool action was attempted"
+                ),
+                "failed": True,
+            }
+        if action_index > first_missing_index:
+            result["skipped"] = True
+        results.append(result)
     record_messages(
         session,
         session_store,
         *tool_results.messages_from_action_results(
-            [pending_tool_action],
-            [result],
+            pending_tool_actions,
+            results,
         ),
     )
