@@ -1,3 +1,17 @@
+- 2026-09-20: Made `RepeatedReadNudge` associate successful `read_file`
+  coverage with each file's `(st_mtime_ns, size)` metadata and invalidate that
+  file's coverage, trim provenance, patch-stale spans, and reread strikes when
+  current metadata differs. This keeps coverage truthful after changes through
+  `run_command`, external processes, or user edits while retaining the existing
+  immediate `write_file` invalidation and range-aware `apply_patch` behavior.
+  Added focused regression coverage for unchanged suppression, an external
+  edit followed by a fresh visible read and newly suppressible reread, and
+  metadata-backed truncated-read range behavior. The focused repeated-read
+  suite passed 46 tests, and the broader trimming/Hook/read/tool suite passed
+  170 tests. The full suite passed 1,392 tests with the existing unrelated
+  third-level Markdown-heading indentation failure. Production and test
+  packages compiled successfully, and `git diff --check` passed.
+
 - 2026-09-20: Fixed native Ollama fallback Tool-call identity collisions.
   Missing provider IDs now receive a response-unique UUID prefix plus the
   response-local call index in both streaming and non-streaming adaptation;

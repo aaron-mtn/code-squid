@@ -166,6 +166,48 @@ def test_exact_repeated_returned_range_is_masked_on_first_reread(
     )
 
 
+def test_external_file_change_invalidates_coverage_until_fresh_reread(
+    tmp_path: Path,
+) -> None:
+    """A mutation without a structured Tool event must make old coverage unusable."""
+    runner = HookRunner([RepeatedReadNudge()])
+    path = tmp_path / "external.py"
+    path.write_text("old first\nold second\n", encoding="utf-8")
+    args = {
+        "path": str(path),
+        "ranges": [{"start_line": 1, "end_line": 2}],
+    }
+
+    def observe(result: dict) -> HookResponse:
+        return runner.tool_result(
+            ToolResultContext(
+                session_id=None,
+                repo_root=str(tmp_path),
+                action={"tool": "read_file", "args": args},
+                result=result,
+            )
+        )
+
+    first_result = read_file(tmp_path, **args)
+    assert observe(first_result).updated_tool_output == first_result
+    assert observe(read_file(tmp_path, **args)).updated_tool_output[
+        "already_covered"
+    ] is True
+
+    # This stands in for run_command, a user edit, or any other mutation path
+    # that does not notify the structured mutation Hook seam.
+    path.write_text("new first\nnew second with a size change\n", encoding="utf-8")
+    changed_result = read_file(tmp_path, **args)
+    changed = observe(changed_result)
+    assert changed.updated_tool_output == changed_result
+    assert "new second with a size change" in changed.updated_tool_output["content"]
+
+    # The successful reread establishes coverage against the new fingerprint.
+    repeated = observe(read_file(tmp_path, **args))
+    assert repeated.updated_tool_output["already_covered"] is True
+    assert "content" not in repeated.updated_tool_output
+
+
 def test_first_redundant_read_replaces_contents_at_runner_seam(
     tmp_path: Path,
 ) -> None:
@@ -696,6 +738,7 @@ def test_truncated_full_file_tracks_each_returned_range_separately(
 ) -> None:
     hook = RepeatedReadNudge()
     path = tmp_path / "large.py"
+    path.write_text(_source(1, 2000), encoding="utf-8")
     returned_ranges = [
         {"start_line": 1, "end_line": 500},
         {"start_line": 1501, "end_line": 2000},

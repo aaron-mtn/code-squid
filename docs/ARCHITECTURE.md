@@ -683,7 +683,14 @@ does not infer workspace changes from command text or filesystem observation.
 `RepeatedReadNudge` keeps bounded, run-local line-range coverage from
 successful `read_file` source results under normalized absolute path keys,
 preferring the separate exact `returned_line_ranges` when a full-file read is
-truncated. Coverage is request-visible rather than merely historical:
+truncated. Each file's coverage is associated with a cheap filesystem version
+made from its nanosecond modification time and size. Before using coverage, the
+Hook compares that version with current metadata and invalidates all state for
+the file when they differ, so edits through `run_command`, another process, or
+a user cannot leave stale source classified as already covered. Structured
+`write_file` and `apply_patch` invalidation remains immediate; a range-aware
+patch associates its preserved coverage with the post-patch version. Coverage
+is request-visible rather than merely historical:
 request-only tool-result rendering maps retained head and tail characters back
 to complete source lines and dispatches `read_result_trimmed` with those
 ranges. The Hook keeps bounded per-tool-call provenance so it can retract only

@@ -33,9 +33,9 @@ class RepeatedReadNudge:
     """Escalate repeated overlapping reads of one unchanged file range.
 
     Coverage comes from successful ``read_file`` source results and is reduced
-    when request rendering trims that source. Successful built-in mutations
-    adjust or invalidate the affected file, so no filesystem timestamp checks
-    are needed.
+    when request rendering trims that source. Lightweight file fingerprints
+    keep that coverage truthful when a mutation bypasses the built-in tools;
+    successful built-in mutations still adjust or invalidate it immediately.
     """
 
     def __init__(
@@ -51,6 +51,9 @@ class RepeatedReadNudge:
         # Hosts inspect Hook sources as configuration metadata.
         self.source = source
         self._coverage: dict[str, list[tuple[int, int]]] = {}
+        # Metadata is intentionally cheap: reread suppression needs change
+        # detection, not a repository-wide content identity system.
+        self._file_versions: dict[str, tuple[int, int] | None] = {}
         # Tool-call provenance lets request rendering retract one trimmed read
         # without discarding overlapping source still visible in another result.
         self._read_result_coverage: dict[
@@ -73,6 +76,7 @@ class RepeatedReadNudge:
     def _reset_state(self) -> None:
         """Clear all coverage and escalation state as one lifecycle unit."""
         self._coverage.clear()
+        self._file_versions.clear()
         self._read_result_coverage.clear()
         self._stale_ranges.clear()
         self._redundant_counts.clear()
@@ -110,10 +114,12 @@ class RepeatedReadNudge:
                 self._redundant_counts.pop(path, None)
                 if tool_name == "apply_patch":
                     self._adjust_coverage_for_patch(path, result)
+                    if path in self._file_versions:
+                        # Preserve the patch's existing range-aware invalidation
+                        # while associating surviving coverage with the new file.
+                        self._file_versions[path] = _file_version(path)
                 else:
-                    self._coverage.pop(path, None)
-                    self._stale_ranges.pop(path, None)
-                    self._discard_result_coverage(path)
+                    self._invalidate_file_state(path)
 
         return None
 
@@ -132,6 +138,13 @@ class RepeatedReadNudge:
         if path is None or not returned_ranges:
             return None
 
+        current_version = _file_version(path)
+        recorded_version = self._file_versions.get(path)
+        if path in self._file_versions and recorded_version != current_version:
+            # Commands, users, and other processes can mutate files without a
+            # structured Tool event. Never use coverage from the old contents.
+            self._invalidate_file_state(path)
+
         # Stale lines are not unchanged coverage even though older results may
         # still contain their pre-patch text. A verification read must return
         # those lines again while unchanged portions can still be omitted.
@@ -144,6 +157,7 @@ class RepeatedReadNudge:
 
         if not covered_ranges:
             self._record_read_coverage(path, action, returned_ranges)
+            self._file_versions[path] = current_version
             self._mark_stale_ranges_fresh(path, returned_ranges)
             return None
 
@@ -180,6 +194,7 @@ class RepeatedReadNudge:
                 shaped_result = result
                 visible_ranges = returned_ranges
             self._record_read_coverage(path, action, visible_ranges)
+            self._file_versions[path] = current_version
             self._mark_stale_ranges_fresh(path, returned_ranges)
 
             count = self._record_redundant_strike(path) if requested_overlap else 0
@@ -357,6 +372,7 @@ class RepeatedReadNudge:
             del self._coverage[oldest_path]
             self._stale_ranges.pop(oldest_path, None)
             self._redundant_counts.pop(oldest_path, None)
+            self._file_versions.pop(oldest_path, None)
             self._discard_result_coverage(oldest_path)
         self._coverage[path] = _merge_ranges(existing + returned_ranges)[
             -_MAX_RANGES_PER_FILE:
@@ -379,6 +395,7 @@ class RepeatedReadNudge:
             self._coverage[path] = _merge_ranges(ranges)[-_MAX_RANGES_PER_FILE:]
         else:
             self._coverage.pop(path, None)
+            self._file_versions.pop(path, None)
 
     def _discard_result_coverage(self, path: str) -> None:
         for call_id, (result_path, _ranges) in list(
@@ -386,6 +403,14 @@ class RepeatedReadNudge:
         ):
             if result_path == path:
                 del self._read_result_coverage[call_id]
+
+    def _invalidate_file_state(self, path: str) -> None:
+        """Discard every observation whose truth depends on one file version."""
+        self._coverage.pop(path, None)
+        self._file_versions.pop(path, None)
+        self._stale_ranges.pop(path, None)
+        self._redundant_counts.pop(path, None)
+        self._discard_result_coverage(path)
 
     def _adjust_result_coverage_for_patch(
         self,
@@ -418,6 +443,17 @@ def _result_path(action: dict[str, Any], result: dict[str, Any]) -> str | None:
     if not isinstance(path, str) or not path:
         return None
     return os.path.normcase(str(Path(path).expanduser().resolve()))
+
+
+def _file_version(path: str) -> tuple[int, int] | None:
+    """Return cheap metadata that changes for ordinary file replacements."""
+    try:
+        stat = os.stat(path)
+    except OSError:
+        # Absence is still a version: creating or restoring the file later will
+        # differ and invalidate any synthetic/test coverage recorded for it.
+        return None
+    return stat.st_mtime_ns, stat.st_size
 
 
 def _already_covered_result(
