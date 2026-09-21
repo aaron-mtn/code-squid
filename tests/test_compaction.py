@@ -30,6 +30,16 @@ class FailingModelAdapter:
         raise RuntimeError("summary failed")
 
 
+class RawResponseModelAdapter:
+    """Return an exact response object for malformed-contract regressions."""
+
+    def __init__(self, response: object) -> None:
+        self.response = response
+
+    def complete_text(self, messages: list[dict]) -> object:
+        return self.response
+
+
 def settings(
     enabled: bool = True,
     trigger_input_tokens: int = 1,
@@ -364,11 +374,94 @@ def test_complete_text_failure_does_not_mutate_session_messages() -> None:
     original_messages = list(messages)
     current_session = session(messages)
     compactor = Compactor(settings(), FailingModelAdapter())
+    events = []
 
     with pytest.raises(RuntimeError, match="summary failed"):
-        compactor.maybe_compact(current_session)
+        compactor.maybe_compact(current_session, event_callback=events.append)
 
     assert current_session.messages == original_messages
+    assert events[-1] == {
+        "type": "compaction_failed",
+        "stage": "model_request",
+        "error_type": "RuntimeError",
+        "error": "summary failed",
+    }
+    assert "compaction_applied" not in [event["type"] for event in events]
+
+
+@pytest.mark.parametrize("summary", ["", " \t\r\n "])
+def test_empty_summary_fails_without_mutating_session_messages(summary: str) -> None:
+    messages = compactable_messages()
+    original_messages = list(messages)
+    current_session = session(messages)
+    events = []
+
+    with pytest.raises(
+        ValueError,
+        match="did not contain non-whitespace summary text",
+    ):
+        Compactor(settings(), FakeModelAdapter(summary)).maybe_compact(
+            current_session, event_callback=events.append
+        )
+
+    assert current_session.messages == original_messages
+    assert events[-1] == {
+        "type": "compaction_failed",
+        "stage": "response_parse",
+        "error_type": "ValueError",
+        "error": "compaction response did not contain non-whitespace summary text",
+    }
+    assert "compaction_applied" not in [event["type"] for event in events]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [None, [], {}, {"content": None}, {"content": ["not", "text"]}],
+)
+def test_malformed_summary_response_fails_without_mutation(response: object) -> None:
+    messages = compactable_messages()
+    original_messages = list(messages)
+    current_session = session(messages)
+    events = []
+
+    with pytest.raises(ValueError, match="summary text"):
+        Compactor(settings(), RawResponseModelAdapter(response)).maybe_compact(
+            current_session, event_callback=events.append
+        )
+
+    assert current_session.messages == original_messages
+    assert events[-1]["type"] == "compaction_failed"
+    assert events[-1]["stage"] == "response_parse"
+    assert "compaction_applied" not in [event["type"] for event in events]
+
+
+def test_rejected_summary_leaves_session_usable_for_next_model_turn() -> None:
+    messages = compactable_messages()
+    current_session = session(messages)
+
+    with pytest.raises(ValueError):
+        Compactor(settings(), FakeModelAdapter("   ")).maybe_compact(current_session)
+
+    next_turn_adapter = FakeModelAdapter("next model reply")
+    next_turn_adapter.complete_text(current_session.messages)
+    assert next_turn_adapter.requests == [messages]
+
+
+def test_estimates_after_rejected_summary_use_unchanged_transcript() -> None:
+    messages = compactable_messages()
+    current_session = session(messages)
+    compactor = Compactor(settings(), FakeModelAdapter(""))
+
+    with pytest.raises(ValueError):
+        compactor.maybe_compact(current_session)
+
+    events = []
+    compactor.settings.trigger_input_tokens = 100_000
+    assert compactor.maybe_compact(current_session, event_callback=events.append) is None
+    assert events[0]["type"] == "compaction_check"
+    assert events[0]["estimated_tokens"] == estimate_messages_tokens(messages)
+    assert events[0]["threshold_crossed"] is False
+    assert events[0]["will_compact"] is False
 
 
 def test_returned_metadata_includes_token_message_counts_and_summary_chars() -> None:

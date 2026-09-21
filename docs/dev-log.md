@@ -1,3 +1,19 @@
+- 2026-09-20: Made transcript compaction fail safe when a summarizer returns no
+  usable summary text. Core now validates the response mapping and requires a
+  non-whitespace string before rebuilding `session.messages`; absent, malformed,
+  empty, and whitespace-only summaries emit the existing `compaction_failed`
+  response-parse lifecycle and leave the original transcript intact, without a
+  `compaction_applied` event. Valid summary, chunk selection, preserved-tail,
+  prompt, estimation, and trimming behavior remain unchanged. Added focused
+  regressions for rejected outputs, exceptions, lifecycle boundaries, retry
+  usability, unchanged estimates, and successful retention behavior.
+  Verification: 37 focused compaction tests passed; the full suite passed 1,367
+  tests with the existing unrelated
+  `test_headings_lists_quotes_fence_and_rule_render_as_blocks` failure, which
+  expects indentation for a third-level Markdown heading. Production and test
+  packages compiled successfully, and `git diff --check` passed. No live model
+  inference was run.
+
 - 2026-09-20: Hardened Core interruption and failure unwinding around the
   transcript-pair invariant. Cancellation, KeyboardInterrupt, ordinary
   exceptions, and other boundary interruptions now share one incomplete-run

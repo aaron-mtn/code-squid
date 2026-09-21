@@ -1630,6 +1630,10 @@ When triggered, compaction:
 - selects oldest whole chunks in order until their cumulative estimate reaches
   that target or the minimum recent-chunk boundary prevents further selection
 - summarizes older chunks with `ModelAdapter.complete_text(...)`
+- validates that the adapter returned a structurally valid, non-whitespace text
+  summary before rebuilding the transcript; an absent, non-text, empty, or
+  whitespace-only summary fails compaction and leaves every original message
+  intact
 - supplies the protected original system and user messages to the summarizer in
   separately labeled reference sections; they remain outside the history being
   replaced, while later user messages selected before the cutoff remain visible
@@ -1701,7 +1705,9 @@ normal transcript entries:
   only after the in-memory rebuild and event append succeed
 - `compaction_failed` records `prepare`, `model_request`, `response_parse`,
   `session_rebuild`, or `persistence` plus a concise exception description,
-  then the original exception continues through the existing error path
+  then the original exception continues through the existing error path;
+  response-parse failures occur before transcript mutation and never emit
+  `compaction_applied`
 
 `ModelAdapter.complete_text(...)` retains its existing `content` and `usage`
 result fields and additionally exposes normalized `reasoning` and

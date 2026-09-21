@@ -125,7 +125,7 @@ class Compactor:
             summary_response = self.model_adapter.complete_text(request_messages)
 
             stage = "response_parse"
-            summary = summary_response.get("content") or ""
+            summary = self._validated_summary(summary_response)
             reasoning = summary_response.get("reasoning")
             if reasoning:
                 stage = "persistence"
@@ -196,6 +196,22 @@ class Compactor:
             except Exception:
                 pass
             raise
+
+    def _validated_summary(self, response: object) -> str:
+        """Return summary text only when the adapter response is safe to apply."""
+        if not isinstance(response, dict):
+            raise ValueError(
+                "compaction response must be a dictionary containing summary text"
+            )
+
+        summary = response.get("content")
+        if not isinstance(summary, str) or not summary.strip():
+            # Keep this structural: compaction must not judge summary quality, but
+            # it also must never replace real history with an absent text payload.
+            raise ValueError(
+                "compaction response did not contain non-whitespace summary text"
+            )
+        return summary
 
     def _provided_context(self, preserved_messages: list[dict]) -> str:
         """Return optional app context without allowing its failure to abort compaction."""
