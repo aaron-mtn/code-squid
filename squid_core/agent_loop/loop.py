@@ -35,6 +35,7 @@ from squid_core.hooks import (
     ToolResultContext,
 )
 from squid_core.model_adapter import ModelRequestError, model_request_error_details
+from squid_core.providers.base import StreamCancelled
 from squid_core.safety import ActionPreflight, ApprovalPolicy, denied_result
 from squid_core.settings import ToolResultTrimmingSettings
 from squid_core.tool_result_trimming import render_messages_for_model
@@ -116,6 +117,68 @@ class AgentLoop:
     def _check_cancelled(self) -> None:
         if self.should_cancel():
             raise _CancellationRequested
+
+    def _wait_for_retry(self, backoff_ms: int) -> None:
+        """Preserve retry timing while checking cancellation during the wait."""
+        deadline = time.monotonic() + (backoff_ms / 1000)
+        while True:
+            self._check_cancelled()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(remaining, 0.05))
+
+    def _unwind_incomplete_run(
+        self,
+        *,
+        status: Literal["failed", "interrupted"],
+        reason: str,
+        run_stage: str,
+        pending_tool_action: dict | None,
+        pending_tool_result: dict | None,
+        runtime_event: dict,
+        preserve_error: bool,
+    ) -> HookResponse:
+        """Repair transcript state and publish one incomplete-run lifecycle."""
+        def repair() -> None:
+            record_pending_tool_result(
+                self.session,
+                self.session_store,
+                self.tool_results,
+                pending_tool_action,
+                pending_tool_result,
+                interrupted=status == "interrupted",
+            )
+
+        def record_lifecycle() -> None:
+            self._emit_runtime_event(
+                {**runtime_event, "status": status, "stage": run_stage}
+            )
+
+        def update_status() -> None:
+            self._update_status(status)
+
+        def finish_hook() -> HookResponse:
+            decision = self._run_finished_decision(status=status, reason=reason)
+            self._emit_event({"type": "run_finished", "status": status})
+            return decision
+
+        if not preserve_error:
+            repair()
+            record_lifecycle()
+            update_status()
+            return finish_hook()
+
+        # Cleanup diagnostics must never replace the exception already unwinding.
+        for cleanup in (repair, record_lifecycle, update_status):
+            try:
+                cleanup()
+            except Exception:
+                pass
+        try:
+            return finish_hook()
+        except Exception:
+            return HookResponse()
 
     # Update durable session status when persistence is wired in.
     def _update_status(self, status: str) -> None:
@@ -292,7 +355,10 @@ class AgentLoop:
                         tool_definitions=tool_definitions,
                         on_text_delta=on_text_delta,
                         on_tool_preparing=on_tool_preparing,
+                        should_cancel=self.should_cancel,
                     )
+            except StreamCancelled:
+                raise _CancellationRequested
             except BaseException as error:
                 details = model_request_error_details(error)
                 transient = details.pop("_transient")
@@ -339,8 +405,7 @@ class AgentLoop:
                     {"type": "model_request_retry_scheduled", **retry_event}
                 )
                 if backoff_ms:
-                    time.sleep(backoff_ms / 1000)
-                self._check_cancelled()
+                    self._wait_for_retry(backoff_ms)
                 attempt = next_attempt
                 self._emit_runtime_event(
                     {"type": "model_request_retry_started", **retry_event}
@@ -686,15 +751,17 @@ class AgentLoop:
                     )
                     final_message = assistant_content
                 self._check_cancelled()
+                if reply["actions"]:
+                    # Establish repair ownership before persistence: a store
+                    # append can succeed and still fail while advancing metadata.
+                    pending_tool_action = reply["actions"][0]
+                    pending_tool_result = None
                 record_message(
                     self.session,
                     self.session_store,
                     reply["message"],
                     usage=reply.get("usage"),
                 )
-                if reply["actions"]:
-                    pending_tool_action = reply["actions"][0]
-                    pending_tool_result = None
 
                 # Execute each requested tool action and collect the raw results.
                 executed_actions = []
@@ -864,28 +931,19 @@ class AgentLoop:
                 hook_notes=self._hook_notes_from_decision(run_finished),
             )
         except _CancellationRequested:
-            record_pending_tool_result(
-                self.session,
-                self.session_store,
-                self.tool_results,
-                pending_tool_action,
-                pending_tool_result,
-            )
-            self._emit_runtime_event(
-                {
-                    "type": "run_interrupted",
-                    "status": "interrupted",
-                    "reason": "cancelled",
-                    "requested": True,
-                    "stage": run_stage,
-                }
-            )
-            self._update_status("interrupted")
-            run_finished = self._run_finished_decision(
+            run_finished = self._unwind_incomplete_run(
                 status="interrupted",
                 reason="cancelled",
+                run_stage=run_stage,
+                pending_tool_action=pending_tool_action,
+                pending_tool_result=pending_tool_result,
+                runtime_event={
+                    "type": "run_interrupted",
+                    "reason": "cancelled",
+                    "requested": True,
+                },
+                preserve_error=False,
             )
-            self._emit_event({"type": "run_finished", "status": "interrupted"})
             return RunResult(
                 status="interrupted",
                 reason="cancelled",
@@ -895,44 +953,43 @@ class AgentLoop:
         except KeyboardInterrupt:
             # Repair any committed tool-call pair and leave durable evidence
             # before preserving the CLI's KeyboardInterrupt control flow.
-            record_pending_tool_result(
-                self.session,
-                self.session_store,
-                self.tool_results,
-                pending_tool_action,
-                pending_tool_result,
-            )
-            self._emit_runtime_event_preserving_error(
-                {
+            self._unwind_incomplete_run(
+                status="interrupted",
+                reason="KeyboardInterrupt",
+                run_stage=run_stage,
+                pending_tool_action=pending_tool_action,
+                pending_tool_result=pending_tool_result,
+                runtime_event={
                     "type": "run_interrupted",
-                    "status": "interrupted",
                     "interruption_type": "KeyboardInterrupt",
-                    "stage": run_stage,
-                }
+                },
+                preserve_error=True,
             )
-            self._update_status_preserving_error("interrupted")
             raise
         except Exception as error:
             details = model_request_error_details(error)
             details.pop("_transient")
-            self._emit_runtime_event_preserving_error(
-                {
-                    "type": "run_failed",
-                    "status": "failed",
-                    "stage": run_stage,
-                    **details,
-                }
+            self._unwind_incomplete_run(
+                status="failed",
+                reason=details["error_message"],
+                run_stage=run_stage,
+                pending_tool_action=pending_tool_action,
+                pending_tool_result=pending_tool_result,
+                runtime_event={"type": "run_failed", **details},
+                preserve_error=True,
             )
-            self._update_status_preserving_error("failed")
             raise
         except BaseException as error:
-            self._emit_runtime_event_preserving_error(
-                {
+            self._unwind_incomplete_run(
+                status="interrupted",
+                reason=type(error).__name__,
+                run_stage=run_stage,
+                pending_tool_action=pending_tool_action,
+                pending_tool_result=pending_tool_result,
+                runtime_event={
                     "type": "run_interrupted",
-                    "status": "interrupted",
                     "interruption_type": type(error).__name__,
-                    "stage": run_stage,
-                }
+                },
+                preserve_error=True,
             )
-            self._update_status_preserving_error("interrupted")
             raise

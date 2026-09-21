@@ -10,7 +10,7 @@ from urllib.error import HTTPError, URLError
 
 from openai import OpenAI
 
-from .base import BaseProvider
+from .base import BaseProvider, StreamCancelled
 
 
 class OpenAICompatibleProvider(BaseProvider):
@@ -134,6 +134,7 @@ class OpenAICompatibleProvider(BaseProvider):
         tool_choice=None,
         trace_callback=None,
         please_stop_contemplating_the_void: bool = False,
+        should_cancel=None,
     ) -> object:
         payload = self._payload(
             model=model,
@@ -176,8 +177,11 @@ class OpenAICompatibleProvider(BaseProvider):
             },
         )
 
+        stream = self._inference_client().chat.completions.create(**payload)
         try:
-            for chunk in self._inference_client().chat.completions.create(**payload):
+            for chunk in stream:
+                if should_cancel is not None and should_cancel():
+                    raise StreamCancelled
                 chunk_elapsed = time.perf_counter() - request_started_at
                 if trace_callback is not None:
                     raw_chunk_count += 1
@@ -261,6 +265,9 @@ class OpenAICompatibleProvider(BaseProvider):
                             on_tool_preparing=on_tool_preparing,
                         )
         finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
             self._trace(
                 trace_callback,
                 {

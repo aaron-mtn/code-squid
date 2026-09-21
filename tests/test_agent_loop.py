@@ -91,11 +91,16 @@ class FakeModelAdapter:
         tool_definitions: list[dict],
         on_text_delta,
         on_tool_preparing=None,
+        should_cancel=None,
     ) -> dict:
         self.message_requests.append([dict(message) for message in messages])
         if self.events is not None:
             self.events.append("respond_streaming:start")
         for delta in self.deltas:
+            if should_cancel is not None and should_cancel():
+                from squid_core.providers.base import StreamCancelled
+
+                raise StreamCancelled
             on_text_delta(delta)
         self.deltas = []
         if on_tool_preparing is not None:
@@ -612,6 +617,70 @@ def test_keyboard_interrupt_after_tool_call_persistence_repairs_pair_and_reraise
     assert session.messages[-1]["role"] == "tool"
     assert session.messages[-1]["tool_call_id"] == "call_keyboard"
     assert json.loads(session.messages[-1]["content"])["interrupted"] is True
+
+
+def test_ordinary_failure_after_tool_call_persistence_repairs_pair_and_reraises(
+    tmp_path,
+) -> None:
+    class FailingApprovalPolicy:
+        mode = "never"
+
+        def check(self, action: dict):
+            raise RuntimeError("approval exploded")
+
+    events = []
+    session = Session(repo_root=tmp_path)
+    session_store = SessionStore.create(tmp_path, "ordinary tool failure")
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter([tool_call_reply("call_failed")]),
+        tool_executor=FakeToolExecutor(),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        approval_policy=FailingApprovalPolicy(),
+        on_event=events.append,
+        session_store=session_store,
+    )
+
+    with pytest.raises(RuntimeError, match="approval exploded"):
+        loop.run()
+
+    assert session.messages[-1]["tool_call_id"] == "call_failed"
+    assert json.loads(session.messages[-1]["content"])["failed"] is True
+    loaded = SessionStore.open(session_store.session_dir).load_messages()
+    assert loaded[-1] == session.messages[-1]
+    assert [event["type"] for event in events][-2:] == ["run_failed", "run_finished"]
+
+
+def test_cancellation_during_streamed_output_unwinds_as_interrupted() -> None:
+    events = []
+    loop = AgentLoop(
+        session=Session(repo_root=None),
+        model_adapter=FakeModelAdapter(
+            [reply("unused")],
+            streaming=True,
+            deltas=["first", "second"],
+        ),
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        stream_assistant_text=True,
+        on_event=events.append,
+        should_cancel=lambda: any(
+            event["type"] == "assistant_delta" for event in events
+        ),
+    )
+
+    result = loop.run()
+
+    assert result == RunResult(status="interrupted", reason="cancelled")
+    assert [event["type"] for event in events].count("assistant_delta") == 1
+    assert [event["type"] for event in events][-2:] == [
+        "run_interrupted",
+        "run_finished",
+    ]
 
 
 def test_normal_successful_tool_execution_still_persists_normal_result() -> None:
@@ -2066,6 +2135,33 @@ def test_transient_model_failure_retries_same_turn_then_succeeds(tmp_path) -> No
     assert lifecycle[1]["failure_class"] == "timeout"
     assert lifecycle[2]["attempt"] == 2
     assert lifecycle[-1]["retry_count"] == 1
+
+
+def test_cancellation_interrupts_retry_backoff_promptly() -> None:
+    events = []
+    model_adapter = SequencedRequestAdapter(
+        [_wrapped_model_error(TimeoutError("provider timed out"))]
+    )
+    loop = AgentLoop(
+        session=Session(repo_root=None),
+        model_adapter=model_adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        on_event=events.append,
+        should_cancel=lambda: any(
+            event["type"] == "model_request_retry_scheduled" for event in events
+        ),
+        model_request_retry_backoff_ms=5_000,
+    )
+
+    started = __import__("time").monotonic()
+    result = loop.run()
+
+    assert result == RunResult(status="interrupted", reason="cancelled")
+    assert __import__("time").monotonic() - started < 1
+    assert model_adapter.index == 1
 
 
 def test_transient_model_failure_exhausts_retries_with_diagnostics(tmp_path) -> None:

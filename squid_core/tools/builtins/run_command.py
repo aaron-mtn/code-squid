@@ -1,13 +1,13 @@
-"""Own deterministic ``run_command`` execution and failure diagnostics.
-
-The Tool reports mechanical process facts. Recovery policy and model guidance
-remain runtime/application concerns rather than behavior of this built-in.
-"""
+"""Own cancellable ``run_command`` execution and failure diagnostics."""
 
 import errno
+import os
 import re
+import signal
 import subprocess
+import time
 from pathlib import Path
+from typing import Callable
 
 from squid_core.platform_context import PlatformContext, detect_platform_context
 
@@ -16,7 +16,7 @@ from ._truncation import truncate_head_tail
 
 TOOL_NAME = "run_command"
 DEFAULT_TIMEOUT_SECONDS = 15
-
+POLL_INTERVAL_SECONDS = 0.05
 
 _POWERSHELL_COMMAND_NOT_FOUND = re.compile(
     r"The term '.+?' is not recognized as the name of a cmdlet, function, "
@@ -27,22 +27,22 @@ _POWERSHELL_INVALID_SEPARATOR = re.compile(
     r"The token '(?:&&|\|\|)' is not a valid statement separator",
     re.IGNORECASE,
 )
-# Return the tool definition shown to the model.
+
+
 def tool_definition() -> dict:
+    """Return the command Tool definition shown to the model."""
     return {
         "type": "function",
         "function": {
             "name": TOOL_NAME,
             "description": (
-                "Run one shell command from the repository root and return its combined output and exit status."
+                "Run one shell command from the repository root and return its "
+                "combined output and exit status."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "Shell command to run",
-                    },
+                    "command": {"type": "string", "description": "Shell command to run"},
                     "verification": {
                         "type": "boolean",
                         "description": (
@@ -57,16 +57,19 @@ def tool_definition() -> dict:
     }
 
 
-# Run a command from the repo root and return the result in a consistent shape.
 def execute(
     repo_root: Path,
     command: str,
     verification: bool,
     platform_context: PlatformContext | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> dict:
+    """Run one owned process tree and return its normalized result."""
     platform_context = platform_context or detect_platform_context()
+    should_cancel = should_cancel or (lambda: False)
     subprocess_command: str | list[str] = command
     use_shell = True
+    popen_options = {}
     if platform_context.is_windows:
         subprocess_command = [
             platform_context.shell_executable,
@@ -75,69 +78,128 @@ def execute(
             command,
         ]
         use_shell = False
+        popen_options["creationflags"] = getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+        )
+    else:
+        # A new session gives the Tool an exact process group to terminate.
+        popen_options["start_new_session"] = True
 
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             subprocess_command,
             shell=use_shell,
             cwd=repo_root,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            timeout=DEFAULT_TIMEOUT_SECONDS,
+            **popen_options,
         )
-    except subprocess.TimeoutExpired as exc:
-        output = exc.stdout or ""
-        if isinstance(output, bytes):
-            output = output.decode(encoding="utf-8", errors="replace")
-        output, output_metadata = truncate_head_tail(output)
-
-        return {
-            "ok": False,
-            "tool": TOOL_NAME,
-            "command": command,
-            "output": output,
-            "output_truncated": output_metadata["truncated"],
-            "output_original_chars": output_metadata["original_chars"],
-            "output_returned_chars": output_metadata["returned_chars"],
-            "returncode": -1,
-            "timed_out": True,
-            "verification": verification,
-            "failure_class": "timeout",
-            "shell": platform_context.shell_name,
-            "platform": platform_context.os_name,
-        }
     except OSError as exc:
-        output, output_metadata = truncate_head_tail(str(exc))
-        if exc.errno in {errno.EACCES, errno.EPERM}:
-            failure_class = "permission_denied"
-        elif exc.errno == errno.ENOENT:
-            # This exception describes the configured shell, cwd, or another
-            # launch path. It does not prove that the requested command is absent.
-            failure_class = "path_not_found"
-        else:
-            failure_class = "unknown_failure"
+        return _launch_failure(command, verification, platform_context, exc)
 
-        return {
-            "ok": False,
-            "tool": TOOL_NAME,
-            "command": command,
-            "verification": verification,
-            "output": output,
-            "output_truncated": output_metadata["truncated"],
-            "output_original_chars": output_metadata["original_chars"],
-            "output_returned_chars": output_metadata["returned_chars"],
-            "returncode": -1,
-            "failure_class": failure_class,
-            "shell": platform_context.shell_name,
-            "platform": platform_context.os_name,
-        }
+    deadline = time.monotonic() + DEFAULT_TIMEOUT_SECONDS
+    cancelled = False
+    timed_out = False
+    output_bytes = b""
+    while True:
+        if should_cancel():
+            cancelled = True
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            timed_out = True
+            break
+        try:
+            output_bytes, _ = process.communicate(
+                timeout=min(POLL_INTERVAL_SECONDS, remaining)
+            )
+            break
+        except subprocess.TimeoutExpired:
+            continue
 
-    output, output_metadata = truncate_head_tail(result.stdout)
-    response = {
-        "ok": result.returncode == 0,
+    if cancelled or timed_out:
+        _terminate_process_tree(process, platform_context.is_windows)
+        try:
+            output_bytes, _ = process.communicate(timeout=1)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            output_bytes, _ = process.communicate()
+
+    output = (output_bytes or b"").decode("utf-8", errors="replace")
+    # Match subprocess text mode's universal-newline behavior on every platform.
+    output = output.replace("\r\n", "\n").replace("\r", "\n")
+    output, output_metadata = truncate_head_tail(output)
+    if cancelled or timed_out:
+        response = _base_response(
+            command, verification, output, output_metadata, returncode=-1
+        )
+        response.update(
+            {
+                "cancelled": cancelled,
+                "timed_out": timed_out,
+                "failure_class": "cancelled" if cancelled else "timeout",
+                "shell": platform_context.shell_name,
+                "platform": platform_context.os_name,
+            }
+        )
+        return response
+
+    response = _base_response(
+        command,
+        verification,
+        output,
+        output_metadata,
+        returncode=process.returncode,
+    )
+    response["ok"] = process.returncode == 0
+    if process.returncode != 0:
+        response.update(
+            {
+                "failure_class": _classify_failure(
+                    platform_context, process.returncode, output
+                ),
+                "shell": platform_context.shell_name,
+                "platform": platform_context.os_name,
+            }
+        )
+    return response
+
+
+def _terminate_process_tree(process: subprocess.Popen, is_windows: bool) -> None:
+    """Terminate descendants using the process-tree primitive for this platform."""
+    if process.poll() is not None:
+        return
+    if is_windows:
+        # taskkill /T is the smallest dependable Windows descendant-tree primitive.
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if process.poll() is None:
+            process.kill()
+        return
+
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+        process.wait(timeout=0.2)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def _base_response(
+    command: str,
+    verification: bool,
+    output: str,
+    output_metadata: dict,
+    *,
+    returncode: int,
+) -> dict:
+    return {
+        "ok": False,
         "tool": TOOL_NAME,
         "command": command,
         "verification": verification,
@@ -145,20 +207,31 @@ def execute(
         "output_truncated": output_metadata["truncated"],
         "output_original_chars": output_metadata["original_chars"],
         "output_returned_chars": output_metadata["returned_chars"],
-        "returncode": result.returncode,
+        "returncode": returncode,
     }
-    if result.returncode != 0:
-        response.update(
-            {
-                "failure_class": _classify_failure(
-                    platform_context,
-                    result.returncode,
-                    result.stdout,
-                ),
-                "shell": platform_context.shell_name,
-                "platform": platform_context.os_name,
-            }
-        )
+
+
+def _launch_failure(
+    command: str,
+    verification: bool,
+    platform_context: PlatformContext,
+    exc: OSError,
+) -> dict:
+    output, metadata = truncate_head_tail(str(exc))
+    if exc.errno in {errno.EACCES, errno.EPERM}:
+        failure_class = "permission_denied"
+    elif exc.errno == errno.ENOENT:
+        failure_class = "path_not_found"
+    else:
+        failure_class = "unknown_failure"
+    response = _base_response(command, verification, output, metadata, returncode=-1)
+    response.update(
+        {
+            "failure_class": failure_class,
+            "shell": platform_context.shell_name,
+            "platform": platform_context.os_name,
+        }
+    )
     return response
 
 
@@ -200,8 +273,6 @@ def _classify_failure(
             return "permission_denied"
         return "process_failed"
 
-    # Exit status alone is not enough: an application may deliberately return
-    # 126/127. Require the configured shell's recognizable diagnostic as well.
     shell_name = re.escape(platform_context.shell_name)
     shell_prefix = rf"^(?:.*/)?{shell_name}:\s*"
     if returncode == 127 and (
@@ -225,7 +296,6 @@ def _classify_failure(
         re.IGNORECASE | re.MULTILINE,
     ):
         return "permission_denied"
-
     if returncode == 2 and re.search(
         rf"^(?:.*/)?{shell_name}:.*syntax error",
         output,

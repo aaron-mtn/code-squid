@@ -76,6 +76,7 @@ class StreamingProvider(FakeProvider):
         tools: list[dict],
         on_text_delta,
         on_tool_preparing=None,
+        should_cancel=None,
     ) -> FakeResponse:
         self.requests.append(
             {
@@ -85,6 +86,10 @@ class StreamingProvider(FakeProvider):
             }
         )
         for delta in self.deltas:
+            if should_cancel is not None and should_cancel():
+                from squid_core.providers.base import StreamCancelled
+
+                raise StreamCancelled
             on_text_delta(delta)
         if on_tool_preparing is not None:
             for event in self.tool_preparing_events:

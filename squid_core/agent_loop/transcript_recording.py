@@ -1,4 +1,4 @@
-"""Transcript message construction, recording, and cancellation repair."""
+"""Transcript message construction, recording, and failed-run repair."""
 
 from typing import Any, Iterable
 
@@ -80,18 +80,31 @@ def record_pending_tool_result(
     tool_results,
     pending_tool_action: dict | None,
     pending_tool_result: dict | None,
+    *,
+    interrupted: bool = True,
 ) -> None:
-    """Close a committed tool-call pair after cancellation or interruption."""
+    """Close a committed tool-call pair before an incomplete run unwinds."""
     if pending_tool_action is None:
         return
 
-    result = pending_tool_result if pending_tool_result is not None else {
-        "ok": False,
-        "tool": pending_tool_action.get("tool", ""),
-        "error": "tool action interrupted",
-        "reason": "interrupted before a tool result was available",
-        "interrupted": True,
-    }
+    if pending_tool_result is not None:
+        result = pending_tool_result
+    elif interrupted:
+        result = {
+            "ok": False,
+            "tool": pending_tool_action.get("tool", ""),
+            "error": "tool action interrupted",
+            "reason": "interrupted before a tool result was available",
+            "interrupted": True,
+        }
+    else:
+        result = {
+            "ok": False,
+            "tool": pending_tool_action.get("tool", ""),
+            "error": "tool action failed",
+            "reason": "run failed before a tool result was available",
+            "failed": True,
+        }
     record_messages(
         session,
         session_store,

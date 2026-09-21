@@ -4,6 +4,8 @@ import json
 import re
 from collections.abc import Callable
 
+from squid_core.providers.base import StreamCancelled
+
 TOOL_CALL_CONTENT_MODES = {"omit", "empty", "null"}
 
 
@@ -295,6 +297,9 @@ class ModelAdapter:
                 else self.provider.create_response
             )
             return transport(**request, **transport_options)
+        except StreamCancelled:
+            # Cooperative cancellation is loop control, not a provider failure.
+            raise
         except Exception as exc:
             # Provider-specific failures are wrapped at this boundary so the
             # host can distinguish transport failures from application bugs.
@@ -337,11 +342,13 @@ class ModelAdapter:
         tool_definitions: list[dict],
         on_text_delta,
         on_tool_preparing=None,
+        should_cancel=None,
     ) -> dict:
         return self.respond_streaming_prepared(
             self.prepare_request(messages, tool_definitions),
             on_text_delta=on_text_delta,
             on_tool_preparing=on_tool_preparing,
+            should_cancel=should_cancel,
         )
 
     def respond_streaming_prepared(
@@ -349,6 +356,7 @@ class ModelAdapter:
         request: dict,
         on_text_delta,
         on_tool_preparing=None,
+        should_cancel=None,
     ) -> dict:
         """Stream one already-finalized provider request."""
         tool_metadata = self._tool_metadata_from_definitions(request["tools"])
@@ -357,6 +365,7 @@ class ModelAdapter:
             streaming=True,
             on_text_delta=on_text_delta,
             on_tool_preparing=on_tool_preparing,
+            should_cancel=should_cancel,
         )
 
         return self._reply_from_response_or_error(raw_response, tool_metadata)

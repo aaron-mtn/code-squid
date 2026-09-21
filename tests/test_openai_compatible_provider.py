@@ -1,6 +1,9 @@
 from types import SimpleNamespace
 
+import pytest
+
 from squid_core.providers.openai_compatible import OpenAICompatibleProvider
+from squid_core.providers.base import StreamCancelled
 
 
 class FakeCompletions:
@@ -304,6 +307,42 @@ def test_stream_chat_requests_stream_true_and_assembles_text() -> None:
     assert deltas == ["hello ", "world"]
     assert response.choices[0].message.content == "hello world"
     assert response.choices[0].message.tool_calls == []
+
+
+def test_stream_cancellation_stops_consumption_and_closes_response() -> None:
+    class ClosableStream:
+        def __init__(self) -> None:
+            self.closed = False
+            self.chunks = iter([chunk(content="first"), chunk(content="second")])
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return next(self.chunks)
+
+        def close(self) -> None:
+            self.closed = True
+
+    provider, client = provider_with_fake_client()
+    stream = ClosableStream()
+    client.chat.completions.response = stream
+    cancelled = False
+
+    def on_delta(_delta: str) -> None:
+        nonlocal cancelled
+        cancelled = True
+
+    with pytest.raises(StreamCancelled):
+        provider.stream_chat(
+            model="test-model",
+            messages=[],
+            tools=[],
+            on_text_delta=on_delta,
+            should_cancel=lambda: cancelled,
+        )
+
+    assert stream.closed is True
 
 
 def test_stream_chat_preserves_exposed_reasoning_finish_reason_and_response_id() -> None:

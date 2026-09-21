@@ -351,7 +351,11 @@ and application layer; `squid_core/` is the reusable agent runtime.
     to `squid_core.events.emit_event`.
   - `transcript_recording.py` owns accepted-message writes to the in-memory
     Session and optional SessionStore, runtime user/context message construction,
-    and mechanical repair of a pending Tool call/result transcript pair.
+    and mechanical repair of a pending Tool call/result transcript pair during
+    cancellation, interruption, or ordinary exceptional failure. `loop.py`
+    funnels those incomplete exits through one unwind path that repairs the
+    pair, records terminal lifecycle/status, runs `run_finished`, and then
+    preserves the original exception semantics.
 
 - `squid_core/mods/`
   - Mod metadata, validation, discovery, and runtime composition.
@@ -1825,7 +1829,10 @@ Resume selects an active saved session inside the persistent CLI loop. A later
 authored task loads messages with `SessionStore.load_messages()`, appends a
 follow-up user message, marks the session active, creates a fresh undo buffer,
 and continues the same saved session. `latest` resolves through the explicit
-workspace sessions path supplied by `code_squid.app_paths`.
+workspace sessions path supplied by `code_squid.app_paths`. Loading also repairs
+a genuinely trailing assistant Tool call left by an older interrupted runtime
+by durably appending a synthetic interrupted Tool result; it does not attempt
+to reinterpret malformed pairs in the middle of history.
 
 The saved-session viewer can list sessions and show message transcripts.
 Compaction events are not printed as transcript messages by the viewer.
@@ -1974,7 +1981,11 @@ editing.
 - merges stderr into stdout
 - decodes the merged process stream as UTF-8 with replacement for malformed
   bytes, independent of the host platform's locale
-- times out after 15 seconds
+- polls an owned process while checking cooperative cancellation and times out
+  after 15 seconds
+- returns distinct normalized `cancelled` and `timed_out` flags; either boundary
+  terminates the complete owned process tree (Windows `taskkill /T`, or a
+  dedicated POSIX process group) before returning
 - returns `ok` based on process return code
 - attaches `failure_class` to every failed execution using only timeout state,
   launch errors, return code, platform/shell identity, and narrowly recognized
@@ -2101,6 +2112,10 @@ narration is encouraged by prompts.
 - Core records model request failures, unexpected run failures, requested
   cancellation, and boundary-level interruptions before preserving the existing
   exception or cancellation control flow for its host.
+- Streaming providers check cancellation between arriving chunks and explicitly
+  close the active response iterator on completion, cancellation, or error.
+  Retry backoff uses the same cancellation predicate in short bounded waits.
+  A transport blocked before its first response data remains provider-dependent.
 - The console frontend supplies `TerminalDisplay`; Code Squid application and
   generic Core construction use Core's `NullDisplay` when a host omits
   presentation.

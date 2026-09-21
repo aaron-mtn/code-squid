@@ -1,6 +1,7 @@
 """Dispatch built-in tools with workspace and undo lifecycle safeguards."""
 
 from pathlib import Path
+from typing import Callable
 
 from squid_core.platform_context import PlatformContext
 from squid_core.safety.workspace_boundary import workspace_boundary_reason
@@ -29,6 +30,7 @@ class ToolExecutor:
         tools: dict | None = None,
         platform_context: PlatformContext | None = None,
         read_file_settings: ReadFileSettings | None = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> None:
         self.repo_root = repo_root
         self.session = session
@@ -37,6 +39,7 @@ class ToolExecutor:
         self.tools = TOOLS if tools is None else tools
         self.platform_context = platform_context
         self.read_file_settings = read_file_settings or ReadFileSettings()
+        self.should_cancel = should_cancel or (lambda: False)
         # The executor is constructed per agent run, which bounds candidate lifetime
         # without coupling diagnostic recovery to persisted Session history.
         self.patch_candidates = PatchCandidateStore()
@@ -102,7 +105,11 @@ class ToolExecutor:
 
             execute_args = args
             if tool["execute"] is BUILTIN_RUN_COMMAND:
-                execute_args = {**args, "platform_context": self.platform_context}
+                execute_args = {
+                    **args,
+                    "platform_context": self.platform_context,
+                    "should_cancel": self.should_cancel,
+                }
             elif tool["execute"] is BUILTIN_APPLY_PATCH:
                 execute_args = {**args, "candidate_store": self.patch_candidates}
             elif tool["execute"] is BUILTIN_READ_FILE:

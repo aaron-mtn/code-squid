@@ -1,5 +1,9 @@
 """Provider contract for raw model request, response, and setup probes."""
 
+
+class StreamCancelled(Exception):
+    """Signal that a streamed response was closed after cooperative cancellation."""
+
 class BaseProvider:
     """Owns the raw request/response call to a model provider; must not own agent policy, loop control, or tool execution."""
 
@@ -34,5 +38,6 @@ class BaseProvider:
         tool_choice=None,
         trace_callback=None,
         please_stop_contemplating_the_void: bool = False,
+        should_cancel=None,
     ) -> object:
         raise NotImplementedError

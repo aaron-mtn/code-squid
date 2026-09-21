@@ -267,6 +267,34 @@ class SessionStore:
                         ),
                     ]
 
+        trailing = messages[-1] if messages else None
+        tool_calls = (
+            trailing.get("tool_calls")
+            if isinstance(trailing, dict) and trailing.get("role") == "assistant"
+            else None
+        )
+        if tool_calls:
+            # Older interrupted runs could commit an assistant call without its
+            # required result. Repair only the genuinely trailing case so load
+            # never guesses about malformed history in the middle of a session.
+            for tool_call in tool_calls:
+                function = tool_call.get("function") or {}
+                result = {
+                    "ok": False,
+                    "tool": function.get("name", ""),
+                    "error": "tool action interrupted",
+                    "reason": "recovered trailing tool call from an interrupted session",
+                    "interrupted": True,
+                    "recovered": True,
+                }
+                message = {
+                    "role": "tool",
+                    "tool_call_id": tool_call.get("id", ""),
+                    "content": json.dumps(result, indent=2),
+                }
+                self.append_message(message)
+                messages.append(message)
+
         return messages
 
     # Update the run-level session status in metadata.json.

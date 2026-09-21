@@ -777,10 +777,11 @@ def test_only_builtin_run_command_receives_platform_context(monkeypatch, tmp_pat
     executor.execute({"tool": "run_command", "args": {"command": "Get-ChildItem"}})
     executor.execute({"tool": "other", "args": {"value": 1}})
 
-    assert calls == [
-        ("command", {"command": "Get-ChildItem", "platform_context": context}),
-        ("other", {"value": 1}),
-    ]
+    assert calls[0][0] == "command"
+    assert calls[0][1]["command"] == "Get-ChildItem"
+    assert calls[0][1]["platform_context"] == context
+    assert calls[0][1]["should_cancel"]() is False
+    assert calls[1] == ("other", {"value": 1})
 
 
 def test_allow_outside_workspace_allows_outside_file_paths_through(

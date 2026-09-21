@@ -175,6 +175,31 @@ def test_load_messages_ignores_run_context_entries(tmp_path: Path) -> None:
     assert store.load_messages() == messages
 
 
+def test_load_messages_repairs_trailing_unmatched_tool_call_once(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path, "repair trailing tool")
+    store.append_message(
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_old",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }
+            ],
+        }
+    )
+
+    first_load = store.load_messages()
+    second_load = store.load_messages()
+
+    assert first_load == second_load
+    assert first_load[-1]["role"] == "tool"
+    assert first_load[-1]["tool_call_id"] == "call_old"
+    assert json.loads(first_load[-1]["content"])["recovered"] is True
+
+
 def test_append_compaction_event_writes_first_class_jsonl_entry(tmp_path: Path) -> None:
     store = SessionStore.create(tmp_path, "compact lifecycle")
 

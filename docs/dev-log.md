@@ -1,3 +1,25 @@
+- 2026-09-20: Hardened Core interruption and failure unwinding around the
+  transcript-pair invariant. Cancellation, KeyboardInterrupt, ordinary
+  exceptions, and other boundary interruptions now share one incomplete-run
+  cleanup path; committed Tool calls receive real or synthetic results before
+  status/lifecycle/`run_finished` handling, while original exceptions still
+  propagate. Session loading repairs only a genuinely trailing unmatched Tool
+  call from older sessions. Streaming cancellation is checked between arriving
+  provider chunks and always closes the OpenAI-compatible or Ollama stream;
+  retry backoff is cancellation-aware. `run_command` now owns a `Popen` process,
+  distinguishes completion, timeout, cancellation, launch failure, and process
+  failure, and terminates its Windows descendant tree or POSIX process group on
+  timeout/cancellation while retaining combined decoded output. Added focused
+  lifecycle, replay, stream-close, retry-wait, command cancellation, timeout,
+  process-tree, output, and executor-wiring regressions. Intentionally deferred:
+  cancellation before a provider yields response data and arbitrary Python Tool
+  or Hook force-termination. Focused Core lifecycle/provider/storage/Tool coverage
+  passed 280 tests. The full suite passed 1,358 tests with the existing unrelated
+  `test_headings_lists_quotes_fence_and_rule_render_as_blocks` failure, which
+  expects indentation for a third-level Markdown heading. Production and test
+  packages compiled successfully, and `git diff --check` passed. No live model
+  inference was run.
+
 - 2026-09-19: Applied the three scoped harness-guidance cleanups. Read nudges
   now report accumulated reads without a successful built-in edit and allow a
   specific missing fact, unmet requirement, required verification, read-only

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from urllib import request
 from urllib.error import HTTPError, URLError
 
-from .base import BaseProvider
+from .base import BaseProvider, StreamCancelled
 
 
 DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
@@ -93,6 +93,7 @@ class OllamaProvider(BaseProvider):
         tool_choice=None,
         trace_callback=None,
         please_stop_contemplating_the_void: bool = False,
+        should_cancel=None,
     ) -> object:
         payload = {
             "model": model,
@@ -130,8 +131,11 @@ class OllamaProvider(BaseProvider):
             },
         )
 
+        stream = self._post_chat_stream(payload)
         try:
-            for chunk in self._post_chat_stream(payload):
+            for chunk in stream:
+                if should_cancel is not None and should_cancel():
+                    raise StreamCancelled
                 chunk_elapsed = time.perf_counter() - request_started_at
                 raw_chunk_count += 1
                 if first_raw_chunk_elapsed is None:
@@ -180,6 +184,9 @@ class OllamaProvider(BaseProvider):
                 if chunk.get("done") is True:
                     break
         finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
             self._trace(
                 trace_callback,
                 {

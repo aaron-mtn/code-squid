@@ -1,7 +1,6 @@
 import importlib
 from pathlib import Path
 import shlex
-from subprocess import TimeoutExpired
 import sys
 
 import pytest
@@ -559,14 +558,16 @@ def test_run_command_keeps_shared_character_truncation(
 ) -> None:
     output = "x" * 12001
 
-    class Completed:
+    class Process:
         returncode = 0
-        stdout = output
+
+        def communicate(self, timeout=None):
+            return output.encode(), None
 
     monkeypatch.setattr(
         run_command_module.subprocess,
-        "run",
-        lambda *args, **kwargs: Completed(),
+        "Popen",
+        lambda *args, **kwargs: Process(),
     )
 
     result = run_command(tmp_path, "generate lots of output", verification=False)
@@ -925,19 +926,72 @@ def test_apply_patch_rejects_malformed_request_forms(
 
 
 def test_run_command_timeout_returns_normal_failure_result(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    def raise_timeout(*args, **kwargs):
-        raise TimeoutExpired(cmd="sleep 1", timeout=0.01, output="partial output")
-
-    monkeypatch.setattr(run_command_module.subprocess, "run", raise_timeout)
-
-    result = run_command(tmp_path, "sleep 1", verification=True)
+    monkeypatch.setattr(run_command_module, "DEFAULT_TIMEOUT_SECONDS", 0.05)
+    executable = f"& '{sys.executable}'" if sys.platform == "win32" else shlex.quote(sys.executable)
+    command = (
+        f'{executable} -c "import time; print(\'partial output\', flush=True); time.sleep(5)"'
+    )
+    result = run_command(
+        tmp_path,
+        command,
+        verification=True,
+    )
 
     assert result["ok"] is False
     assert result["timed_out"] is True
     assert result["tool"] == "run_command"
-    assert result["command"] == "sleep 1"
+    assert result["command"] == command
     assert result["verification"] is True
     assert result["failure_class"] == "timeout"
+
+
+def test_run_command_cancellation_stops_promptly(tmp_path: Path) -> None:
+    executable = f"& '{sys.executable}'" if sys.platform == "win32" else shlex.quote(sys.executable)
+    started = run_command_module.time.monotonic()
+    result = run_command(
+        tmp_path,
+        f'{executable} -c "import time; time.sleep(5)"',
+        verification=False,
+        should_cancel=lambda: run_command_module.time.monotonic() - started > 0.1,
+    )
+
+    assert result["ok"] is False
+    assert result["cancelled"] is True
+    assert result["timed_out"] is False
+    assert result["failure_class"] == "cancelled"
+    assert run_command_module.time.monotonic() - started < 2
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows process-tree regression")
+def test_run_command_timeout_terminates_descendant_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    marker = tmp_path / "descendant-finished.txt"
+    child = tmp_path / "child.py"
+    child.write_text(
+        "import pathlib, time\ntime.sleep(1)\npathlib.Path(r'"
+        + str(marker)
+        + "').write_text('late', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    parent = tmp_path / "parent.py"
+    parent.write_text(
+        "import subprocess, sys, time\n"
+        f"subprocess.Popen([sys.executable, r'{child}'])\n"
+        "time.sleep(5)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(run_command_module, "DEFAULT_TIMEOUT_SECONDS", 0.2)
+
+    result = run_command(
+        tmp_path,
+        _python_script_command(parent),
+        verification=False,
+    )
+    run_command_module.time.sleep(1.2)
+
+    assert result["timed_out"] is True
+    assert marker.exists() is False
 
 
 def test_run_command_classifies_powershell_invalid_separator(
@@ -945,29 +999,15 @@ def test_run_command_classifies_powershell_invalid_separator(
 ) -> None:
     from squid_core.platform_context import PlatformContext
 
-    class Completed:
-        returncode = 1
-        stdout = (
-            "At line:1 char:10\n"
-            "+ Get-Date && Get-Date\n"
-            "+          ~~\n"
-            "The token '&&' is not a valid statement separator in this version.\n"
-        )
-
-    context = PlatformContext("Windows", "PowerShell", "powershell", "\\", True)
-    monkeypatch.setattr(run_command_module.subprocess, "run", lambda *args, **kwargs: Completed())
-
-    result = run_command(
-        tmp_path,
-        "Get-Date && Get-Date",
-        verification=False,
-        platform_context=context,
+    output = (
+        "At line:1 char:10\n"
+        "+ Get-Date && Get-Date\n"
+        "+          ~~\n"
+        "The token '&&' is not a valid statement separator in this version.\n"
     )
 
-    assert result["failure_class"] == "shell_syntax_error"
-    assert result["shell"] == "PowerShell"
-    assert result["platform"] == "Windows"
-    assert result["output"] == Completed.stdout
+    context = PlatformContext("Windows", "PowerShell", "powershell", "\\", True)
+    assert run_command_module._classify_failure(context, 1, output) == "shell_syntax_error"
 
 
 def test_run_command_classifies_recognizable_missing_executable(
@@ -975,26 +1015,15 @@ def test_run_command_classifies_recognizable_missing_executable(
 ) -> None:
     from squid_core.platform_context import PlatformContext
 
-    class Completed:
-        returncode = 1
-        stdout = (
-            "missing-tool : The term 'missing-tool' is not recognized as the name "
-            "of a cmdlet, function, script file, or operable program.\n"
-            "    + CategoryInfo : ObjectNotFound: (missing-tool:String) [], "
-            "CommandNotFoundException\n"
-        )
-
-    context = PlatformContext("Windows", "PowerShell", "powershell", "\\", True)
-    monkeypatch.setattr(run_command_module.subprocess, "run", lambda *args, **kwargs: Completed())
-
-    result = run_command(
-        tmp_path,
-        "missing-tool",
-        verification=False,
-        platform_context=context,
+    output = (
+        "missing-tool : The term 'missing-tool' is not recognized as the name "
+        "of a cmdlet, function, script file, or operable program.\n"
+        "    + CategoryInfo : ObjectNotFound: (missing-tool:String) [], "
+        "CommandNotFoundException\n"
     )
 
-    assert result["failure_class"] == "command_not_found"
+    context = PlatformContext("Windows", "PowerShell", "powershell", "\\", True)
+    assert run_command_module._classify_failure(context, 1, output) == "command_not_found"
 
 
 def test_run_command_keeps_ordinary_project_failure_generic(
@@ -1002,22 +1031,10 @@ def test_run_command_keeps_ordinary_project_failure_generic(
 ) -> None:
     from squid_core.platform_context import PlatformContext
 
-    class Completed:
-        returncode = 1
-        stdout = "FAILED tests/test_widget.py - AssertionError: command not found in message\n"
+    output = "FAILED tests/test_widget.py - AssertionError: command not found in message\n"
 
     context = PlatformContext("Linux", "bash", "/bin/bash", "/", False)
-    monkeypatch.setattr(run_command_module.subprocess, "run", lambda *args, **kwargs: Completed())
-
-    result = run_command(
-        tmp_path,
-        "pytest -q",
-        verification=True,
-        platform_context=context,
-    )
-
-    assert result["failure_class"] == "process_failed"
-    assert result["output"] == Completed.stdout
+    assert run_command_module._classify_failure(context, 1, output) == "process_failed"
 
 
 def test_run_command_uses_selected_powershell_on_windows(
@@ -1027,9 +1044,11 @@ def test_run_command_uses_selected_powershell_on_windows(
 
     calls = []
 
-    class Completed:
+    class Process:
         returncode = 0
-        stdout = "ok\n"
+
+        def communicate(self, timeout=None):
+            return b"ok\n", None
 
     monkeypatch.setattr(
         run_command_module,
@@ -1038,8 +1057,8 @@ def test_run_command_uses_selected_powershell_on_windows(
     )
     monkeypatch.setattr(
         run_command_module.subprocess,
-        "run",
-        lambda *args, **kwargs: calls.append((args, kwargs)) or Completed(),
+        "Popen",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or Process(),
     )
 
     result = run_command(tmp_path, "Get-ChildItem", verification=False)
@@ -1053,7 +1072,7 @@ def test_run_command_uses_selected_powershell_on_windows(
     ]
     assert kwargs["shell"] is False
     assert kwargs["cwd"] == tmp_path
-    assert kwargs["timeout"] == 15
+    assert kwargs["creationflags"] == getattr(run_command_module.subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     assert result["ok"] is True
 
 
@@ -1062,9 +1081,11 @@ def test_run_command_uses_supplied_context_without_redetecting(monkeypatch, tmp_
 
     calls = []
 
-    class Completed:
+    class Process:
         returncode = 0
-        stdout = "ok\n"
+
+        def communicate(self, timeout=None):
+            return b"ok\n", None
 
     def fail_detection():
         raise AssertionError("platform should not be redetected")
@@ -1073,8 +1094,8 @@ def test_run_command_uses_supplied_context_without_redetecting(monkeypatch, tmp_
     monkeypatch.setattr(run_command_module, "detect_platform_context", fail_detection)
     monkeypatch.setattr(
         run_command_module.subprocess,
-        "run",
-        lambda *args, **kwargs: calls.append((args, kwargs)) or Completed(),
+        "Popen",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or Process(),
     )
 
     result = run_command(
@@ -1086,4 +1107,5 @@ def test_run_command_uses_supplied_context_without_redetecting(monkeypatch, tmp_
 
     assert calls[0][0][0] == "printf ok"
     assert calls[0][1]["shell"] is True
+    assert calls[0][1]["start_new_session"] is True
     assert result["ok"] is True
