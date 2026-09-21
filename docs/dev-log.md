@@ -1,3 +1,20 @@
+- 2026-09-20: Fixed streamed response integrity for native Ollama and
+  OpenAI-compatible providers. Native Ollama now requires its `done: true`
+  terminal record, and OpenAI-compatible chat completions require a non-null
+  choice `finish_reason`; EOF without the provider-native completion signal
+  raises a clear provider failure instead of accepting accumulated partial text
+  or Tool-call fragments. Cancellation remains distinct through a final
+  cancellation check, and active streams still close on success, incomplete
+  EOF, and cancellation. Added focused normal text/Tool, partial text/Tool,
+  empty-stream, cancellation, terminal-metadata, and cleanup regressions for
+  both providers. The focused provider suite passed 56 tests; the broader
+  provider/model/agent suite passed 188 tests. The full suite passed 1,376
+  tests with the existing unrelated
+  `test_headings_lists_quotes_fence_and_rule_render_as_blocks` failure, which
+  expects indentation for a third-level Markdown heading. Production and test
+  packages compiled successfully, and `git diff --check` passed. No live model
+  inference was run.
+
 - 2026-09-20: Made transcript compaction fail safe when a summarizer returns no
   usable summary text. Core now validates the response mapping and requires a
   non-whitespace string before rebuilding `session.messages`; absent, malformed,

@@ -2118,8 +2118,13 @@ narration is encouraged by prompts.
 - Core records model request failures, unexpected run failures, requested
   cancellation, and boundary-level interruptions before preserving the existing
   exception or cancellation control flow for its host.
-- Streaming providers check cancellation between arriving chunks and explicitly
-  close the active response iterator on completion, cancellation, or error.
+- Streaming providers accept a response only after a provider-native terminal
+  signal: native Ollama requires `done: true`, while OpenAI-compatible chat
+  completions require a non-null choice `finish_reason`. EOF without that
+  evidence is a provider failure, so partial text or Tool calls never become an
+  accepted assistant response. Providers check cancellation between arriving
+  chunks and once more before classifying incomplete EOF, then explicitly close
+  the active response iterator on completion, cancellation, or error.
   Retry backoff uses the same cancellation predicate in short bounded waits.
   A transport blocked before its first response data remains provider-dependent.
 - The console frontend supplies `TerminalDisplay`; Code Squid application and

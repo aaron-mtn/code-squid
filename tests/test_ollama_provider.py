@@ -4,6 +4,7 @@ import pytest
 
 from squid_core.model_adapter import ModelAdapter
 from squid_core.providers import build_provider, tool_call_content_mode
+from squid_core.providers.base import StreamCancelled
 from squid_core.providers.ollama import OllamaProvider, adapt_response, convert_messages
 from squid_core.providers.openai_compatible import OpenAICompatibleProvider
 from squid_core.settings import ProviderSettings
@@ -28,6 +29,32 @@ class StreamingOllamaProvider(OllamaProvider):
     def _post_chat_stream(self, payload: dict):
         self.payloads.append(payload)
         yield from self.chunks
+
+
+class ClosableStream:
+    """Small iterator double that records the provider cleanup contract."""
+
+    def __init__(self, chunks: list[dict]) -> None:
+        self._chunks = iter(chunks)
+        self.closed = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return next(self._chunks)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class ClosableStreamingOllamaProvider(OllamaProvider):
+    def __init__(self, stream: ClosableStream) -> None:
+        super().__init__()
+        self.stream = stream
+
+    def _post_chat_stream(self, payload: dict):
+        return self.stream
 
 
 def test_stream_trace_reports_native_raw_thinking_and_summary() -> None:
@@ -327,6 +354,87 @@ def test_native_ollama_streaming_accumulates_text_and_tool_calls_once() -> None:
         }
     ]
     assert preparing_events == [{"tool": "read_file", "tool_call_index": 0}]
+
+
+@pytest.mark.parametrize(
+    "chunks",
+    [
+        [{"message": {"content": "partial"}, "done": False}],
+        [
+            {
+                "message": {
+                    "tool_calls": [
+                        {
+                            "function": {
+                                "name": "read_file",
+                                "arguments": {"path": "/tmp/incomplete"},
+                            }
+                        }
+                    ]
+                },
+                "done": False,
+            }
+        ],
+        [],
+    ],
+    ids=["partial-text", "partial-tool-call", "empty"],
+)
+def test_native_ollama_incomplete_stream_fails_and_closes(chunks) -> None:
+    stream = ClosableStream(chunks)
+    provider = ClosableStreamingOllamaProvider(stream)
+
+    with pytest.raises(RuntimeError, match="ended before provider signaled completion"):
+        provider.stream_chat(
+            model="test-model",
+            messages=[],
+            tools=[],
+            on_text_delta=lambda _delta: None,
+        )
+
+    assert stream.closed is True
+
+
+def test_native_ollama_completed_stream_closes() -> None:
+    stream = ClosableStream(
+        [{"message": {"content": "complete"}, "done": True, "done_reason": "stop"}]
+    )
+    provider = ClosableStreamingOllamaProvider(stream)
+
+    response = provider.stream_chat(
+        model="test-model",
+        messages=[],
+        tools=[],
+        on_text_delta=lambda _delta: None,
+    )
+
+    assert response.choices[0].message.content == "complete"
+    assert stream.closed is True
+
+
+def test_native_ollama_stream_cancellation_remains_distinct_and_closes() -> None:
+    stream = ClosableStream(
+        [
+            {"message": {"content": "first"}, "done": False},
+            {"message": {"content": "second"}, "done": False},
+        ]
+    )
+    provider = ClosableStreamingOllamaProvider(stream)
+    cancelled = False
+
+    def on_delta(_delta: str) -> None:
+        nonlocal cancelled
+        cancelled = True
+
+    with pytest.raises(StreamCancelled):
+        provider.stream_chat(
+            model="test-model",
+            messages=[],
+            tools=[],
+            on_text_delta=on_delta,
+            should_cancel=lambda: cancelled,
+        )
+
+    assert stream.closed is True
 
 
 def test_provider_selection_defaults_to_openai_compatible() -> None:

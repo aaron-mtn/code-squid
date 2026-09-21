@@ -159,6 +159,7 @@ class OpenAICompatibleProvider(BaseProvider):
         first_raw_chunk_elapsed = None
         first_content_delta_elapsed = None
         first_reasoning_delta_elapsed = None
+        saw_completion = False
 
         self._trace(
             trace_callback,
@@ -245,6 +246,9 @@ class OpenAICompatibleProvider(BaseProvider):
                     choice_finish_reason = getattr(choice, "finish_reason", None)
                     if choice_finish_reason is not None:
                         finish_reason = choice_finish_reason
+                        # Chat-completions marks its terminal choice with a
+                        # finish reason; transport EOF alone is not success.
+                        saw_completion = True
                     delta = getattr(choice, "delta", None)
                     if delta is None:
                         continue
@@ -264,6 +268,14 @@ class OpenAICompatibleProvider(BaseProvider):
                             prepared_tool_call_indexes=prepared_tool_call_indexes,
                             on_tool_preparing=on_tool_preparing,
                         )
+            if not saw_completion:
+                # Cancellation remains authoritative when it caused an idle
+                # or otherwise incomplete provider stream to close.
+                if should_cancel is not None and should_cancel():
+                    raise StreamCancelled
+                raise RuntimeError(
+                    "OpenAI-compatible stream ended before provider signaled completion"
+                )
         finally:
             close = getattr(stream, "close", None)
             if callable(close):

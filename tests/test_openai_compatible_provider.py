@@ -288,11 +288,28 @@ def tool_call_delta(index, id=None, name=None, arguments=None):
     )
 
 
+class ClosableStream:
+    """Small iterator double that records the provider cleanup contract."""
+
+    def __init__(self, chunks) -> None:
+        self.closed = False
+        self.chunks = iter(chunks)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return next(self.chunks)
+
+    def close(self) -> None:
+        self.closed = True
+
+
 def test_stream_chat_requests_stream_true_and_assembles_text() -> None:
     provider, client = provider_with_fake_client()
     client.chat.completions.response = [
         chunk(content="hello "),
-        chunk(content="world"),
+        chunk(content="world", finish_reason="stop"),
     ]
     deltas = []
 
@@ -310,22 +327,8 @@ def test_stream_chat_requests_stream_true_and_assembles_text() -> None:
 
 
 def test_stream_cancellation_stops_consumption_and_closes_response() -> None:
-    class ClosableStream:
-        def __init__(self) -> None:
-            self.closed = False
-            self.chunks = iter([chunk(content="first"), chunk(content="second")])
-
-        def __iter__(self):
-            return self
-
-        def __next__(self):
-            return next(self.chunks)
-
-        def close(self) -> None:
-            self.closed = True
-
     provider, client = provider_with_fake_client()
-    stream = ClosableStream()
+    stream = ClosableStream([chunk(content="first"), chunk(content="second")])
     client.chat.completions.response = stream
     cancelled = False
 
@@ -423,6 +426,7 @@ def test_stream_chat_assembles_tool_call_fragments() -> None:
                 )
             ]
         ),
+        chunk(finish_reason="tool_calls"),
     ]
     deltas = []
 
@@ -462,6 +466,7 @@ def test_stream_chat_notifies_tool_preparing_once_when_name_appears() -> None:
                 )
             ]
         ),
+        chunk(finish_reason="tool_calls"),
     ]
     preparing_events = []
 
@@ -495,6 +500,7 @@ def test_stream_chat_tool_preparing_does_not_include_arguments() -> None:
                 )
             ]
         ),
+        chunk(finish_reason="tool_calls"),
     ]
     preparing_events = []
 
@@ -515,3 +521,55 @@ def test_stream_chat_tool_preparing_does_not_include_arguments() -> None:
     ]
     assert "arguments" not in preparing_events[0]
     assert "args" not in preparing_events[0]
+
+
+@pytest.mark.parametrize(
+    "chunks",
+    [
+        [chunk(content="partial")],
+        [
+            chunk(
+                tool_calls=[
+                    tool_call_delta(
+                        0,
+                        id="call_1",
+                        name="read_file",
+                        arguments='{"path": ',
+                    )
+                ]
+            )
+        ],
+        [],
+    ],
+    ids=["partial-text", "partial-tool-call", "empty"],
+)
+def test_openai_compatible_incomplete_stream_fails_and_closes(chunks) -> None:
+    provider, client = provider_with_fake_client()
+    stream = ClosableStream(chunks)
+    client.chat.completions.response = stream
+
+    with pytest.raises(RuntimeError, match="ended before provider signaled completion"):
+        provider.stream_chat(
+            model="test-model",
+            messages=[],
+            tools=[],
+            on_text_delta=lambda _delta: None,
+        )
+
+    assert stream.closed is True
+
+
+def test_openai_compatible_completed_stream_closes() -> None:
+    provider, client = provider_with_fake_client()
+    stream = ClosableStream([chunk(content="complete", finish_reason="stop")])
+    client.chat.completions.response = stream
+
+    response = provider.stream_chat(
+        model="test-model",
+        messages=[],
+        tools=[],
+        on_text_delta=lambda _delta: None,
+    )
+
+    assert response.choices[0].message.content == "complete"
+    assert stream.closed is True

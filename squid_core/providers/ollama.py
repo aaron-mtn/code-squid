@@ -118,6 +118,7 @@ class OllamaProvider(BaseProvider):
         first_content_delta_elapsed = None
         first_reasoning_delta_elapsed = None
         response_id = None
+        saw_completion = False
         self._trace(
             trace_callback,
             {
@@ -182,7 +183,16 @@ class OllamaProvider(BaseProvider):
                     prepared_tool_call_indexes=prepared_tool_call_indexes,
                 )
                 if chunk.get("done") is True:
+                    saw_completion = True
                     break
+            if not saw_completion:
+                # EOF is not an Ollama completion signal. Check cancellation
+                # once more because it may have closed an otherwise idle stream.
+                if should_cancel is not None and should_cancel():
+                    raise StreamCancelled
+                raise RuntimeError(
+                    "Ollama stream ended before provider signaled completion"
+                )
         finally:
             close = getattr(stream, "close", None)
             if callable(close):
