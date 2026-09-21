@@ -1970,3 +1970,15 @@
 - 2026-07-06: Active extension hooks now load while an extension is active and deactivate when the extension is inactive or invalid. Loose user hooks continue to work independently through the existing user-hook opt-in path.
 - 2026-07-06: Added CLI extension management commands for listing, checking,
   activating, deactivating, and validating discovered user extensions.
+- 2026-09-20: Made session JSONL loading recover from an interrupted final
+  append. Transcript resume and raw session viewing now share a narrow reader
+  that ignores one malformed final non-empty record only after a valid prefix;
+  malformed middle records and malformed-only files still fail. The reader is
+  non-mutating by default, while the real `SessionStore` append path truncates
+  a proven malformed final record before deriving the next entry ID. Coverage
+  includes valid loading, trailing blanks, load-append-reload durability,
+  exclusion of torn bytes, coherent IDs/parent linkage, and corruption before
+  later records. Verification: 51 focused session/storage tests passed;
+  compilation and `git diff --check` passed. The full suite passed 1,399 tests
+  and retained the unrelated Markdown heading indentation failure in
+  `tests/test_markdown_formatting.py`.

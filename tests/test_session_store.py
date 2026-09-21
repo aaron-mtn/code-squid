@@ -175,6 +175,79 @@ def test_load_messages_ignores_run_context_entries(tmp_path: Path) -> None:
     assert store.load_messages() == messages
 
 
+def test_load_messages_ignores_truncated_final_record(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path, "torn final record")
+    messages = [
+        {"role": "user", "content": "one"},
+        {"role": "assistant", "content": "two"},
+    ]
+    for message in messages:
+        store.append_message(message)
+    with store.jsonl_path.open("a", encoding="utf-8") as file:
+        file.write('{"id": "e_000003", "type": "message", "message": {')
+
+    assert SessionStore.open(store.session_dir).load_messages() == messages
+
+
+def test_load_messages_ignores_malformed_final_record_before_blank_lines(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore.create(tmp_path, "torn final record with blanks")
+    message = {"role": "user", "content": "complete"}
+    store.append_message(message)
+    with store.jsonl_path.open("a", encoding="utf-8") as file:
+        file.write("{malformed\n\n  \n")
+
+    assert store.load_messages() == [message]
+
+
+def test_load_messages_rejects_malformed_middle_record(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path, "malformed middle record")
+    store.append_message({"role": "user", "content": "before"})
+    store.append_message({"role": "assistant", "content": "after"})
+    valid_lines = store.jsonl_path.read_text(encoding="utf-8").splitlines()
+    store.jsonl_path.write_text(
+        f"{valid_lines[0]}\n{{malformed\n{valid_lines[1]}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(json.JSONDecodeError):
+        store.load_messages()
+
+
+def test_load_messages_rejects_only_malformed_record(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path, "only malformed record")
+    store.jsonl_path.write_text("{malformed", encoding="utf-8")
+
+    with pytest.raises(json.JSONDecodeError):
+        store.load_messages()
+
+
+def test_recovered_session_can_append_and_reload_after_truncated_tail(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore.create(tmp_path, "continue after torn tail")
+    original_messages = [
+        {"role": "user", "content": "one"},
+        {"role": "assistant", "content": "two"},
+    ]
+    original_entries = [store.append_message(message) for message in original_messages]
+    with store.jsonl_path.open("a", encoding="utf-8") as file:
+        file.write('{"id": "e_000003", "type": "message", "message": {')
+
+    assert SessionStore.open(store.session_dir).load_messages() == original_messages
+
+    new_message = {"role": "user", "content": "continued"}
+    new_entry = store.append_message(new_message)
+    reloaded = SessionStore.open(store.session_dir)
+
+    assert reloaded.load_messages() == [*original_messages, new_message]
+    assert read_entries(reloaded) == [*original_entries, new_entry]
+    assert new_entry["id"] == "e_000003"
+    assert new_entry["parent_id"] == original_entries[-1]["id"]
+    assert read_metadata(reloaded)["active_leaf_id"] == new_entry["id"]
+
+
 def test_load_messages_repairs_trailing_unmatched_tool_call_once(tmp_path: Path) -> None:
     store = SessionStore.create(tmp_path, "repair trailing tool")
     store.append_message(

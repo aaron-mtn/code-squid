@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from squid_core.storage.atomic_json import atomic_write_json
+from squid_core.storage.session_jsonl import load_session_jsonl
 
 
 # Status values allowed in metadata.json.
@@ -245,27 +246,20 @@ class SessionStore:
     def load_messages(self) -> list[dict]:
         messages = []
 
-        with self.jsonl_path.open(encoding="utf-8") as file:
-            for line in file:
-                # Ignore blank lines so hand-edited files do not immediately
-                # explode on harmless whitespace.
-                if not line.strip():
-                    continue
-
-                entry = json.loads(line)
-                if entry.get("type") == "message":
-                    messages.append(entry["message"])
-                elif entry.get("type") == "system_message_reconciliation":
-                    # Keep storage append-only while making the newest run's
-                    # specialization prompt durable across process restarts.
-                    messages = [
-                        entry["message"],
-                        *(
-                            message
-                            for message in messages
-                            if message.get("role") != "system"
-                        ),
-                    ]
+        for entry in load_session_jsonl(self.jsonl_path):
+            if entry.get("type") == "message":
+                messages.append(entry["message"])
+            elif entry.get("type") == "system_message_reconciliation":
+                # Keep storage append-only while making the newest run's
+                # specialization prompt durable across process restarts.
+                messages = [
+                    entry["message"],
+                    *(
+                        message
+                        for message in messages
+                        if message.get("role") != "system"
+                    ),
+                ]
 
         trailing = messages[-1] if messages else None
         tool_calls = (
@@ -318,14 +312,11 @@ class SessionStore:
     # This scans the JSONL file for now because it is simple and reliable.
     # If sessions get huge later, metadata can grow a next_entry_number field.
     def _next_entry_number(self) -> int:
-        count = 0
-
-        with self.jsonl_path.open(encoding="utf-8") as file:
-            for line in file:
-                if line.strip():
-                    count += 1
-
-        return count + 1
+        # A resumed session may end in an interrupted append. This is the point
+        # where read-only recovery must become durable: remove only that proven
+        # torn tail before assigning an ID and appending new valid history.
+        entries = load_session_jsonl(self.jsonl_path, truncate_torn_tail=True)
+        return len(entries) + 1
 
     def _next_model_request_number(self) -> int:
         """Return the next request number, including requests from prior runs."""

@@ -1760,6 +1760,16 @@ messages, compaction events, run-context events, and model reply diagnostics.
 Message entries include `id`, `parent_id`, `type`, `timestamp`, `message`, and
 optional `usage`.
 
+Session transcript readers parse non-empty records in append order. If the
+final non-empty line is malformed after a valid JSON prefix, readers treat it
+as a torn interrupted append and expose only the complete prefix. A malformed
+record with any later non-empty record, or a file containing only a malformed
+record, remains corruption and raises the normal JSON decoding error.
+Before appending continued history, `SessionStore` removes such a proven torn
+tail, then derives the next entry ID from the remaining valid records. This
+keeps resumed parent linkage and future reloads coherent without weakening the
+middle-record corruption boundary.
+
 `model-view.jsonl` records one object for every provider attempt. `ModelAdapter`
 finalizes each request, then its shared provider-transport boundary gives a
 generic observer that exact request object immediately before sending it.

@@ -281,3 +281,54 @@ def test_load_session_entries_returns_entries_in_order_and_skips_blank_lines(
         first,
         second,
     ]
+
+
+def test_load_session_entries_ignores_only_a_malformed_final_record(
+    tmp_path: Path,
+) -> None:
+    session_dir = write_session(
+        tmp_path,
+        "session",
+        {
+            "session_id": "session",
+            "updated_at": "2026-05-14T16:00:00+00:00",
+        },
+    )
+    complete = {
+        "id": "e_000001",
+        "type": "message",
+        "message": {"role": "user"},
+    }
+    (session_dir / "session.jsonl").write_text(
+        f"{json.dumps(complete)}\n{{malformed\n\n",
+        encoding="utf-8",
+    )
+
+    assert load_session_entries(workspace_sessions_dir(tmp_path), "session") == [
+        complete
+    ]
+
+
+def test_load_session_entries_rejects_malformed_record_before_later_record(
+    tmp_path: Path,
+) -> None:
+    session_dir = write_session(
+        tmp_path,
+        "session",
+        {
+            "session_id": "session",
+            "updated_at": "2026-05-14T16:00:00+00:00",
+        },
+    )
+    complete = {
+        "id": "e_000001",
+        "type": "message",
+        "message": {"role": "user"},
+    }
+    (session_dir / "session.jsonl").write_text(
+        f"{json.dumps(complete)}\n{{malformed\n{json.dumps(complete)}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(json.JSONDecodeError):
+        load_session_entries(workspace_sessions_dir(tmp_path), "session")

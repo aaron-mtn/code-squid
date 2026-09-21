@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from squid_core.storage.session_jsonl import load_session_jsonl
+
 
 def register_session_root(index_path: Path, sessions_dir: Path) -> None:
     """Append one explicit sessions directory to an explicit registry file."""
@@ -102,12 +104,7 @@ def session_dir_for(sessions_dir: Path, session_id: str) -> Path:
 def load_session_entries(sessions_dir: Path, session_id: str) -> list[dict]:
     """Load raw JSONL entries for one saved session in append order."""
     jsonl_path = session_dir_for(sessions_dir, session_id) / "session.jsonl"
-    entries = []
-    with jsonl_path.open(encoding="utf-8") as file:
-        for line in file:
-            if line.strip():
-                entries.append(json.loads(line))
-    return entries
+    return load_session_jsonl(jsonl_path)
 
 
 def _updated_at(metadata: dict[str, Any]) -> str:
