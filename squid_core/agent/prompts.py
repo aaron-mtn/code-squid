@@ -20,50 +20,34 @@ class PromptDefaults:
 VISIBLE_NARRATION_GUIDANCE = """
 ## Visible action notes
 
-Strongly prefer a short note before each tool call.
+Prefer a brief natural note before tool calls when useful.
 
-Keep it natural and conversational. Briefly tell the user what you found, what changed, or what you’re checking next.
+Say what you found, changed, or are checking next. Keep it short and do not restate the whole plan or explain obvious actions.
 
-Usually 1-2 short sentences is enough. Don’t restate the whole plan, explain obvious steps, or make every action sound formal.
-
-Use inline code for file names, paths, commands, functions, selectors, IDs, symbols, and literal values when helpful. Keep formatting light.
-
-Make sure the note matches the tool call that follows and doesn’t claim something happened before it actually did.
-
-Visible narration is preferred but not required for runtime validity. A turn with one or more valid tool calls may still be accepted when the assistant text is blank.
+Visible narration is preferred but not required. A turn with valid tool calls may contain no assistant text.
 """.strip()
 
 
 PROTECTED_RESPONSE_PROTOCOL = """
 ## Response protocol
 
-- A non-final turn uses one or more real tool calls for the immediate next step.
-- Multiple tool calls are allowed when every call can be fully determined from the current context.
-- Tool calls execute sequentially in the order emitted. If constructing a later call depends on an earlier call's result, wait for the next turn before issuing it.
-- A final response uses no tool call and contains non-empty human-readable content.
-- Finish only when the task is complete and you have run the verification that is appropriate and practical for the task, or when further verification honestly cannot be performed.
+- A non-final turn uses one or more real tool calls.
+- Multiple tool calls may be issued together when each can be fully determined from the current context.
+- Tool calls execute sequentially in the order emitted.
+- If a later call depends on an earlier result, wait for the next turn.
+- A final response contains no tool call and non-empty human-readable content.
+- Finish when the task is complete and practical verification has been performed, or when further verification cannot reasonably be done.
 """.strip()
 
 
 PROTECTED_VERIFICATION_GUIDANCE = """
 ## Verification honesty
 
-Do not claim something was verified unless you actually verified it.
+Report only what you actually verified, and make the conclusion match the evidence.
 
-In the final response, clearly distinguish:
-- what you changed
-- what you actually tested or checked
-- what those checks demonstrated
-- anything important that was not verified
+A syntax or build check does not prove runtime behavior. Tests did not pass unless they ran successfully. Interactive or visual behavior is unverified unless exercised.
 
-Do not infer runtime behavior from a syntax check alone.
-Do not say tests passed unless you actually ran them successfully.
-Do not claim interactive or visual behavior works unless you actually exercised it.
-Do not say a change is fully verified unless the evidence you gathered supports that claim.
-
-If verification was limited, unavailable, or only partial, say so plainly.
-
-Report the strongest conclusion supported by the evidence you actually observed, not the conclusion you expected or intended.
+State partial or unavailable verification plainly.
 """.strip()
 
 
@@ -71,57 +55,57 @@ PROTECTED_RESPONSE_EXAMPLES = """
 ## Valid response examples
 
 Valid non-final response:
-I found where this is going wrong. I’m going to read the surrounding code before I touch it.
-[one or more independent real tool calls to read the relevant implementation files]
 
-Valid non-final response:
-There it is. This should only need a small patch.
-[one real tool call to apply the patch]
+I found the relevant implementation. I'm reading the surrounding code before changing it.
+[one or more independent tool calls]
 
-Valid non-final response:
-The fix is in. I’m going to run the relevant check now and make sure I didn’t break anything nearby.
-[one or more independent real tool calls to run verification]
+After enough investigation:
 
-Valid non-final response after a failed patch:
-The returned candidate diagnostics identify the intended current text. I’ll retry the patch using that candidate's match_id.
-[one real tool call to apply_patch with the selected match_id]
-
-Reread after a failed patch only when the returned candidate diagnostics do not provide enough context to choose safely.
-
-Valid non-final response after a failed command:
-That command isn’t right for this setup. I’m going to check what this project actually uses instead of guessing again.
-[one real tool call to inspect project configuration or tooling]
-
-Valid non-final response after enough investigation:
-I’ve got enough context now. More digging isn’t going to help, so I’m making the change.
-[one or more independent real tool calls to edit the relevant files]
+The implementation path is clear. I'm making the focused change now.
+[one or more independent tool calls]
 
 Valid final response:
-Fixed the issue and ran the relevant checks. The syntax check passed and the focused tests passed. I did not exercise the change interactively, so runtime behavior beyond those checks was not directly verified.
+
+Fixed the issue and ran the relevant checks. The focused tests passed. Interactive behavior was not exercised.
 """.strip()
 
 
-def prompt_section(section_name: str, default: str, skill: Skill | None = None) -> str:
+def prompt_section(
+    section_name: str,
+    default: str,
+    skill: Skill | None = None,
+) -> str:
     if skill is None:
         return default
+
     override = skill.prompt_sections.get(section_name)
     if override is None:
         return default
+
     if override.mode == "replace":
         return override.content
+
     if override.mode == "append":
         return f"{default}\n\n{override.content}"
-    raise ValueError(f"Unsupported prompt section override mode: {override.mode}")
+
+    raise ValueError(
+        f"Unsupported prompt section override mode: {override.mode}"
+    )
 
 
-def tool_usage_guidance(default: str, skill: Skill | None = None) -> str:
+def tool_usage_guidance(
+    default: str,
+    skill: Skill | None = None,
+) -> str:
     """Retain application discipline unless a Skill explicitly replaces it."""
+
     return prompt_section("TOOL_USAGE_GUIDANCE", default, skill)
 
 
 def skill_prompt_block(skill: Skill | None = None) -> str:
     if skill is None:
         return ""
+
     return f"""
 ## Active Skill: {skill.name}
 
@@ -145,21 +129,15 @@ def execution_environment_prompt(
         f"Path separator: {platform_context.path_separator}",
         f"Workspace: {workspace}",
         "",
-        "Use commands, quoting, separators, paths, and utilities that are valid for this environment.",
-        "Do not mix command syntax or utilities from a different operating system or shell.",
+        "Use commands, quoting, paths, and utilities valid for this environment.",
     ]
 
     if platform_context.is_windows:
         lines.extend(
             [
                 "run_command already executes in PowerShell. Write PowerShell commands directly; do not wrap them in `powershell -Command`.",
-                "Use PowerShell syntax and separators. Do not use Bash operators such as `&&` or `||`.",
-                "Do not assume Unix commands such as ls, cat, grep, find, cp, mv, rm, wc, or python3 are available.",
-                "Prefer Get-ChildItem for listing files and directories.",
-                "Use read_file for known source files when available. For appropriate shell inspection, Get-Content is the PowerShell text-reading utility.",
-                "Prefer Select-String for searching text.",
-                "Prefer Copy-Item, Move-Item, and Remove-Item for file operations.",
-                "Quote Windows paths when they contain spaces.",
+                "Use PowerShell syntax, paths, and commands, not Bash-only syntax.",
+                "Prefer dedicated file tools for source reading and editing. For shell discovery, use native commands such as Get-ChildItem and Select-String.",
             ]
         )
     else:
@@ -181,17 +159,25 @@ def system_prompt(
     workspace: str | None = None,
 ) -> str:
     defaults = defaults or PromptDefaults()
-    intro = prompt_section("SYSTEM_PROMPT_INTRO", defaults.system_prompt_intro, skill)
+
+    intro = prompt_section(
+        "SYSTEM_PROMPT_INTRO",
+        defaults.system_prompt_intro,
+        skill,
+    )
+
     environment = (
         execution_environment_prompt(platform_context, workspace)
         if platform_context is not None and workspace is not None
         else ""
     )
+
     final_guidance = prompt_section(
         "FINAL_SUMMARY_REQUIREMENTS",
         defaults.final_summary_requirements,
         skill,
     )
+
     sections = [
         intro,
         defaults.baseline_policy,
@@ -204,7 +190,10 @@ def system_prompt(
         final_guidance,
         PROTECTED_RESPONSE_EXAMPLES,
     ]
-    return "\n\n".join(section for section in sections if section.strip()).strip()
+
+    return "\n\n".join(
+        section for section in sections if section.strip()
+    ).strip()
 
 
 CORRECTION_MESSAGES = {
@@ -212,13 +201,16 @@ CORRECTION_MESSAGES = {
 Format error: your last response had no tool call and no final content.
 
 If the task is complete, reply with a concise non-empty final response and no tool call.
-If work remains, choose one or more real tool calls for the immediate next step. Batch calls only when each one can be fully determined without seeing an earlier call's result. Brief visible narration is strongly preferred.
+
+If work remains, choose one or more real tool calls for the immediate next step. Batch calls only when each one can be fully determined without seeing an earlier call's result.
+
 Do not restate the plan or do extra work unless concrete work remains.
 """.strip(),
+
     "malformed_tool_call": """
 Format error: your last response included an invalid tool call.
 
-Use one or more available tools with valid arguments for the immediate next step. Batch calls only when none depends on an earlier call's result. Brief visible narration is strongly preferred.
+Use one or more available tools with valid arguments for the immediate next step. Batch calls only when none depends on an earlier call's result.
 """.strip(),
 }
 
@@ -226,5 +218,9 @@ Use one or more available tools with valid arguments for the immediate next step
 def correction_message(reason: str) -> str:
     return CORRECTION_MESSAGES.get(
         reason,
-        "Your last response was invalid. Reply with one or more valid tool calls for the immediate next step, or a non-empty final response with no tool call.",
+        (
+            "Your last response was invalid. Reply with one or more valid "
+            "tool calls for the immediate next step, or a non-empty final "
+            "response with no tool call."
+        ),
     )

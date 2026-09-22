@@ -115,7 +115,7 @@ class ToolResultTrimmingSettings:
     """Tune the smaller view of older tool results sent to the model."""
 
     enabled: bool = True
-    recent_full_results: int = 5
+    recent_full_results: int = 10
     read_old_content_chars: int = 1000
     command_old_output_chars: int = 1000
     patch_old_diagnostic_chars: int = 800
