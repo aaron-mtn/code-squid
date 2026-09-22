@@ -1,3 +1,25 @@
+- 2026-09-21: Preserved transient Hook guidance across sequential multi-tool
+  batches. AgentLoop now accumulates every non-empty per-action contribution in
+  execution order, deduplicates exact repeats, and supplies the result only to
+  the next model request; single-action behavior and canonical history remain
+  unchanged. Regression coverage confirms that same-batch reads already update
+  `TooManyReadsNudge` action/line-volume state and `RepeatedReadNudge` coverage
+  synchronously, including partial-overlap shaping and truncated full-read
+  suppression, so no read-state implementation or threshold changed. Tracing
+  the observed DeepSeek run found both empty calls in persisted raw OpenRouter
+  replies (`e_000022` and `e_000037`): each first `write_file` contained the
+  literal argument string `{}`, while its sibling retained a large valid JSON
+  payload. Provider streaming, normalization, canonical-action, and execution
+  regressions now verify that valid arguments remain associated with each call;
+  malformed-batch recovery remains unchanged. The focused AgentLoop/adapter/
+  OpenAI-compatible-provider suite passed 185 tests, and the broader relevant
+  Hook/read/tool/provider suite passed 401 tests. The full suite completed with
+  1,438 passing and 15 unrelated existing prompt-copy assertion failures in
+  `test_coding_agent.py` and `test_core_agent.py`; those tests expect phrases
+  absent from the current condensed prompt. Production and test packages
+  compiled successfully, Core imports passed, and `git diff --check` passed.
+  No live model inference was run.
+
 - 2026-09-21: Added sequential multi-tool turns through the existing AgentLoop
   and one-action `ToolExecutor` path. `reply["actions"]` is now the canonical
   ordered batch for both single- and multi-call turns; failed, Hook-blocked,

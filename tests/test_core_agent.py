@@ -63,11 +63,12 @@ def test_skill_replacements_cannot_erase_core_protocol_or_narration() -> None:
         "review", skill=_skill_with_replacements(), prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS
     ).initial_messages()[0]["content"]
 
-    assert "Multiple tool calls are allowed" in prompt
-    assert "depends on an earlier call's result" in prompt
-    assert "A final response uses no tool call" in prompt
-    assert "Strongly prefer a short note before each tool call." in prompt
-    assert "one or more independent real tool calls" in prompt
+    assert "Multiple tool calls may be issued together" in prompt
+    assert "If a later call depends on an earlier result, wait for the next turn." in prompt
+    assert "A final response contains no tool call" in prompt
+    assert "Prefer a brief natural note before tool calls when useful." in prompt
+    assert "A non-final turn uses one or more real tool calls." in prompt
+    assert "[one or more independent tool calls]" in prompt
 
 
 def test_skill_replacements_cannot_erase_code_squid_baseline_policy() -> None:
@@ -76,9 +77,9 @@ def test_skill_replacements_cannot_erase_code_squid_baseline_policy() -> None:
     ).initial_messages()[0]["content"]
 
     assert BASELINE_CODING_POLICY in prompt
-    assert "Inspect just enough relevant code, tests, repository guidance, and project configuration" in prompt
-    assert "Make the smallest clean change" in prompt
-    assert "Run the strongest practical verification" in prompt
+    assert "Find the smallest part of the repository responsible" in prompt
+    assert "Keep changes small and relevant." in prompt
+    assert "Verify the behavior that changed with practical, relevant checks." in prompt
     assert "Specialized intro." in prompt
     assert "Return review findings." in prompt
 
@@ -91,5 +92,6 @@ def test_prompt_encourages_narration_but_validation_does_not_require_it() -> Non
         "actions": [{"tool": "read_file", "args": {}, "tool_call_id": "call_1"}],
     }
 
-    assert "Strongly prefer a short note before each tool call." in prompt
+    assert "Prefer a brief natural note before tool calls when useful." in prompt
+    assert "Visible narration is preferred but not required." in prompt
     assert agent.validate_reply(reply) == {"ok": True, "reason": ""}

@@ -263,16 +263,17 @@ def test_follow_up_message_returns_user_message() -> None:
     assert message == {"role": "user", "content": "show me what changed"}
 
 
-def test_initial_prompts_encourage_compact_markdown_narration() -> None:
+def test_initial_prompts_encourage_compact_useful_narration() -> None:
     messages = CodingAgent(
         task="Update the UI", prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS
     ).initial_messages()
     combined_prompt = "\n".join(message["content"] for message in messages)
 
-    assert "Strongly prefer a short note before each tool call." in combined_prompt
-    assert "Usually 1-2 short sentences is enough." in combined_prompt
-    assert "Use inline code for file names, paths, commands" in combined_prompt
-    assert "Keep formatting light." in combined_prompt
+    assert "## Visible action notes" in combined_prompt
+    assert "Prefer a brief natural note before tool calls when useful." in combined_prompt
+    assert "Say what you found, changed, or are checking next." in combined_prompt
+    assert "Keep it short" in combined_prompt
+    assert "do not restate the whole plan or explain obvious actions" in combined_prompt
 
 
 def test_initial_prompts_keep_markdown_final_summary_guidance() -> None:
@@ -281,10 +282,11 @@ def test_initial_prompts_keep_markdown_final_summary_guidance() -> None:
     ).initial_messages()
     combined_prompt = "\n".join(message["content"] for message in messages)
 
-    assert "write the final summary in simple Markdown" in combined_prompt
-    assert "Prefer short Markdown headings" in combined_prompt
-    assert "Use bullets when they make the summary easier to scan." in combined_prompt
-    assert "Use backticks for paths, commands, code symbols" in combined_prompt
+    assert "## Code Squid final report" in combined_prompt
+    assert "Keep the final response concise and appropriate to the task." in combined_prompt
+    assert "State the important changes, the verification actually performed" in combined_prompt
+    assert "meaningful remaining risk, limitation, or unverified behavior" in combined_prompt
+    assert "Use the clearest Markdown structure and omit empty sections." in combined_prompt
 
 
 def test_initial_prompt_includes_selected_skill_instructions() -> None:
@@ -308,34 +310,23 @@ def test_default_tool_usage_guidance_is_used_without_skill() -> None:
 
 
 def test_read_guidance_prefers_coherent_reads_over_incremental_ranges() -> None:
-    assert "Read only the source needed for the next decision or edit" in TOOL_USAGE_GUIDANCE
-    assert "understanding the file as a whole is necessary" in TOOL_USAGE_GUIDANCE
-    assert "For every targeted read, use ranges" in TOOL_USAGE_GUIDANCE
-    assert "request them together in one information-dense read_file call" in TOOL_USAGE_GUIDANCE
-    assert "substantial coherent regions over tiny inchworm reads" in TOOL_USAGE_GUIDANCE
-    assert "many scattered ranges for speculative broad exploration" in TOOL_USAGE_GUIDANCE
-    assert "Do not reread unchanged ranges" in TOOL_USAGE_GUIDANCE
-    assert "For obviously large files, prefer a focused line range" not in TOOL_USAGE_GUIDANCE
-    assert "do not re-read solely to confirm it happened" in TOOL_USAGE_GUIDANCE
+    assert "Read only what the current decision or edit needs." in TOOL_USAGE_GUIDANCE
+    assert "For large files, use coherent relevant ranges" in TOOL_USAGE_GUIDANCE
+    assert "read the whole file only when its overall structure genuinely matters" in TOOL_USAGE_GUIDANCE
+    assert "Do not scatter speculative reads across files" in TOOL_USAGE_GUIDANCE
+    assert "Do not reread unchanged source merely for reassurance" in TOOL_USAGE_GUIDANCE
+    assert "If a read is truncated, use returned_line_ranges" in TOOL_USAGE_GUIDANCE
 
 
 def test_baseline_policy_uses_corrective_failures_and_changes_stalled_approaches() -> None:
-    assert (
-        "A failed tool result is a learning opportunity. Use any corrective details "
-        "it provides before taking another action."
-        in BASELINE_CODING_POLICY
-    )
-    assert (
-        "Do not retry an unsuccessful action unchanged. The next attempt must address "
-        "the reported cause or use a materially different approach."
-        in BASELINE_CODING_POLICY
-    )
+    assert "Treat failures as information." in BASELINE_CODING_POLICY
+    assert "Address the reported cause or change approach" in BASELINE_CODING_POLICY
+    assert "never retry a failed action unchanged" in BASELINE_CODING_POLICY
 
 
 def test_baseline_policy_requires_behavioral_verification_against_the_request() -> None:
     assert (
-        "Before finishing, compare the final implementation against the user's requested "
-        "behavior. A syntax or build check alone does not verify behavioral correctness."
+        "Verify the behavior that changed with practical, relevant checks."
         in BASELINE_CODING_POLICY
     )
 
@@ -344,43 +335,33 @@ def test_baseline_policy_requires_explicit_run_command_verification_intent() -> 
     assert "Every run_command call must explicitly set verification" in (
         TOOL_USAGE_GUIDANCE
     )
-    assert "tests, syntax checks, validation builds, lint or type checks" in (
+    assert "verification=true for tests, builds, lint, type or syntax checks" in (
         TOOL_USAGE_GUIDANCE
     )
-    assert "repository discovery, file listings, code searches" in (
-        TOOL_USAGE_GUIDANCE
-    )
-    assert "Classify the command by its purpose" in BASELINE_CODING_POLICY
+    assert "verification=false for discovery, searches, setup" in TOOL_USAGE_GUIDANCE
+    assert "environment inspection, and ordinary execution" in TOOL_USAGE_GUIDANCE
 
 
 def test_baseline_policy_removes_replaced_implementations() -> None:
-    assert "remove obsolete code, state, helpers, and comments" in BASELINE_CODING_POLICY
-    assert "only for a concrete compatibility, fallback" in BASELINE_CODING_POLICY
-    assert "no longer referenced or unnecessarily present" in BASELINE_CODING_POLICY
+    assert "When replacing an implementation, remove the obsolete path" in BASELINE_CODING_POLICY
+    assert "unless a concrete compatibility or fallback need remains" in BASELINE_CODING_POLICY
 
 
 def test_apply_patch_guidance_prefers_diagnostics_over_unconditional_rereads() -> None:
-    assert "Choose the intended returned candidate" in TOOL_USAGE_GUIDANCE
-    assert "retry apply_patch with only that match_id" in TOOL_USAGE_GUIDANCE
-    assert "returned candidate context is insufficient" in (
-        TOOL_USAGE_GUIDANCE
-    )
-    assert "selectable closest current match" in TOOL_USAGE_GUIDANCE
-    assert "mutation remains exact and revalidated" in (
-        TOOL_USAGE_GUIDANCE
-    )
+    assert "If a failure returns selectable candidates" in TOOL_USAGE_GUIDANCE
+    assert "choose the intended match_id" in TOOL_USAGE_GUIDANCE
+    assert "Reread only when the diagnostics are insufficient." in TOOL_USAGE_GUIDANCE
+    assert "Candidate selection still revalidates exact current text." in TOOL_USAGE_GUIDANCE
 
 
 def test_tool_guidance_prevents_shell_workarounds_for_editing_tool_failures() -> None:
-    assert (
-        "Do not use run_command to read, patch, or write files when the dedicated file tools are available."
-        in TOOL_USAGE_GUIDANCE
+    assert "Do not use run_command in place of read_file, apply_patch, or write_file." in (
+        TOOL_USAGE_GUIDANCE
     )
-    assert (
-        "Use run_command for repository discovery, toolchain discovery, verification, "
-        "and shell behavior."
-        in TOOL_USAGE_GUIDANCE
+    assert "Use shell discovery to locate relevant files, symbols, tests, or workflows." in (
+        TOOL_USAGE_GUIDANCE
     )
+    assert "switch to the dedicated file tools for source work" in TOOL_USAGE_GUIDANCE
 
 
 def test_system_prompt_without_platform_context_preserves_compatibility() -> None:
@@ -398,8 +379,8 @@ def test_windows_environment_prompt_includes_workspace_and_powershell_guidance()
     assert "Preferred shell: PowerShell" in prompt
     assert "Path separator: \\" in prompt
     assert f"Workspace: {workspace}" in prompt
-    assert "Use PowerShell syntax and separators." in prompt
-    assert "Prefer Get-ChildItem" in prompt
+    assert "Use PowerShell syntax, paths, and commands, not Bash-only syntax." in prompt
+    assert "use native commands such as Get-ChildItem and Select-String" in prompt
 
 
 def test_non_windows_environment_prompt_omits_powershell_guidance() -> None:
@@ -524,18 +505,15 @@ def test_active_skill_tool_usage_append_keeps_default_guidance() -> None:
     assert TOOL_USAGE_GUIDANCE in system
 
 
-def test_failed_patch_example_uses_candidates_before_rereading() -> None:
-    from squid_core.agent.prompts import PROTECTED_RESPONSE_EXAMPLES
-
-    assert "retry the patch using that candidate's match_id" in PROTECTED_RESPONSE_EXAMPLES
-    assert "Reread after a failed patch only when" in PROTECTED_RESPONSE_EXAMPLES
-    assert "do not provide enough context to choose safely" in PROTECTED_RESPONSE_EXAMPLES
-    assert "read a tighter section" not in PROTECTED_RESPONSE_EXAMPLES
+def test_failed_patch_guidance_uses_candidates_before_rereading() -> None:
+    assert "If a failure returns selectable candidates" in TOOL_USAGE_GUIDANCE
+    assert "choose the intended match_id" in TOOL_USAGE_GUIDANCE
+    assert "Reread only when the diagnostics are insufficient." in TOOL_USAGE_GUIDANCE
 
 
 def test_windows_guidance_keeps_dedicated_source_reading_default() -> None:
     context = PlatformContext("Windows", "PowerShell", "powershell", "\\", True)
     prompt = system_prompt(platform_context=context, workspace="C:/repo")
-    assert "Use read_file for known source files when available" in prompt
-    assert "For appropriate shell inspection, Get-Content" in prompt
-    assert "Prefer Get-Content for reading text files" not in prompt
+    assert "Prefer dedicated file tools for source reading and editing." in prompt
+    assert "For shell discovery, use native commands" in prompt
+    assert "Get-ChildItem and Select-String" in prompt

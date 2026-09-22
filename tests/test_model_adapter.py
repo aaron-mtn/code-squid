@@ -437,6 +437,94 @@ def test_assistant_tool_calls_metadata_is_preserved_on_normalized_message() -> N
     ]
 
 
+def test_multiple_raw_tool_calls_preserve_each_argument_payload_when_normalized() -> None:
+    raw_arguments = [
+        '{"path": "/tmp/index.html", "content": "<main>game</main>"}',
+        '{"path": "/tmp/style.css", "content": "main { color: cyan; }"}',
+    ]
+    response = FakeResponse(
+        FakeMessage(
+            content="Writing both files.",
+            tool_calls=[
+                FakeToolCall("call_1", "write_file", raw_arguments[0]),
+                FakeToolCall("call_2", "write_file", raw_arguments[1]),
+            ],
+        )
+    )
+    adapter = ModelAdapter(
+        provider=FakeProvider(response),
+        model_name="test-model",
+        provider_name="openrouter",
+    )
+
+    reply = adapter.respond(
+        messages=[{"role": "user", "content": "write files"}],
+        tool_definitions=[tool_definition("write_file", ["path", "content"])],
+    )
+
+    assert [
+        call["function"]["arguments"]
+        for call in reply["raw_reply"]["assistant"]["raw_tool_calls"]
+    ] == raw_arguments
+    assert [
+        call["function"]["arguments"] for call in reply["message"]["tool_calls"]
+    ] == raw_arguments
+    assert reply["actions"] == [
+        {
+            "tool": "write_file",
+            "args": {"path": "/tmp/index.html", "content": "<main>game</main>"},
+            "tool_call_id": "call_1",
+            "raw_arguments": raw_arguments[0],
+        },
+        {
+            "tool": "write_file",
+            "args": {"path": "/tmp/style.css", "content": "main { color: cyan; }"},
+            "tool_call_id": "call_2",
+            "raw_arguments": raw_arguments[1],
+        },
+    ]
+
+
+def test_provider_emitted_empty_first_call_is_preserved_as_raw_diagnostic() -> None:
+    """Match the observed DeepSeek response without changing malformed-batch policy."""
+    response = FakeResponse(
+        FakeMessage(
+            content="Writing both files.",
+            tool_calls=[
+                FakeToolCall("call_0", "write_file", "{}"),
+                FakeToolCall(
+                    "call_1",
+                    "write_file",
+                    '{"path": "/tmp/style.css", "content": "body {}"}',
+                ),
+            ],
+        )
+    )
+    adapter = ModelAdapter(
+        provider=FakeProvider(response),
+        model_name="deepseek/deepseek-v4-flash-0731",
+        provider_name="openrouter",
+    )
+
+    reply = adapter.respond(
+        messages=[{"role": "user", "content": "write files"}],
+        tool_definitions=[tool_definition("write_file", ["path", "content"])],
+    )
+
+    assert reply["actions"] == []
+    assert reply["format_error"] == (
+        "Missing required arguments for write_file: path, content"
+    )
+    assert reply["recoverable_raw_arguments"] == "{}"
+    assert [
+        call["function"]["arguments"]
+        for call in reply["raw_reply"]["assistant"]["raw_tool_calls"]
+    ] == [
+        "{}",
+        '{"path": "/tmp/style.css", "content": "body {}"}',
+    ]
+
+
 def test_default_tool_call_replay_mode_sends_empty_content() -> None:
     provider = FakeProvider(FakeResponse(FakeMessage(content="", tool_calls=[])))
     adapter = ModelAdapter(provider=provider, model_name="test-model")

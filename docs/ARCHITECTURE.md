@@ -606,7 +606,11 @@ registration order and the loop injects them as a transient user-instruction
 message for exactly the next model request. That guidance is not appended to
 canonical `session.messages`, persisted, or added to the system prompt. The
 final transformed Tool result continues through normal display and transcript
-persistence.
+persistence. For a multi-action turn, the loop accumulates non-empty guidance
+from every attempted action in execution order until control returns to the
+model. Exactly identical per-action guidance is included only once; a later
+action with no guidance cannot erase an earlier contribution. A single-action
+turn follows the same path and retains its existing one-turn behavior.
 
 Code Squid wires Core's small `RepeatedFailureNudge` Hook at this seam. The
 generic Hook retains its exact-action detector: three consecutive failures must
@@ -653,6 +657,13 @@ constructor arguments in Core, while Code Squid enables the Hook by default and
 exposes the independent boolean
 `runtime.too_many_reads_enabled` application setting. Disabling it does not
 disable any other built-in Hook.
+
+Sibling reads in one assistant batch pass through this pipeline synchronously.
+Each final transformed result updates read counts, returned-line volume, and
+visible coverage before the next sibling executes. The read result retains its
+own exact `content_returned_chars` metadata; the behavioral volume thresholds
+remain line-based, so no separate cumulative character threshold or counter is
+introduced by batching.
 
 `PostVerificationNudge` is
 self-contained: it records whether a successful `run_command` result explicitly
@@ -1574,6 +1585,12 @@ owns exactly one action. The loop stops a batch after the first failed,
 Hook-blocked, or approval-denied result. Unattempted suffix calls receive
 explicit skipped results so every preserved assistant call ID remains closed,
 without invoking the executor or consuming a Tool step.
+
+Provider Tool arguments remain attached to their call index during streaming,
+are copied verbatim into raw diagnostics and assistant `tool_calls`, and are
+parsed into the corresponding canonical action. Schema failure in any call
+still rejects the whole reply before AgentLoop execution under the existing
+malformed-reply policy.
 
 Assistant tool-call/result pairs must stay replayable. This matters for strict
 OpenAI-compatible model templates and for provider adapters that need to

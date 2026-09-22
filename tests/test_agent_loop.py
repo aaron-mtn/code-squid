@@ -15,11 +15,13 @@ from squid_core.hooks import (
     HookResponse,
     HookRunner,
     RepeatedReadNudge,
+    TOO_MANY_READS_GUIDANCE,
+    TooManyReadsNudge,
     ToolResultContext,
 )
 from squid_core.model_adapter import ModelRequestError
 from squid_core.session import Session
-from squid_core.tools import ToolResults
+from squid_core.tools import ToolExecutor, ToolResults
 from squid_core.storage import SessionStore
 
 
@@ -316,6 +318,30 @@ def multi_tool_call_reply(*calls: tuple[str, str]) -> dict:
         "actions": [
             {"tool": tool, "args": {}, "tool_call_id": call_id}
             for call_id, tool in calls
+        ],
+        "reason": "",
+        "raw_reply": {"assistant": {"content": "Running independent tools."}},
+    }
+
+
+def multi_tool_call_reply_with_args(*calls: tuple[str, str, dict]) -> dict:
+    """Build a tool turn with explicit arguments for execution-path tests."""
+    return {
+        "message": {
+            "role": "assistant",
+            "content": "Running independent tools.",
+            "tool_calls": [
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": tool, "arguments": json.dumps(args)},
+                }
+                for call_id, tool, args in calls
+            ],
+        },
+        "actions": [
+            {"tool": tool, "args": args, "tool_call_id": call_id}
+            for call_id, tool, args in calls
         ],
         "reason": "",
         "raw_reply": {"assistant": {"content": "Running independent tools."}},
@@ -2910,6 +2936,38 @@ def test_multiple_successful_tool_calls_execute_and_record_in_order() -> None:
     ]
 
 
+def test_canonical_multi_action_arguments_reach_executor_unchanged() -> None:
+    actions = (
+        (
+            "call_1",
+            "write_file",
+            {"path": "/tmp/index.html", "content": "<main>game</main>"},
+        ),
+        (
+            "call_2",
+            "write_file",
+            {"path": "/tmp/style.css", "content": "main { color: cyan; }"},
+        ),
+    )
+    executor = FakeToolExecutor()
+    loop = AgentLoop(
+        session=Session(repo_root=None),
+        model_adapter=FakeModelAdapter(
+            [multi_tool_call_reply_with_args(*actions), reply("TASK COMPLETE")]
+        ),
+        tool_executor=executor,
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+    )
+
+    assert loop.run() == RunResult(status="complete")
+    assert [action["args"] for action in executor.actions] == [
+        actions[0][2],
+        actions[1][2],
+    ]
+
+
 def test_first_failed_action_stops_batch_and_closes_unattempted_calls() -> None:
     class FailingExecutor(FakeToolExecutor):
         def execute(self, action: dict) -> dict:
@@ -3051,7 +3109,7 @@ def test_tool_step_limit_stops_partway_through_batch() -> None:
     assert json.loads(tool_messages[-1]["content"])["error"] == "tool_step_limit"
 
 
-def test_multi_action_hooks_receive_per_attempt_step_counts_and_latest_guidance() -> None:
+def test_multi_action_hooks_keep_intermediate_guidance_for_next_model_turn() -> None:
     before_counts = []
     finished_counts = []
 
@@ -3059,8 +3117,10 @@ def test_multi_action_hooks_receive_per_attempt_step_counts_and_latest_guidance(
         def before_tool_execute(self, context) -> None:
             before_counts.append(context.tool_steps_used)
 
-        def tool_result(self, context) -> HookResponse:
-            return HookResponse(additional_context=f"guidance:{context.action['tool']}")
+        def tool_result(self, context) -> HookResponse | None:
+            if context.action["tool"] == "read_file":
+                return HookResponse(additional_context="read guidance")
+            return None
 
         def run_finished(self, context) -> None:
             finished_counts.append(context.tool_steps_used)
@@ -3089,8 +3149,271 @@ def test_multi_action_hooks_receive_per_attempt_step_counts_and_latest_guidance(
     assert finished_counts == [2]
     assert adapter.message_requests[1][-1] == {
         "role": "user",
-        "content": "guidance:run_command",
+        "content": "read guidance",
     }
+
+
+def test_multi_action_hooks_keep_distinct_guidance_in_execution_order() -> None:
+    class GuidanceHook:
+        def tool_result(self, context) -> HookResponse:
+            return HookResponse(additional_context=f"guidance:{context.action['tool']}")
+
+    adapter = FakeModelAdapter(
+        [
+            multi_tool_call_reply(
+                ("call_1", "read_file"),
+                ("call_2", "run_command"),
+            ),
+            reply("TASK COMPLETE"),
+        ]
+    )
+    loop = AgentLoop(
+        session=Session(repo_root=None),
+        model_adapter=adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        hook_runner=HookRunner([GuidanceHook()]),
+    )
+
+    assert loop.run() == RunResult(status="complete")
+    assert adapter.message_requests[1][-1] == {
+        "role": "user",
+        "content": "guidance:read_file\n\nguidance:run_command",
+    }
+
+
+def test_multi_action_hooks_deduplicate_exact_repeated_guidance() -> None:
+    class RepeatingHook:
+        def tool_result(self, _context) -> HookResponse:
+            return HookResponse(additional_context="same guidance")
+
+    adapter = FakeModelAdapter(
+        [
+            multi_tool_call_reply(
+                ("call_1", "read_file"),
+                ("call_2", "run_command"),
+                ("call_3", "write_file"),
+            ),
+            reply("TASK COMPLETE"),
+        ]
+    )
+    loop = AgentLoop(
+        session=Session(repo_root=None),
+        model_adapter=adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        hook_runner=HookRunner([RepeatingHook()]),
+    )
+
+    assert loop.run() == RunResult(status="complete")
+    assert adapter.message_requests[1][-1] == {
+        "role": "user",
+        "content": "same guidance",
+    }
+
+
+def test_single_action_transient_guidance_behavior_is_unchanged() -> None:
+    class GuidanceHook:
+        def tool_result(self, _context) -> HookResponse:
+            return HookResponse(additional_context="one-turn guidance")
+
+    adapter = FakeModelAdapter(
+        [
+            tool_call_reply("call_1"),
+            reply("TASK COMPLETE"),
+        ]
+    )
+    session = Session(repo_root=None)
+    loop = AgentLoop(
+        session=session,
+        model_adapter=adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        hook_runner=HookRunner([GuidanceHook()]),
+    )
+
+    assert loop.run() == RunResult(status="complete")
+    assert adapter.message_requests[1][-1] == {
+        "role": "user",
+        "content": "one-turn guidance",
+    }
+    assert not any(
+        message.get("content") == "one-turn guidance"
+        for message in session.messages
+    )
+
+
+def _run_read_batch(tmp_path, actions, hooks):
+    """Exercise sibling reads through the production executor and Hook pipeline."""
+    session = Session(repo_root=tmp_path)
+    adapter = FakeModelAdapter(
+        [multi_tool_call_reply_with_args(*actions), reply("TASK COMPLETE")]
+    )
+    loop = AgentLoop(
+        session=session,
+        model_adapter=adapter,
+        tool_executor=ToolExecutor(tmp_path, session),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        hook_runner=HookRunner(hooks),
+    )
+
+    assert loop.run() == RunResult(status="complete")
+    results = [
+        json.loads(message["content"])
+        for message in session.messages
+        if message["role"] == "tool"
+    ]
+    return adapter, results
+
+
+def test_read_count_threshold_is_cumulative_within_batch(tmp_path) -> None:
+    paths = []
+    for index in range(3):
+        path = tmp_path / f"source_{index}.py"
+        path.write_text(f"source {index}\n", encoding="utf-8")
+        paths.append(path)
+    actions = tuple(
+        (f"call_{index}", "read_file", {"path": str(path)})
+        for index, path in enumerate(paths, start=1)
+    )
+    hook = TooManyReadsNudge(
+        first_nudge_reads=3,
+        strong_nudge_reads=5,
+        first_nudge_lines=10_000,
+        strong_nudge_lines=20_000,
+    )
+
+    adapter, results = _run_read_batch(tmp_path, actions, [hook])
+
+    assert all(result["ok"] is True for result in results)
+    assert adapter.message_requests[1][-1]["content"] == TOO_MANY_READS_GUIDANCE
+
+
+def test_visible_source_volume_is_cumulative_within_batch(tmp_path) -> None:
+    paths = []
+    for index in range(2):
+        path = tmp_path / f"volume_{index}.py"
+        path.write_text("".join(f"line {line}\n" for line in range(15)), encoding="utf-8")
+        paths.append(path)
+    actions = tuple(
+        (f"call_{index}", "read_file", {"path": str(path)})
+        for index, path in enumerate(paths, start=1)
+    )
+    hook = TooManyReadsNudge(
+        first_nudge_reads=4,
+        strong_nudge_reads=6,
+        first_nudge_lines=30,
+        strong_nudge_lines=60,
+    )
+
+    adapter, results = _run_read_batch(tmp_path, actions, [hook])
+
+    assert sum(result["content_returned_chars"] for result in results) == sum(
+        len(path.read_text(encoding="utf-8")) for path in paths
+    )
+    assert adapter.message_requests[1][-1]["content"] == TOO_MANY_READS_GUIDANCE
+
+
+def test_visible_source_character_totals_are_cumulative_within_batch(tmp_path) -> None:
+    class VisibleCharacterCounter:
+        def __init__(self) -> None:
+            self.total = 0
+            self.observed_totals = []
+
+        def tool_result(self, context) -> None:
+            content = context.result.get("content")
+            if context.action["tool"] == "read_file" and isinstance(content, str):
+                self.total += len(content)
+                self.observed_totals.append(self.total)
+
+    character_counts = (8_000, 12_000, 5_000)
+    paths = []
+    for index, character_count in enumerate(character_counts):
+        path = tmp_path / f"characters_{index}.txt"
+        path.write_text("x" * character_count, encoding="utf-8")
+        paths.append(path)
+    actions = tuple(
+        (f"call_{index}", "read_file", {"path": str(path)})
+        for index, path in enumerate(paths, start=1)
+    )
+    counter = VisibleCharacterCounter()
+
+    _adapter, results = _run_read_batch(tmp_path, actions, [counter])
+
+    assert counter.observed_totals == [8_000, 20_000, 25_000]
+    assert sum(result["content_returned_chars"] for result in results) == 25_000
+
+
+def test_earlier_batch_read_shapes_overlapping_later_read(tmp_path) -> None:
+    path = tmp_path / "overlap.py"
+    path.write_text(
+        "".join(f"line {line}\n" for line in range(1, 401)),
+        encoding="utf-8",
+    )
+    actions = (
+        (
+            "call_1",
+            "read_file",
+            {"path": str(path), "ranges": [{"start_line": 1, "end_line": 150}]},
+        ),
+        (
+            "call_2",
+            "read_file",
+            {"path": str(path), "ranges": [{"start_line": 76, "end_line": 225}]},
+        ),
+    )
+
+    _adapter, results = _run_read_batch(
+        tmp_path,
+        actions,
+        [RepeatedReadNudge()],
+    )
+
+    assert results[1]["returned_line_ranges"] == [
+        {"start_line": 151, "end_line": 225}
+    ]
+    assert results[1]["content"] == "".join(
+        f"line {line}\n" for line in range(151, 226)
+    )
+    assert results[1]["content_returned_chars"] == len(results[1]["content"])
+
+
+def test_truncated_batch_read_coverage_suppresses_later_overlap(tmp_path) -> None:
+    path = tmp_path / "large.py"
+    path.write_text(
+        "".join(f"line {line}\n" for line in range(1, 1_201)),
+        encoding="utf-8",
+    )
+    actions = (
+        ("call_1", "read_file", {"path": str(path)}),
+        (
+            "call_2",
+            "read_file",
+            {"path": str(path), "ranges": [{"start_line": 1, "end_line": 20}]},
+        ),
+    )
+
+    _adapter, results = _run_read_batch(
+        tmp_path,
+        actions,
+        [RepeatedReadNudge()],
+    )
+
+    assert results[0]["content_truncated"] is True
+    assert results[0]["returned_line_ranges"] == [
+        {"start_line": 1, "end_line": 500},
+        {"start_line": 701, "end_line": 1200},
+    ]
+    assert results[1]["already_covered"] is True
+    assert "content" not in results[1]
 
 
 def test_cancellation_during_partial_batch_closes_every_tool_call() -> None:

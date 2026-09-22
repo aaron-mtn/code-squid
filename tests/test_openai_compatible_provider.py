@@ -445,6 +445,49 @@ def test_stream_chat_assembles_tool_call_fragments() -> None:
     assert tool_call.function.arguments == '{"path": "/tmp/a.txt"}'
 
 
+def test_stream_chat_keeps_interleaved_arguments_with_their_tool_call_indexes() -> None:
+    provider, client = provider_with_fake_client(provider_name="openrouter")
+    client.chat.completions.response = [
+        chunk(
+            tool_calls=[
+                tool_call_delta(
+                    0,
+                    id="call_1",
+                    name="write_file",
+                    arguments='{"path":"/tmp/a.html",',
+                ),
+                tool_call_delta(
+                    1,
+                    id="call_2",
+                    name="write_file",
+                    arguments='{"path":"/tmp/b.css",',
+                ),
+            ]
+        ),
+        chunk(
+            tool_calls=[
+                tool_call_delta(1, arguments='"content":"body{}"}'),
+                tool_call_delta(0, arguments='"content":"<main/>"}'),
+            ]
+        ),
+        chunk(finish_reason="tool_calls"),
+    ]
+
+    response = provider.stream_chat(
+        model="deepseek/deepseek-v4-flash-0731",
+        messages=[],
+        tools=[{"type": "function", "function": {"name": "write_file"}}],
+        on_text_delta=lambda _delta: None,
+    )
+
+    assert [
+        call.function.arguments for call in response.choices[0].message.tool_calls
+    ] == [
+        '{"path":"/tmp/a.html","content":"<main/>"}',
+        '{"path":"/tmp/b.css","content":"body{}"}',
+    ]
+
+
 def test_stream_chat_notifies_tool_preparing_once_when_name_appears() -> None:
     provider, client = provider_with_fake_client()
     client.chat.completions.response = [

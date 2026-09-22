@@ -809,7 +809,8 @@ class AgentLoop:
                 results = []
                 approval_instructions = []
                 successful_tool_action = False
-                latest_tool_guidance = ""
+                batch_tool_guidance = []
+                seen_tool_guidance = set()
                 for action_index, action in enumerate(reply["actions"]):
                     if (
                         self.max_tool_steps is not None
@@ -897,10 +898,17 @@ class AgentLoop:
                         event_sink=self._emit_hook_event,
                     )
                     result = tool_result_response.updated_tool_output
-                    # Only guidance from the final attempted action is carried
-                    # into the next model request. A later action can make an
-                    # earlier per-result nudge stale.
-                    latest_tool_guidance = tool_result_response.additional_context
+                    # A batch postpones the next model decision, so retain every
+                    # transient correction produced before control returns to the
+                    # model. Exact deduplication prevents a persistent Hook state
+                    # from repeating the same message for several sibling actions.
+                    additional_context = tool_result_response.additional_context
+                    if (
+                        additional_context.strip()
+                        and additional_context not in seen_tool_guidance
+                    ):
+                        batch_tool_guidance.append(additional_context)
+                        seen_tool_guidance.add(additional_context)
                     pending_tool_results[action_index] = result
                     if result.get("ok", False):
                         successful_tool_action = True
@@ -917,9 +925,9 @@ class AgentLoop:
                     if not result.get("ok", False):
                         break
 
-                if latest_tool_guidance:
+                if batch_tool_guidance:
                     pending_runtime_messages.append(
-                        user_instruction_message(latest_tool_guidance)
+                        user_instruction_message("\n\n".join(batch_tool_guidance))
                     )
 
                 # The assistant message retains the complete emitted batch.
