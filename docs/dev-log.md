@@ -1,3 +1,17 @@
+- 2026-09-22: Corrected H4 repeated `run_command` recovery so the broader
+  detector is cause-specific and mutation-aware. The old single counter mixed
+  every classified non-zero result, allowing unrelated `process_failed`, shell,
+  and timeout results to trigger shell/environment advice. Core now counts only
+  consecutive matching shell/launch classes or matching timeouts, selects
+  separate application-owned guidance for those causes, and leaves ordinary
+  executed-process failures as diagnostics. Successful commands and successful
+  built-in file mutations reset the streak; unrelated discovery remains
+  neutral. Successful file Tools are still treated as mutation because current
+  Hook facts do not distinguish no-op success (deferred to H6), and the fixed
+  command deadline remains unchanged (H8). Verification: 110 focused Tool/Hook
+  tests passed; the broader agent-loop/Hook/Tool suite passed 345 tests; the
+  full suite passed 1,457 tests; production compilation and `git diff --check`
+  passed.
 - 2026-09-21: Preserved transient Hook guidance across sequential multi-tool
   batches. AgentLoop now accumulates every non-empty per-action contribution in
   execution order, deduplicates exact repeats, and supplies the result only to

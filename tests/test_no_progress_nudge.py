@@ -128,63 +128,141 @@ def test_a_nudge_requires_a_fresh_threshold_before_repeating() -> None:
     assert _failure(hook) is not None
 
 
-def test_three_different_failed_commands_trigger_command_recovery_nudge() -> None:
+def test_three_ordinary_failed_commands_do_not_trigger_shell_recovery() -> None:
     hook = RepeatedFailureNudge(GUIDANCE, run_command_guidance="Reassess commands.")
 
-    assert _command_result(hook, "grep thing") is None
-    assert _command_result(
-        hook, "wc -l", failure_class="command_not_found"
-    ) is None
+    assert _command_result(hook, "pytest tests/test_one.py") is None
+    assert _command_result(hook, "pytest tests/test_two.py") is None
+    assert _command_result(hook, "pytest tests/test_three.py") is None
+
+
+def test_repeated_shell_failures_trigger_shell_recovery_nudge() -> None:
+    hook = RepeatedFailureNudge(GUIDANCE, run_command_guidance="Reassess commands.")
+
+    assert (
+        _command_result(hook, "missing-one", failure_class="command_not_found")
+        is None
+    )
+    assert (
+        _command_result(hook, "missing-two", failure_class="command_not_found")
+        is None
+    )
     response = _command_result(
-        hook, "powershell -Command x", failure_class="shell_syntax_error"
+        hook, "missing-three", failure_class="command_not_found"
     )
 
     assert response is not None
     assert "Reassess commands." in response.additional_context
-    assert "Configured environment: Windows / PowerShell" in response.additional_context
     assert (
-        "Recent failures: process_failed, command_not_found, shell_syntax_error"
+        "Configured environment: Windows / PowerShell"
         in response.additional_context
     )
+    assert "Repeated failure class: command_not_found" in response.additional_context
     assert response.block is False
+
+
+def test_repeated_timeouts_use_timeout_not_shell_guidance() -> None:
+    hook = RepeatedFailureNudge(
+        GUIDANCE,
+        run_command_guidance="Reassess shell commands.",
+        run_command_timeout_guidance="The command exceeded its deadline.",
+    )
+
+    assert _command_result(hook, "slow-one", failure_class="timeout") is None
+    assert _command_result(hook, "slow-two", failure_class="timeout") is None
+    response = _command_result(hook, "slow-three", failure_class="timeout")
+
+    assert response is not None
+    assert "exceeded its deadline" in response.additional_context
+    assert "Reassess shell commands" not in response.additional_context
+    assert "Repeated failure class: timeout" in response.additional_context
+
+
+def test_different_command_failure_classes_do_not_share_a_streak() -> None:
+    hook = RepeatedFailureNudge(
+        GUIDANCE,
+        run_command_guidance="Reassess commands.",
+        run_command_timeout_guidance="The command exceeded its deadline.",
+    )
+
+    _command_result(hook, "missing", failure_class="command_not_found")
+    _command_result(hook, "slow", failure_class="timeout")
+    _command_result(hook, "syntax", failure_class="shell_syntax_error")
+
+    assert (
+        _command_result(hook, "syntax-again", failure_class="shell_syntax_error")
+        is None
+    )
+
+
+def test_successful_file_mutation_breaks_command_failure_streak() -> None:
+    hook = RepeatedFailureNudge(GUIDANCE, run_command_guidance="Reassess commands.")
+    _command_result(hook, "missing-one", failure_class="command_not_found")
+    _command_result(hook, "missing-two", failure_class="command_not_found")
+
+    # Successful file Tools are the current mutation signal. They do not yet
+    # distinguish a real content change from a no-op; H6 owns that refinement.
+    hook.tool_result(
+        _Context(
+            action={"tool": "apply_patch", "args": {"path": "a.py"}},
+            result={"ok": True, "tool": "apply_patch", "path": "a.py"},
+        )
+    )
+
+    assert (
+        _command_result(hook, "missing-three", failure_class="command_not_found")
+        is None
+    )
+    assert (
+        _command_result(hook, "missing-four", failure_class="command_not_found")
+        is None
+    )
 
 
 def test_successful_command_resets_command_failure_streak() -> None:
     hook = RepeatedFailureNudge(GUIDANCE, run_command_guidance="Reassess commands.")
-    _command_result(hook, "first")
-    _command_result(hook, "second")
+    _command_result(hook, "first", failure_class="command_not_found")
+    _command_result(hook, "second", failure_class="command_not_found")
 
     _command_result(hook, "success", ok=True)
 
-    assert _command_result(hook, "third") is None
-    assert _command_result(hook, "fourth") is None
+    assert (
+        _command_result(hook, "third", failure_class="command_not_found") is None
+    )
+    assert (
+        _command_result(hook, "fourth", failure_class="command_not_found") is None
+    )
 
 
-def test_unrelated_tool_calls_do_not_increment_or_reset_command_streak() -> None:
+def test_unrelated_discovery_does_not_increment_or_reset_command_streak() -> None:
     hook = RepeatedFailureNudge(GUIDANCE, run_command_guidance="Reassess commands.")
-    _command_result(hook, "first")
+    _command_result(hook, "first", failure_class="command_not_found")
     assert hook.tool_result(
         _Context(
             action={"tool": "read_file", "args": {"path": "a.py"}},
             result={"ok": True, "tool": "read_file"},
         )
     ) is None
-    assert _command_result(hook, "second") is None
+    assert (
+        _command_result(hook, "second", failure_class="command_not_found") is None
+    )
 
-    response = _command_result(hook, "third")
+    response = _command_result(hook, "third", failure_class="command_not_found")
 
     assert response is not None
 
 
 def test_command_nudge_resets_and_does_not_block_the_next_command() -> None:
     hook = RepeatedFailureNudge(GUIDANCE, run_command_guidance="Reassess commands.")
-    _command_result(hook, "first")
-    _command_result(hook, "second")
-    response = _command_result(hook, "third")
+    _command_result(hook, "first", failure_class="command_not_found")
+    _command_result(hook, "second", failure_class="command_not_found")
+    response = _command_result(hook, "third", failure_class="command_not_found")
 
     assert response is not None
     assert response.block is False
-    assert _command_result(hook, "fourth") is None
+    assert (
+        _command_result(hook, "fourth", failure_class="command_not_found") is None
+    )
 
     assert _failure(hook) is None
     assert _failure(hook) is None

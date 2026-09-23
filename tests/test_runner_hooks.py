@@ -25,6 +25,7 @@ from squid_core.hooks import (
 from code_squid.agent_setup import (
     NO_PROGRESS_GUIDANCE,
     RUN_COMMAND_RECOVERY_GUIDANCE,
+    RUN_COMMAND_TIMEOUT_RECOVERY_GUIDANCE,
     build_coding_task_run,
     build_hook_runner,
 )
@@ -265,6 +266,10 @@ def test_code_squid_always_wires_product_owned_no_progress_guidance() -> None:
     assert isinstance(runner.hooks[-1], RepeatedFailureNudge)
     assert runner.hooks[-1].guidance == NO_PROGRESS_GUIDANCE
     assert runner.hooks[-1].run_command_guidance == RUN_COMMAND_RECOVERY_GUIDANCE
+    assert (
+        runner.hooks[-1].run_command_timeout_guidance
+        == RUN_COMMAND_TIMEOUT_RECOVERY_GUIDANCE
+    )
 
 
 def test_too_many_reads_default_hook_can_be_disabled() -> None:

@@ -617,15 +617,21 @@ generic Hook retains its exact-action detector: three consecutive failures must
 have the same Tool, JSON arguments, and scalar `error`; success, an
 uncategorized failure, or any changed action/category resets that streak. The
 same Hook also has an independently configured `run_command` detector. It
-counts actual classified command-process failures across different command
-strings, ignores unrelated Tool calls without incrementing or resetting the
-command count, and resets the count after a successful command. Approval,
-schema, and pre-execution failures have no `failure_class` and do not enter this
-counter. At either threshold the Hook returns recovery wording as transient
+tracks one structured recovery cause at a time across different command
+strings. Concrete shell and launch classes use shell/environment guidance;
+timeouts use separate deadline guidance. Ordinary completed-process failures
+(`process_failed`) and cancellations remain diagnostics without a broad
+command-recovery nudge. A changed failure class, a successful command, or a
+successful built-in `write_file`/`apply_patch` resets the command streak, while
+unrelated discovery Tools are neutral. Successful file results are currently
+the best mutation fact exposed to Hooks and can include no-op success; actual
+change/no-op distinction is intentionally deferred. Approval, schema, and
+pre-execution failures have no `failure_class` and do not enter this counter.
+At either threshold the Hook returns cause-appropriate wording as transient
 `HookResponse.additional_context` and immediately resets the applicable
 counter, so another nudge requires three fresh failures. It never blocks,
 rewrites, or retries a Tool action. Squid Core owns these run-local detection
-mechanisms while `code_squid.agent_setup` owns both guidance texts and enables
+mechanisms while `code_squid.agent_setup` owns the guidance texts and enables
 them for Code Squid runs. Its `source` remains configuration metadata used by
 hosts; it no longer controls prompt rendering.
 

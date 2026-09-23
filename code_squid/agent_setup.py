@@ -57,6 +57,12 @@ RUN_COMMAND_RECOVERY_GUIDANCE = (
     "Do not assume commands, syntax, or utilities from a different environment "
     "are available."
 )
+RUN_COMMAND_TIMEOUT_RECOVERY_GUIDANCE = (
+    "Several recent commands exceeded their execution deadline.\n\n"
+    "Use the latest partial output to decide whether the command is hanging or "
+    "simply needs to be narrowed. Avoid repeating the same long-running command "
+    "unchanged."
+)
 
 
 @dataclass(frozen=True)
@@ -313,6 +319,7 @@ def build_hook_runner(
     no_progress_hook = RepeatedFailureNudge(
         NO_PROGRESS_GUIDANCE,
         run_command_guidance=RUN_COMMAND_RECOVERY_GUIDANCE,
+        run_command_timeout_guidance=RUN_COMMAND_TIMEOUT_RECOVERY_GUIDANCE,
         source="Code Squid",
     )
     built_in_hooks = [repeated_read_hook]
