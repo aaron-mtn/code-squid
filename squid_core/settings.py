@@ -112,7 +112,12 @@ class CompactionSettings:
 
 @dataclass(frozen=True)
 class ToolResultTrimmingSettings:
-    """Tune the smaller view of older tool results sent to the model."""
+    """Tune the smaller view of older tool results sent to the model.
+
+    ``recent_full_results`` retains the newest results by count. Independently,
+    every result in the just-completed assistant Tool batch receives one normal
+    bounded exposure before age-based trimming applies.
+    """
 
     enabled: bool = True
     recent_full_results: int = 10

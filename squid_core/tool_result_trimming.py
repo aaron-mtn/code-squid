@@ -33,12 +33,17 @@ def render_messages_for_model(
     tool_indexes = [
         index for index, message in enumerate(messages) if message.get("role") == "tool"
     ]
+    # The latest completed assistant batch has not yet been visible to the model.
+    # Protect the whole batch rather than letting later siblings make its early
+    # results look historical. Existing Tool-level bounds still define the
+    # ordinary rendered form; this only postpones age-based reduction once.
+    first_exposure_indexes = _latest_completed_tool_batch_indexes(messages)
     old_count = (
         max(0, len(tool_indexes) - settings.recent_full_results)
         if settings.enabled
         else 0
     )
-    old_indexes = set(tool_indexes[:old_count])
+    old_indexes = set(tool_indexes[:old_count]) - first_exposure_indexes
 
     tool_names = _tool_names_by_call_id(messages)
     rendered = []
@@ -57,6 +62,52 @@ def render_messages_for_model(
             )
         )
     return rendered
+
+
+def _latest_completed_tool_batch_indexes(messages: list[dict]) -> set[int]:
+    """Return result indexes for the latest assistant turn when fully paired.
+
+    A completed Tool batch at the transcript tail is awaiting its first model
+    exposure. Transient user/context messages may follow its results, but any
+    later assistant message proves the earlier batch was already exposed.
+    """
+    assistant_index = next(
+        (
+            index
+            for index in range(len(messages) - 1, -1, -1)
+            if messages[index].get("role") == "assistant"
+        ),
+        None,
+    )
+    if assistant_index is None:
+        return set()
+
+    raw_calls = messages[assistant_index].get("tool_calls")
+    if not isinstance(raw_calls, list) or not raw_calls:
+        return set()
+
+    call_ids: list[str] = []
+    for call in raw_calls:
+        if not isinstance(call, dict) or not isinstance(call.get("id"), str):
+            return set()
+        call_ids.append(call["id"])
+    if len(set(call_ids)) != len(call_ids):
+        return set()
+
+    result_indexes: dict[str, int] = {}
+    for index in range(assistant_index + 1, len(messages)):
+        message = messages[index]
+        if message.get("role") != "tool":
+            continue
+        call_id = message.get("tool_call_id")
+        if call_id in call_ids:
+            if call_id in result_indexes:
+                return set()
+            result_indexes[call_id] = index
+
+    if set(result_indexes) != set(call_ids):
+        return set()
+    return set(result_indexes.values())
 
 
 def render_tool_result_for_model(

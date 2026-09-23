@@ -1,3 +1,20 @@
+- 2026-09-22: Implemented H2 from the agent-harness audit so a large
+  multi-Tool response cannot age its own early sibling results before their
+  first model exposure. Request-only rendering now derives the latest complete
+  batch from the newest assistant `tool_calls` message and its paired Tool
+  messages, protects that whole batch for one normal bounded request, and
+  returns it to the existing count-based retention policy after a later
+  assistant turn. Canonical history, Tool-call/result pairing, built-in output
+  bounds, and read provenance remain unchanged; read trim callbacks now occur
+  only once protected source actually becomes historically eligible. Added
+  deterministic mixed read/command, large-batch aging, repeated-read coverage,
+  false masking, pairing, AgentLoop handoff, and failed/skipped-result
+  regressions. A general aggregate batch-output budget remains intentionally
+  deferred as a separate experiment because it must not reintroduce
+  pre-exposure deletion. Verification: 33 focused trimming tests, 293 broader
+  AgentLoop/Hook/context/provider tests, and the full 1,471-test suite passed;
+  production compilation and `git diff --check` also passed.
+
 - 2026-09-22: Implemented H1 from the agent-harness audit so built-in guidance
   that describes accumulated current state cannot become stale across a
   sequential multi-tool batch. `TooManyReadsNudge` and

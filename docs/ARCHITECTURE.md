@@ -1879,6 +1879,19 @@ Tool calls and their Tool messages retain the original `tool_call_id` pairing.
 Unknown tools retain their canonical serialization because Core cannot infer
 which caller-defined fields are safe to omit.
 
+Age-based Tool-result retention follows assistant batch boundaries as well as
+the configured result count. Results from the just-completed assistant Tool
+batch receive one normal bounded exposure before historical trimming applies,
+even when the batch itself is larger than `recent_full_results`. Core derives
+that first-exposure batch from the latest assistant `tool_calls` message and
+its complete set of paired Tool messages; transient request context may follow
+the results without changing the boundary. Once a later assistant message is
+in canonical history, those results age by the ordinary count-based policy.
+The guarantee does not expand Tool-level output bounds, duplicate result
+payloads, or mutate canonical history. Read trim notifications therefore fire
+only when source is actually reduced in a later model request, keeping
+`RepeatedReadNudge` provenance aligned with request-visible source.
+
 Every provider reply is captured before agent validation as a diagnostic-only
 `model_reply` entry:
 
