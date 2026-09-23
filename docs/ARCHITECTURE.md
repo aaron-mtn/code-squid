@@ -699,19 +699,31 @@ Successful `write_file` and `apply_patch` results invalidate all facts tied to
 the prior implementation. The Hook starts empty for every run and is not
 persisted.
 
-After verification is current, every successful non-mutation Tool result counts,
-including reads, searches, commands, other Tool activity, and repeated explicit
-verification. At the default threshold of two actions, the Hook arms direct
-one-turn advisory guidance to identify an unfinished requirement (including
-required documentation), concrete issue, or required validation, and finalize
-when none remains. It renders that guidance from current state at the next
-`before_model_turn` boundary, then resets the counter so the message does not
-repeat forever. A successful check does not establish task completion. The
-first successful verification after a mutation, successful structured
-mutation, failed explicit verification, and the start of a run reset the
-counter. It does not block or finalize the run. A later successful mutation in
-the same batch invalidates verification and clears the armed warning before it
-can be shown. Because `RepeatedReadNudge` runs first, a read it
+At every `before_model_turn` boundary where verification remains current, the
+Hook exposes one compact advisory receipt: the latest explicit verification
+succeeded, no successful built-in file edit has occurred since, and no later
+explicit verification failure is unresolved. This starts on the model request
+immediately following verification; no intervening Tool action is required.
+Repeated successful verification still produces one receipt rather than stacked
+copies. The receipt advises continuing only for a concrete unfinished
+requirement, issue, or required validation, but does not block Tool use, force a
+final response, or infer semantic task completion.
+
+After verification is current, every successful non-mutation Tool result also
+counts toward the existing stronger escalation, including reads, searches,
+commands, other Tool activity, and repeated explicit verification. At the
+default threshold of two actions, the Hook replaces the compact receipt for one
+turn with `HIGH PRIORITY` guidance to identify an unfinished requirement
+(including required documentation), concrete issue, or required validation, and
+finalize when none remains. It then resets only the escalation counter, so
+another strong warning requires a fresh threshold while the compact current-state
+receipt remains available. A successful check does not establish task
+completion. The first successful verification after a mutation, successful
+structured mutation, failed explicit verification, and the start of a run reset
+the counter. The latter three also clear the current receipt as applicable. A
+later successful mutation in the same batch invalidates verification and clears
+all verification guidance before it can be shown. Because
+`RepeatedReadNudge` runs first, a read it
 masks as already covered still advances the post-verification count but does not
 emit stacked post-verification guidance on that result. This policy deliberately
 recognizes only the built-in `write_file` and `apply_patch` mutation Tools; it

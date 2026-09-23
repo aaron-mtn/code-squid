@@ -15,7 +15,7 @@ from ._truncation import truncate_head_tail
 
 
 TOOL_NAME = "run_command"
-DEFAULT_TIMEOUT_SECONDS = 15
+DEFAULT_TIMEOUT_SECONDS = 60
 POLL_INTERVAL_SECONDS = 0.05
 
 _POWERSHELL_COMMAND_NOT_FOUND = re.compile(

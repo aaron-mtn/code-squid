@@ -1,4 +1,4 @@
-"""Nudge continued observation after successful current verification."""
+"""Expose current verification state and nudge post-verification wandering."""
 
 from __future__ import annotations
 
@@ -8,6 +8,13 @@ from .runner import HookResponse, PromptContextBlock
 
 
 DEFAULT_POST_VERIFICATION_THRESHOLD = 2
+CURRENT_VERIFICATION_STATE_GUIDANCE = (
+    "* Latest explicit verification succeeded.\n"
+    "* No successful built-in file edit has occurred since.\n"
+    "* No unresolved explicit verification failure is known.\n\n"
+    "Continue only for a concrete unfinished requirement, issue, or required "
+    "validation. Otherwise finalize."
+)
 POST_VERIFICATION_GUIDANCE = (
     "HIGH PRIORITY: Identify concrete remaining work before using more tools.\n\n"
     "An explicitly marked verification succeeded, and no successful built-in "
@@ -19,11 +26,12 @@ POST_VERIFICATION_GUIDANCE = (
     "or verification command merely for reassurance."
 )
 _MUTATION_TOOLS = {"apply_patch", "write_file"}
-_CONTEXT_TITLE = "Post-Verification Guidance"
+_CURRENT_STATE_CONTEXT_TITLE = "Current Verification State"
+_ESCALATION_CONTEXT_TITLE = "Post-Verification Guidance"
 
 
 class PostVerificationNudge:
-    """Offer advisory guidance after a bounded post-verification idle streak."""
+    """Report current verification and nudge a bounded subsequent action streak."""
 
     def __init__(
         self,
@@ -44,18 +52,27 @@ class PostVerificationNudge:
         self._reset_for_implementation_change()
 
     def before_model_turn(self, _ctx: Any) -> HookResponse | None:
-        """Render guidance from the state left by the complete Tool batch."""
-        if not self._verification_current or not self._guidance_ready:
+        """Render the final verification state left by the complete Tool batch."""
+        if not self._verification_current:
             return None
 
-        # Preserve the existing one-turn cadence: another warning requires a
-        # complete fresh threshold of post-verification activity.
-        self._reset_action_count()
+        if self._guidance_ready:
+            # Preserve the existing escalation cadence: another strong warning
+            # requires a complete fresh threshold of post-verification activity.
+            self._reset_action_count()
+            title = _ESCALATION_CONTEXT_TITLE
+            guidance = POST_VERIFICATION_GUIDANCE
+        else:
+            # This compact receipt is intentionally repeatable while current.
+            # It reports known state without consuming the escalation counter.
+            title = _CURRENT_STATE_CONTEXT_TITLE
+            guidance = CURRENT_VERIFICATION_STATE_GUIDANCE
+
         return HookResponse(
             context_blocks=(
                 PromptContextBlock(
-                    _CONTEXT_TITLE,
-                    POST_VERIFICATION_GUIDANCE,
+                    title,
+                    guidance,
                     self.source,
                 ),
             )

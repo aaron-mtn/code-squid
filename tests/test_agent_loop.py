@@ -12,6 +12,7 @@ from squid_core.safety import ActionPreflightDecision
 from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.safety import ApprovalDecision, ApprovalPolicy
 from squid_core.hooks import (
+    CURRENT_VERIFICATION_STATE_GUIDANCE,
     HookResponse,
     HookRunner,
     POST_VERIFICATION_GUIDANCE,
@@ -3336,6 +3337,83 @@ class _VerificationExecutor(FakeToolExecutor):
         return result
 
 
+def test_successful_verification_reaches_immediately_following_model_request() -> None:
+    adapter = FakeModelAdapter(
+        [
+            multi_tool_call_reply_with_args(
+                ("verify", "run_command", {"verification": True})
+            ),
+            reply("TASK COMPLETE"),
+        ]
+    )
+    loop = AgentLoop(
+        session=Session(repo_root=None),
+        model_adapter=adapter,
+        tool_executor=_VerificationExecutor(),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        hook_runner=HookRunner([PostVerificationNudge(threshold=2)]),
+    )
+
+    assert loop.run() == RunResult(status="complete")
+    content = adapter.message_requests[1][-1]["content"]
+    assert CURRENT_VERIFICATION_STATE_GUIDANCE in content
+    assert content.count(CURRENT_VERIFICATION_STATE_GUIDANCE) == 1
+    assert POST_VERIFICATION_GUIDANCE not in content
+
+
+def test_omitting_post_verification_hook_omits_current_state_guidance() -> None:
+    adapter = FakeModelAdapter(
+        [
+            multi_tool_call_reply_with_args(
+                ("verify", "run_command", {"verification": True})
+            ),
+            reply("TASK COMPLETE"),
+        ]
+    )
+    loop = AgentLoop(
+        session=Session(repo_root=None),
+        model_adapter=adapter,
+        tool_executor=_VerificationExecutor(),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        hook_runner=HookRunner(),
+    )
+
+    assert loop.run() == RunResult(status="complete")
+    assert CURRENT_VERIFICATION_STATE_GUIDANCE not in str(
+        adapter.message_requests[1]
+    )
+
+
+def test_verification_in_multi_tool_batch_uses_final_current_state() -> None:
+    adapter = FakeModelAdapter(
+        [
+            multi_tool_call_reply_with_args(
+                ("verify", "run_command", {"verification": True}),
+                ("inspect", "search_files", {}),
+            ),
+            reply("TASK COMPLETE"),
+        ]
+    )
+    loop = AgentLoop(
+        session=Session(repo_root=None),
+        model_adapter=adapter,
+        tool_executor=_VerificationExecutor(),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        hook_runner=HookRunner([PostVerificationNudge(threshold=2)]),
+    )
+
+    assert loop.run() == RunResult(status="complete")
+    content = adapter.message_requests[1][-1]["content"]
+    assert CURRENT_VERIFICATION_STATE_GUIDANCE in content
+    assert content.count(CURRENT_VERIFICATION_STATE_GUIDANCE) == 1
+
+
 def test_post_verification_guidance_invalidated_by_later_batch_edit() -> None:
     adapter = FakeModelAdapter(
         [
@@ -3361,7 +3439,12 @@ def test_post_verification_guidance_invalidated_by_later_batch_edit() -> None:
     )
 
     assert loop.run() == RunResult(status="complete")
+    assert (
+        CURRENT_VERIFICATION_STATE_GUIDANCE
+        in adapter.message_requests[1][-1]["content"]
+    )
     assert POST_VERIFICATION_GUIDANCE not in str(adapter.message_requests[2])
+    assert CURRENT_VERIFICATION_STATE_GUIDANCE not in str(adapter.message_requests[2])
 
 
 def test_post_verification_guidance_uses_final_valid_batch_state() -> None:

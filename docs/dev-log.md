@@ -1,3 +1,21 @@
+- 2026-09-23: Implemented P2 from the agent-harness audit by evolving
+  `PostVerificationNudge` to expose current successful verification state on the
+  immediately following model request. The compact advisory receipt reports
+  only an explicit verification success, the absence of a later successful
+  built-in file edit, and the absence of a later unresolved explicit
+  verification failure. Successful `write_file` or `apply_patch` and failed
+  explicit verification clear it; repeated verification remains a single
+  current-state block. The existing threshold-based `HIGH PRIORITY` escalation
+  remains and replaces, rather than stacks with, the compact receipt for its
+  one-turn cadence. The Hook remains optional at the Core runner boundary and
+  neither blocks Tool use nor decides task completion. Added focused unit and
+  AgentLoop coverage for immediate delivery without an intervening action,
+  mutation/failure invalidation, legitimate later edits, repeated verification,
+  retained escalation, single- and multi-Tool batches, and Hook omission.
+  Verification: 181 focused PostVerificationNudge/Hook runner/AgentLoop tests,
+  280 broader Hook/AgentLoop tests, and the full 1,478-test suite passed;
+  production compilation and `git diff --check` also passed.
+
 - 2026-09-23: Tightened the protected multi-Tool response policy from
   argument-known batching to necessity-known batching. A batch is now allowed
   only when both each call's arguments and its necessity are already known;

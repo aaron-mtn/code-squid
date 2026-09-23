@@ -13,6 +13,7 @@ from .no_progress import (
     RepeatedFailureNudge,
 )
 from .post_verification import (
+    CURRENT_VERIFICATION_STATE_GUIDANCE,
     DEFAULT_POST_VERIFICATION_THRESHOLD,
     POST_VERIFICATION_GUIDANCE,
     PostVerificationNudge,
@@ -58,6 +59,7 @@ __all__ = [
     "HookRunner",
     "PromptContextBlock",
     "ReadResultTrimmedContext",
+    "CURRENT_VERIFICATION_STATE_GUIDANCE",
     "DEFAULT_POST_VERIFICATION_THRESHOLD",
     "POST_VERIFICATION_GUIDANCE",
     "PostVerificationNudge",

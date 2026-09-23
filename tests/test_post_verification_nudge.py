@@ -7,6 +7,7 @@ import pytest
 from squid_core.hooks import (
     BeforeModelTurnContext,
     BeforeRunContext,
+    CURRENT_VERIFICATION_STATE_GUIDANCE,
     HookRunner,
     POST_VERIFICATION_GUIDANCE,
     PostVerificationNudge,
@@ -58,7 +59,7 @@ def _guidance(runner: HookRunner) -> str:
     return "\n\n".join(block.body for block in response.context_blocks)
 
 
-def test_successful_explicit_verification_activates_tracking() -> None:
+def test_successful_explicit_verification_is_visible_at_next_model_boundary() -> None:
     runner, nudge = _runner()
     response = _observe(
         runner,
@@ -67,6 +68,8 @@ def test_successful_explicit_verification_activates_tracking() -> None:
     assert nudge._verification_current is True
     assert nudge._post_verification_action_count == 0
     assert response.additional_context == ""
+    # No intervening read or other Tool action is needed to expose the receipt.
+    assert _guidance(runner) == CURRENT_VERIFICATION_STATE_GUIDANCE
 
 
 def test_failed_explicit_verification_disables_tracking() -> None:
@@ -88,6 +91,7 @@ def test_failed_explicit_verification_disables_tracking() -> None:
     assert nudge._verification_current is False
     assert nudge._post_verification_action_count == 0
     assert response.additional_context == ""
+    assert _guidance(runner) == ""
 
 
 @pytest.mark.parametrize("tool", ["apply_patch", "write_file"])
@@ -101,6 +105,7 @@ def test_successful_mutation_invalidates_verification(tool: str) -> None:
     _observe(runner, _context(tool))
     assert nudge._verification_current is False
     assert nudge._post_verification_action_count == 0
+    assert _guidance(runner) == ""
 
 
 def test_failed_mutation_does_not_invalidate_verification() -> None:
@@ -144,6 +149,9 @@ def test_repeated_successful_verification_increments_action_count() -> None:
     )
     assert nudge._post_verification_action_count == 1
     assert response.additional_context == ""
+    guidance = _guidance(runner)
+    assert guidance == CURRENT_VERIFICATION_STATE_GUIDANCE
+    assert guidance.count("Latest explicit verification succeeded") == 1
 
 
 @pytest.mark.parametrize(
@@ -172,6 +180,23 @@ def test_second_non_mutating_action_triggers_guidance() -> None:
     response = _observe(runner, _context("search_files"))
 
     assert response.additional_context == ""
+    assert _guidance(runner) == POST_VERIFICATION_GUIDANCE
+    assert nudge._post_verification_action_count == 0
+
+
+def test_immediate_state_does_not_consume_stronger_guidance_threshold() -> None:
+    runner, nudge = _runner(threshold=2)
+    _observe(
+        runner,
+        _context("run_command", command="pytest focused.py", verification=True),
+    )
+    assert _guidance(runner) == CURRENT_VERIFICATION_STATE_GUIDANCE
+
+    _observe(runner, _context("read_file"))
+    assert _guidance(runner) == CURRENT_VERIFICATION_STATE_GUIDANCE
+    assert nudge._post_verification_action_count == 1
+
+    _observe(runner, _context("search_files"))
     assert _guidance(runner) == POST_VERIFICATION_GUIDANCE
     assert nudge._post_verification_action_count == 0
 
@@ -327,3 +352,13 @@ def test_guidance_allows_remaining_requirements_and_validation() -> None:
     assert "another required validation step" in POST_VERIFICATION_GUIDANCE
     assert "If none remains, finalize the task now" in POST_VERIFICATION_GUIDANCE
     assert "does not establish that every task requirement" in POST_VERIFICATION_GUIDANCE
+
+
+def test_current_state_guidance_is_advisory_and_limited_to_known_facts() -> None:
+    assert CURRENT_VERIFICATION_STATE_GUIDANCE == (
+        "* Latest explicit verification succeeded.\n"
+        "* No successful built-in file edit has occurred since.\n"
+        "* No unresolved explicit verification failure is known.\n\n"
+        "Continue only for a concrete unfinished requirement, issue, or required "
+        "validation. Otherwise finalize."
+    )
