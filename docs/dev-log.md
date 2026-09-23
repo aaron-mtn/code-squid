@@ -1,3 +1,21 @@
+- 2026-09-22: Implemented H1 from the agent-harness audit so built-in guidance
+  that describes accumulated current state cannot become stale across a
+  sequential multi-tool batch. `TooManyReadsNudge` and
+  `PostVerificationNudge` still observe every transformed Tool result, but now
+  render their advisory text as transient `before_model_turn` context from the
+  final state at model handoff. A later successful `write_file` or
+  `apply_patch` clears an armed warning, and batches that cross both read
+  thresholds render only the stronger warning. Generic `tool_result`
+  accumulation is unchanged for custom/user Hooks and event-specific recovery;
+  `RepeatedReadNudge` keeps its exact reread correction and result shaping, and
+  `RepeatedFailureNudge` keeps its exact failure guidance. Added deterministic
+  unit and AgentLoop regressions for stale and valid post-verification/read
+  guidance, one-warning rendering, and ordinary single-tool behavior. The
+  later experiment to stop remaining sibling tools after a nudge remains
+  intentionally deferred. Verification passed 251 focused tests, 288 broader
+  Hook/AgentLoop tests, and the full 1,465-test suite; production compilation
+  and `git diff --check` also passed.
+
 - 2026-09-22: Corrected H4 repeated `run_command` recovery so the broader
   detector is cause-specific and mutation-aware. The old single counter mixed
   every classified non-zero result, allowing unrelated `process_failed`, shell,

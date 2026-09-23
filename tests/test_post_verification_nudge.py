@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import pytest
 
 from squid_core.hooks import (
+    BeforeModelTurnContext,
     BeforeRunContext,
     HookRunner,
     POST_VERIFICATION_GUIDANCE,
@@ -48,6 +49,13 @@ def _observe(runner: HookRunner, context: _Context):
     return runner.tool_result(
         ToolResultContext(None, ".", context.action, context.result)
     )
+
+
+def _guidance(runner: HookRunner) -> str:
+    response = runner.before_model_turn(
+        BeforeModelTurnContext(None, ".", "task", (), 0)
+    )
+    return "\n\n".join(block.body for block in response.context_blocks)
 
 
 def test_successful_explicit_verification_activates_tracking() -> None:
@@ -120,7 +128,8 @@ def test_differently_worded_successful_verification_counts_without_reset() -> No
     assert nudge._post_verification_action_count == 1
 
     response = _observe(runner, _context("read_file"))
-    assert response.additional_context == POST_VERIFICATION_GUIDANCE
+    assert response.additional_context == ""
+    assert _guidance(runner) == POST_VERIFICATION_GUIDANCE
 
 
 def test_repeated_successful_verification_increments_action_count() -> None:
@@ -162,8 +171,26 @@ def test_second_non_mutating_action_triggers_guidance() -> None:
 
     response = _observe(runner, _context("search_files"))
 
-    assert response.additional_context == POST_VERIFICATION_GUIDANCE
+    assert response.additional_context == ""
+    assert _guidance(runner) == POST_VERIFICATION_GUIDANCE
     assert nudge._post_verification_action_count == 0
+
+
+@pytest.mark.parametrize("mutation", ["apply_patch", "write_file"])
+def test_later_mutation_discards_armed_post_verification_guidance(
+    mutation: str,
+) -> None:
+    runner, _nudge = _runner()
+    _observe(
+        runner,
+        _context("run_command", command="pytest focused.py", verification=True),
+    )
+    _observe(runner, _context("read_file"))
+    _observe(runner, _context("search_files"))
+
+    _observe(runner, _context(mutation))
+
+    assert _guidance(runner) == ""
 
 
 def test_already_covered_read_counts_without_stacking_guidance() -> None:
@@ -185,7 +212,8 @@ def test_later_action_uses_count_accumulated_by_already_covered_read() -> None:
     _observe(runner, verification)
     _observe(runner, _context("read_file", already_covered=True))
     response = _observe(runner, verification)
-    assert response.additional_context == POST_VERIFICATION_GUIDANCE
+    assert response.additional_context == ""
+    assert _guidance(runner) == POST_VERIFICATION_GUIDANCE
     assert nudge._post_verification_action_count == 0
 
 
@@ -220,7 +248,8 @@ def test_repeated_read_guidance_is_not_stacked_with_post_verification() -> None:
     assert post_verification._post_verification_action_count == 2
 
     later = _observe(runner, verification)
-    assert later.additional_context == POST_VERIFICATION_GUIDANCE
+    assert later.additional_context == ""
+    assert _guidance(runner) == POST_VERIFICATION_GUIDANCE
     assert post_verification._post_verification_action_count == 0
 
 
@@ -233,8 +262,10 @@ def test_threshold_guidance_and_reset_remain_equivalent() -> None:
     assert _observe(runner, _context("read_file")).additional_context == ""
     assert _observe(runner, _context("read_file")).additional_context == ""
     response = _observe(runner, _context("read_file"))
-    assert response.additional_context == POST_VERIFICATION_GUIDANCE
+    assert response.additional_context == ""
     assert response.updated_tool_output["ok"] is True
+    assert nudge._post_verification_action_count == 3
+    assert _guidance(runner) == POST_VERIFICATION_GUIDANCE
     assert nudge._post_verification_action_count == 0
 
 
@@ -253,10 +284,8 @@ def test_verification_after_mutation_starts_fresh_window() -> None:
     assert nudge._verification_current is True
     assert nudge._post_verification_action_count == 0
     assert _observe(runner, _context("read_file")).additional_context == ""
-    assert (
-        _observe(runner, _context("search_files")).additional_context
-        == POST_VERIFICATION_GUIDANCE
-    )
+    assert _observe(runner, _context("search_files")).additional_context == ""
+    assert _guidance(runner) == POST_VERIFICATION_GUIDANCE
 
 
 def test_new_run_resets_all_post_verification_state() -> None:

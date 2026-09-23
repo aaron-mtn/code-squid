@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .runner import HookResponse
+from .runner import HookResponse, PromptContextBlock
 
 
 DEFAULT_FIRST_NUDGE_READS = 3
@@ -30,6 +30,7 @@ TOO_MANY_READS_STRONG_GUIDANCE = (
     "forward with the task now."
 )
 _MUTATION_TOOLS = {"apply_patch", "write_file"}
+_CONTEXT_TITLE = "Read Activity Guidance"
 
 
 class TooManyReadsNudge:
@@ -71,12 +72,32 @@ class TooManyReadsNudge:
         self._read_count = 0
         self._returned_lines = 0
         self._first_nudge_emitted = False
+        self._guidance_ready = False
 
     def before_run(self, _ctx: Any) -> None:
         """Start each run with no behavioral history from an earlier run."""
         self._read_count = 0
         self._returned_lines = 0
         self._first_nudge_emitted = False
+        self._guidance_ready = False
+
+    def before_model_turn(self, _ctx: Any) -> HookResponse | None:
+        """Render a warning only after every sibling Tool has updated state."""
+        if not self._guidance_ready:
+            return None
+
+        # The warning is one-turn context. A later successful read can arm the
+        # strong warning again, matching the prior per-result cadence.
+        self._guidance_ready = False
+        guidance = self._current_guidance()
+        if guidance is None:
+            return None
+        self._first_nudge_emitted = True
+        return HookResponse(
+            context_blocks=(
+                PromptContextBlock(_CONTEXT_TITLE, guidance, self.source),
+            )
+        )
 
     def tool_result(self, ctx: Any) -> HookResponse | None:
         """Observe successful built-in reads and substantive mutations."""
@@ -88,6 +109,8 @@ class TooManyReadsNudge:
             self._read_count = 0
             self._returned_lines = 0
             self._first_nudge_emitted = False
+            # A later sibling mutation makes any earlier read warning false.
+            self._guidance_ready = False
             return None
         if tool_name != "read_file":
             return None
@@ -98,14 +121,27 @@ class TooManyReadsNudge:
             self._read_count >= self.strong_nudge_reads
             or self._returned_lines >= self.strong_nudge_lines
         ):
-            self._first_nudge_emitted = True
-            return HookResponse(additional_context=TOO_MANY_READS_STRONG_GUIDANCE)
+            self._guidance_ready = True
+            return None
         if not self._first_nudge_emitted and (
             self._read_count >= self.first_nudge_reads
             or self._returned_lines >= self.first_nudge_lines
         ):
-            self._first_nudge_emitted = True
-            return HookResponse(additional_context=TOO_MANY_READS_GUIDANCE)
+            self._guidance_ready = True
+        return None
+
+    def _current_guidance(self) -> str | None:
+        """Select guidance from counters that are current at model handoff."""
+        if (
+            self._read_count >= self.strong_nudge_reads
+            or self._returned_lines >= self.strong_nudge_lines
+        ):
+            return TOO_MANY_READS_STRONG_GUIDANCE
+        if not self._first_nudge_emitted and (
+            self._read_count >= self.first_nudge_reads
+            or self._returned_lines >= self.first_nudge_lines
+        ):
+            return TOO_MANY_READS_GUIDANCE
         return None
 
 

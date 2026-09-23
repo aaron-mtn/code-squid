@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .runner import HookResponse
+from .runner import HookResponse, PromptContextBlock
 
 
 DEFAULT_POST_VERIFICATION_THRESHOLD = 2
@@ -19,6 +19,7 @@ POST_VERIFICATION_GUIDANCE = (
     "or verification command merely for reassurance."
 )
 _MUTATION_TOOLS = {"apply_patch", "write_file"}
+_CONTEXT_TITLE = "Post-Verification Guidance"
 
 
 class PostVerificationNudge:
@@ -36,13 +37,32 @@ class PostVerificationNudge:
         self.source = source
         self._verification_current = False
         self._post_verification_action_count = 0
+        self._guidance_ready = False
 
     def before_run(self, _ctx: Any) -> None:
         """Start each run without observations from an earlier run."""
         self._reset_for_implementation_change()
 
-    def tool_result(self, ctx: Any) -> HookResponse | None:
-        """Count successful actions after current verification and nudge."""
+    def before_model_turn(self, _ctx: Any) -> HookResponse | None:
+        """Render guidance from the state left by the complete Tool batch."""
+        if not self._verification_current or not self._guidance_ready:
+            return None
+
+        # Preserve the existing one-turn cadence: another warning requires a
+        # complete fresh threshold of post-verification activity.
+        self._reset_action_count()
+        return HookResponse(
+            context_blocks=(
+                PromptContextBlock(
+                    _CONTEXT_TITLE,
+                    POST_VERIFICATION_GUIDANCE,
+                    self.source,
+                ),
+            )
+        )
+
+    def tool_result(self, ctx: Any) -> None:
+        """Observe every result while deferring current-state guidance."""
         result = ctx.result
         tool_name = ctx.action.get("tool")
 
@@ -52,7 +72,8 @@ class PostVerificationNudge:
             return None
 
         if result.get("verification") is True:
-            return self._observe_verification(result)
+            self._observe_verification(result)
+            return None
 
         if not self._verification_current or result.get("ok") is not True:
             return None
@@ -63,12 +84,13 @@ class PostVerificationNudge:
         # do not stack post-verification guidance on the same result.
         if result.get("already_covered") is True:
             return None
-        return self._nudge_if_ready()
+        self._mark_guidance_if_ready()
+        return None
 
     def _observe_verification(
         self,
         result: dict[str, Any],
-    ) -> HookResponse | None:
+    ) -> None:
         """Classify one explicitly marked verification result."""
         if result.get("ok") is not True:
             self._verification_current = False
@@ -79,20 +101,17 @@ class PostVerificationNudge:
             # Rechecking an unchanged implementation is continued activity,
             # regardless of the verification command text.
             self._record_post_verification_action()
-            return self._nudge_if_ready()
+            self._mark_guidance_if_ready()
+            return None
 
         self._verification_current = True
         self._reset_action_count()
         return None
 
-    def _nudge_if_ready(self) -> HookResponse | None:
-        if self._post_verification_action_count < self.threshold:
-            return None
-
-        # Match the existing escalation style: guidance is transient and a
-        # later nudge requires a complete fresh streak.
-        self._reset_action_count()
-        return HookResponse(additional_context=POST_VERIFICATION_GUIDANCE)
+    def _mark_guidance_if_ready(self) -> None:
+        """Remember that current state warrants guidance at the next boundary."""
+        if self._post_verification_action_count >= self.threshold:
+            self._guidance_ready = True
 
     def _record_post_verification_action(self) -> None:
         """Record one successful action after current verification."""
@@ -101,6 +120,7 @@ class PostVerificationNudge:
     def _reset_action_count(self) -> None:
         """Start a fresh post-verification action window."""
         self._post_verification_action_count = 0
+        self._guidance_ready = False
 
     def _reset_for_implementation_change(self) -> None:
         """Invalidate observations tied to the prior implementation."""

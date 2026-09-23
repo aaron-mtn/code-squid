@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import pytest
 
 from squid_core.hooks import (
+    BeforeModelTurnContext,
     BeforeRunContext,
     CompactionAppliedContext,
     HookRunner,
@@ -45,19 +46,40 @@ def _successful_reads(hook: TooManyReadsNudge, count: int):
     return [_result(hook, "read_file") for _ in range(count)]
 
 
-def test_third_successful_read_produces_first_nudge() -> None:
-    responses = _successful_reads(TooManyReadsNudge(), 3)
+def _guidance(hook: TooManyReadsNudge) -> str:
+    response = hook.before_model_turn(
+        BeforeModelTurnContext(None, ".", "task", (), 0)
+    )
+    if response is None:
+        return ""
+    return "\n\n".join(block.body for block in response.context_blocks)
 
-    assert responses[:2] == [None, None]
-    assert responses[2].additional_context == TOO_MANY_READS_GUIDANCE
+
+def test_third_successful_read_renders_first_nudge_at_model_boundary() -> None:
+    hook = TooManyReadsNudge()
+    responses = _successful_reads(hook, 3)
+
+    assert responses == [None, None, None]
+    assert _guidance(hook) == TOO_MANY_READS_GUIDANCE
+    assert _guidance(hook) == ""
+
+
+@pytest.mark.parametrize("mutation", ["apply_patch", "write_file"])
+def test_later_mutation_discards_armed_read_guidance(mutation: str) -> None:
+    hook = TooManyReadsNudge()
+    _successful_reads(hook, 3)
+
+    assert _result(hook, mutation) is None
+    assert _guidance(hook) == ""
 
 
 def test_fifth_and_later_successful_reads_produce_strong_nudge() -> None:
     hook = TooManyReadsNudge()
-    responses = _successful_reads(hook, 6)
+    assert _successful_reads(hook, 5) == [None] * 5
+    assert _guidance(hook) == TOO_MANY_READS_STRONG_GUIDANCE
 
-    assert responses[4].additional_context == TOO_MANY_READS_STRONG_GUIDANCE
-    assert responses[5].additional_context == TOO_MANY_READS_STRONG_GUIDANCE
+    assert _result(hook, "read_file") is None
+    assert _guidance(hook) == TOO_MANY_READS_STRONG_GUIDANCE
 
 
 def test_broad_reads_nudge_earlier_by_returned_line_volume() -> None:
@@ -75,7 +97,8 @@ def test_broad_reads_nudge_earlier_by_returned_line_volume() -> None:
     )
 
     assert first is None
-    assert second.additional_context == TOO_MANY_READS_GUIDANCE
+    assert second is None
+    assert _guidance(hook) == TOO_MANY_READS_GUIDANCE
 
 
 def test_only_novel_ranges_from_shaped_result_add_read_volume() -> None:
@@ -100,7 +123,8 @@ def test_only_novel_ranges_from_shaped_result_add_read_volume() -> None:
         "read_file",
         result_metadata={"returned_line_ranges": ranges},
     )
-    assert third.additional_context == TOO_MANY_READS_GUIDANCE
+    assert third is None
+    assert _guidance(hook) == TOO_MANY_READS_GUIDANCE
 
 
 def test_already_covered_result_counts_as_an_action_but_not_source_volume() -> None:
@@ -126,7 +150,8 @@ def test_already_covered_result_counts_as_an_action_but_not_source_volume() -> N
         result_metadata={"start_line": 1, "end_line": 500},
     )
 
-    assert third.additional_context == TOO_MANY_READS_GUIDANCE
+    assert third is None
+    assert _guidance(hook) == TOO_MANY_READS_GUIDANCE
 
 
 def test_broad_reads_reach_strong_volume_guidance_before_fifth_read() -> None:
@@ -140,8 +165,9 @@ def test_broad_reads_reach_strong_volume_guidance_before_fifth_read() -> None:
         for _ in range(3)
     ]
 
-    assert results[1].additional_context == TOO_MANY_READS_GUIDANCE
-    assert results[2].additional_context == TOO_MANY_READS_STRONG_GUIDANCE
+    assert results == [None, None, None]
+    # One batch gets one logical warning, using the strongest final state.
+    assert _guidance(hook) == TOO_MANY_READS_STRONG_GUIDANCE
 
 
 def test_successful_mutation_resets_returned_line_volume() -> None:
@@ -160,7 +186,8 @@ def test_neutral_commands_do_not_make_reads_consecutive() -> None:
     assert _result(hook, "read_file") is None
     assert _result(hook, "run_command") is None
 
-    assert _result(hook, "read_file").additional_context == TOO_MANY_READS_GUIDANCE
+    assert _result(hook, "read_file") is None
+    assert _guidance(hook) == TOO_MANY_READS_GUIDANCE
 
 
 @pytest.mark.parametrize("mutation", ["apply_patch", "write_file"])
@@ -170,7 +197,8 @@ def test_successful_mutation_resets_read_count(mutation: str) -> None:
     assert _result(hook, mutation) is None
 
     assert _successful_reads(hook, 2) == [None, None]
-    assert _result(hook, "read_file").additional_context == TOO_MANY_READS_GUIDANCE
+    assert _result(hook, "read_file") is None
+    assert _guidance(hook) == TOO_MANY_READS_GUIDANCE
 
 
 def test_failed_mutation_does_not_reset_read_count() -> None:
@@ -178,7 +206,8 @@ def test_failed_mutation_does_not_reset_read_count() -> None:
     _successful_reads(hook, 2)
     assert _result(hook, "apply_patch", ok=False) is None
 
-    assert _result(hook, "read_file").additional_context == TOO_MANY_READS_GUIDANCE
+    assert _result(hook, "read_file") is None
+    assert _guidance(hook) == TOO_MANY_READS_GUIDANCE
 
 
 def test_failed_read_neither_increments_nor_resets() -> None:
@@ -186,7 +215,8 @@ def test_failed_read_neither_increments_nor_resets() -> None:
     _successful_reads(hook, 2)
     assert _result(hook, "read_file", ok=False) is None
 
-    assert _result(hook, "read_file").additional_context == TOO_MANY_READS_GUIDANCE
+    assert _result(hook, "read_file") is None
+    assert _guidance(hook) == TOO_MANY_READS_GUIDANCE
 
 
 def test_compaction_does_not_reset_read_count() -> None:
@@ -195,7 +225,8 @@ def test_compaction_does_not_reset_read_count() -> None:
     _successful_reads(hook, 2)
     runner.compaction_applied(CompactionAppliedContext(None, "."))
 
-    assert _result(hook, "read_file").additional_context == TOO_MANY_READS_GUIDANCE
+    assert _result(hook, "read_file") is None
+    assert _guidance(hook) == TOO_MANY_READS_GUIDANCE
 
 
 def test_before_run_resets_read_count() -> None:
@@ -214,8 +245,8 @@ def test_hook_does_not_modify_read_tool_output() -> None:
         _Context(action={"tool": "read_file", "args": {}}, result=result)
     )
 
-    assert response.updated_tool_output is None
-    assert response.block is False
+    assert response is None
+    assert _guidance(hook) == TOO_MANY_READS_GUIDANCE
     assert result == {
         "ok": True,
         "tool": "read_file",

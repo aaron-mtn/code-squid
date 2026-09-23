@@ -573,6 +573,12 @@ request, but is not appended to `session.messages` and is not persisted.
 Hooks contribute prompt blocks through `HookResponse.context_blocks`; there is
 no separate return convention for this event.
 
+Built-in behavioral Hooks whose advice asserts current accumulated state use
+this seam to render that advice. Their `tool_result` handlers still observe
+every result synchronously, but a later sibling in the same Tool batch can
+invalidate the state before the next model request. Event-specific recovery
+and correction guidance remains on `tool_result`.
+
 ### compaction_applied
 
 Runs only after the compactor has replaced the active in-memory transcript and
@@ -611,6 +617,10 @@ from every attempted action in execution order until control returns to the
 model. Exactly identical per-action guidance is included only once; a later
 action with no guidance cannot erase an earlier contribution. A single-action
 turn follows the same path and retains its existing one-turn behavior.
+This accumulation contract remains available to custom/user Hooks and to
+event-specific built-ins such as failure recovery and repeated-read correction;
+the runner does not reinterpret arbitrary `additional_context` as recomputable
+state.
 
 Code Squid wires Core's small `RepeatedFailureNudge` Hook at this seam. The
 generic Hook retains its exact-action detector: three consecutive failures must
@@ -640,12 +650,16 @@ Code Squid wires Core's `RepeatedReadNudge`, `TooManyReadsNudge`, and
 `TooManyReadsNudge` counts successful `read_file` results and the source lines
 they returned since the last successful `write_file` or `apply_patch`.
 Commands, other Tools, and all failed results are neutral: they neither
-increment nor reset either counter. It supplies one-turn advisory context on
-the third successful read or after 1,500 returned source lines, whichever comes
-first. Stronger context begins on the fifth read or after 3,000 returned lines
-and continues on later reads. These are advisory thresholds rather than a read
-budget: the Hook never blocks or transforms a result, so investigations can
-continue for a specific missing fact, unmet requirement, or required verification.
+increment nor reset either counter. Its `tool_result` handler updates those
+counters without emitting state-dependent text. At the next
+`before_model_turn` boundary it supplies one-turn advisory context when current
+state has reached the third successful read or 1,500 returned source lines,
+whichever comes first. Stronger context applies from the fifth read or 3,000
+returned lines onward and continues after later reads. If one batch crosses
+both thresholds, only the stronger current warning is rendered. These are
+advisory thresholds rather than a read budget: the Hook never blocks or
+transforms a result, so investigations can continue for a specific missing
+fact, unmet requirement, or required verification.
 The wording reports reads without a successful built-in edit, not inferred lack
 of progress; read-only work and needed context recovery after compaction remain
 legitimate reasons to read.
@@ -658,9 +672,11 @@ reuses the existing coverage decision without exposing or duplicating its
 private state. Malformed or missing range metadata contributes no volume and
 leaves the action-count behavior intact. Unlike source coverage, both
 behavioral counters intentionally survive transcript compaction; only a
-successful built-in mutation or `before_run` resets them. The thresholds remain
-constructor arguments in Core, while Code Squid enables the Hook by default and
-exposes the independent boolean
+successful built-in mutation or `before_run` resets them. A successful mutation
+also clears any armed read warning before the model boundary, so an earlier
+sibling read cannot describe state that the later edit reset. The thresholds
+remain constructor arguments in Core, while Code Squid enables the Hook by
+default and exposes the independent boolean
 `runtime.too_many_reads_enabled` application setting. Disabling it does not
 disable any other built-in Hook.
 
@@ -685,14 +701,17 @@ persisted.
 
 After verification is current, every successful non-mutation Tool result counts,
 including reads, searches, commands, other Tool activity, and repeated explicit
-verification. At the default threshold of two actions, the Hook supplies direct
+verification. At the default threshold of two actions, the Hook arms direct
 one-turn advisory guidance to identify an unfinished requirement (including
 required documentation), concrete issue, or required validation, and finalize
-when none remains. A successful check does not establish task completion. It
-then resets the counter so the message does not repeat forever. The first
-successful verification after a mutation, successful structured mutation,
-failed explicit verification, and the start of a run reset the counter. It does
-not block or finalize the run. Because `RepeatedReadNudge` runs first, a read it
+when none remains. It renders that guidance from current state at the next
+`before_model_turn` boundary, then resets the counter so the message does not
+repeat forever. A successful check does not establish task completion. The
+first successful verification after a mutation, successful structured
+mutation, failed explicit verification, and the start of a run reset the
+counter. It does not block or finalize the run. A later successful mutation in
+the same batch invalidates verification and clears the armed warning before it
+can be shown. Because `RepeatedReadNudge` runs first, a read it
 masks as already covered still advances the post-verification count but does not
 emit stacked post-verification guidance on that result. This policy deliberately
 recognizes only the built-in `write_file` and `apply_patch` mutation Tools; it

@@ -14,6 +14,8 @@ from squid_core.safety import ApprovalDecision, ApprovalPolicy
 from squid_core.hooks import (
     HookResponse,
     HookRunner,
+    POST_VERIFICATION_GUIDANCE,
+    PostVerificationNudge,
     RepeatedReadNudge,
     TOO_MANY_READS_GUIDANCE,
     TooManyReadsNudge,
@@ -3294,7 +3296,7 @@ def test_read_count_threshold_is_cumulative_within_batch(tmp_path) -> None:
     adapter, results = _run_read_batch(tmp_path, actions, [hook])
 
     assert all(result["ok"] is True for result in results)
-    assert adapter.message_requests[1][-1]["content"] == TOO_MANY_READS_GUIDANCE
+    assert TOO_MANY_READS_GUIDANCE in adapter.message_requests[1][-1]["content"]
 
 
 def test_visible_source_volume_is_cumulative_within_batch(tmp_path) -> None:
@@ -3319,7 +3321,133 @@ def test_visible_source_volume_is_cumulative_within_batch(tmp_path) -> None:
     assert sum(result["content_returned_chars"] for result in results) == sum(
         len(path.read_text(encoding="utf-8")) for path in paths
     )
-    assert adapter.message_requests[1][-1]["content"] == TOO_MANY_READS_GUIDANCE
+    assert TOO_MANY_READS_GUIDANCE in adapter.message_requests[1][-1]["content"]
+
+
+class _VerificationExecutor(FakeToolExecutor):
+    """Mark requested commands as verification for boundary-guidance tests."""
+
+    def execute(self, action: dict) -> dict:
+        result = super().execute(action)
+        if action["tool"] == "run_command" and action.get("args", {}).get(
+            "verification"
+        ):
+            result["verification"] = True
+        return result
+
+
+def test_post_verification_guidance_invalidated_by_later_batch_edit() -> None:
+    adapter = FakeModelAdapter(
+        [
+            multi_tool_call_reply_with_args(
+                ("verify", "run_command", {"verification": True})
+            ),
+            multi_tool_call_reply(
+                ("read_1", "read_file"),
+                ("read_2", "read_file"),
+                ("write", "write_file"),
+            ),
+            reply("TASK COMPLETE"),
+        ]
+    )
+    loop = AgentLoop(
+        session=Session(repo_root=None),
+        model_adapter=adapter,
+        tool_executor=_VerificationExecutor(),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        hook_runner=HookRunner([PostVerificationNudge(threshold=2)]),
+    )
+
+    assert loop.run() == RunResult(status="complete")
+    assert POST_VERIFICATION_GUIDANCE not in str(adapter.message_requests[2])
+
+
+def test_post_verification_guidance_uses_final_valid_batch_state() -> None:
+    adapter = FakeModelAdapter(
+        [
+            multi_tool_call_reply_with_args(
+                ("verify", "run_command", {"verification": True})
+            ),
+            multi_tool_call_reply(
+                ("read", "read_file"),
+                ("search", "search_files"),
+            ),
+            reply("TASK COMPLETE"),
+        ]
+    )
+    loop = AgentLoop(
+        session=Session(repo_root=None),
+        model_adapter=adapter,
+        tool_executor=_VerificationExecutor(),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        hook_runner=HookRunner([PostVerificationNudge(threshold=2)]),
+    )
+
+    assert loop.run() == RunResult(status="complete")
+    content = adapter.message_requests[2][-1]["content"]
+    assert POST_VERIFICATION_GUIDANCE in content
+    assert content.count(POST_VERIFICATION_GUIDANCE) == 1
+
+
+def test_read_guidance_invalidated_by_later_batch_edit() -> None:
+    hook = TooManyReadsNudge(
+        first_nudge_reads=3,
+        strong_nudge_reads=5,
+        first_nudge_lines=10_000,
+        strong_nudge_lines=20_000,
+    )
+    adapter = FakeModelAdapter(
+        [
+            multi_tool_call_reply(
+                ("read_1", "read_file"),
+                ("read_2", "read_file"),
+                ("read_3", "read_file"),
+                ("write", "write_file"),
+            ),
+            reply("TASK COMPLETE"),
+        ]
+    )
+    loop = AgentLoop(
+        session=Session(repo_root=None),
+        model_adapter=adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        hook_runner=HookRunner([hook]),
+    )
+
+    assert loop.run() == RunResult(status="complete")
+    assert TOO_MANY_READS_GUIDANCE not in str(adapter.message_requests[1])
+
+
+def test_single_read_guidance_renders_once_at_next_model_boundary() -> None:
+    hook = TooManyReadsNudge(
+        first_nudge_reads=1,
+        strong_nudge_reads=2,
+        first_nudge_lines=10_000,
+        strong_nudge_lines=20_000,
+    )
+    adapter = FakeModelAdapter(
+        [tool_call_reply("read"), reply("TASK COMPLETE")]
+    )
+    loop = AgentLoop(
+        session=Session(repo_root=None),
+        model_adapter=adapter,
+        tool_executor=FakeToolExecutor(),
+        tool_results=ToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        hook_runner=HookRunner([hook]),
+    )
+
+    assert loop.run() == RunResult(status="complete")
+    content = adapter.message_requests[1][-1]["content"]
+    assert content.count(TOO_MANY_READS_GUIDANCE) == 1
 
 
 def test_visible_source_character_totals_are_cumulative_within_batch(tmp_path) -> None:
