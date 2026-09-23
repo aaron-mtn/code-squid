@@ -1,3 +1,14 @@
+- 2026-09-23: Tightened the protected multi-Tool response policy from
+  argument-known batching to necessity-known batching. A batch is now allowed
+  only when both each call's arguments and its necessity are already known;
+  independent known-required calls remain valid, while a call that an earlier
+  result could eliminate or materially change must wait. Updated both invalid-
+  reply corrections and prompt-assembly regressions so the old permissive rule
+  cannot reappear there. Runtime validation, sequential batch execution, batch
+  size, and Hook state are unchanged. Verification: 44 focused prompt tests,
+  204 broader prompt/AgentLoop/model-adapter tests, and the full 1,473-test
+  suite passed; production compilation and `git diff --check` also passed.
+
 - 2026-09-22: Implemented H2 from the agent-harness audit so a large
   multi-Tool response cannot age its own early sibling results before their
   first model exposure. Request-only rendering now derives the latest complete

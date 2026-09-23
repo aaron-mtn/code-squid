@@ -32,9 +32,9 @@ PROTECTED_RESPONSE_PROTOCOL = """
 ## Response protocol
 
 - A non-final turn uses one or more real tool calls.
-- Multiple tool calls may be issued together when each can be fully determined from the current context.
+- Batch multiple tool calls only when both their arguments and their necessity are already known from the current context. Independent known-required calls are valid.
 - Tool calls execute sequentially in the order emitted.
-- If a later call depends on an earlier result, wait for the next turn.
+- If an earlier call's result could eliminate the need for a later call or materially change what that later call should do, wait for the earlier result before issuing the later call.
 - A final response contains no tool call and non-empty human-readable content.
 - Finish when the task is complete and practical verification has been performed, or when further verification cannot reasonably be done.
 """.strip()
@@ -202,7 +202,7 @@ Format error: your last response had no tool call and no final content.
 
 If the task is complete, reply with a concise non-empty final response and no tool call.
 
-If work remains, choose one or more real tool calls for the immediate next step. Batch calls only when each one can be fully determined without seeing an earlier call's result.
+If work remains, choose one or more real tool calls for the immediate next step. Batch calls only when both their arguments and their necessity are already known from the current context. If an earlier result could eliminate or materially change a later call, wait for it before issuing that call.
 
 Do not restate the plan or do extra work unless concrete work remains.
 """.strip(),
@@ -210,7 +210,7 @@ Do not restate the plan or do extra work unless concrete work remains.
     "malformed_tool_call": """
 Format error: your last response included an invalid tool call.
 
-Use one or more available tools with valid arguments for the immediate next step. Batch calls only when none depends on an earlier call's result.
+Use one or more available tools with valid arguments for the immediate next step. Batch calls only when both their arguments and their necessity are already known from the current context. If an earlier result could eliminate or materially change a later call, wait for it before issuing that call.
 """.strip(),
 }
 

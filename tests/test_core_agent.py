@@ -63,12 +63,33 @@ def test_skill_replacements_cannot_erase_core_protocol_or_narration() -> None:
         "review", skill=_skill_with_replacements(), prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS
     ).initial_messages()[0]["content"]
 
-    assert "Multiple tool calls may be issued together" in prompt
-    assert "If a later call depends on an earlier result, wait for the next turn." in prompt
+    assert "Batch multiple tool calls only when both their arguments and their necessity" in prompt
+    assert "Independent known-required calls are valid." in prompt
+    assert "could eliminate the need for a later call or materially change" in prompt
+    assert "wait for the earlier result before issuing the later call" in prompt
     assert "A final response contains no tool call" in prompt
     assert "Prefer a brief natural note before tool calls when useful." in prompt
     assert "A non-final turn uses one or more real tool calls." in prompt
     assert "[one or more independent tool calls]" in prompt
+
+
+def test_default_prompt_requires_known_necessity_without_disabling_batches() -> None:
+    prompt = Agent("inspect it").initial_messages()[0]["content"]
+
+    assert "A non-final turn uses one or more real tool calls." in prompt
+    assert (
+        "Batch multiple tool calls only when both their arguments and their "
+        "necessity are already known from the current context."
+    ) in prompt
+    assert "Independent known-required calls are valid." in prompt
+    assert (
+        "If an earlier call's result could eliminate the need for a later call "
+        "or materially change what that later call should do, wait for the "
+        "earlier result before issuing the later call."
+    ) in prompt
+    assert "[one or more independent tool calls]" in prompt
+    assert "each can be fully determined from the current context" not in prompt
+    assert "If a later call depends on an earlier result" not in prompt
 
 
 def test_skill_replacements_cannot_erase_code_squid_baseline_policy() -> None:

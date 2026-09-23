@@ -255,6 +255,19 @@ def test_empty_final_correction_mentions_final_content() -> None:
     assert "TASK COMPLETE" not in message["content"]
 
 
+def test_invalid_reply_corrections_preserve_necessity_based_batching_rule() -> None:
+    agent = CodingAgent("demo task")
+
+    for reason in ("empty_final_reply", "malformed_tool_call"):
+        content = agent.correction_message_for(reason)["content"]
+
+        assert "both their arguments and their necessity are already known" in content
+        assert "could eliminate or materially change a later call" in content
+        assert "wait for it before issuing that call" in content
+        assert "fully determined without seeing an earlier call's result" not in content
+        assert "none depends on an earlier call's result" not in content
+
+
 def test_follow_up_message_returns_user_message() -> None:
     agent = CodingAgent("show me what changed")
 

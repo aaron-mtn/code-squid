@@ -1578,10 +1578,11 @@ counter. Repeated invalid replies stop after the configured hard-coded loop
 limit, currently 3 consecutive invalid replies.
 
 Runtime validation accepts a non-final reply with one or more tool actions even
-when assistant content is blank. The prompt permits a batch only when every
-call can be determined from current context; calls that depend on an earlier
-result wait for a later turn. The runtime does not infer dependencies or impose
-a separate per-turn batch-size limit.
+when assistant content is blank. The prompt permits a batch only when both the
+arguments and necessity of every call are known from current context. Independent
+known-required calls remain valid; if an earlier result could eliminate or
+materially change a later call, the model must wait for that result. The runtime
+does not infer semantic necessity or impose a separate per-turn batch-size limit.
 
 Each action that enters the per-action Hook/preflight/approval/execution path
 counts toward `runtime.max_tool_steps`, including blocked and denied actions.
