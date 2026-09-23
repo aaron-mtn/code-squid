@@ -20,11 +20,9 @@ class PromptDefaults:
 VISIBLE_NARRATION_GUIDANCE = """
 ## Visible action notes
 
-Prefer a brief natural note before tool calls when useful.
+Prefer a brief natural note or narration before tool calls when useful.
 
 Say what you found, changed, or are checking next. Keep it short and do not restate the whole plan or explain obvious actions.
-
-Visible narration is preferred but not required. A turn with valid tool calls may contain no assistant text.
 """.strip()
 
 
@@ -32,11 +30,10 @@ PROTECTED_RESPONSE_PROTOCOL = """
 ## Response protocol
 
 - A non-final turn uses one or more real tool calls.
-- Batch multiple tool calls only when both their arguments and their necessity are already known from the current context. Independent known-required calls are valid.
-- Tool calls execute sequentially in the order emitted.
+- Batch multiple tool calls when it is efficient and the arguments are known.
 - If an earlier call's result could eliminate the need for a later call or materially change what that later call should do, wait for the earlier result before issuing the later call.
 - A final response contains no tool call and non-empty human-readable content.
-- Finish when the task is complete and practical verification has been performed, or when further verification cannot reasonably be done.
+- Finish when the task is complete.
 """.strip()
 
 
@@ -56,17 +53,12 @@ PROTECTED_RESPONSE_EXAMPLES = """
 
 Valid non-final response:
 
-I found the relevant implementation. I'm reading the surrounding code before changing it.
-[one or more independent tool calls]
-
-After enough investigation:
-
-The implementation path is clear. I'm making the focused change now.
+I found the section I was looking for. I'm checking out the surrounding code before I change anything.
 [one or more independent tool calls]
 
 Valid final response:
 
-Fixed the issue and ran the relevant checks. The focused tests passed. Interactive behavior was not exercised.
+I Fixed the issue and ran the tests. Everything is green. Interactive behavior was not confirmed yet since I didn't have the browser available to me.
 """.strip()
 
 
