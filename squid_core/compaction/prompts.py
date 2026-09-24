@@ -7,6 +7,11 @@ COMPACTION_SYSTEM_PROMPT = (
     "broaden, replace, or add task requirements."
 )
 
+COMPACTION_RETRY_CORRECTION = (
+    "The previous compaction response was empty or invalid. Return a non-empty "
+    "summary of the supplied conversation context."
+)
+
 
 def compaction_prompt(
     prior_context: str,
@@ -14,7 +19,11 @@ def compaction_prompt(
     *,
     agent_context: str = "[]",
     user_context: str = "[]",
+    retry_after_invalid_response: bool = False,
 ) -> str:
+    retry_correction = ""
+    if retry_after_invalid_response:
+        retry_correction = f"\n\n{COMPACTION_RETRY_CORRECTION}"
     authoritative_section = ""
     if authoritative_context:
         authoritative_section = f"""
@@ -42,4 +51,5 @@ Protected user task/instruction context (retained verbatim outside the summary):
 History being summarized and replaced:
 {prior_context}
 {authoritative_section}
+{retry_correction}
 """.strip()

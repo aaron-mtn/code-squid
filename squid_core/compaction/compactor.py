@@ -44,6 +44,7 @@ class Compactor:
             return None
 
         stage = "prepare"
+        invalid_summary_failure = False
         try:
             estimated_tokens_before = estimate_messages_tokens(session.messages)
             threshold_crossed = (
@@ -81,6 +82,7 @@ class Compactor:
                 event_callback,
                 {
                     "type": "compaction_started",
+                    "attempt": 1,
                     "estimated_tokens_before": estimated_tokens_before,
                     "messages_before": messages_before,
                     **selection,
@@ -98,40 +100,85 @@ class Compactor:
             # Generate deterministic context once so the summarizer and the
             # retained backstop see exactly the same cutoff-scoped facts.
             context = self._provided_context(preserved_messages)
-            request_messages = [
-                {
-                    "role": "system",
-                    "content": COMPACTION_SYSTEM_PROMPT,
-                },
-                {
-                    "role": "user",
-                    "content": compaction_prompt(
-                        prior_context,
-                        context,
-                        agent_context=agent_context,
-                        user_context=user_context,
+            attempt = 1
+            while True:
+                request_messages = [
+                    {
+                        "role": "system",
+                        "content": COMPACTION_SYSTEM_PROMPT,
+                    },
+                    {
+                        "role": "user",
+                        "content": compaction_prompt(
+                            prior_context,
+                            context,
+                            agent_context=agent_context,
+                            user_context=user_context,
+                            retry_after_invalid_response=attempt > 1,
+                        ),
+                    },
+                ]
+                request_event = {
+                    "type": "compaction_request",
+                    "attempt": attempt,
+                    "estimated_request_tokens": estimate_messages_tokens(
+                        request_messages
                     ),
-                },
-            ]
-            request_event = {
-                "type": "compaction_request",
-                "estimated_request_tokens": estimate_messages_tokens(request_messages),
-            }
-            self._copy_adapter_identity(request_event)
-            stage = "persistence"
-            self._emit(event_callback, request_event)
+                }
+                self._copy_adapter_identity(request_event)
+                stage = "persistence"
+                self._emit(event_callback, request_event)
 
-            stage = "model_request"
-            summary_response = self.model_adapter.complete_text(request_messages)
+                stage = "model_request"
+                summary_response = self.model_adapter.complete_text(request_messages)
 
-            stage = "response_parse"
-            summary = self._validated_summary(summary_response)
+                stage = "response_parse"
+                try:
+                    # Keep the catch around validation alone: request/provider,
+                    # persistence, and later rebuild failures are not retryable.
+                    summary = self._validated_summary(summary_response)
+                    break
+                except ValueError as error:
+                    if attempt > 1:
+                        invalid_summary_failure = True
+                        raise
+                    # Validation precedes all transcript mutation. Report the
+                    # rejected output before issuing the one corrective retry.
+                    stage = "persistence"
+                    self._emit(
+                        event_callback,
+                        {
+                            "type": "compaction_failed",
+                            "stage": "response_parse",
+                            "attempt": attempt,
+                            "will_retry": True,
+                            "error_type": "ValueError",
+                            "error": str(error),
+                        },
+                    )
+                    attempt += 1
+                    self._emit(
+                        event_callback,
+                        {
+                            "type": "compaction_started",
+                            "attempt": attempt,
+                            "retry": True,
+                            "estimated_tokens_before": estimated_tokens_before,
+                            "messages_before": messages_before,
+                            **selection,
+                        },
+                    )
+
             reasoning = summary_response.get("reasoning")
             if reasoning:
                 stage = "persistence"
                 self._emit(
                     event_callback,
-                    {"type": "compaction_reasoning", "content": reasoning},
+                    {
+                        "type": "compaction_reasoning",
+                        "attempt": attempt,
+                        "content": reasoning,
+                    },
                 )
 
             # Persist the exact model output before touching session state so a
@@ -139,7 +186,11 @@ class Compactor:
             stage = "persistence"
             self._emit(
                 event_callback,
-                {"type": "compaction_summary", "content": summary},
+                {
+                    "type": "compaction_summary",
+                    "attempt": attempt,
+                    "content": summary,
+                },
             )
             stage = "response_parse"
             response_meta = self._response_meta(summary_response)
@@ -147,7 +198,11 @@ class Compactor:
                 stage = "persistence"
                 self._emit(
                     event_callback,
-                    {"type": "compaction_response_meta", **response_meta},
+                    {
+                        "type": "compaction_response_meta",
+                        "attempt": attempt,
+                        **response_meta,
+                    },
                 )
 
             stage = "session_rebuild"
@@ -177,21 +232,25 @@ class Compactor:
             stage = "persistence"
             self._emit(
                 event_callback,
-                {"type": "compaction_applied", **metadata},
+                {"type": "compaction_applied", "attempt": attempt, **metadata},
             )
             return metadata
         except Exception as error:
             # Failure logging is best effort only when persistence itself has
             # failed; the original exception must always remain the one raised.
             try:
+                failure_event = {
+                    "type": "compaction_failed",
+                    "stage": stage,
+                    "error_type": type(error).__name__,
+                    "error": str(error) or type(error).__name__,
+                }
+                if invalid_summary_failure:
+                    failure_event["attempt"] = 2
+                    failure_event["will_retry"] = False
                 self._emit(
                     event_callback,
-                    {
-                        "type": "compaction_failed",
-                        "stage": stage,
-                        "error_type": type(error).__name__,
-                        "error": str(error) or type(error).__name__,
-                    },
+                    failure_event,
                 )
             except Exception:
                 pass

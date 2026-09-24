@@ -1,3 +1,19 @@
+- 2026-09-23: Made an invalid compaction summary recoverable for one attempt.
+  Core now classifies only its structural/non-whitespace summary validation
+  error, emits the failed first attempt, and retries once with the same source
+  context plus an explicit request for a non-empty summary. Session replacement
+  remains after successful validation, so neither rejected response can discard
+  history. Attempt fields distinguish the failed request, retry start/request,
+  and eventual application or terminal failure. Provider, persistence, rebuild,
+  callback, cancellation, and arbitrary exceptions retain their existing
+  single-attempt behavior. Added focused coverage for invalid-then-valid,
+  invalid-twice, valid-first, and non-validation failures. Verification: 38
+  focused compaction tests and 416 broader compaction/session/loop/presentation
+  tests passed. The full suite passed 1,436 tests with 54 unrelated existing
+  prompt, Hook-default, and Hook-guidance assertion failures. Production and
+  test packages compiled successfully, and `git diff --check` passed. No live
+  model inference was run.
+
 - 2026-09-23: Normalized Code Squid's built-in behavioral Hook enablement at
   the application composition seam. Replaced the one-off
   `runtime.too_many_reads_enabled` field and builder argument with the keyed

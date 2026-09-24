@@ -1747,8 +1747,9 @@ When triggered, compaction:
 - summarizes older chunks with `ModelAdapter.complete_text(...)`
 - validates that the adapter returned a structurally valid, non-whitespace text
   summary before rebuilding the transcript; an absent, non-text, empty, or
-  whitespace-only summary fails compaction and leaves every original message
-  intact
+  whitespace-only summary leaves every original message intact and triggers
+  one retry over the same source material with an explicit non-empty-summary
+  correction; a second invalid response fails compaction without mutation
 - supplies the protected original system and user messages to the summarizer in
   separately labeled reference sections; they remain outside the history being
   replaced, while later user messages selected before the cutoff remain visible
@@ -1810,19 +1811,26 @@ normal transcript entries:
 
 - `compaction_check` records the estimate, configured trigger, threshold result,
   whether compaction is possible, and compactable-selection diagnostics
-- `compaction_started` records the pre-compaction message count plus eligible,
-  target, selected, and preserved token/chunk selection details
-- `compaction_request` records the estimated request size and configured
-  provider/model immediately before the model call
+- `compaction_started` records the attempt number, pre-compaction message count,
+  and eligible, target, selected, and preserved token/chunk selection details;
+  a validation retry emits a second start event with `retry=true`
+- `compaction_request` records the attempt number, estimated request size, and
+  configured provider/model immediately before the model call
 - optional `compaction_reasoning`, exact `compaction_summary`, and optional
-  `compaction_response_meta` events preserve normalized response diagnostics
+  `compaction_response_meta` events preserve the successful attempt number and
+  normalized response diagnostics
 - `compaction_applied` records before/after token estimates and message counts
-  only after the in-memory rebuild and event append succeed
+  plus the successful attempt number, only after the in-memory rebuild and
+  event append succeed
 - `compaction_failed` records `prepare`, `model_request`, `response_parse`,
   `session_rebuild`, or `persistence` plus a concise exception description,
-  then the original exception continues through the existing error path;
-  response-parse failures occur before transcript mutation and never emit
-  `compaction_applied`
+  then the original exception continues through the existing error path. The
+  first invalid-summary failure instead records `attempt=1` and
+  `will_retry=true`; only that validation failure is recoverable, and its second
+  failure records `attempt=2` and `will_retry=false` before propagating.
+  Response-parse failures occur before transcript mutation and never emit
+  `compaction_applied`; provider, persistence, rebuild, callback, cancellation,
+  and unexpected failures are not retried by compaction
 
 `ModelAdapter.complete_text(...)` retains its existing `content` and `usage`
 result fields and additionally exposes normalized `reasoning` and

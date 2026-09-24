@@ -40,6 +40,24 @@ class RawResponseModelAdapter:
         return self.response
 
 
+class SequencedModelAdapter:
+    """Return queued responses while recording the session seen by each call."""
+
+    provider_name = "test-provider"
+    model_name = "test-model"
+
+    def __init__(self, responses: list[object], current_session) -> None:
+        self.responses = list(responses)
+        self.current_session = current_session
+        self.requests = []
+        self.session_snapshots = []
+
+    def complete_text(self, messages: list[dict]) -> object:
+        self.requests.append(messages)
+        self.session_snapshots.append(list(self.current_session.messages))
+        return self.responses.pop(0)
+
+
 def settings(
     enabled: bool = True,
     trigger_input_tokens: int = 1,
@@ -389,28 +407,80 @@ def test_complete_text_failure_does_not_mutate_session_messages() -> None:
     assert "compaction_applied" not in [event["type"] for event in events]
 
 
-@pytest.mark.parametrize("summary", ["", " \t\r\n "])
-def test_empty_summary_fails_without_mutating_session_messages(summary: str) -> None:
+def test_invalid_summary_retries_once_and_applies_valid_second_response() -> None:
     messages = compactable_messages()
     original_messages = list(messages)
     current_session = session(messages)
+    adapter = SequencedModelAdapter(
+        [{"content": " \t\r\n "}, {"content": "valid retry summary"}],
+        current_session,
+    )
+    events = []
+
+    result = Compactor(settings(), adapter).maybe_compact(
+        current_session, event_callback=events.append
+    )
+
+    assert result is not None
+    assert len(adapter.requests) == 2
+    assert adapter.session_snapshots == [original_messages, original_messages]
+    assert adapter.requests[0][1]["content"] in adapter.requests[1][1]["content"]
+    assert "previous compaction response was empty or invalid" in adapter.requests[1][1][
+        "content"
+    ]
+    assert current_session.messages[2]["content"].endswith("valid retry summary")
+    assert [event["type"] for event in events] == [
+        "compaction_check",
+        "compaction_started",
+        "compaction_request",
+        "compaction_failed",
+        "compaction_started",
+        "compaction_request",
+        "compaction_summary",
+        "compaction_applied",
+    ]
+    assert events[4]["attempt"] == 2
+    assert events[4]["retry"] is True
+    assert next(event for event in events if event.get("will_retry")) == {
+        "type": "compaction_failed",
+        "stage": "response_parse",
+        "attempt": 1,
+        "will_retry": True,
+        "error_type": "ValueError",
+        "error": "compaction response did not contain non-whitespace summary text",
+    }
+    assert events[-1]["type"] == "compaction_applied"
+    assert events[-1]["attempt"] == 2
+
+
+@pytest.mark.parametrize("summary", ["", " \t\r\n "])
+def test_two_invalid_summaries_fail_without_mutating_session_messages(
+    summary: str,
+) -> None:
+    messages = compactable_messages()
+    original_messages = list(messages)
+    current_session = session(messages)
+    adapter = SequencedModelAdapter(
+        [{"content": summary}, {"content": summary}], current_session
+    )
     events = []
 
     with pytest.raises(
         ValueError,
         match="did not contain non-whitespace summary text",
     ):
-        Compactor(settings(), FakeModelAdapter(summary)).maybe_compact(
+        Compactor(settings(), adapter).maybe_compact(
             current_session, event_callback=events.append
         )
 
+    assert len(adapter.requests) == 2
+    assert adapter.session_snapshots == [original_messages, original_messages]
     assert current_session.messages == original_messages
-    assert events[-1] == {
-        "type": "compaction_failed",
-        "stage": "response_parse",
-        "error_type": "ValueError",
-        "error": "compaction response did not contain non-whitespace summary text",
-    }
+    failure_events = [event for event in events if event["type"] == "compaction_failed"]
+    assert [event["attempt"] for event in failure_events] == [1, 2]
+    assert [event["will_retry"] for event in failure_events] == [True, False]
+    assert failure_events[-1]["stage"] == "response_parse"
+    assert failure_events[-1]["error_type"] == "ValueError"
     assert "compaction_applied" not in [event["type"] for event in events]
 
 
@@ -503,21 +573,28 @@ def test_successful_compaction_logs_complete_lifecycle_and_exact_model_data() ->
     ]
     assert events[0]["will_compact"] is True
     assert events[1]["messages_before"] == 6
+    assert events[1]["attempt"] == 1
     assert events[1]["compact_fraction"] == 0.8
     assert events[1]["min_recent_chunks"] == 2
     assert events[1]["selected_chunks"] == 2
     assert events[1]["preserved_chunks"] == 2
     assert events[2]["estimated_request_tokens"] > 0
+    assert events[2]["attempt"] == 1
     assert events[2]["provider"] == "test-provider"
     assert events[2]["model"] == "test-model"
     assert events[3]["content"] == "careful compaction reasoning"
     assert events[4]["content"] == "exact summary\nwith detail"
     assert events[5] == {
         "type": "compaction_response_meta",
+        "attempt": 1,
         "finish_reason": "stop",
         "usage": {"input_tokens": 220, "output_tokens": 30, "total_tokens": 250},
     }
-    assert events[6] == {"type": "compaction_applied", **result}
+    assert events[6] == {"type": "compaction_applied", "attempt": 1, **result}
+    assert len(model_adapter.requests) == 1
+    assert "previous compaction response was empty or invalid" not in model_adapter.requests[
+        0
+    ][1]["content"]
 
 
 def test_compaction_omits_reasoning_and_response_meta_when_absent() -> None:
@@ -540,15 +617,21 @@ def test_model_request_failure_logs_stage_and_reraises_original_exception() -> N
         provider_name = "test-provider"
         model_name = "test-model"
 
+        def __init__(self) -> None:
+            self.requests = 0
+
         def complete_text(self, messages: list[dict]) -> dict:
+            self.requests += 1
             raise error
 
+    adapter = ExactFailingModelAdapter()
     with pytest.raises(RuntimeError) as exc_info:
-        Compactor(settings(), ExactFailingModelAdapter()).maybe_compact(
+        Compactor(settings(), adapter).maybe_compact(
             session(compactable_messages()), event_callback=events.append
         )
 
     assert exc_info.value is error
+    assert adapter.requests == 1
     assert events[-1] == {
         "type": "compaction_failed",
         "stage": "model_request",
