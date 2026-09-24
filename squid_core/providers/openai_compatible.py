@@ -135,6 +135,7 @@ class OpenAICompatibleProvider(BaseProvider):
         trace_callback=None,
         please_stop_contemplating_the_void: bool = False,
         should_cancel=None,
+        on_reasoning_delta=None,
     ) -> object:
         payload = self._payload(
             model=model,
@@ -252,14 +253,26 @@ class OpenAICompatibleProvider(BaseProvider):
                     delta = getattr(choice, "delta", None)
                     if delta is None:
                         continue
-                    content_delta = getattr(delta, "content", None)
-                    if content_delta:
-                        content_parts.append(content_delta)
-                        on_text_delta(content_delta)
                     for name, parts in reasoning_parts.items():
                         value = getattr(delta, name, None)
                         if value:
                             parts.append(value)
+                    if on_reasoning_delta is not None:
+                        # Providers sometimes expose aliases for the same
+                        # reasoning stream. Match reply normalization by
+                        # forwarding only the first populated field.
+                        for name in reasoning_parts:
+                            value = getattr(delta, name, None)
+                            if value:
+                                on_reasoning_delta(value)
+                                break
+                    # When a provider places its last reasoning fragment and
+                    # first visible text in one chunk, preserve the semantic
+                    # reasoning-before-narration order at the callback seam.
+                    content_delta = getattr(delta, "content", None)
+                    if content_delta:
+                        content_parts.append(content_delta)
+                        on_text_delta(content_delta)
                     for tool_call_delta in getattr(delta, "tool_calls", None) or []:
                         self._accumulate_tool_call_delta(tool_call_parts, tool_call_delta)
                         self._notify_tool_preparing(

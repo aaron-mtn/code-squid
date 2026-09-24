@@ -28,6 +28,7 @@ DEFAULT_API_KEY = "lm-studio"
 DEFAULT_MODEL_NAME = "qwen3.5-9b"
 DEFAULT_PROVIDER = "lm_studio"
 DEFAULT_DEBUG = False
+DEFAULT_SHOW_REASONING = False
 DEFAULT_TEMPERATURE = None
 DEFAULT_REASONING_MODE = None
 DEFAULT_REASONING_TOKEN_BUDGET = None
@@ -75,6 +76,7 @@ class ModelSettings:
 @dataclass(frozen=True)
 class DisplaySettings:
     debug: bool = DEFAULT_DEBUG
+    show_reasoning: bool = DEFAULT_SHOW_REASONING
 
 
 @dataclass(frozen=True)
@@ -616,6 +618,15 @@ def load_settings(repo_root: Path) -> Settings:
     reasoning_token_budget = _reasoning_token_budget(model_settings, settings_path)
     ollama_request_timeout = _ollama_request_timeout(model_settings, settings_path)
     debug = display_settings.get("debug", DEFAULT_DEBUG)
+    show_reasoning = display_settings.get(
+        "show_reasoning",
+        DEFAULT_SHOW_REASONING,
+    )
+    if not isinstance(show_reasoning, bool):
+        raise ValueError(
+            f"Invalid settings JSON in {settings_path}: "
+            "display.show_reasoning must be a boolean"
+        )
     approval_mode = _approval_mode(runtime_settings, settings_path)
     max_tool_steps = _max_tool_steps(runtime_settings, settings_path)
     stream_assistant_text = _stream_assistant_text(runtime_settings, settings_path)
@@ -641,7 +652,10 @@ def load_settings(repo_root: Path) -> Settings:
             reasoning_token_budget=reasoning_token_budget,
             ollama_request_timeout=ollama_request_timeout,
         ),
-        display=DisplaySettings(debug=bool(debug)),
+        display=DisplaySettings(
+            debug=bool(debug),
+            show_reasoning=show_reasoning,
+        ),
         runtime=RuntimeSettings(
             approval_mode=approval_mode,
             max_tool_steps=max_tool_steps,
@@ -664,6 +678,21 @@ def write_approval_mode(repo_root: Path, approval_mode: str) -> None:
     runtime_settings = _section(raw_settings, "runtime", settings_path)
     runtime_settings["approval_mode"] = approval_mode
     raw_settings["runtime"] = runtime_settings
+
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(settings_path, raw_settings)
+
+
+def write_show_reasoning(repo_root: Path, show_reasoning: bool) -> None:
+    """Persist the reasoning presentation preference without changing the model."""
+
+    if not isinstance(show_reasoning, bool):
+        raise ValueError("show_reasoning must be a boolean")
+
+    settings_path, raw_settings = _read_application_settings(repo_root)
+    display_settings = _section(raw_settings, "display", settings_path)
+    display_settings["show_reasoning"] = show_reasoning
+    raw_settings["display"] = display_settings
 
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_json(settings_path, raw_settings)

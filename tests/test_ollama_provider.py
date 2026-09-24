@@ -216,6 +216,30 @@ def test_stream_trace_reports_native_raw_thinking_and_summary() -> None:
     assert events[-1]["total_raw_chunk_count"] == 2
 
 
+def test_native_stream_forwards_normalized_reasoning_deltas() -> None:
+    provider = StreamingOllamaProvider(
+        [
+            {"message": {"thinking": "first "}},
+            {
+                "message": {"thinking": "second"},
+                "done": True,
+                "done_reason": "stop",
+            },
+        ]
+    )
+    reasoning_deltas = []
+
+    provider.stream_chat(
+        model="test-model",
+        messages=[],
+        tools=[],
+        on_text_delta=lambda _delta: None,
+        on_reasoning_delta=reasoning_deltas.append,
+    )
+
+    assert reasoning_deltas == ["first ", "second"]
+
+
 def test_assistant_tool_call_arguments_are_converted_to_dict() -> None:
     converted = convert_messages(
         [

@@ -60,10 +60,12 @@ class StreamingProvider(FakeProvider):
         self,
         response: FakeResponse,
         deltas: list[str],
+        reasoning_deltas: list[str] | None = None,
         tool_preparing_events: list[dict] | None = None,
     ) -> None:
         super().__init__(response)
         self.deltas = deltas
+        self.reasoning_deltas = reasoning_deltas or []
         self.tool_preparing_events = tool_preparing_events or []
 
     def supports_streaming(self) -> bool:
@@ -75,6 +77,7 @@ class StreamingProvider(FakeProvider):
         messages: list[dict],
         tools: list[dict],
         on_text_delta,
+        on_reasoning_delta=None,
         on_tool_preparing=None,
         should_cancel=None,
     ) -> FakeResponse:
@@ -85,6 +88,9 @@ class StreamingProvider(FakeProvider):
                 "tools": tools,
             }
         )
+        if on_reasoning_delta is not None:
+            for delta in self.reasoning_deltas:
+                on_reasoning_delta(delta)
         for delta in self.deltas:
             if should_cancel is not None and should_cancel():
                 from squid_core.providers.base import StreamCancelled
@@ -381,6 +387,7 @@ def test_malformed_tool_arguments_preserve_raw_reply_and_available_metadata() ->
     assert reply["format_error"].startswith("Tool arguments were not valid JSON:")
     assert reply["recoverable_tool_name"] == "local_tool"
     assert reply["recoverable_raw_arguments"] == '{"path":'
+    assert reply["reasoning"] == "provider-exposed reasoning"
     assert reply["raw_reply"] == {
         "provider": "test-provider",
         "model": "test-model",
@@ -417,6 +424,20 @@ def test_raw_reply_does_not_invent_unavailable_reasoning_or_metadata() -> None:
     assert "finish_reason" not in reply["raw_reply"]
     assert "response_id" not in reply["raw_reply"]
     assert "usage" not in reply["raw_reply"]
+    assert "reasoning" not in reply
+
+
+def test_ordinary_reply_normalizes_provider_reasoning_content() -> None:
+    message = FakeMessage(content="done", tool_calls=[])
+    message.reasoning_content = "provider reasoning"
+    provider = FakeProvider(FakeResponse(message))
+
+    reply = ModelAdapter(provider=provider, model_name="test-model").respond(
+        messages=[],
+        tool_definitions=[],
+    )
+
+    assert reply["reasoning"] == "provider reasoning"
 
 
 def test_assistant_tool_calls_metadata_is_preserved_on_normalized_message() -> None:
@@ -798,6 +819,28 @@ def test_respond_streaming_emits_deltas_and_returns_normalized_reply() -> None:
     assert reply["message"]["content"] == "hello world"
     assert reply["actions"] == []
     assert observed == [provider.requests[0]]
+
+
+def test_respond_streaming_forwards_reasoning_deltas_when_provider_supports_them() -> None:
+    message = FakeMessage(content="done", tool_calls=[])
+    message.reasoning_content = "first second"
+    provider = StreamingProvider(
+        FakeResponse(message),
+        deltas=["done"],
+        reasoning_deltas=["first ", "second"],
+    )
+    adapter = ModelAdapter(provider=provider, model_name="test-model")
+    reasoning_deltas = []
+
+    reply = adapter.respond_streaming(
+        messages=[],
+        tool_definitions=[],
+        on_text_delta=lambda _delta: None,
+        on_reasoning_delta=reasoning_deltas.append,
+    )
+
+    assert reasoning_deltas == ["first ", "second"]
+    assert reply["reasoning"] == "first second"
 
 
 def test_respond_streaming_forwards_tool_preparing_callback() -> None:

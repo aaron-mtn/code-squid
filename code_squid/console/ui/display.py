@@ -30,6 +30,7 @@ from code_squid.console.ui.formatting import (
     BOLD_STYLE,
     DIM_STYLE,
     FINAL_SUMMARY_INDENT,
+    ITALIC_STYLE,
     DEFAULT_MOD_ACCENT_HEX,
     RESET_STYLE,
     RUN_PANEL_CONTENT_WIDTH,
@@ -111,6 +112,7 @@ class TerminalDisplay:
     def __init__(
         self,
         debug: bool = False,
+        show_reasoning: bool = False,
         show_transcript: bool = False,
         startup_info: StartupInfo | None = None,
         _spinner: TerminalSpinner | None = None,
@@ -119,6 +121,7 @@ class TerminalDisplay:
         _narration_output: Output | None = None,
     ) -> None:
         self.debug = debug
+        self.show_reasoning = show_reasoning
         self.show_transcript = show_transcript
         self.startup_info = startup_info
         self.header = _header if _header is not None else BinaryRainHeader()
@@ -148,8 +151,17 @@ class TerminalDisplay:
             enabled=not debug,
             output=_narration_output,
         )
+        self._streaming_reasoning = StreamingNarration(
+            self._reasoning_panel_lines,
+            stream=_output_stream,
+            enabled=not debug,
+            output=_narration_output,
+        )
+        self._streamed_reasoning_text = ""
+        self._streamed_reasoning_was_visible = False
 
     def start(self) -> None:
+        self._discard_streaming_reasoning()
         self._streaming_narration.discard()
         self._stop_spinner()
         self.start_session_scene()
@@ -157,6 +169,7 @@ class TerminalDisplay:
         self._needs_detail_blank_after_assistant = False
 
     def run_started(self) -> None:
+        self._discard_streaming_reasoning()
         self._streaming_narration.discard()
         self.retire_session_scene()
         self._stop_spinner()
@@ -206,7 +219,67 @@ class TerminalDisplay:
         self._needs_leading_blank = False
         self._needs_detail_blank_after_assistant = True
 
+    def reasoning_message(self, content: str) -> None:
+        """Render provider-exposed reasoning when the display preference allows it."""
+
+        if (
+            not self.show_reasoning
+            or not isinstance(content, str)
+            or not content.strip()
+        ):
+            return
+
+        content = content.strip()
+        if self._streamed_reasoning_text:
+            # Provider transports assemble the completed reasoning from these
+            # same deltas. Settle an active panel, or leave its retained frame
+            # alone after narration has already begun.
+            if self._streaming_reasoning.active:
+                if self._commit_streamed_reasoning(content):
+                    return
+            elif self._streamed_reasoning_was_visible:
+                return
+
+        self._stop_spinner()
+        self._finish_startup_before_output()
+        self._print_leading_blank_if_needed()
+        if self._needs_detail_blank_after_assistant:
+            print()
+            self._needs_detail_blank_after_assistant = False
+        self._print_rendered_lines(self._reasoning_panel_lines(content))
+        self._has_run_output = True
+        print()
+
+    def _reasoning_panel_lines(
+        self,
+        content: str,
+        viewport_width: int = RUN_PANEL_WIDTH,
+    ) -> list[str]:
+        """Build a dim narration-shaped panel for exposed model reasoning."""
+
+        panel_width = max(min(RUN_PANEL_WIDTH, viewport_width), 9)
+        content_width = min(
+            PANEL_CONTENT_WIDTH,
+            panel_width - 2 - len(PANEL_LEFT_PADDING) - 1,
+        )
+        body_lines = [
+            formatting.ANSI_ESCAPE_PATTERN.sub("", line)
+            for line in render_markdown_lines(content, width=content_width)
+        ]
+        lines = [styled_text("Reasoning:", DIM_STYLE), ""]
+        lines.extend(
+            styled_text(line, DIM_STYLE, ITALIC_STYLE) if line else line
+            for line in body_lines
+        )
+        return self._render_panel_lines(
+            lines,
+            panel_width=panel_width,
+            content_width=content_width,
+            content_style=DIM_STYLE,
+        )
+
     def final_message(self, content: str) -> None:
+        self._settle_streaming_reasoning()
         self._streaming_narration.discard()
         self._stop_spinner()
         # Written paths arrive in loop_finished, so retain the report briefly to
@@ -309,6 +382,7 @@ class TerminalDisplay:
 
     def reply_rejected(self, reason: str) -> None:
         self._finish_startup_before_output()
+        self._discard_streaming_reasoning()
         self._streaming_narration.discard()
         self._stop_spinner()
         self._print_visible_line(
@@ -335,6 +409,7 @@ class TerminalDisplay:
 
     def interrupted(self) -> None:
         self._finish_startup_before_output()
+        self._discard_streaming_reasoning()
         self._streaming_narration.discard()
         self._stop_spinner()
         self._interrupted = True
@@ -342,6 +417,7 @@ class TerminalDisplay:
 
     def model_request_failed(self, log_path: Path) -> None:
         self._finish_startup_before_output()
+        self._discard_streaming_reasoning()
         self._streaming_narration.discard()
         self._stop_spinner()
         # Provider details belong in the saved log; normal CLI output stays stable.
@@ -360,6 +436,7 @@ class TerminalDisplay:
     ) -> None:
         """Render one unrecoverable run failure without exposing a traceback."""
         self._finish_startup_before_output()
+        self._discard_streaming_reasoning()
         self._streaming_narration.discard()
         self._stop_spinner()
         self._print_leading_blank_if_needed()
@@ -383,6 +460,7 @@ class TerminalDisplay:
 
     def loop_finished(self, session, run_result=None) -> None:
         self._finish_startup_before_output()
+        self._discard_streaming_reasoning()
         self._streaming_narration.discard()
         self._stop_spinner()
         if self._needs_leading_blank:
@@ -443,12 +521,24 @@ class TerminalDisplay:
             self._stop_spinner()
             return
         if event_type == "assistant_message_started":
+            self._discard_streaming_reasoning()
             self._streaming_narration.begin()
+            return
+        if event_type == "assistant_reasoning_delta":
+            delta = event.get("delta", "")
+            if not self.show_reasoning or not isinstance(delta, str) or not delta:
+                return
+            if not self._streaming_reasoning.active:
+                self._prepare_assistant_narration()
+                self._streaming_reasoning.begin()
+            self._streamed_reasoning_text += delta
+            self._streaming_reasoning.append(delta)
             return
         if event_type == "assistant_delta":
             delta = event.get("delta", "")
             if not isinstance(delta, str) or not delta:
                 return
+            self._settle_streaming_reasoning()
             if (
                 not self._streaming_narration.visible
                 and self._streaming_narration.can_render
@@ -457,6 +547,7 @@ class TerminalDisplay:
             self._streaming_narration.append(delta)
             return
         if event_type == "tool_preparing":
+            self._settle_streaming_reasoning()
             narration_released = False
             if (
                 self._streaming_narration.can_render
@@ -488,9 +579,11 @@ class TerminalDisplay:
             "run_failed",
             "run_finished",
         }:
+            self._discard_streaming_reasoning()
             self._stop_spinner()
             return
         if event_type in {"reply_rejected", "final_message"}:
+            self._discard_streaming_reasoning()
             self._streaming_narration.discard()
             self._stop_spinner()
 
@@ -680,6 +773,27 @@ class TerminalDisplay:
             print()
             self._needs_detail_blank_after_assistant = False
 
+    def _settle_streaming_reasoning(self) -> bool:
+        """Retain the live reasoning panel before later reply output."""
+        if not self._streaming_reasoning.active:
+            return False
+        return self._commit_streamed_reasoning(self._streamed_reasoning_text)
+
+    def _commit_streamed_reasoning(self, content: str) -> bool:
+        settled = self._streaming_reasoning.commit(content)
+        if settled:
+            self._streamed_reasoning_was_visible = True
+            self._has_run_output = True
+            self._needs_leading_blank = False
+            self._needs_detail_blank_after_assistant = True
+        return settled
+
+    def _discard_streaming_reasoning(self) -> None:
+        """Release transient reasoning state at request and run boundaries."""
+        self._streaming_reasoning.discard()
+        self._streamed_reasoning_text = ""
+        self._streamed_reasoning_was_visible = False
+
     def _commit_streamed_narration(self, content: str) -> bool:
         settled = self._streaming_narration.commit(content)
         if not settled:
@@ -785,6 +899,7 @@ class TerminalDisplay:
         *,
         panel_width: int = RUN_PANEL_WIDTH,
         content_width: int = PANEL_CONTENT_WIDTH,
+        content_style: str = "",
     ) -> list[str]:
         """Build fixed-width physical rows without taking terminal ownership."""
         available_width = panel_width - 2 - len(PANEL_LEFT_PADDING) - 1
@@ -805,7 +920,8 @@ class TerminalDisplay:
             )
             left = styled_text("│", DIM_STYLE)
             right = styled_text("│", DIM_STYLE)
-            rendered.append(f"{left}{PANEL_LEFT_PADDING}{line}{padding}{right}")
+            interior = f"{PANEL_LEFT_PADDING}{line}{padding}"
+            rendered.append(f"{left}{styled_text(interior, content_style)}{right}")
         rendered.append(styled_text(f"╰{horizontal}╯", DIM_STYLE))
         return rendered
 

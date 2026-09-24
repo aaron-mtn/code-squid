@@ -23,6 +23,7 @@ from code_squid.settings import (
     write_approval_mode,
     write_compaction_trigger_input_tokens,
     write_provider,
+    write_show_reasoning,
 )
 from squid_core.compaction.compaction_status import format_token_count
 
@@ -64,6 +65,7 @@ def handle_runtime_command(
         "/model",
         "/safety",
         "/compact-at",
+        "/reasoning",
     }:
         return False, settings
 
@@ -74,8 +76,10 @@ def handle_runtime_command(
             _handle_model(repo_root, parts[1:])
         elif parts[0] == "/safety":
             _handle_safety(repo_root, parts[1:])
-        else:
+        elif parts[0] == "/compact-at":
             _handle_compact_at(repo_root, parts[1:])
+        else:
+            _handle_reasoning(repo_root, parts[1:])
 
         # Reloading keeps later runs current without adding mutable settings
         # state or a settings-manager lifecycle to this deliberately small CLI.
@@ -86,6 +90,25 @@ def handle_runtime_command(
         # feedback while retaining the last known-good in-memory settings.
         print(f"Settings change failed: {error}")
         return True, settings
+
+
+def _handle_reasoning(repo_root: Path, args: list[str]) -> None:
+    """Report or persist only whether exposed reasoning is presented."""
+
+    if not args:
+        state = (
+            "shown" if load_settings(repo_root).display.show_reasoning else "hidden"
+        )
+        print(f"Reasoning display: {state}")
+        return
+
+    if len(args) != 1 or args[0] not in {"show", "hide"}:
+        print("Usage: /reasoning [show|hide]")
+        return
+
+    shown = args[0] == "show"
+    write_show_reasoning(repo_root, shown)
+    print(f"Reasoning display: {'shown' if shown else 'hidden'}")
 
 
 def _handle_compact_at(repo_root: Path, args: list[str]) -> None:

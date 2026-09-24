@@ -67,6 +67,7 @@ class FakeModelAdapter:
         events: list[str] | None = None,
         streaming: bool = False,
         deltas: list[str] | None = None,
+        reasoning_deltas: list[str] | None = None,
         tool_preparing_events: list[dict] | None = None,
     ) -> None:
         self.replies = replies
@@ -74,6 +75,7 @@ class FakeModelAdapter:
         self.events = events
         self.streaming = streaming
         self.deltas = deltas or []
+        self.reasoning_deltas = reasoning_deltas or []
         self.tool_preparing_events = tool_preparing_events or []
         self.message_requests = []
         self.provider_name = "fake-provider"
@@ -95,12 +97,17 @@ class FakeModelAdapter:
         messages: list[dict],
         tool_definitions: list[dict],
         on_text_delta,
+        on_reasoning_delta=None,
         on_tool_preparing=None,
         should_cancel=None,
     ) -> dict:
         self.message_requests.append([dict(message) for message in messages])
         if self.events is not None:
             self.events.append("respond_streaming:start")
+        if on_reasoning_delta is not None:
+            for delta in self.reasoning_deltas:
+                on_reasoning_delta(delta)
+        self.reasoning_deltas = []
         for delta in self.deltas:
             if should_cancel is not None and should_cancel():
                 from squid_core.providers.base import StreamCancelled
@@ -227,6 +234,7 @@ class NullDisplay:
     def __init__(self, events: list[str] | None = None) -> None:
         self.step_limits_reached = []
         self.assistant_messages = []
+        self.reasoning_messages = []
         self.final_messages = []
         self.debug_replies = []
         self.rejected_replies = []
@@ -239,6 +247,9 @@ class NullDisplay:
 
     def assistant_message(self, content: str) -> None:
         self.assistant_messages.append(content)
+
+    def reasoning_message(self, content: str) -> None:
+        self.reasoning_messages.append(content)
 
     def final_message(self, content: str) -> None:
         self.final_messages.append(content)
@@ -1648,6 +1659,41 @@ def test_one_tool_reply_uses_normal_assistant_display_path() -> None:
     assert display.final_messages == ["TASK COMPLETE"]
 
 
+def test_reasoning_is_presented_and_emitted_before_matching_narration() -> None:
+    events = []
+    first_reply = reply(
+        "Using read_file.",
+        actions=[{"tool": "read_file"}],
+    )
+    first_reply["reasoning"] = "The relevant code is probably in README.md."
+
+    _, _, _, display = run_loop(
+        [first_reply, reply("TASK COMPLETE")],
+        on_event=events.append,
+    )
+
+    assert display.reasoning_messages == [
+        "The relevant code is probably in README.md."
+    ]
+    event_types = [event["type"] for event in events]
+    assert event_types.index("assistant_reasoning") < event_types.index(
+        "assistant_message"
+    )
+    assert event_types.index("assistant_reasoning") < event_types.index("tool_started")
+
+
+def test_reply_without_reasoning_keeps_existing_display_and_events() -> None:
+    events = []
+
+    _, _, _, display = run_loop(
+        [reply("TASK COMPLETE")],
+        on_event=events.append,
+    )
+
+    assert display.reasoning_messages == []
+    assert "assistant_reasoning" not in [event["type"] for event in events]
+
+
 def test_loop_emits_basic_run_events(tmp_path) -> None:
     events = []
     target = tmp_path / "README.md"
@@ -1780,6 +1826,55 @@ def test_streaming_enabled_emits_started_deltas_and_full_assistant_message() -> 
             "delta": "file.",
         },
     ]
+
+
+def test_streaming_reasoning_precedes_narration_and_tool_execution() -> None:
+    events = []
+    callback_events = []
+
+    def on_event(event: dict) -> None:
+        events.append(event)
+        callback_events.append(event["type"])
+
+    first_reply = reply("Using read_file.", actions=[{"tool": "read_file"}])
+    first_reply["reasoning"] = "Inspect the repository first."
+    model_adapter = FakeModelAdapter(
+        [first_reply, reply("TASK COMPLETE")],
+        events=callback_events,
+        streaming=True,
+        reasoning_deltas=["Inspect the ", "repository first."],
+        deltas=["Using ", "read_file."],
+    )
+    tool_executor = FakeToolExecutor(events=callback_events)
+    loop = AgentLoop(
+        session=Session(repo_root=None),
+        model_adapter=model_adapter,
+        tool_executor=tool_executor,
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        stream_assistant_text=True,
+        on_event=on_event,
+    )
+
+    loop.run()
+
+    reasoning_deltas = [
+        event for event in events if event["type"] == "assistant_reasoning_delta"
+    ]
+    assert [event["delta"] for event in reasoning_deltas] == [
+        "Inspect the ",
+        "repository first.",
+    ]
+    assert all(event["phase"] == "reasoning" for event in reasoning_deltas)
+    first_reasoning = callback_events.index("assistant_reasoning_delta")
+    first_narration = callback_events.index("assistant_delta")
+    completed_reasoning = callback_events.index("assistant_reasoning")
+    narration = callback_events.index("assistant_message")
+    tool_started = callback_events.index("tool_started")
+    assert first_reasoning < first_narration
+    assert completed_reasoning < narration
+    assert narration < tool_started < callback_events.index("execute:read_file")
 
 
 def test_streaming_enabled_emits_tool_preparing_before_message_and_tool_started() -> None:

@@ -39,7 +39,7 @@ def _run_display(
 ) -> TerminalDisplay:
     trace = os.getenv("CODE_SQUID_TRACE") == "1"
     debug = settings.display.debug or trace
-    return TerminalDisplay(
+    display = TerminalDisplay(
         debug=debug,
         show_transcript=trace,
         startup_info=StartupInfo(
@@ -50,6 +50,10 @@ def _run_display(
             skill_name=skill_name,
         ),
     )
+    # Keep the display-construction seam stable for embedders and tests while
+    # applying the application-owned presentation preference before any run.
+    display.show_reasoning = settings.display.show_reasoning
+    return display
 
 
 def _run_loop(

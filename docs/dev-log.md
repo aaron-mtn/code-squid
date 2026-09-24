@@ -1,3 +1,43 @@
+- 2026-09-24: Completed live provider-reasoning presentation. The built-in
+  OpenAI-compatible and Ollama streaming transports now forward the first
+  populated `reasoning`, `reasoning_content`, or `thinking` chunk through an
+  optional `ModelAdapter` callback; older custom provider transports remain
+  compatible when they do not accept that callback. `AgentLoop` emits
+  `assistant_reasoning_delta` events, and `TerminalDisplay` uses a second,
+  sequential instance of the existing prompt-toolkit provisional-panel
+  lifecycle so one dim italic `Reasoning:` panel grows live, settles before
+  narration, and is not duplicated by the completed normalized reply. Hidden
+  reasoning and providers without deltas retain immediate narration streaming;
+  completed-only reasoning retains the existing static fallback. Cancellation
+  and run boundaries clear both provisional regions. Verification: 654 focused
+  provider, adapter, Agent-loop, streaming/display, settings, slash-command,
+  construction, and generation tests passed. The full suite completed with
+  1,463 passing and the same 54 unrelated existing prompt/Hook-default/
+  Hook-guidance expectation failures recorded by the preceding reasoning-panel
+  patch. Production packages compiled successfully, and `git diff --check`
+  passed. No live model inference was run.
+
+- 2026-09-24: Added an optional provider-reasoning panel to the Code Squid run
+  UI. `ModelAdapter` now normalizes provider `reasoning`, `reasoning_content`,
+  or `thinking` on ordinary replies; the Agent loop presents and emits a
+  non-empty reasoning block before its matching narration/final event and Tool
+  action. The display reuses the existing fixed-width narration panel geometry
+  with a dim interior/text treatment, italic body, and `Reasoning:` label.
+  Added the application-owned boolean `display.show_reasoning`, defaulting to
+  false, plus `/reasoning`, `/reasoning show`, and `/reasoning hide`; the
+  persistent prompt updates the same display setting immediately. Model
+  reasoning mode, effort, budget, provider configuration, prompts, transcript
+  semantics, and content persistence remain unchanged. Because the current
+  streaming callback exposes narration but not reasoning deltas, enabled
+  reasoning display delays narration until the completed reply rather than
+  changing Core's streaming protocol. Verification: 596 focused UI,
+  streaming, settings, slash-command, adapter, Agent-loop, and CLI lifecycle
+  tests passed. Production and test packages compiled successfully, and
+  `git diff --check` passed. The full suite completed with 1,453 passing and 54
+  unrelated existing prompt/Hook-default/Hook-guidance expectation failures;
+  those out-of-scope failures were not modified. No live model inference was
+  run.
+
 - 2026-09-24: Made successful transcript compaction durable across follow-ups,
   CLI resume, and process restart without rewriting canonical history.
   `compaction_applied` now carries a versioned replay transform containing the

@@ -108,6 +108,7 @@ class OllamaProvider(BaseProvider):
         trace_callback=None,
         please_stop_contemplating_the_void: bool = False,
         should_cancel=None,
+        on_reasoning_delta=None,
     ) -> object:
         payload = {
             "model": model,
@@ -193,6 +194,7 @@ class OllamaProvider(BaseProvider):
                     assembled,
                     chunk,
                     on_text_delta=on_text_delta,
+                    on_reasoning_delta=on_reasoning_delta,
                     on_tool_preparing=on_tool_preparing,
                     prepared_tool_call_indexes=prepared_tool_call_indexes,
                 )
@@ -426,21 +428,28 @@ def _accumulate_stream_chunk(
     assembled: dict,
     chunk: dict,
     on_text_delta,
+    on_reasoning_delta,
     on_tool_preparing,
     prepared_tool_call_indexes: set,
 ) -> None:
     message = chunk.get("message") or {}
     assembled_message = assembled["message"]
 
-    content_delta = message.get("content")
-    if content_delta:
-        assembled_message["content"] += content_delta
-        on_text_delta(content_delta)
-
     for name in ("reasoning", "reasoning_content", "thinking"):
         value = message.get(name)
         if value:
             assembled_message[name] = f"{assembled_message.get(name, '')}{value}"
+    if on_reasoning_delta is not None:
+        for name in ("reasoning", "reasoning_content", "thinking"):
+            value = message.get(name)
+            if value:
+                on_reasoning_delta(value)
+                break
+
+    content_delta = message.get("content")
+    if content_delta:
+        assembled_message["content"] += content_delta
+        on_text_delta(content_delta)
 
     for index, tool_call in enumerate(message.get("tool_calls") or []):
         _accumulate_tool_call(assembled_message["tool_calls"], index, tool_call)

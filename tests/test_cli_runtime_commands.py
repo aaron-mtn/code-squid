@@ -22,6 +22,7 @@ from code_squid.console.cli.prompt_loop import (
     _run_interactive,
 )
 from code_squid.console.cli.runtime_commands import handle_runtime_command
+from code_squid.console.cli.session_runner import _run_display
 from code_squid.console.startup_menu import MAIN_ROWS, StartupMenu
 from code_squid.console.ui.startup_application import (
     STARTUP_SESSION_SELECTED,
@@ -294,6 +295,7 @@ def test_runtime_commands_write_only_application_settings(tmp_path, monkeypatch)
         "/provider key app-secret",
         "/model app-model",
         "/safety balanced",
+        "/reasoning show",
     )
     current = load_settings(tmp_path)
     for command in commands:
@@ -306,7 +308,45 @@ def test_runtime_commands_write_only_application_settings(tmp_path, monkeypatch)
     assert persisted["providers"]["lm_studio"]["api_key"] == "app-secret"
     assert persisted["model"]["name"] == "app-model"
     assert persisted["runtime"]["approval_mode"] == "guarded"
+    assert persisted["display"]["show_reasoning"] is True
     assert not (tmp_path / ".code-squid" / "settings.json").exists()
+
+
+def test_reasoning_command_reports_changes_and_persists_shared_setting(
+    tmp_path,
+    capsys,
+) -> None:
+    current = load_settings(tmp_path)
+    original_mode = current.model.reasoning_mode
+    original_budget = current.model.reasoning_token_budget
+
+    handled, current = handle_runtime_command(tmp_path, "/reasoning", current)
+    assert handled is True
+    assert capsys.readouterr().out == "Reasoning display: hidden\n"
+
+    _, current = handle_runtime_command(tmp_path, "/reasoning show", current)
+    assert capsys.readouterr().out == "Reasoning display: shown\n"
+    assert current.display.show_reasoning is True
+    assert load_settings(tmp_path).display.show_reasoning is True
+
+    _, current = handle_runtime_command(tmp_path, "/reasoning hide", current)
+    assert capsys.readouterr().out == "Reasoning display: hidden\n"
+    assert current.display.show_reasoning is False
+    assert current.model.reasoning_mode == original_mode
+    assert current.model.reasoning_token_budget == original_budget
+
+
+def test_reasoning_command_setting_is_used_by_run_display(tmp_path, capsys) -> None:
+    _, settings = handle_runtime_command(
+        tmp_path,
+        "/reasoning show",
+        load_settings(tmp_path),
+    )
+    capsys.readouterr()
+
+    display = _run_display(tmp_path, settings)
+
+    assert display.show_reasoning is True
 
 
 @pytest.mark.parametrize(

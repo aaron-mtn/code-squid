@@ -1,5 +1,6 @@
 """Normalize model-provider requests, responses, and safe failure details."""
 
+import inspect
 import json
 import re
 from collections.abc import Callable
@@ -343,10 +344,12 @@ class ModelAdapter:
         on_text_delta,
         on_tool_preparing=None,
         should_cancel=None,
+        on_reasoning_delta=None,
     ) -> dict:
         return self.respond_streaming_prepared(
             self.prepare_request(messages, tool_definitions),
             on_text_delta=on_text_delta,
+            on_reasoning_delta=on_reasoning_delta,
             on_tool_preparing=on_tool_preparing,
             should_cancel=should_cancel,
         )
@@ -357,15 +360,32 @@ class ModelAdapter:
         on_text_delta,
         on_tool_preparing=None,
         should_cancel=None,
+        on_reasoning_delta=None,
     ) -> dict:
         """Stream one already-finalized provider request."""
         tool_metadata = self._tool_metadata_from_definitions(request["tools"])
+        transport_options = {
+            "on_text_delta": on_text_delta,
+            "on_tool_preparing": on_tool_preparing,
+            "should_cancel": should_cancel,
+        }
+        if on_reasoning_delta is not None:
+            try:
+                parameters = inspect.signature(self.provider.stream_chat).parameters
+            except (TypeError, ValueError):
+                parameters = {}
+            accepts_keywords = any(
+                parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters.values()
+            )
+            if "on_reasoning_delta" in parameters or accepts_keywords:
+                # Keep older custom streaming providers working while built-in
+                # transports adopt the optional reasoning-delta seam.
+                transport_options["on_reasoning_delta"] = on_reasoning_delta
         raw_response = self._send_prepared_request(
             request,
             streaming=True,
-            on_text_delta=on_text_delta,
-            on_tool_preparing=on_tool_preparing,
-            should_cancel=should_cancel,
+            **transport_options,
         )
 
         return self._reply_from_response_or_error(raw_response, tool_metadata)
@@ -631,6 +651,14 @@ class ModelAdapter:
                 **self._recoverable_tool_fields(error),
             }
 
+        # Normalize the first provider-exposed reasoning field once, alongside
+        # content and actions, so presentation never needs provider-specific keys.
+        assistant = raw_reply["assistant"]
+        for name in ("reasoning", "reasoning_content", "thinking"):
+            reasoning = assistant.get(name)
+            if reasoning:
+                reply["reasoning"] = reasoning
+                break
         reply["raw_reply"] = raw_reply
         return reply
 

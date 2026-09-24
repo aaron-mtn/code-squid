@@ -76,7 +76,7 @@ and application layer; `squid_core/` is the reusable agent runtime.
     CLI options and workspace resolution; `cli_commands.py` handles launch-time
     dispatch; `prompt_loop.py` owns the one persistent interpreter used by
     fresh and resumed sessions; `runtime_commands.py` owns interactive
-    provider, model, and safety changes; `control_commands.py` owns interactive
+    provider, model, safety, and reasoning-display changes; `control_commands.py` owns interactive
     session, undo, and workspace commands; `session_runner.py`
     constructs the terminal display, including startup information and
     trace/debug settings, and handles new/resumed session-backed runs; and
@@ -235,9 +235,10 @@ and application layer; `squid_core/` is the reusable agent runtime.
     heads are staggered through the full rain height so the first frame is
     populated above, beside, and below the panel; later resets continue to
     enter naturally from above.
-    `streaming_narration.py` owns only the current provisional assistant panel.
+    `streaming_narration.py` owns the reusable provisional panel lifecycle.
     The CLI passes `TerminalDisplay.handle_event` to Core and translates
-    `assistant_message_started`/`assistant_delta` into that temporary region.
+    narration and reasoning delta events into separate, sequential instances
+    of that temporary region.
     The first visible TTY delta starts one temporary, nonfullscreen
     prompt_toolkit `Application` around a `FormattedTextControl`; subsequent
     deltas update its content and invalidate that renderer. A private pipe
@@ -269,6 +270,23 @@ and application layer; `squid_core/` is the reusable agent runtime.
     static narration cleared its preparation state. Tool-result and existing
     run finalization boundaries stop the active pulse. Code Squid owns no
     raw cursor-up or clear-row repaint geometry for live narration.
+
+    Provider-exposed reasoning uses the same fixed-width panel renderer as
+    narration, with only a dim interior/text treatment, italic body text, and a
+    `Reasoning:` label. `display.show_reasoning` is false by default and is the
+    single persisted preference read by display construction and `/reasoning`.
+    It does not alter Core provider reasoning mode, effort, budget, prompts, or
+    requests. The built-in OpenAI-compatible and Ollama transports normalize
+    the first populated `reasoning`, `reasoning_content`, or `thinking` field
+    in each chunk through an optional reasoning-delta callback. `AgentLoop`
+    publishes those chunks as `assistant_reasoning_delta`; the first non-empty
+    delta opens one live reasoning panel and later deltas update that same
+    prompt_toolkit region. The first narration delta or Tool-preparation
+    boundary settles reasoning before existing narration/tool presentation
+    proceeds. The completed normalized reasoning remains the fallback when a
+    provider exposes only a completed field, and it only settles bookkeeping
+    when a live panel was already shown. Hidden reasoning and providers without
+    reasoning deltas retain the existing live narration path without delay.
 
     `prompt_input.py`, `sessions.py`, and `spinner.py` retain their focused
     input, saved-session, and animation responsibilities. The ordinary task
@@ -422,7 +440,13 @@ and application layer; `squid_core/` is the reusable agent runtime.
   - `events.py` owns observation; `generation.py` owns one-shot generation;
     `model_adapter.py` owns final provider request preparation, generic
     best-effort request observation at the shared transport boundary, and
-    response normalization; `settings.py` owns generic provider/runtime/
+    response normalization. Its ordinary reply shape normalizes the first
+    available `reasoning`, `reasoning_content`, or `thinking` field to
+    `reply["reasoning"]`; its optional streaming callback forwards normalized
+    reasoning deltas from providers that support the seam. The Agent loop
+    publishes `assistant_reasoning_delta` as chunks arrive and a non-empty
+    `assistant_reasoning` event before the matching narration/final event and
+    Tool start. `settings.py` owns generic provider/runtime/
     compaction and tool-result trimming semantics; `tool_result_trimming.py`
     owns the request-only rendering of older built-in Tool payloads and reports
     exact retained source-line ranges when it trims a `read_file` result;
@@ -471,7 +495,9 @@ Current loop-level event types include:
 - `model_request_finished`
 - `model_request_failed`
 - `assistant_message_started`
+- `assistant_reasoning_delta`
 - `assistant_delta`
+- `assistant_reasoning`
 - `assistant_message`
 - `tool_preparing`
 - `tool_started`
@@ -483,9 +509,12 @@ Current loop-level event types include:
 - `run_finished`
 
 Assistant-text events identify their semantic phase without introducing a
-separate model call or event family. `assistant_message_started`,
+separate model call. `assistant_message_started`,
 `assistant_delta`, and `assistant_message` carry `phase: "narration"` for
 user-visible mid-turn text that may be followed by tool activity.
+`assistant_reasoning_delta` carries `phase: "reasoning"` and one normalized
+provider chunk while it arrives. `assistant_reasoning` carries the completed,
+normalized provider-exposed text before its matching narration or final event.
 `final_message` carries `phase: "final"` for the terminal assistant response.
 `tool_preparing` remains the transition from streamed narration into structured
 tool-call preparation and does not carry an assistant-text phase.
@@ -1302,6 +1331,7 @@ Missing settings are allowed. Defaults keep the CLI usable with LM Studio:
 - reasoning mode: `null` (do not override provider/model behavior)
 - reasoning token budget: `null` (use provider/model behavior)
 - display debug: `false`
+- reasoning display: `false`
 - approval mode: `never`
 - max tool steps: unlimited
 - assistant text streaming: disabled
@@ -1320,6 +1350,7 @@ Supported settings sections and fields:
 - `providers.<provider_id>.api_key`
 - `providers.<provider_id>.api_key_env`
 - `display.debug`
+- `display.show_reasoning`
 - `runtime.approval_mode`
 - `runtime.max_tool_steps`
 - `runtime.stream_assistant_text`
@@ -1358,6 +1389,10 @@ provider, the loop emits `assistant_message_started` before generation and
 validated. These events carry the `narration` or `final` phase described in
 Events And External Wrappers. Streamed deltas are UI events only; tool execution
 still waits for the full validated assistant response.
+`display.show_reasoning` is a boolean presentation preference. `/reasoning`
+reports it, while `/reasoning show` and `/reasoning hide` persist it. This field
+is intentionally separate from `model.reasoning_mode` and
+`model.reasoning_token_budget`.
 `runtime.model_request_max_retries` is an integer from 0 through 10 and counts
 retries after the initial request. `runtime.model_request_retry_backoff_ms` is
 an integer from 0 through 10,000. The loop exponentially increases that base
@@ -1544,10 +1579,11 @@ are present. Providers may still return multiple tool calls. Code Squid retains
 those calls as one ordered assistant turn and executes them sequentially through
 the same per-action `ToolExecutor` path used by a one-call turn.
 
-The OpenAI-compatible provider also supports optional assistant text streaming.
-Streaming assembles text and tool-call fragments into the same raw response
-shape used by non-streaming responses before `ModelAdapter` normalizes and
-validates the reply.
+The OpenAI-compatible provider also supports optional assistant text and
+reasoning streaming. Streaming forwards the first populated reasoning alias
+per chunk while assembling text, reasoning, and tool-call fragments into the
+same raw response shape used by non-streaming responses before `ModelAdapter`
+normalizes and validates the reply.
 
 The native Ollama provider exists and is experimental. `squid_core/providers/ollama.py`
 uses Ollama `/api/chat`, converts replayed messages into Ollama's expected

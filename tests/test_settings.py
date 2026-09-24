@@ -50,6 +50,7 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert settings.model.reasoning_token_budget is None
     assert settings.model.ollama_request_timeout is None
     assert settings.display.debug is False
+    assert settings.display.show_reasoning is False
     assert settings.runtime.approval_mode == "never"
     assert settings.runtime.max_tool_steps is None
     assert settings.runtime.stream_assistant_text is False
@@ -75,6 +76,19 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert runtime_settings.read_file.minimum_range_lines == 150
     assert runtime_settings.model_request_max_retries == 2
     assert runtime_settings.model_request_retry_backoff_ms == 250
+
+
+def test_display_reasoning_setting_accepts_only_booleans(tmp_path: Path) -> None:
+    write_settings(tmp_path, {"display": {"show_reasoning": True}})
+
+    assert load_settings(tmp_path).display.show_reasoning is True
+
+    settings_path().write_text(
+        json.dumps({"display": {"show_reasoning": "yes"}}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="display\\.show_reasoning"):
+        load_settings(tmp_path)
 
 
 @pytest.mark.parametrize(

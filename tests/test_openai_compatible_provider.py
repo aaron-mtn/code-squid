@@ -368,6 +368,50 @@ def test_stream_chat_preserves_exposed_reasoning_finish_reason_and_response_id()
     assert not hasattr(response.choices[0].message, "reasoning")
 
 
+def test_stream_chat_forwards_normalized_reasoning_deltas() -> None:
+    provider, client = provider_with_fake_client()
+    client.chat.completions.response = [
+        chunk(reasoning_content="first "),
+        chunk(reasoning_content="second", finish_reason="stop"),
+    ]
+    reasoning_deltas = []
+
+    provider.stream_chat(
+        model="test-model",
+        messages=[],
+        tools=[],
+        on_text_delta=lambda _delta: None,
+        on_reasoning_delta=reasoning_deltas.append,
+    )
+
+    assert reasoning_deltas == ["first ", "second"]
+
+
+def test_stream_chat_emits_reasoning_before_content_from_the_same_chunk() -> None:
+    provider, client = provider_with_fake_client()
+    client.chat.completions.response = [
+        chunk(
+            content="Visible.",
+            reasoning_content="Last thought.",
+            finish_reason="stop",
+        )
+    ]
+    callbacks = []
+
+    provider.stream_chat(
+        model="test-model",
+        messages=[],
+        tools=[],
+        on_text_delta=lambda delta: callbacks.append(("text", delta)),
+        on_reasoning_delta=lambda delta: callbacks.append(("reasoning", delta)),
+    )
+
+    assert callbacks == [
+        ("reasoning", "Last thought."),
+        ("text", "Visible."),
+    ]
+
+
 def test_stream_trace_reports_raw_reasoning_before_visible_content() -> None:
     provider, client = provider_with_fake_client()
     client.chat.completions.response = [

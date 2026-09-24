@@ -50,6 +50,7 @@ def interactive_display(
     *,
     spinner: CountingSpinner | None = None,
     size: list[Size] | None = None,
+    show_reasoning: bool = False,
 ) -> tuple[TerminalDisplay, TtyBuffer]:
     """Build a display around a real prompt_toolkit VT100 Output test seam."""
     stream = TtyBuffer()
@@ -58,6 +59,7 @@ def interactive_display(
     monkeypatch.setattr(sys, "stdout", stream)
     return (
         TerminalDisplay(
+            show_reasoning=show_reasoning,
             _spinner=spinner,
             _output_stream=stream,
             _narration_output=output,
@@ -108,6 +110,99 @@ def test_first_visible_delta_takes_ownership_from_spinner(monkeypatch) -> None:
     assert spinner.starts == 1
     assert spinner.stops == 1
     display.handle_event({"type": "final_message"})
+
+
+def test_reasoning_deltas_grow_one_panel_before_narration(monkeypatch) -> None:
+    display, stream = interactive_display(monkeypatch, show_reasoning=True)
+
+    display.handle_event({"type": "assistant_message_started"})
+    display.handle_event(
+        {"type": "assistant_reasoning_delta", "delta": "Inspecting "}
+    )
+    first_frame = stream.getvalue()
+    assert "Reasoning:" in first_frame
+    assert "Inspecting" in first_frame
+    assert display._streaming_reasoning.visible is True
+
+    display.handle_event(
+        {"type": "assistant_reasoning_delta", "delta": "the parser."}
+    )
+    reasoning_output = stream.getvalue()
+    assert "parser." in reasoning_output
+    assert reasoning_output.count("Reasoning:") == 1
+
+    display.handle_event({"type": "assistant_delta", "delta": "I found it."})
+    output = stream.getvalue()
+    assert display._streaming_reasoning.active is False
+    assert output.index("Inspecting") < output.index("I found it.")
+
+    # The completed normalized field settles bookkeeping only; it must not
+    # print a second copy after the streamed panel is retained.
+    before_completion = stream.getvalue()
+    display.reasoning_message("Inspecting the parser.")
+    assert stream.getvalue() == before_completion
+    display.assistant_message("I found it.")
+    assert display.streaming_narration_active is False
+
+
+def test_hidden_reasoning_delta_does_not_delay_narration(monkeypatch) -> None:
+    display, stream = interactive_display(monkeypatch, show_reasoning=False)
+
+    display.handle_event({"type": "assistant_message_started"})
+    display.handle_event(
+        {"type": "assistant_reasoning_delta", "delta": "not visible"}
+    )
+    display.handle_event({"type": "assistant_delta", "delta": "Visible now."})
+
+    output = stream.getvalue()
+    assert "not visible" not in output
+    assert "Visible now." in output
+    assert display.streaming_narration_active is True
+    display.handle_event({"type": "final_message"})
+
+
+def test_enabled_reasoning_without_deltas_does_not_delay_narration(monkeypatch) -> None:
+    display, stream = interactive_display(monkeypatch, show_reasoning=True)
+
+    display.handle_event({"type": "assistant_message_started"})
+    display.handle_event({"type": "assistant_delta", "delta": "Visible now."})
+
+    assert "Visible now." in stream.getvalue()
+    assert "Reasoning:" not in stream.getvalue()
+    assert display.streaming_narration_active is True
+    display.handle_event({"type": "final_message"})
+
+
+def test_non_tty_reasoning_deltas_use_completed_static_fallback(capsys) -> None:
+    display = TerminalDisplay(show_reasoning=True)
+
+    display.handle_event({"type": "assistant_message_started"})
+    display.handle_event(
+        {"type": "assistant_reasoning_delta", "delta": "streamed thought"}
+    )
+    display.handle_event({"type": "assistant_delta", "delta": "narration"})
+    assert capsys.readouterr().out == ""
+
+    display.reasoning_message("streamed thought")
+    display.assistant_message("narration")
+    output = capsys.readouterr().out
+    assert output.count("streamed thought") == 1
+    assert output.count("narration") == 1
+    assert output.index("streamed thought") < output.index("narration")
+
+
+def test_interruption_clears_live_reasoning_and_narration_state(monkeypatch) -> None:
+    display, stream = interactive_display(monkeypatch, show_reasoning=True)
+
+    display.handle_event({"type": "assistant_message_started"})
+    display.handle_event(
+        {"type": "assistant_reasoning_delta", "delta": "in progress"}
+    )
+    display.interrupted()
+
+    assert display._streaming_reasoning.active is False
+    assert display.streaming_narration_active is False
+    assert "\033[J" in stream.getvalue()
 
 
 def test_validated_message_replaces_and_settles_provisional_text(monkeypatch) -> None:

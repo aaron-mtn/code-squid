@@ -353,6 +353,15 @@ class AgentLoop:
                             }
                         )
 
+                    def on_reasoning_delta(delta: str) -> None:
+                        self._emit_event(
+                            {
+                                "type": "assistant_reasoning_delta",
+                                "phase": "reasoning",
+                                "delta": delta,
+                            }
+                        )
+
                     def on_tool_preparing(tool_call: dict) -> None:
                         self._emit_event(tool_preparing_event(tool_call))
 
@@ -360,6 +369,7 @@ class AgentLoop:
                         messages=messages,
                         tool_definitions=tool_definitions,
                         on_text_delta=on_text_delta,
+                        on_reasoning_delta=on_reasoning_delta,
                         on_tool_preparing=on_tool_preparing,
                         should_cancel=self.should_cancel,
                     )
@@ -433,6 +443,27 @@ class AgentLoop:
                 )
             self._emit_runtime_event(finished_event)
             return reply
+
+    def _present_reasoning(self, reply: dict) -> None:
+        """Publish one normalized, non-empty reasoning block before reply output."""
+
+        reasoning = reply.get("reasoning")
+        if not isinstance(reasoning, str) or not reasoning.strip():
+            return
+
+        # Display is deliberately optional at the reusable Core boundary. The
+        # event remains useful to other observers without imposing UI policy.
+        reasoning_message = getattr(self.display, "reasoning_message", None)
+        if callable(reasoning_message):
+            reasoning_message(reasoning)
+        self._emit_event(
+            {
+                "type": "assistant_reasoning",
+                "phase": "reasoning",
+                "message": reasoning,
+                "text": reasoning,
+            }
+        )
 
     def _handle_trimmed_read_result(self, trimmed: ReadResultTrimmedContext) -> None:
         """Keep reread coverage aligned with the request-visible transcript."""
@@ -770,6 +801,7 @@ class AgentLoop:
                         }
 
                 if reply["actions"]:
+                    self._present_reasoning(reply)
                     self.display.assistant_message(assistant_content)
                     self._check_cancelled()
                     self._emit_event(
@@ -781,6 +813,7 @@ class AgentLoop:
                         }
                     )
                 else:
+                    self._present_reasoning(reply)
                     self.display.final_message(assistant_content)
                     self._check_cancelled()
                     self._emit_event(

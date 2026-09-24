@@ -39,5 +39,6 @@ class BaseProvider:
         trace_callback=None,
         please_stop_contemplating_the_void: bool = False,
         should_cancel=None,
+        on_reasoning_delta=None,
     ) -> object:
         raise NotImplementedError

@@ -19,6 +19,7 @@ from code_squid.console.ui.display import (
     DIM_STYLE,
     DEFAULT_MOD_ACCENT_HEX,
     FINAL_SUMMARY_INDENT,
+    ITALIC_STYLE,
     INPUT_PROMPT_PREFIX,
     INPUT_PROMPT_STYLE,
     RUN_PANEL_WIDTH,
@@ -1703,6 +1704,51 @@ def test_normal_assistant_message_uses_squid_marker(
     output = capsys.readouterr().out
     assert f"│  {SQUID_GLYPH} The directory doesn't exist yet." in output
     assert all(_display_width(line) == RUN_PANEL_WIDTH for line in output.splitlines())
+
+
+def test_reasoning_is_hidden_by_default_and_empty_content_never_draws(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    display = TerminalDisplay()
+
+    display.reasoning_message("Inspect the provider reply.")
+    display.show_reasoning = True
+    display.reasoning_message("   \n")
+
+    assert capsys.readouterr().out == ""
+
+
+def test_reasoning_reuses_panel_geometry_with_dim_italic_text(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    display = TerminalDisplay(show_reasoning=True)
+
+    display.reasoning_message("Inspect the provider reply.")
+
+    output = capsys.readouterr().out
+    assert "Reasoning:" in output
+    assert f"{DIM_STYLE}{ITALIC_STYLE}Inspect the provider reply.{RESET_STYLE}" in output
+    assert DIM_STYLE in output
+    assert all(
+        _display_width(line) == RUN_PANEL_WIDTH
+        for line in output.splitlines()
+        if line
+    )
+
+
+def test_reasoning_panel_precedes_unchanged_narration_panel(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    display = TerminalDisplay(show_reasoning=True)
+
+    display.reasoning_message("Inspect first.")
+    display.assistant_message("Then narrate.")
+
+    output = capsys.readouterr().out
+    assert output.index("Reasoning:") < output.index(f"{SQUID_GLYPH} Then narrate.")
+    assert output.count("╭") == output.count("╰") == 2
 
 
 def test_assistant_message_does_not_hide_fallback_like_narration(

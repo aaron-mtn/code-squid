@@ -80,6 +80,7 @@ Runtime:
   /provider status shows effective setup without exposing secrets.
   /model shows the effective model; /model <name> selects its exact ID.
   /safety shows or changes the safety mode (strict, balanced, yolo).
+  /reasoning [show|hide] reports or changes reasoning display.
   /compact-at <tokens> sets the automatic compaction trigger (for example, 30k).
 
 Sessions and workspace:
@@ -376,6 +377,9 @@ def _run_interactive(
                 _finish_startup_fade(display)
             handled, settings = handle_runtime_command(repo_root, task, settings)
             if handled:
+                # Runtime display preferences take effect in this persistent
+                # prompt without rebuilding the session or model runtime.
+                display.show_reasoning = settings.display.show_reasoning
                 menu.sync(settings, mod_name=mod_name, skill_name=skill_name)
                 continue
             handled, selected_root = handle_workspace_command(repo_root, task)
