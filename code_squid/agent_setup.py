@@ -291,7 +291,7 @@ def build_coding_task_run(
         model_adapter=model_adapter,
         compactor=compactor,
         compaction_context_provider=CodeSquidCompactionContextProvider(
-            session_store.load_messages
+            session_store.load_canonical_messages
         ),
         tool_executor=tool_executor,
         tool_results=tool_results,

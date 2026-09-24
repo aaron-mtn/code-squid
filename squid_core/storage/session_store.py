@@ -260,11 +260,17 @@ class SessionStore:
             {"message": message},
         )
 
-    # Load the effective transcript messages from session.jsonl in order.
-    #
-    # Reconciliation events replace only the active system message; other
-    # non-message events remain outside the provider-style transcript.
     def load_messages(self) -> list[dict]:
+        """Load the effective replay transcript, including applied compactions."""
+        return self._load_messages(replay_compactions=True)
+
+    def load_canonical_messages(self) -> list[dict]:
+        """Load original messages without applying compaction transformations."""
+        return self._load_messages(replay_compactions=False)
+
+    # Reconciliation events replace only the active system message in both
+    # views. Other non-message events remain outside provider-style history.
+    def _load_messages(self, *, replay_compactions: bool) -> list[dict]:
         messages = []
 
         for entry in load_session_jsonl(self.jsonl_path):
@@ -281,6 +287,8 @@ class SessionStore:
                         if message.get("role") != "system"
                     ),
                 ]
+            elif replay_compactions and entry.get("type") == "compaction_applied":
+                messages = _replay_applied_compaction(messages, entry)
 
         trailing = messages[-1] if messages else None
         tool_calls = (
@@ -387,6 +395,53 @@ class SessionStore:
     # Write metadata.json in a stable, readable format.
     def _write_metadata(self, metadata: dict[str, Any]) -> None:
         atomic_write_json(self.metadata_path, metadata)
+
+
+def _replay_applied_compaction(messages: list[dict], entry: dict) -> list[dict]:
+    """Apply one durable effective-transcript boundary, or fail closed.
+
+    Older sessions have no replay payload and retain their historical replay
+    behavior. New payloads are accepted only when their expected message counts
+    match the effective transcript constructed so far; a partial or malformed
+    diagnostic event must never discard canonical history.
+    """
+    replay = entry.get("replay")
+    if not isinstance(replay, dict) or replay.get("version") != 1:
+        return messages
+
+    messages_before = entry.get("messages_before")
+    messages_after = entry.get("messages_after")
+    protected_count = replay.get("protected_message_count")
+    preserved_count = replay.get("preserved_message_count")
+    compacted_message = replay.get("compacted_message")
+    counts = (
+        messages_before,
+        messages_after,
+        protected_count,
+        preserved_count,
+    )
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) for value in counts
+    ):
+        return messages
+    if (
+        messages_before != len(messages)
+        or protected_count < 0
+        or preserved_count < 0
+        or protected_count + preserved_count > len(messages)
+        or messages_after != protected_count + 1 + preserved_count
+        or not isinstance(compacted_message, dict)
+        or compacted_message.get("role") != "assistant"
+        or not isinstance(compacted_message.get("content"), str)
+    ):
+        return messages
+
+    preserved = messages[-preserved_count:] if preserved_count else []
+    return [
+        *messages[:protected_count],
+        compacted_message,
+        *preserved,
+    ]
 
 
 # Build a unique, human-readable session ID.

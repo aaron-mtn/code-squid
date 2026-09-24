@@ -1,3 +1,21 @@
+- 2026-09-24: Made successful transcript compaction durable across follow-ups,
+  CLI resume, and process restart without rewriting canonical history.
+  `compaction_applied` now carries a versioned replay transform containing the
+  exact compacted assistant message and protected/preserved message counts.
+  `SessionStore.load_messages()` applies only count-validated successful
+  transforms in chronological order, so later messages, multiple compactions,
+  system reconciliation, and torn-tail recovery retain their existing order;
+  legacy, incomplete, failed, or malformed compaction records fail closed to
+  unchanged replay. Added `load_canonical_messages()` for Code Squid's
+  authoritative compaction-facts provider so original append-only Tool history
+  remains available independently of effective model replay. Verification:
+  the focused/broader compaction, storage, context-provider, transcript,
+  runner, follow-up, AgentLoop, spawner, storage-index, and Tool-result-trimming
+  suite passed 343 tests; `python -m compileall -q code_squid squid_core tests`
+  and `git diff --check` passed. The full repository suite completed with 1,441
+  passing and 57 unrelated failures in existing prompt/guidance/default/icon
+  expectation tests; those out-of-scope failures were not modified.
+
 - 2026-09-23: Made an invalid compaction summary recoverable for one attempt.
   Core now classifies only its structural/non-whitespace summary validation
   error, emits the failed first attempt, and retries once with the same source

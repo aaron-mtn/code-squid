@@ -229,10 +229,26 @@ class Compactor:
                 "summary_chars": len(summary),
             }
 
+            # Persist the exact effective-transcript transform rather than the
+            # discarded canonical payloads. Session storage can replay this
+            # small boundary after a process restart while leaving every
+            # original message in the append-only log for diagnostics.
+            replay = {
+                "version": 1,
+                "protected_message_count": len(protected_messages),
+                "preserved_message_count": len(preserved_messages),
+                "compacted_message": compacted_message,
+            }
+
             stage = "persistence"
             self._emit(
                 event_callback,
-                {"type": "compaction_applied", "attempt": attempt, **metadata},
+                {
+                    "type": "compaction_applied",
+                    "attempt": attempt,
+                    **metadata,
+                    "replay": replay,
+                },
             )
             return metadata
         except Exception as error:

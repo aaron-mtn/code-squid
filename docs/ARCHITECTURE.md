@@ -1782,7 +1782,8 @@ verification commands, task state, or filesystem truth. It communicates only
 the exact preserved message tail and accepts optional text in return.
 `code_squid.compaction_context.CodeSquidCompactionContextProvider` is wired only
 by the Code Squid application builder. It reloads the complete append-only
-canonical message history from `SessionStore` at compaction time and requires
+canonical message history through `SessionStore.load_canonical_messages()` at
+compaction time and requires
 the supplied preserved tail to equal its exact suffix. A mismatch fails closed
 without authoritative context; a match removes that suffix so facts describe
 only the canonical prefix represented by the summary. This remains correct
@@ -1819,9 +1820,11 @@ normal transcript entries:
 - optional `compaction_reasoning`, exact `compaction_summary`, and optional
   `compaction_response_meta` events preserve the successful attempt number and
   normalized response diagnostics
-- `compaction_applied` records before/after token estimates and message counts
-  plus the successful attempt number, only after the in-memory rebuild and
-  event append succeed
+- `compaction_applied` records before/after token estimates and message counts,
+  the successful attempt number, and a versioned replay transform containing
+  the exact compacted assistant message plus protected/preserved message counts;
+  it is emitted only after the in-memory rebuild succeeds, and failed event
+  persistence leaves no durable replay boundary
 - `compaction_failed` records `prepare`, `model_request`, `response_parse`,
   `session_rebuild`, or `persistence` plus a concise exception description,
   then the original exception continues through the existing error path. The
@@ -1834,9 +1837,14 @@ normal transcript entries:
 
 `ModelAdapter.complete_text(...)` retains its existing `content` and `usage`
 result fields and additionally exposes normalized `reasoning` and
-`finish_reason` when the provider supplies them. Compaction events are
-diagnostic, not transcript messages: `SessionStore.load_messages()` continues
-to ignore them and replay only message and system-reconciliation entries.
+`finish_reason` when the provider supplies them. Compaction events are not
+transcript messages, but a valid versioned `compaction_applied` event is a
+durable effective-transcript transformation. `SessionStore.load_messages()`
+replays those transformations sequentially with ordinary messages and system
+reconciliations. It validates the expected pre/post message counts and fails
+closed to unchanged history for legacy, partial, or malformed replay metadata.
+`SessionStore.load_canonical_messages()` remains the explicit seam for
+untransformed append-only message history used by authoritative diagnostics.
 The CLI observes the authoritative `compaction_started`, `compaction_applied`,
 and `compaction_failed` boundaries. Start transfers the existing animated
 status line to `Compacting...`, using the same position, pulse, and ownership as
@@ -1846,8 +1854,10 @@ application clears that transient line and emits the indented, dim
 existing run termination boundaries clear the transient line without adding a
 new compaction failure message; checks that do not compact stay silent.
 
-Compaction is transcript compression for continuation context. It does not
-provide durable workspace memory.
+Compaction is durable transcript compression for continuation context. It does
+not claim workspace truth or replace canonical history: original message and
+Tool-result entries remain append-only for diagnostics, while resumes continue
+from the latest successfully applied effective transcript.
 
 ## Sessions, Resume, Undo, And Interruption
 
@@ -1987,9 +1997,11 @@ A rejected reply adds a linked diagnostic-only `reply_rejection` entry:
 
 Recoverable tool fields are omitted when unavailable. Rejection diagnostics
 cover normal agent reply validation failures; hook-blocked finals are outside
-this path. `SessionStore.load_messages()` replays `type: "message"` entries and
-applies `system_message_reconciliation` entries; model-reply and rejection
-diagnostics never enter canonical history or reach the model.
+this path. `SessionStore.load_messages()` replays `type: "message"` entries,
+applies `system_message_reconciliation` entries, and applies only validated
+versioned `compaction_applied` transformations. Model-reply and rejection
+diagnostics never enter canonical history or reach the model. The separate
+`load_canonical_messages()` view retains original messages across compactions.
 
 Current session statuses are:
 
@@ -2002,8 +2014,10 @@ Current session statuses are:
 Resume selects an active saved session inside the persistent CLI loop. A later
 authored task loads messages with `SessionStore.load_messages()`, appends a
 follow-up user message, marks the session active, creates a fresh undo buffer,
-and continues the same saved session. `latest` resolves through the explicit
-workspace sessions path supplied by `code_squid.app_paths`. Loading also repairs
+and continues the same saved session from its latest durable compaction
+boundary instead of re-expanding discarded model context. `latest` resolves
+through the explicit workspace sessions path supplied by
+`code_squid.app_paths`. Loading also repairs
 a genuinely trailing assistant Tool call left by an older interrupted runtime
 by durably appending a synthetic interrupted Tool result; it does not attempt
 to reinterpret malformed pairs in the middle of history.

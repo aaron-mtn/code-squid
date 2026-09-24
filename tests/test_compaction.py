@@ -1,4 +1,5 @@
 import inspect
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -6,6 +7,7 @@ import pytest
 import squid_core.compaction as compaction_module
 from squid_core.compaction import Compactor
 from squid_core.compaction.token_estimate import estimate_messages_tokens
+from squid_core.storage import SessionStore
 
 
 class FakeModelAdapter:
@@ -590,11 +592,62 @@ def test_successful_compaction_logs_complete_lifecycle_and_exact_model_data() ->
         "finish_reason": "stop",
         "usage": {"input_tokens": 220, "output_tokens": 30, "total_tokens": 250},
     }
-    assert events[6] == {"type": "compaction_applied", "attempt": 1, **result}
+    assert events[6] == {
+        "type": "compaction_applied",
+        "attempt": 1,
+        **result,
+        "replay": {
+            "version": 1,
+            "protected_message_count": 2,
+            "preserved_message_count": 2,
+            "compacted_message": current_session.messages[2],
+        },
+    }
     assert len(model_adapter.requests) == 1
     assert "previous compaction response was empty or invalid" not in model_adapter.requests[
         0
     ][1]["content"]
+
+
+def test_successful_compaction_reloads_exact_live_effective_transcript(tmp_path) -> None:
+    """A recreated session must continue from the durable compacted boundary."""
+    canonical_messages = compactable_messages()
+    store = SessionStore.create(tmp_path, "durable compaction")
+    for message in canonical_messages:
+        store.append_message(message)
+
+    current_session = session(list(canonical_messages))
+    Compactor(settings(), FakeModelAdapter("durable summary")).maybe_compact(
+        current_session,
+        event_callback=store.append_compaction_event,
+    )
+    live_messages = list(current_session.messages)
+
+    # Later canonical history remains ordinary append-only history after the
+    # durable transformation boundary.
+    follow_up = {"role": "user", "content": "continue from compacted state"}
+    store.append_message(follow_up)
+    current_session.messages.append(follow_up)
+
+    reopened = SessionStore.open(store.session_dir)
+    assert reopened.load_messages() == current_session.messages
+    assert reopened.load_messages()[:-1] == live_messages
+
+    entries = [
+        json.loads(line)
+        for line in store.jsonl_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    canonical_tool_results = [
+        entry["message"]
+        for entry in entries
+        if entry.get("type") == "message"
+        and entry.get("message", {}).get("role") == "tool"
+    ]
+    assert canonical_tool_results
+    assert all(
+        message not in reopened.load_messages() for message in canonical_tool_results
+    )
 
 
 def test_compaction_omits_reasoning_and_response_meta_when_absent() -> None:

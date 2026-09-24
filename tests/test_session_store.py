@@ -22,6 +22,27 @@ def read_entries(store: SessionStore) -> list[dict]:
     ]
 
 
+def applied_compaction_event(
+    *,
+    messages_before: int,
+    compacted_message: dict,
+    protected_count: int,
+    preserved_count: int,
+) -> dict:
+    """Build the durable replay fields emitted by a successful compaction."""
+    return {
+        "type": "compaction_applied",
+        "messages_before": messages_before,
+        "messages_after": protected_count + 1 + preserved_count,
+        "replay": {
+            "version": 1,
+            "protected_message_count": protected_count,
+            "preserved_message_count": preserved_count,
+            "compacted_message": compacted_message,
+        },
+    }
+
+
 def test_create_writes_initial_metadata_and_empty_jsonl(tmp_path: Path) -> None:
     store = SessionStore.create(
         tmp_path,
@@ -179,6 +200,220 @@ def test_load_messages_ignores_run_context_entries(tmp_path: Path) -> None:
     store.append_message(messages[1])
 
     assert store.load_messages() == messages
+
+
+def test_load_messages_applies_successful_compaction_and_keeps_later_messages(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore.create(tmp_path, "durable compact")
+    system = {"role": "system", "content": "system"}
+    task = {"role": "user", "content": "original task"}
+    old_assistant = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"id": "call_old", "function": {"name": "read_file"}}],
+    }
+    old_tool = {
+        "role": "tool",
+        "tool_call_id": "call_old",
+        "content": "full old source",
+    }
+    recent = {"role": "assistant", "content": "recent work"}
+    canonical = [system, task, old_assistant, old_tool, recent]
+    for message in canonical:
+        store.append_message(message)
+
+    compacted = {"role": "assistant", "content": "# compacted\nsummary"}
+    store.append_compaction_event(
+        applied_compaction_event(
+            messages_before=len(canonical),
+            compacted_message=compacted,
+            protected_count=2,
+            preserved_count=1,
+        )
+    )
+    follow_up = {"role": "user", "content": "follow up"}
+    store.append_message(follow_up)
+
+    assert SessionStore.open(store.session_dir).load_messages() == [
+        system,
+        task,
+        compacted,
+        recent,
+        follow_up,
+    ]
+    assert SessionStore.open(store.session_dir).load_canonical_messages() == [
+        *canonical,
+        follow_up,
+    ]
+    assert old_tool in [
+        entry["message"]
+        for entry in read_entries(store)
+        if entry.get("type") == "message"
+    ]
+
+
+def test_load_messages_replays_multiple_compactions_in_order(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path, "multiple compact")
+    system = {"role": "system", "content": "system"}
+    task = {"role": "user", "content": "task"}
+    old = {"role": "assistant", "content": "old"}
+    recent = {"role": "assistant", "content": "recent"}
+    for message in (system, task, old, recent):
+        store.append_message(message)
+
+    summary_a = {"role": "assistant", "content": "summary A"}
+    store.append_compaction_event(
+        applied_compaction_event(
+            messages_before=4,
+            compacted_message=summary_a,
+            protected_count=2,
+            preserved_count=1,
+        )
+    )
+    later_a = {"role": "assistant", "content": "later A"}
+    later_b = {"role": "user", "content": "later B"}
+    store.append_message(later_a)
+    store.append_message(later_b)
+
+    # Effective history before B is prefix + summary A + recent + two later
+    # messages. B replaces all but its protected prefix and newest two messages.
+    summary_b = {"role": "assistant", "content": "summary B"}
+    store.append_compaction_event(
+        applied_compaction_event(
+            messages_before=6,
+            compacted_message=summary_b,
+            protected_count=2,
+            preserved_count=2,
+        )
+    )
+    final = {"role": "assistant", "content": "final"}
+    store.append_message(final)
+
+    assert SessionStore.open(store.session_dir).load_messages() == [
+        system,
+        task,
+        summary_b,
+        later_a,
+        later_b,
+        final,
+    ]
+
+
+def test_incomplete_and_failed_compactions_do_not_change_replay(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path, "failed compact")
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "task"},
+        {"role": "assistant", "content": "history"},
+    ]
+    for message in messages:
+        store.append_message(message)
+
+    store.append_compaction_event({"type": "compaction_started", "attempt": 1})
+    store.append_compaction_event(
+        {"type": "compaction_summary", "attempt": 1, "content": "unused"}
+    )
+    store.append_compaction_event(
+        {
+            "type": "compaction_failed",
+            "attempt": 1,
+            "will_retry": True,
+            "stage": "response_parse",
+        }
+    )
+    store.append_compaction_event({"type": "compaction_started", "attempt": 2})
+    store.append_compaction_event(
+        {"type": "compaction_summary", "attempt": 2, "content": "also unused"}
+    )
+    store.append_compaction_event(
+        {"type": "compaction_failed", "attempt": 2, "stage": "response_parse"}
+    )
+
+    assert SessionStore.open(store.session_dir).load_messages() == messages
+
+
+def test_malformed_or_legacy_applied_compaction_fails_closed(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path, "malformed compact")
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "task"},
+        {"role": "assistant", "content": "history"},
+    ]
+    for message in messages:
+        store.append_message(message)
+
+    store.append_compaction_event(
+        {"type": "compaction_applied", "messages_before": len(messages)}
+    )
+    malformed = applied_compaction_event(
+        messages_before=999,
+        compacted_message={"role": "assistant", "content": "must not apply"},
+        protected_count=2,
+        preserved_count=0,
+    )
+    store.append_compaction_event(malformed)
+
+    assert SessionStore.open(store.session_dir).load_messages() == messages
+
+
+def test_system_reconciliation_after_compaction_replaces_active_system(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore.create(tmp_path, "compact reconciliation")
+    old_system = {"role": "system", "content": "old system"}
+    task = {"role": "user", "content": "task"}
+    history = {"role": "assistant", "content": "history"}
+    for message in (old_system, task, history):
+        store.append_message(message)
+
+    compacted = {"role": "assistant", "content": "summary"}
+    store.append_compaction_event(
+        applied_compaction_event(
+            messages_before=3,
+            compacted_message=compacted,
+            protected_count=2,
+            preserved_count=0,
+        )
+    )
+    new_system = {"role": "system", "content": "new system"}
+    store.append_system_message_reconciliation(new_system)
+
+    assert SessionStore.open(store.session_dir).load_messages() == [
+        new_system,
+        task,
+        compacted,
+    ]
+
+
+def test_torn_final_diagnostic_keeps_applied_compaction_replayable(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore.create(tmp_path, "compact torn diagnostic")
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "task"},
+        {"role": "assistant", "content": "old"},
+    ]
+    for message in messages:
+        store.append_message(message)
+    compacted = {"role": "assistant", "content": "summary"}
+    store.append_compaction_event(
+        applied_compaction_event(
+            messages_before=3,
+            compacted_message=compacted,
+            protected_count=2,
+            preserved_count=0,
+        )
+    )
+    with store.jsonl_path.open("a", encoding="utf-8") as file:
+        file.write('{"type": "compaction_started", "attempt": ')
+
+    assert SessionStore.open(store.session_dir).load_messages() == [
+        messages[0],
+        messages[1],
+        compacted,
+    ]
 
 
 def test_load_messages_ignores_truncated_final_record(tmp_path: Path) -> None:

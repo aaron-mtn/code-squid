@@ -1019,6 +1019,72 @@ def test_follow_up_delegates_mod_resolution_to_application_builder(
     ]
 
 
+def test_follow_up_loads_durable_compacted_history_before_appending_user(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    session_store = SessionStore.create(tmp_path, "original task")
+    system = {"role": "system", "content": "system"}
+    task = {"role": "user", "content": "original task"}
+    discarded = {"role": "assistant", "content": "large discarded history"}
+    recent = {"role": "assistant", "content": "recent state"}
+    for message in (system, task, discarded, recent):
+        session_store.append_message(message)
+    compacted = {"role": "assistant", "content": "compacted state"}
+    session_store.append_compaction_event(
+        {
+            "type": "compaction_applied",
+            "messages_before": 4,
+            "messages_after": 4,
+            "replay": {
+                "version": 1,
+                "protected_message_count": 2,
+                "preserved_message_count": 1,
+                "compacted_message": compacted,
+            },
+        }
+    )
+    captured = {}
+
+    class FollowUpAgent:
+        def follow_up_message(self, task: str) -> dict:
+            return {"role": "user", "content": task}
+
+    def fake_build(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(loop=SimpleNamespace(agent=FollowUpAgent()))
+
+    monkeypatch.setattr(
+        "code_squid.console.cli.session_runner._session_dir_for_resume",
+        lambda repo_root, session_id: session_store.session_dir,
+    )
+    monkeypatch.setattr(
+        "code_squid.console.cli.session_runner.build_coding_task_run",
+        fake_build,
+    )
+    monkeypatch.setattr(
+        "code_squid.console.cli.session_runner._run_loop",
+        lambda *args: 0,
+    )
+
+    status, _ = _run_follow_up_task(
+        tmp_path,
+        session_store.session_id,
+        "continue compactly",
+        load_settings(tmp_path),
+        FakeDisplay(),
+    )
+
+    assert status == 0
+    assert captured["session"].messages == [
+        system,
+        task,
+        compacted,
+        recent,
+        {"role": "user", "content": "continue compactly"},
+    ]
+
+
 def test_resume_session_empty_task_exits_without_run(monkeypatch, tmp_path, capsys) -> None:
     session_store = SessionStore.create(tmp_path, "original task")
     displays: list[BannerDisplay] = []
