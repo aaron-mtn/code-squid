@@ -3,7 +3,10 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from code_squid.settings import (
+    DEFAULT_BUILT_IN_HOOK_SETTINGS,
     CompactionSettings,
     DisplaySettings,
     ModelSettings,
@@ -15,6 +18,7 @@ from code_squid.app_paths import CODE_SQUID_HOME_ENV
 from squid_core.tools.builtins.read_file import execute as execute_read_file
 from squid_core.hooks import (
     BeforeRunContext,
+    HookRunner,
     PromptContextBlock,
     RepeatedFailureNudge,
     RepeatedReadNudge,
@@ -254,7 +258,7 @@ def test_default_runner_behavior_does_not_load_user_hooks(
     assert "DISK_DEFAULT_MARKER" not in _message_text(messages)
 
 
-def test_code_squid_always_wires_product_owned_no_progress_guidance() -> None:
+def test_code_squid_enables_all_built_in_hooks_by_default() -> None:
     runner = build_hook_runner()
 
     assert isinstance(runner.hooks[-4], RepeatedReadNudge)
@@ -272,16 +276,69 @@ def test_code_squid_always_wires_product_owned_no_progress_guidance() -> None:
     )
 
 
-def test_too_many_reads_default_hook_can_be_disabled() -> None:
-    runner = build_hook_runner(too_many_reads_enabled=False)
+@pytest.mark.parametrize(
+    ("hook_id", "hook_type"),
+    [
+        ("repeated_read", RepeatedReadNudge),
+        ("too_many_reads", TooManyReadsNudge),
+        ("post_verification", PostVerificationNudge),
+        ("repeated_failure", RepeatedFailureNudge),
+    ],
+)
+def test_each_built_in_hook_can_be_disabled_independently(
+    hook_id: str,
+    hook_type: type,
+) -> None:
+    runner = build_hook_runner(built_in_hook_settings={hook_id: False})
 
-    assert not any(isinstance(hook, TooManyReadsNudge) for hook in runner.hooks)
-    assert any(isinstance(hook, RepeatedReadNudge) for hook in runner.hooks)
-    assert any(isinstance(hook, PostVerificationNudge) for hook in runner.hooks)
-    assert any(isinstance(hook, RepeatedFailureNudge) for hook in runner.hooks)
+    assert not any(isinstance(hook, hook_type) for hook in runner.hooks)
+    assert len(runner.hooks) == len(DEFAULT_BUILT_IN_HOOK_SETTINGS) - 1
 
 
-def test_coding_task_settings_disable_too_many_reads_hook(
+def test_all_built_in_hooks_can_be_disabled_together() -> None:
+    runner = build_hook_runner(
+        built_in_hook_settings=dict.fromkeys(DEFAULT_BUILT_IN_HOOK_SETTINGS, False)
+    )
+
+    assert runner.hooks == []
+
+
+def test_external_hooks_remain_when_all_built_ins_are_disabled() -> None:
+    # Disable only the application-created instances, even when a caller
+    # deliberately supplies another Hook of the same Core type.
+    external_hook = RepeatedReadNudge(source="external")
+    runner = build_hook_runner(
+        hooks=[external_hook],
+        built_in_hook_settings=dict.fromkeys(DEFAULT_BUILT_IN_HOOK_SETTINGS, False),
+    )
+
+    assert runner.hooks == [external_hook]
+
+
+def test_user_hooks_remain_when_all_built_ins_are_disabled(tmp_path: Path) -> None:
+    home = tmp_path / "code-squid-home"
+    _write_saved_hook(home)
+
+    runner = build_hook_runner(
+        include_user_hooks=True,
+        app_home=home,
+        built_in_hook_settings=dict.fromkeys(DEFAULT_BUILT_IN_HOOK_SETTINGS, False),
+    )
+
+    assert [type(hook).__name__ for hook in runner.hooks] == ["DiskContextHook"]
+
+
+def test_explicit_hook_runner_remains_when_all_built_ins_are_disabled() -> None:
+    external_hook = ManualContextHook()
+    runner = build_hook_runner(
+        hook_runner=HookRunner([external_hook]),
+        built_in_hook_settings=dict.fromkeys(DEFAULT_BUILT_IN_HOOK_SETTINGS, False),
+    )
+
+    assert runner.hooks == [external_hook]
+
+
+def test_coding_task_settings_select_built_in_hooks(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -289,7 +346,13 @@ def test_coding_task_settings_disable_too_many_reads_hook(
     settings = Settings(
         model=ModelSettings(),
         display=DisplaySettings(debug=False),
-        runtime=RuntimeSettings(too_many_reads_enabled=False),
+        runtime=RuntimeSettings(
+            built_in_hook_settings={
+                **DEFAULT_BUILT_IN_HOOK_SETTINGS,
+                "repeated_read": False,
+                "post_verification": False,
+            }
+        ),
         compaction=CompactionSettings(enabled=False),
     )
 
@@ -300,9 +363,10 @@ def test_coding_task_settings_disable_too_many_reads_hook(
         settings=settings,
     )
 
-    assert not any(
-        isinstance(hook, TooManyReadsNudge) for hook in run.loop.hook_runner.hooks
-    )
+    assert [type(hook) for hook in run.loop.hook_runner.hooks] == [
+        TooManyReadsNudge,
+        RepeatedFailureNudge,
+    ]
 
 
 def test_include_user_hooks_loads_disk_hooks(

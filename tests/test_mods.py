@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from code_squid.settings import (
+    DEFAULT_BUILT_IN_HOOK_SETTINGS,
     CompactionSettings,
     DisplaySettings,
     ModelSettings,
@@ -82,11 +83,19 @@ def _write_mod(
     return mod_dir
 
 
-def _settings() -> Settings:
+def _settings(
+    built_in_hook_settings: dict[str, bool] | None = None,
+) -> Settings:
     return Settings(
         model=ModelSettings(),
         display=DisplaySettings(),
-        runtime=RuntimeSettings(),
+        runtime=RuntimeSettings(
+            built_in_hook_settings=(
+                dict(DEFAULT_BUILT_IN_HOOK_SETTINGS)
+                if built_in_hook_settings is None
+                else built_in_hook_settings
+            )
+        ),
         compaction=CompactionSettings(enabled=False),
     )
 
@@ -258,7 +267,9 @@ def test_code_squid_builder_resolves_selected_mod_into_agent_tools_hooks_and_con
     run = build_coding_task_run(
         tmp_path,
         "review",
-        settings=_settings(),
+        settings=_settings(
+            dict.fromkeys(DEFAULT_BUILT_IN_HOOK_SETTINGS, False)
+        ),
         display=_Display(),
         mod_name="review-pack",
         app_home=home,
@@ -267,7 +278,7 @@ def test_code_squid_builder_resolves_selected_mod_into_agent_tools_hooks_and_con
 
     assert run.loop.agent.skill_name == "review-pack"
     assert list(run.loop.tool_executor.tools) == ["read_file"]
-    assert run.loop.hook_runner.hooks[0].source == "selected"
+    assert [hook.source for hook in run.loop.hook_runner.hooks] == ["selected"]
     context = run.session_store.jsonl_path.read_text(encoding="utf-8")
     assert '"mod_id": "review-pack"' in context
     assert '"skill_name": "review-pack"' in context

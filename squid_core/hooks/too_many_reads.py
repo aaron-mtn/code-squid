@@ -7,22 +7,15 @@ from typing import Any
 from .runner import HookResponse, PromptContextBlock
 
 
-DEFAULT_FIRST_NUDGE_READS = 3
-DEFAULT_STRONG_NUDGE_READS = 5
+DEFAULT_FIRST_NUDGE_READS = 5
+DEFAULT_STRONG_NUDGE_READS = 8
 DEFAULT_FIRST_NUDGE_LINES = 1_500
 DEFAULT_STRONG_NUDGE_LINES = 3_000
 TOO_MANY_READS_GUIDANCE = (
-    "You have already spent several read actions or read a substantial amount of content "
-    "without editing any file.\n\n"
-    "If you have the information you need, "
-    "move forward with the task instead of gathering more context."
+    "hey, dummy. do you think you have read enough yet? I think you have consumed the whole repo at least once since I asked you to make this simple patch."
 )
 TOO_MANY_READS_STRONG_GUIDANCE = (
-    "HIGH PRIORITY: Stop. You have been reading in a loop.\n\n"
-    "Repeated read actions or substantial source have accumulated without a "
-    "successful file edit or patch. If you know what you need to do, "
-    "be confident, use the information you already have, and move "
-    "forward with the task now."
+    "HIGH PRIORITY: Stop. I am getting impatient. If you read one more file without making an edit, I am going to report you to management. Make the edit now."
 )
 _MUTATION_TOOLS = {"apply_patch", "write_file"}
 _CONTEXT_TITLE = "Read Activity Guidance"

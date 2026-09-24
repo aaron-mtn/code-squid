@@ -8,11 +8,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Mapping
 
 from code_squid.agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
 from code_squid.compaction_context import CodeSquidCompactionContextProvider
-from code_squid.settings import Settings, load_settings
+from code_squid.settings import (
+    DEFAULT_BUILT_IN_HOOK_SETTINGS,
+    Settings,
+    load_settings,
+)
 from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.events import EventCallback
 from code_squid.app_paths import (
@@ -268,7 +272,7 @@ def build_coding_task_run(
         hook_runner=hook_runner,
         include_user_hooks=include_user_hooks,
         app_home=app_home,
-        too_many_reads_enabled=settings.runtime.too_many_reads_enabled,
+        built_in_hook_settings=settings.runtime.built_in_hook_settings,
     )
     loop = build_core_agent_loop(
         repo_root=repo_root,
@@ -309,8 +313,14 @@ def build_hook_runner(
     hook_runner: HookRunner | None = None,
     include_user_hooks: bool = False,
     app_home: Path | str | None = None,
-    too_many_reads_enabled: bool = True,
+    built_in_hook_settings: Mapping[str, bool] | None = None,
 ) -> HookRunner:
+    enabled = dict(DEFAULT_BUILT_IN_HOOK_SETTINGS)
+    if built_in_hook_settings is not None:
+        enabled.update(built_in_hook_settings)
+
+    # Keep this table local and explicit: it is Code Squid's composition policy,
+    # not a general Hook registry or behavior owned by the Hook classes.
     repeated_read_hook = RepeatedReadNudge(source="Code Squid")
     too_many_reads_hook = TooManyReadsNudge(source="Code Squid")
     post_verification_hook = PostVerificationNudge(
@@ -322,10 +332,15 @@ def build_hook_runner(
         run_command_timeout_guidance=RUN_COMMAND_TIMEOUT_RECOVERY_GUIDANCE,
         source="Code Squid",
     )
-    built_in_hooks = [repeated_read_hook]
-    if too_many_reads_enabled:
-        built_in_hooks.append(too_many_reads_hook)
-    built_in_hooks.extend((post_verification_hook, no_progress_hook))
+    configured_built_in_hooks = (
+        ("repeated_read", repeated_read_hook),
+        ("too_many_reads", too_many_reads_hook),
+        ("post_verification", post_verification_hook),
+        ("repeated_failure", no_progress_hook),
+    )
+    built_in_hooks = [
+        hook for hook_id, hook in configured_built_in_hooks if enabled[hook_id]
+    ]
 
     if hook_runner is not None:
         # Application policy remains active when callers replace the optional

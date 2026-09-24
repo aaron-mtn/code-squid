@@ -4,7 +4,12 @@ from pathlib import Path
 import pytest
 
 from code_squid.app_paths import settings_path
-from code_squid.settings import load_settings, write_approval_mode, write_provider
+from code_squid.settings import (
+    DEFAULT_BUILT_IN_HOOK_SETTINGS,
+    load_settings,
+    write_approval_mode,
+    write_provider,
+)
 
 
 ENV_VARS = [
@@ -48,7 +53,7 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert settings.runtime.approval_mode == "never"
     assert settings.runtime.max_tool_steps is None
     assert settings.runtime.stream_assistant_text is False
-    assert settings.runtime.too_many_reads_enabled is True
+    assert settings.runtime.built_in_hook_settings == DEFAULT_BUILT_IN_HOOK_SETTINGS
     assert settings.runtime.model_request_max_retries == 2
     assert settings.runtime.model_request_retry_backoff_ms == 250
     assert settings.compaction.enabled is True
@@ -94,24 +99,46 @@ def test_invalid_model_request_retry_settings_raise(
         load_settings(tmp_path)
 
 
-def test_too_many_reads_hook_can_be_disabled_in_runtime_settings(
+def test_built_in_hooks_can_be_disabled_in_runtime_settings(
     tmp_path: Path,
 ) -> None:
-    write_settings(tmp_path, {"runtime": {"too_many_reads_enabled": False}})
+    write_settings(
+        tmp_path,
+        {"runtime": {"built_in_hook_settings": {"too_many_reads": False}}},
+    )
 
     settings = load_settings(tmp_path)
 
-    assert settings.runtime.too_many_reads_enabled is False
+    assert settings.runtime.built_in_hook_settings == {
+        **DEFAULT_BUILT_IN_HOOK_SETTINGS,
+        "too_many_reads": False,
+    }
 
 
 @pytest.mark.parametrize("enabled", [None, 0, 1, "false"])
-def test_invalid_too_many_reads_enabled_raises(
+def test_invalid_built_in_hook_setting_raises(
     tmp_path: Path,
     enabled: object,
 ) -> None:
-    write_settings(tmp_path, {"runtime": {"too_many_reads_enabled": enabled}})
+    write_settings(
+        tmp_path,
+        {"runtime": {"built_in_hook_settings": {"too_many_reads": enabled}}},
+    )
 
-    with pytest.raises(ValueError, match="runtime\\.too_many_reads_enabled"):
+    with pytest.raises(
+        ValueError,
+        match="runtime\\.built_in_hook_settings\\.too_many_reads",
+    ):
+        load_settings(tmp_path)
+
+
+def test_unknown_built_in_hook_setting_raises(tmp_path: Path) -> None:
+    write_settings(
+        tmp_path,
+        {"runtime": {"built_in_hook_settings": {"unknown_hook": False}}},
+    )
+
+    with pytest.raises(ValueError, match="unknown_hook"):
         load_settings(tmp_path)
 
 

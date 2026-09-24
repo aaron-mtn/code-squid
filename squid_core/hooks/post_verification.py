@@ -15,9 +15,7 @@ CURRENT_VERIFICATION_STATE_GUIDANCE = (
     "If the task is complete, finalize it now."
 )
 POST_VERIFICATION_GUIDANCE = (
-    "HIGH PRIORITY: An explicitly marked verification succeeded, and no successful "
-    "file edit or failed verification has been observed since. "
-    "if the users request is implemented, finalize the task now."
+    "I’m getting impatient. The tests passed. Stop wasting time running more checks or I will have to get corporate involved. If there isn’t a specific remaining problem, finish the task now."
 )
 _MUTATION_TOOLS = {"apply_patch", "write_file"}
 _CURRENT_STATE_CONTEXT_TITLE = "Current Verification State"

@@ -1,3 +1,20 @@
+- 2026-09-23: Normalized Code Squid's built-in behavioral Hook enablement at
+  the application composition seam. Replaced the one-off
+  `runtime.too_many_reads_enabled` field and builder argument with the keyed
+  `runtime.built_in_hook_settings` mapping and stable IDs `repeated_read`,
+  `too_many_reads`, `post_verification`, and `repeated_failure`; all remain
+  enabled by default. `build_hook_runner` now omits disabled built-ins while
+  preserving caller, Mod, loaded user, and explicitly supplied runner Hooks.
+  Core Hook implementations and Mod architecture are unchanged. Added focused
+  default, independent-disable, disable-all, external-Hook, configured-list,
+  parsing, and validation coverage. Verification: 136 focused application
+  settings/Hook/Mod tests passed. The full suite passed 1,452 tests with 36
+  unrelated existing prompt/guidance-copy assertion failures in
+  `test_coding_agent.py`, `test_core_agent.py`,
+  `test_post_verification_nudge.py`, `test_repeated_read_nudge.py`, and
+  `test_too_many_reads_nudge.py`. Production/test compilation and
+  `git diff --check` passed; no live model inference was run.
+
 - 2026-09-23: Added `model-transcript.txt` beside each session's existing
   canonical logs. The readable file is rebuilt as a derived projection of
   `session.jsonl` and exact provider-bound `model-view.jsonl` records: initial

@@ -42,7 +42,14 @@ VALID_APPROVAL_MODES = {"never", "always", "guarded"}
 # a loop guard for smaller or less reliable models.
 DEFAULT_MAX_TOOL_STEPS = None
 DEFAULT_STREAM_ASSISTANT_TEXT = False
-DEFAULT_TOO_MANY_READS_ENABLED = True
+# Stable application-level IDs keep enablement policy out of the generic Hook
+# implementations and let future Mod/user configuration target one built-in.
+DEFAULT_BUILT_IN_HOOK_SETTINGS = {
+    "repeated_read": False,
+    "too_many_reads": True,
+    "post_verification": True,
+    "repeated_failure": False,
+}
 DEFAULT_MODEL_REQUEST_MAX_RETRIES = 2
 DEFAULT_MODEL_REQUEST_RETRY_BACKOFF_MS = 250
 
@@ -75,7 +82,9 @@ class RuntimeSettings:
     approval_mode: str = DEFAULT_APPROVAL_MODE
     max_tool_steps: int | None = DEFAULT_MAX_TOOL_STEPS
     stream_assistant_text: bool = DEFAULT_STREAM_ASSISTANT_TEXT
-    too_many_reads_enabled: bool = DEFAULT_TOO_MANY_READS_ENABLED
+    built_in_hook_settings: dict[str, bool] = field(
+        default_factory=lambda: dict(DEFAULT_BUILT_IN_HOOK_SETTINGS)
+    )
     model_request_max_retries: int = DEFAULT_MODEL_REQUEST_MAX_RETRIES
     model_request_retry_backoff_ms: int = DEFAULT_MODEL_REQUEST_RETRY_BACKOFF_MS
 
@@ -259,20 +268,37 @@ def _stream_assistant_text(runtime_settings: dict[str, Any], settings_path: Path
     return stream_env == "1"
 
 
-def _too_many_reads_enabled(
+def _built_in_hook_settings(
     runtime_settings: dict[str, Any],
     settings_path: Path,
-) -> bool:
-    enabled = runtime_settings.get(
-        "too_many_reads_enabled",
-        DEFAULT_TOO_MANY_READS_ENABLED,
+) -> dict[str, bool]:
+    configured = runtime_settings.get(
+        "built_in_hook_settings",
+        {},
     )
-    if not isinstance(enabled, bool):
+    if not isinstance(configured, dict):
         raise ValueError(
             f"Invalid settings JSON in {settings_path}: "
-            "runtime.too_many_reads_enabled must be a boolean"
+            "runtime.built_in_hook_settings must be an object"
         )
-    return enabled
+
+    unknown_ids = sorted(set(configured) - set(DEFAULT_BUILT_IN_HOOK_SETTINGS))
+    if unknown_ids:
+        unknown = ", ".join(unknown_ids)
+        raise ValueError(
+            f"Invalid settings JSON in {settings_path}: unknown built-in Hook "
+            f"ID(s) in runtime.built_in_hook_settings: {unknown}"
+        )
+
+    resolved = dict(DEFAULT_BUILT_IN_HOOK_SETTINGS)
+    for hook_id, enabled in configured.items():
+        if not isinstance(enabled, bool):
+            raise ValueError(
+                f"Invalid settings JSON in {settings_path}: "
+                f"runtime.built_in_hook_settings.{hook_id} must be a boolean"
+            )
+        resolved[hook_id] = enabled
+    return resolved
 
 
 def _model_request_retry_settings(
@@ -593,7 +619,7 @@ def load_settings(repo_root: Path) -> Settings:
     approval_mode = _approval_mode(runtime_settings, settings_path)
     max_tool_steps = _max_tool_steps(runtime_settings, settings_path)
     stream_assistant_text = _stream_assistant_text(runtime_settings, settings_path)
-    too_many_reads_enabled = _too_many_reads_enabled(runtime_settings, settings_path)
+    built_in_hook_settings = _built_in_hook_settings(runtime_settings, settings_path)
     model_request_max_retries, model_request_retry_backoff_ms = (
         _model_request_retry_settings(runtime_settings, settings_path)
     )
@@ -620,7 +646,7 @@ def load_settings(repo_root: Path) -> Settings:
             approval_mode=approval_mode,
             max_tool_steps=max_tool_steps,
             stream_assistant_text=stream_assistant_text,
-            too_many_reads_enabled=too_many_reads_enabled,
+            built_in_hook_settings=built_in_hook_settings,
             model_request_max_retries=model_request_max_retries,
             model_request_retry_backoff_ms=model_request_retry_backoff_ms,
         ),

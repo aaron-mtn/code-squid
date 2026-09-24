@@ -676,9 +676,17 @@ successful built-in mutation or `before_run` resets them. A successful mutation
 also clears any armed read warning before the model boundary, so an earlier
 sibling read cannot describe state that the later edit reset. The thresholds
 remain constructor arguments in Core, while Code Squid enables the Hook by
-default and exposes the independent boolean
-`runtime.too_many_reads_enabled` application setting. Disabling it does not
-disable any other built-in Hook.
+default. Application settings expose the small
+`runtime.built_in_hook_settings` mapping, whose stable IDs are
+`repeated_read`, `too_many_reads`, `post_verification`, and
+`repeated_failure`. All four default to enabled. `code_squid.agent_setup`
+consults those IDs while assembling a run and omits each disabled built-in
+from the `HookRunner`; the generic Core Hook implementations do not know about
+application enablement. Caller-supplied, Mod, and loaded user Hooks remain
+separate inputs and are not filtered by this mapping. An explicitly supplied
+`HookRunner` likewise retains its Hooks before the enabled Code Squid
+built-ins are appended. This explicit mapping is the configuration seam for a
+future Mod or user override without making Hook classes own product policy.
 
 Sibling reads in one assistant batch pass through this pipeline synchronously.
 Each final transformed result updates read counts, returned-line volume, and
