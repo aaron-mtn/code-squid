@@ -36,6 +36,12 @@ def test_create_writes_initial_metadata_and_empty_jsonl(tmp_path: Path) -> None:
     assert store.model_view_path == store.jsonl_path.with_name("model-view.jsonl")
     assert store.model_view_path.exists()
     assert store.model_view_path.read_text(encoding="utf-8") == ""
+    assert store.model_transcript_path == store.jsonl_path.with_name(
+        "model-transcript.txt"
+    )
+    assert store.model_transcript_path.read_text(encoding="utf-8") == (
+        "MODEL VIEW TRANSCRIPT\n"
+    )
     assert metadata["status"] == "active"
     assert metadata["task"] == "Fix Formatter Underscore Bug"
     assert metadata["repo_root"] == str(tmp_path.resolve())

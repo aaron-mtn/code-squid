@@ -1,3 +1,22 @@
+- 2026-09-23: Added `model-transcript.txt` beside each session's existing
+  canonical logs. The readable file is rebuilt as a derived projection of
+  `session.jsonl` and exact provider-bound `model-view.jsonl` records: initial
+  context and later deltas appear once, provider reasoning/content, Tool calls,
+  delivered Tool results, request-only Hook/correction context, and accepted
+  finals retain chronological order, while accumulated retries and no-effect
+  lifecycle noise are omitted. Successful compaction is shown as an explicit
+  context transformation with the exact summary message inserted into the next
+  ordinary request; the private summarizer prompt is not mistaken for agent
+  context. Canonical replay/session logging and provider transport remain
+  unchanged, and projection refresh is best effort. Added focused projection,
+  deduplication, ordering, Hook-noise, compaction, final-response, and colocated
+  storage coverage. Verification: 47 focused storage/spawner/transcript tests
+  and 202 broader session, model-view, compaction, and AgentLoop tests passed;
+  the full suite passed 1,469 tests with 12 unrelated existing prompt-copy
+  assertion failures in `test_coding_agent.py` and `test_core_agent.py`.
+  Production/test compilation and `git diff --check` passed; no live model
+  inference was run.
+
 - 2026-09-23: Implemented P2 from the agent-harness audit by evolving
   `PostVerificationNudge` to expose current successful verification state on the
   immediately following model request. The compact advisory receipt reports

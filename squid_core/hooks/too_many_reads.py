@@ -12,21 +12,16 @@ DEFAULT_STRONG_NUDGE_READS = 5
 DEFAULT_FIRST_NUDGE_LINES = 1_500
 DEFAULT_STRONG_NUDGE_LINES = 3_000
 TOO_MANY_READS_GUIDANCE = (
-    "You have already spent several read actions or gathered substantial source "
-    "without a successful built-in file edit. This does not mean an edit is required.\n\n"
-    "Before inspecting more context, identify a specific missing fact, unmet task "
-    "requirement, or required verification step. Read-only tasks and recovery of "
-    "needed context after compaction can require further reading. If no such need "
-    "remains, move forward with the task instead of gathering more context."
+    "You have already spent several read actions or read a substantial amount of content "
+    "without editing any file.\n\n"
+    "If you have the information you need, "
+    "move forward with the task instead of gathering more context."
 )
 TOO_MANY_READS_STRONG_GUIDANCE = (
-    "HIGH PRIORITY: Stop broad, speculative, or reassurance reading.\n\n"
+    "HIGH PRIORITY: Stop. You have been reading in a loop.\n\n"
     "Repeated read actions or substantial source have accumulated without a "
-    "successful built-in file edit. Before another read or source-search, identify "
-    "the specific missing fact, unmet task requirement, or required verification "
-    "step it will address. This also applies to read-only tasks and recovery of "
-    "needed context after compaction; an edit is not required merely to reset this "
-    "guidance. If no concrete need remains, use the available context and move "
+    "successful file edit or patch. If you know what you need to do, "
+    "be confident, use the information you already have, and move "
     "forward with the task now."
 )
 _MUTATION_TOOLS = {"apply_patch", "write_file"}

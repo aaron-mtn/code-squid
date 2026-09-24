@@ -12,18 +12,12 @@ CURRENT_VERIFICATION_STATE_GUIDANCE = (
     "* Latest explicit verification succeeded.\n"
     "* No successful built-in file edit has occurred since.\n"
     "* No unresolved explicit verification failure is known.\n\n"
-    "Continue only for a concrete unfinished requirement, issue, or required "
-    "validation. Otherwise finalize."
+    "If the task is complete, finalize it now."
 )
 POST_VERIFICATION_GUIDANCE = (
-    "HIGH PRIORITY: Identify concrete remaining work before using more tools.\n\n"
-    "An explicitly marked verification succeeded, and no successful built-in "
-    "file edit or failed explicit verification has been observed since. This "
-    "does not establish that every task requirement or validation is complete.\n\n"
-    "Continue only for an unfinished task requirement (including required "
-    "documentation), a concrete issue, or another required validation step. "
-    "If none remains, finalize the task now. Do not perform another read, search, "
-    "or verification command merely for reassurance."
+    "HIGH PRIORITY: An explicitly marked verification succeeded, and no successful "
+    "file edit or failed verification has been observed since. "
+    "if the users request is implemented, finalize the task now."
 )
 _MUTATION_TOOLS = {"apply_patch", "write_file"}
 _CURRENT_STATE_CONTEXT_TITLE = "Current Verification State"

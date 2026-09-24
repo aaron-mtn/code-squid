@@ -17,14 +17,12 @@ _MAX_TRACKED_READ_RESULTS = _MAX_TRACKED_FILES * _MAX_RANGES_PER_FILE
 _MUTATION_TOOLS = {"apply_patch", "write_file"}
 _GUIDANCE = (
     "You already read this unchanged source and it is still available in context. "
-    "The overlapping content is being omitted rather than returned again. "
-    "Reuse the existing context. If the next edit is already clear, make it now. "
-    "Only read again for genuinely new information that is required for the next action."
+    "The already read content is being omitted rather than returned again. "
+    "Check the info you already have in your history. If the next edit is already clear, make it now. "
 )
 _ESCALATED_ALREADY_COVERED_MESSAGE = (
     "HIGH PRIORITY: Stop rereading this source. The requested unchanged content "
     "is already available in context and will not be returned again. "
-    "Do not request this section again for confirmation, reassurance, or completeness. "
     "Use the existing context and take the next non-read action now."
 )
 

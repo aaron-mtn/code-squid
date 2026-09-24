@@ -8,6 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from squid_core.storage.atomic_json import atomic_write_json
+from squid_core.storage.model_transcript import (
+    TRANSCRIPT_TITLE,
+    write_model_transcript,
+)
 from squid_core.storage.session_jsonl import load_session_jsonl
 
 
@@ -36,11 +40,13 @@ class SessionStore:
     # - metadata.json: run-level facts like status, task, and active leaf
     # - session.jsonl: append-only transcript entries
     # - model-view.jsonl: the final model-visible representation per request
+    # - model-transcript.txt: a readable, deduplicated projection of both logs
     def __init__(self, session_dir: Path) -> None:
         self.session_dir = session_dir
         self.metadata_path = session_dir / "metadata.json"
         self.jsonl_path = session_dir / "session.jsonl"
         self.model_view_path = session_dir / "model-view.jsonl"
+        self.model_transcript_path = session_dir / "model-transcript.txt"
 
     @classmethod
     def create(
@@ -77,11 +83,14 @@ class SessionStore:
             # needing to know where that host stores sessions.
             metadata["repo_root"] = str(Path(workspace_root).resolve())
 
-        # Write the initial metadata and create the two append-only logs.
+        # Write the initial metadata, append-only logs, and derived readable view.
         store = cls(session_dir)
         store._write_metadata(metadata)
         store.jsonl_path.write_text("", encoding="utf-8")
         store.model_view_path.write_text("", encoding="utf-8")
+        store.model_transcript_path.write_text(
+            f"{TRANSCRIPT_TITLE}\n", encoding="utf-8"
+        )
         return store
 
     # Open an existing session folder without creating or modifying files.
@@ -127,13 +136,16 @@ class SessionStore:
         metadata["active_leaf_id"] = entry_id
         metadata["updated_at"] = _utc_now()
         self._write_metadata(metadata)
+        self._refresh_model_transcript()
 
         return entry
 
     # Append a provider-derived assistant reply snapshot. This is diagnostic
     # only: load_messages() deliberately ignores it, so it is never replayed.
     def append_model_reply(self, reply: dict) -> dict:
-        return self._append_non_message_entry("model_reply", {"reply": reply})
+        entry = self._append_non_message_entry("model_reply", {"reply": reply})
+        self._refresh_model_transcript()
+        return entry
 
     def append_model_view(self, request: dict) -> dict:
         """Append the exact finalized representation used for one model request."""
@@ -147,6 +159,7 @@ class SessionStore:
         with self.model_view_path.open("a", encoding="utf-8") as file:
             file.write(json.dumps(record) + "\n")
             file.flush()
+        self._refresh_model_transcript()
         return record
 
     # Append validation/rejection details linked to the model_reply snapshot.
@@ -177,10 +190,18 @@ class SessionStore:
 
         # Keep lifecycle fields at the top level like other diagnostic events;
         # this makes chronological JSONL inspection and filtering straightforward.
-        return self._append_non_message_entry(
+        entry = self._append_non_message_entry(
             event_type,
             {name: value for name, value in event.items() if name != "type"},
         )
+        if event_type in {
+            "compaction_request",
+            "compaction_reasoning",
+            "compaction_summary",
+            "compaction_applied",
+        }:
+            self._refresh_model_transcript()
+        return entry
 
     def append_runtime_event(self, event: dict) -> dict:
         """Append one supported runtime lifecycle event to the session log."""
@@ -344,6 +365,19 @@ class SessionStore:
         metadata["updated_at"] = _utc_now()
         self._write_metadata(metadata)
         return entry
+
+    def _refresh_model_transcript(self) -> None:
+        """Best-effort refresh of the derived human-readable model view."""
+        try:
+            write_model_transcript(
+                self.jsonl_path,
+                self.model_view_path,
+                self.model_transcript_path,
+            )
+        except Exception:
+            # A convenience diagnostic must never make canonical persistence or
+            # an otherwise valid provider request fail. Its sources remain intact.
+            pass
 
     # Read metadata.json as a dictionary.
     def _read_metadata(self) -> dict[str, Any]:

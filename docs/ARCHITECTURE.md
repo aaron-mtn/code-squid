@@ -1846,6 +1846,7 @@ Each session folder contains:
 - `metadata.json`
 - `session.jsonl`
 - `model-view.jsonl`
+- `model-transcript.txt`
 
 `metadata.json` stores run-level metadata: session id, timestamps, repo root,
 task, status, and active leaf id. `session.jsonl` stores append-only entries for
@@ -1876,6 +1877,27 @@ This is a request-observability log, not canonical history; request-only Hook
 context, compaction output, Tool-result trimming, and adapter message
 normalization are therefore visible here. Observer failures are swallowed at
 the adapter boundary and cannot fail an otherwise valid provider request.
+
+`model-transcript.txt` is the human-readable, chronological projection of
+`session.jsonl` and `model-view.jsonl`. `SessionStore` refreshes it beside the
+canonical logs when model-visible requests, provider replies, accepted
+messages, or compaction events arrive. The projection records the initial
+system/user context once, then emits only request messages that are new or
+changed, provider reasoning when exposed, assistant content and Tool calls,
+Tool results in the exact request-rendered form delivered to the model,
+request-only Hook/runtime context, and accepted final responses. Identical
+retry requests and accumulated history are not repeated. Successful compaction
+is an explicit context-transformation section containing the exact compacted
+assistant message found in the next ordinary request, including the standard
+preamble and any deterministic context appended by the host. The summarizer's
+private request is excluded, while its available reasoning is retained.
+
+The text file is deliberately not replay input or independent state. It is
+rebuilt from the two canonical JSONL logs, and refresh failures are best effort
+so this diagnostic view cannot break canonical persistence or model transport.
+Routine lifecycle, no-effect Hook, token-estimator, and persistence events stay
+only in the detailed log. Opening an older session remains read-only; its
+readable projection is created on the next relevant append.
 
 Immediately before an ordinary agent request, Core's centralized
 tool-result-rendering seam parses canonical JSON Tool messages into a
