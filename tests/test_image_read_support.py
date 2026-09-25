@@ -34,7 +34,7 @@ from squid_core.tools.builtins.read_file import execute as read_file
 from squid_core.tools.executor import ToolExecutor
 
 
-read_file_module = importlib.import_module("squid_core.tools.builtins.read_file")
+image_reader_module = importlib.import_module("squid_core.file_readers.image")
 atomic_json_module = importlib.import_module("squid_core.storage.atomic_json")
 
 
@@ -134,12 +134,12 @@ def test_image_read_rejects_ranges_corruption_and_safety_limits(
     assert "invalid or corrupt image" in corrupt["error"]
 
     source.write_bytes(image_bytes("PNG", size=(2, 2)))
-    monkeypatch.setattr(read_file_module, "MAX_IMAGE_BYTES", 1)
+    monkeypatch.setattr(image_reader_module, "MAX_IMAGE_BYTES", 1)
     oversized = read_file(tmp_path, str(source), snapshot_asset=store.snapshot_asset)
     assert oversized["ok"] is False
     assert "maximum supported size" in oversized["error"]
 
-    monkeypatch.setattr(read_file_module, "MAX_IMAGE_BYTES", 32 * 1024 * 1024)
+    monkeypatch.setattr(image_reader_module, "MAX_IMAGE_BYTES", 32 * 1024 * 1024)
     monkeypatch.setattr("squid_core.image_content.MAX_IMAGE_PIXELS", 3)
     excessive_pixels = read_file(
         tmp_path,

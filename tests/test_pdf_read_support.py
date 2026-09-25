@@ -19,7 +19,7 @@ from squid_core.tools import ToolResults
 from squid_core.tools.builtins.read_file import execute as read_file
 
 
-read_file_module = importlib.import_module("squid_core.tools.builtins.read_file")
+pdf_reader_module = importlib.import_module("squid_core.file_readers.pdf")
 
 
 def _write_pdf(path: Path, texts: list[str | None]) -> None:
@@ -134,15 +134,15 @@ def test_pdf_page_render_is_reused_across_resumed_store_instances(
     source = tmp_path / "cached.pdf"
     _write_pdf(source, ["cached page"])
     first = _pdf_read(store, source)
-    original_render = read_file_module._render_pdf_page
+    original_render = pdf_reader_module._render_pdf_page
 
     def unexpected_render(*_args, **_kwargs):
         raise AssertionError("an unchanged persisted page should not rerender")
 
-    monkeypatch.setattr(read_file_module, "_render_pdf_page", unexpected_render)
+    monkeypatch.setattr(pdf_reader_module, "_render_pdf_page", unexpected_render)
     resumed_store = SessionStore(store.session_dir)
     second = _pdf_read(resumed_store, source)
-    monkeypatch.setattr(read_file_module, "_render_pdf_page", original_render)
+    monkeypatch.setattr(pdf_reader_module, "_render_pdf_page", original_render)
 
     assert first["rendered_pages"][0]["reused"] is False
     assert second["rendered_pages"][0]["reused"] is True
@@ -197,12 +197,12 @@ def test_pdf_rejects_corruption_file_size_and_excess_page_selection(
     assert "invalid or unreadable PDF" in corrupt["error"]
 
     _write_pdf(source, ["one"])
-    monkeypatch.setattr(read_file_module, "MAX_PDF_BYTES", 1)
+    monkeypatch.setattr(pdf_reader_module, "MAX_PDF_BYTES", 1)
     oversized = _pdf_read(store, source)
     assert oversized["ok"] is False
     assert "maximum supported size" in oversized["error"]
 
-    monkeypatch.setattr(read_file_module, "MAX_PDF_BYTES", 64 * 1024 * 1024)
+    monkeypatch.setattr(pdf_reader_module, "MAX_PDF_BYTES", 64 * 1024 * 1024)
     _write_pdf(source, [None] * 21)
     too_many = _pdf_read(store, source)
     assert too_many["ok"] is False
@@ -249,7 +249,7 @@ def test_pdf_page_api_is_distinct_from_text_ranges_and_bounds_render_size(
     assert non_pdf["ok"] is False
     assert "only for PDF files" in non_pdf["error"]
 
-    monkeypatch.setattr(read_file_module, "MAX_PDF_RENDER_PIXELS", 10_000)
+    monkeypatch.setattr(pdf_reader_module, "MAX_PDF_RENDER_PIXELS", 10_000)
     rendered = _pdf_read(store, source)
     with Image.open(rendered["rendered_pages"][0]["path"]) as image:
         assert image.width * image.height <= 10_000

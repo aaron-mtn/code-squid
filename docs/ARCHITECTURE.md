@@ -1961,6 +1961,11 @@ again. A later ordinary `read_file` of the named PNG snapshots its exact bytes
 through the existing content-addressed image path before request-only provider
 injection; PDF reads themselves never inject images.
 
+The PDF reader supplies rendering bytes and cache identity through the existing
+`SessionStore.ensure_generated_image` seam. Session storage continues to own
+persistence, stable same-stem folder allocation, atomic writes, and per-page
+`.cache-key` files; this reader split does not change or clean up those files.
+
 Session transcript readers parse non-empty records in append order. If the
 final non-empty line is malformed after a valid JSON prefix, readers treat it
 as a torn interrupted append and expose only the complete prefix. A malformed
@@ -2154,6 +2159,20 @@ The protected built-in Tool surface is:
 - `write_file(path, content)`
 - `apply_patch(path, old_text, new_text)` or candidate selection with `match_id`
 - `run_command(command, verification)`
+
+The model-facing `squid_core/tools/builtins/read_file.py` adapter owns the
+schema, argument validation, path requirements, unsupported-media errors, and
+the public Tool entry point. It dispatches one-way into the reusable
+`squid_core/file_readers` package. That package has a deliberately static
+suffix registry: `.pdf` selects the PDF reader, `.png`/`.jpg`/`.jpeg`/`.webp`
+select the image reader, and every other suffix retains the UTF-8 text-reader
+fallback. `text.py`, `image.py`, and `pdf.py` own their format-specific read
+behavior; none depends on the Tool adapter. The adapter packages each validated
+request and its optional session-storage callbacks into one immutable
+`FileReadContext`. Every registered reader accepts that same context, so the
+registry only selects a callable by suffix and invokes it; it has no
+format-specific dispatch branches, discovery, plugin lifecycle, or reader
+class hierarchy.
 
 The `apply_patch` JSON schema declares all four arguments in the top-level
 object `properties`; its `anyOf` branches carry only the two alternative

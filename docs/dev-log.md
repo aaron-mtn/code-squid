@@ -1,3 +1,38 @@
+- 2026-09-25: Standardized every registered file reader on one immutable
+  `FileReadContext` invocation contract. The neutral context module owns the
+  two session-storage callback aliases; text, image, and PDF readers now accept
+  the same single argument. Registry dispatch is consequently only suffix
+  lookup followed by `reader(context)`, with no format identities or branches.
+  Added a direct regression proving a newly registered callable is invoked
+  without dispatcher changes. Public Tool validation, formats, results, PDF
+  rendering/cache behavior, and request-only image handling remain unchanged;
+  `.cache-key` cleanup is still deferred. Verification: all 86 focused
+  registry/text/image/PDF tests and 161 session/executor/result/compaction
+  tests passed. The full suite completed with 1,493 passing and the same 54
+  unrelated prompt/Hook-default/Hook-guidance expectation failures documented
+  by preceding work. Touched modules and tests compiled, import/fallback smoke
+  checks passed, and `git diff --check` passed.
+
+- 2026-09-25: Split the behavior-preserving `read_file` implementation into
+  reusable Core readers under `squid_core/file_readers`. The existing Tool
+  module remains the model-facing schema, validation, absolute-path, and
+  dispatch adapter; a small static suffix registry selects PDF and supported
+  image readers and otherwise preserves the UTF-8 text fallback. Text range
+  expansion/truncation, image validation and session snapshots, and PDF text,
+  selected-page rendering, stable same-stem folders, and cache behavior moved
+  to their format owners without changing public result shapes or provider
+  image injection. Tests that exercised private image/PDF implementation seams
+  now patch the owning reader modules. Per-page `.cache-key` cleanup remains
+  intentionally deferred to its separate follow-up patch. Verification: all
+  85 focused text/image/PDF tests and 161 session/executor/result/compaction
+  tests passed; an additional Hook-integrated sweep passed 195 tests and
+  reproduced 29 unrelated existing Hook expectation failures; the full suite
+  completed with 1,492 passing and the same 54 unrelated
+  prompt/Hook-default/Hook-guidance expectation failures
+  documented by preceding work. Touched modules and tests compiled, registry
+  imports and suffix selection passed a smoke check, and `git diff --check`
+  passed.
+
 - 2026-09-25: Added focused image support to the existing `read_file` Tool for
   PNG, JPG/JPEG, and WebP. Core validates format, dimensions, a 32 MiB byte
   limit, and a 40-million-pixel limit with Pillow, then atomically snapshots
