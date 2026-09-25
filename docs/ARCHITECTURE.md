@@ -1950,21 +1950,28 @@ corrupt snapshot produces a clear model-request failure.
 PDF page renders share that session asset root but use stable, model-readable
 paths rather than provider-facing asset IDs. `SessionStore.ensure_generated_image`
 contains each named PNG below `assets/<PDF stem> rendered images/`, validates it
-through the same image safety code, writes it atomically, and persists a small
-cache key beside it. If distinct PDFs have the same stem, the first keeps that
-folder and later documents use stable `... rendered images 2`, `... 3`, and
-subsequent numbered folders. The PDF digest prefix in existing page cache keys
-identifies folder ownership, so resumed reads reuse the same folder and no
-existing folder is renamed or moved. The full key also includes page number and
-render settings, so resume can reuse an unchanged page without rendering it
-again. A later ordinary `read_file` of the named PNG snapshots its exact bytes
-through the existing content-addressed image path before request-only provider
-injection; PDF reads themselves never inject images.
+through the same image safety code, and writes it atomically. Each generated
+folder has one versioned JSON `.cache-key`: its `folder_identity` is the source
+PDF digest identity, while its `images` map records each lazily rendered PNG's
+render-settings key. The source identity and page number are not repeated in
+those entries because the folder and PNG filename already establish them.
+Per-image settings entries are required because one requested page may be
+regenerated under new settings while unrequested siblings remain stale. If
+distinct PDFs have the same stem, the first keeps that folder and
+later documents use stable `... rendered images 2`, `... 3`, and subsequent
+numbered folders. Exact identity matching makes resumed reads reuse their
+existing folder without renaming or moving any occupied folder. A later ordinary
+`read_file` of the named PNG snapshots its exact bytes through the existing
+content-addressed image path before request-only provider injection; PDF reads
+themselves never inject images.
 
 The PDF reader supplies rendering bytes and cache identity through the existing
 `SessionStore.ensure_generated_image` seam. Session storage continues to own
-persistence, stable same-stem folder allocation, atomic writes, and per-page
-`.cache-key` files; this reader split does not change or clean up those files.
+persistence, stable same-stem folder allocation, atomic writes, and cache
+validation. Only a valid folder-level `.cache-key` with the exact source
+identity proves ownership. A folder with missing, malformed, wrong-version, or
+differently owned metadata is preserved as occupied, and allocation proceeds to
+the next numbered folder instead.
 
 Session transcript readers parse non-empty records in append order. If the
 final non-empty line is malformed after a valid JSON prefix, readers treat it

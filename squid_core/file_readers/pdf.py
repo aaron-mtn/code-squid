@@ -75,8 +75,10 @@ def read_pdf(context: FileReadContext) -> dict:
                     text_parts.append("\n")
 
                 filename = f"page-{page_number}.png"
+                # Folder metadata already establishes the source PDF, and the
+                # filename establishes the page. Keep only render-affecting
+                # settings in each lazy page entry to avoid repeating both.
                 cache_key = (
-                    f"pdf-sha256={source_digest};page={page_number};"
                     f"renderer={pymupdf.VersionBind};scale={PDF_RENDER_SCALE};"
                     f"max-pixels={MAX_PDF_RENDER_PIXELS}"
                 )

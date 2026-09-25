@@ -104,6 +104,21 @@ def test_text_pdf_extracts_text_and_renders_selected_page_range(tmp_path: Path) 
         assert rendered.name == f"page-{item['page']}.png"
         assert rendered.is_file()
 
+    rendered_folder = store.assets_dir / "manual rendered images"
+    cache_metadata = json.loads(
+        (rendered_folder / ".cache-key").read_text(encoding="utf-8")
+    )
+    assert cache_metadata["version"] == 1
+    assert cache_metadata["folder_identity"].startswith("pdf-sha256=")
+    assert set(cache_metadata["images"]) == {"page-2.png", "page-3.png"}
+    assert all(
+        key.startswith("renderer=")
+        and "pdf-sha256=" not in key
+        and "page=" not in key
+        for key in cache_metadata["images"].values()
+    )
+    assert not list(rendered_folder.glob(".page-*.png.cache-key"))
+
 
 def test_image_only_pdf_remains_usable_and_rendered_png_uses_normal_read_path(
     tmp_path: Path,
@@ -147,6 +162,95 @@ def test_pdf_page_render_is_reused_across_resumed_store_instances(
     assert first["rendered_pages"][0]["reused"] is False
     assert second["rendered_pages"][0]["reused"] is True
     assert second["rendered_pages"][0]["path"] == first["rendered_pages"][0]["path"]
+
+
+def test_additional_pdf_pages_share_folder_and_preserve_valid_page_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = SessionStore.create(tmp_path / "sessions", "incremental pages")
+    source = tmp_path / "chapters.pdf"
+    _write_pdf(source, ["one", "two"])
+
+    first = _pdf_read(store, source, pages=[{"start_page": 1, "end_page": 1}])
+    second = _pdf_read(store, source, pages=[{"start_page": 2, "end_page": 2}])
+    original_render = pdf_reader_module._render_pdf_page
+
+    def unexpected_render(*_args, **_kwargs):
+        raise AssertionError("the previously rendered first page should remain valid")
+
+    monkeypatch.setattr(pdf_reader_module, "_render_pdf_page", unexpected_render)
+    reread = _pdf_read(store, source, pages=[{"start_page": 1, "end_page": 1}])
+    monkeypatch.setattr(pdf_reader_module, "_render_pdf_page", original_render)
+
+    first_path = Path(first["rendered_pages"][0]["path"])
+    second_path = Path(second["rendered_pages"][0]["path"])
+    assert first_path.parent == second_path.parent
+    assert second["rendered_pages"][0]["reused"] is False
+    assert reread["rendered_pages"][0]["reused"] is True
+    metadata = json.loads((first_path.parent / ".cache-key").read_text(encoding="utf-8"))
+    assert set(metadata["images"]) == {"page-1.png", "page-2.png"}
+
+
+def test_pdf_render_setting_change_invalidates_only_matching_page_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = SessionStore.create(tmp_path / "sessions", "render settings")
+    source = tmp_path / "settings.pdf"
+    _write_pdf(source, ["settings"])
+    first = _pdf_read(store, source)
+    rendered_path = Path(first["rendered_pages"][0]["path"])
+    with Image.open(rendered_path) as image:
+        first_size = image.size
+
+    monkeypatch.setattr(pdf_reader_module, "PDF_RENDER_SCALE", 1.0)
+    second = _pdf_read(store, source)
+    with Image.open(rendered_path) as image:
+        second_size = image.size
+
+    assert second["rendered_pages"][0]["reused"] is False
+    assert second["rendered_pages"][0]["path"] == str(rendered_path)
+    assert second_size != first_size
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        None,
+        "not JSON",
+        json.dumps(
+            {"version": 999, "folder_identity": "pdf-sha256=unknown", "images": {}}
+        ),
+        json.dumps(
+            {
+                "version": 1,
+                "folder_identity": "pdf-sha256=someone-else",
+                "images": {},
+            }
+        ),
+    ],
+    ids=["missing-metadata", "malformed-metadata", "wrong-version", "wrong-owner"],
+)
+def test_occupied_unowned_pdf_folder_uses_next_numbered_folder(
+    tmp_path: Path,
+    metadata: str | None,
+) -> None:
+    store = SessionStore.create(tmp_path / "sessions", "occupied folder")
+    source = tmp_path / "manual.pdf"
+    _write_pdf(source, ["current"])
+    occupied = store.assets_dir / "manual rendered images"
+    occupied.mkdir(parents=True)
+    marker = occupied / "keep.txt"
+    marker.write_text("occupied", encoding="utf-8")
+    if metadata is not None:
+        (occupied / ".cache-key").write_text(metadata, encoding="utf-8")
+    original_files = {path.name: path.read_bytes() for path in occupied.iterdir()}
+
+    result = _pdf_read(store, source)
+
+    assert Path(result["rendered_pages"][0]["path"]).parent.name == (
+        "manual rendered images 2"
+    )
+    assert original_files == {path.name: path.read_bytes() for path in occupied.iterdir()}
 
 
 def test_same_stem_pdfs_receive_stable_numbered_render_folders(tmp_path: Path) -> None:

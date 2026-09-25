@@ -31,6 +31,8 @@ RUNTIME_LIFECYCLE_EVENTS = {
     "run_failed",
     "run_interrupted",
 }
+GENERATED_IMAGE_CACHE_VERSION = 1
+GENERATED_IMAGE_CACHE_FILENAME = ".cache-key"
 
 
 def _safe_asset_component(value: object) -> bool:
@@ -385,10 +387,10 @@ class SessionStore:
         Keeping both below the session asset root gives generated pages the same
         containment and durable session lifetime as ordinary image snapshots.
 
-        When ``folder_identity`` is supplied, an occupied folder belongs to the
-        caller only when one of its persisted cache keys has that prefix. This
-        lets same-named source documents keep separate readable folders without
-        moving an existing folder or weakening per-image cache validation.
+        One folder-level metadata file records both folder ownership and the
+        generation key for each lazily produced image. Keeping per-image keys
+        in that single file matters because changing render settings for one
+        requested page must not validate stale, unrequested sibling pages.
         """
 
         if not isinstance(cache_key, str) or not cache_key:
@@ -414,14 +416,18 @@ class SessionStore:
         image_path = (folder / filename).resolve()
         if not image_path.is_relative_to(folder):
             raise ValueError("generated image path escapes its asset folder")
-        key_path = folder / f".{filename}.cache-key"
         folder.mkdir(parents=True, exist_ok=True)
+        metadata_path = folder / GENERATED_IMAGE_CACHE_FILENAME
+        metadata = self._generated_image_metadata(
+            metadata_path,
+            folder_identity,
+            initialize_missing=True,
+        )
 
         try:
-            existing_key = key_path.read_text(encoding="utf-8")
             existing_data = image_path.read_bytes()
             inspect_image_bytes(existing_data, ".png")
-            if existing_key == cache_key:
+            if metadata["images"].get(filename) == cache_key:
                 return str(image_path), True
         except (FileNotFoundError, OSError, UnicodeError, ValueError):
             # A partial or corrupt cache is safely regenerated below.
@@ -430,8 +436,47 @@ class SessionStore:
         data = generate()
         inspect_image_bytes(data, ".png")
         atomic_write_bytes(image_path, data)
-        atomic_write_bytes(key_path, cache_key.encode("utf-8"))
+        metadata["images"][filename] = cache_key
+        atomic_write_json(metadata_path, metadata)
         return str(image_path), False
+
+    @staticmethod
+    def _generated_image_metadata(
+        metadata_path: Path,
+        folder_identity: str | None,
+        *,
+        initialize_missing: bool = False,
+    ) -> dict[str, Any]:
+        """Load strict folder cache metadata, optionally initializing a new folder."""
+
+        try:
+            value = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except FileNotFoundError as error:
+            if initialize_missing:
+                return {
+                    "version": GENERATED_IMAGE_CACHE_VERSION,
+                    "folder_identity": folder_identity,
+                    "images": {},
+                }
+            raise ValueError("missing generated image cache metadata") from error
+        except (json.JSONDecodeError, OSError, UnicodeError) as error:
+            raise ValueError("invalid generated image cache metadata") from error
+
+        if (
+            not isinstance(value, dict)
+            or value.get("version") != GENERATED_IMAGE_CACHE_VERSION
+            or value.get("folder_identity") != folder_identity
+            or not isinstance(value.get("images"), dict)
+            or any(
+                not _safe_asset_component(filename)
+                or not filename.lower().endswith(".png")
+                or not isinstance(key, str)
+                or not key
+                for filename, key in value["images"].items()
+            )
+        ):
+            raise ValueError("invalid generated image cache metadata")
+        return value
 
     @staticmethod
     def _generated_image_folder(
@@ -450,18 +495,17 @@ class SessionStore:
             if folder_identity is None or not folder.exists():
                 return folder
             if folder.is_dir():
-                key_paths = list(folder.glob(".*.cache-key"))
-                folder_owned = bool(key_paths)
-                for key_path in key_paths:
-                    try:
-                        existing_key = key_path.read_text(encoding="utf-8")
-                    except (OSError, UnicodeError):
-                        folder_owned = False
-                        break
-                    if not existing_key.startswith(f"{folder_identity};"):
-                        folder_owned = False
-                        break
-                if folder_owned:
+                metadata_path = folder / GENERATED_IMAGE_CACHE_FILENAME
+                try:
+                    metadata = SessionStore._generated_image_metadata(
+                        metadata_path,
+                        folder_identity,
+                    )
+                except ValueError:
+                    # Invalid metadata cannot prove that this caller owns the
+                    # occupied folder, so preserve it and keep searching.
+                    pass
+                else:
                     return folder
             # Unknown and differently owned folders are left untouched.
             index += 1

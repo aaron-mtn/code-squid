@@ -1,3 +1,20 @@
+- 2026-09-25: Consolidated generated PDF page cache state into one versioned
+  JSON `.cache-key` per rendered-image folder. The file records source-folder
+  ownership and per-PNG render-settings keys, preserving lazy page-level render
+  invalidation without redundant per-image metadata. Stable same-stem numbering
+  and human-readable result paths are unchanged. Only valid current-format
+  folder metadata establishes ownership; missing, malformed, wrong-version,
+  and differently owned metadata causes an occupied folder to be skipped.
+  Added focused coverage for the new layout, incremental page reuse,
+  render-setting invalidation, stable same-stem collisions, and strict
+  ownership handling.
+  Verification: all 15 focused PDF tests and all 205 related file-reader,
+  image, PDF, Tool, atomic-write, and session-storage tests passed. The full
+  suite completed with 1,499 passing and the same 54 unrelated prompt/Hook-default/
+  Hook-guidance expectation failures documented by preceding work. Core,
+  application, and test modules compiled; touched imports loaded successfully;
+  and `git diff --check` passed.
+
 - 2026-09-25: Standardized every registered file reader on one immutable
   `FileReadContext` invocation contract. The neutral context module owns the
   two session-storage callback aliases; text, image, and PDF readers now accept
@@ -5,8 +22,8 @@
   lookup followed by `reader(context)`, with no format identities or branches.
   Added a direct regression proving a newly registered callable is invoked
   without dispatcher changes. Public Tool validation, formats, results, PDF
-  rendering/cache behavior, and request-only image handling remain unchanged;
-  `.cache-key` cleanup is still deferred. Verification: all 86 focused
+  rendering/cache behavior, and request-only image handling remain unchanged.
+  Verification: all 86 focused
   registry/text/image/PDF tests and 161 session/executor/result/compaction
   tests passed. The full suite completed with 1,493 passing and the same 54
   unrelated prompt/Hook-default/Hook-guidance expectation failures documented
@@ -22,9 +39,8 @@
   selected-page rendering, stable same-stem folders, and cache behavior moved
   to their format owners without changing public result shapes or provider
   image injection. Tests that exercised private image/PDF implementation seams
-  now patch the owning reader modules. Per-page `.cache-key` cleanup remains
-  intentionally deferred to its separate follow-up patch. Verification: all
-  85 focused text/image/PDF tests and 161 session/executor/result/compaction
+  now patch the owning reader modules. Verification: all 85 focused
+  text/image/PDF tests and 161 session/executor/result/compaction
   tests passed; an additional Hook-integrated sweep passed 195 tests and
   reproduced 29 unrelated existing Hook expectation failures; the full suite
   completed with 1,492 passing and the same 54 unrelated
