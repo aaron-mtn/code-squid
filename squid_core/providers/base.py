@@ -10,6 +10,11 @@ class BaseProvider:
     def supports_streaming(self) -> bool:
         return False
 
+    def supports_image_input(self, model: str) -> bool:
+        """Fail closed unless a transport can verify model vision support."""
+
+        return False
+
     def is_ready(self) -> bool:
         """Return whether the configured backend can currently accept work."""
         raise NotImplementedError
@@ -25,6 +30,7 @@ class BaseProvider:
         tools: list[dict],
         tool_choice=None,
         please_stop_contemplating_the_void: bool = False,
+        asset_loader=None,
     ) -> object:
         raise NotImplementedError
 
@@ -40,5 +46,6 @@ class BaseProvider:
         please_stop_contemplating_the_void: bool = False,
         should_cancel=None,
         on_reasoning_delta=None,
+        asset_loader=None,
     ) -> object:
         raise NotImplementedError

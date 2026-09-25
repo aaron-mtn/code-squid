@@ -52,3 +52,26 @@ def atomic_write_json(path: Path, value: Any) -> None:
             # that explains why the requested write did not complete.
             pass
         raise
+
+
+def atomic_write_bytes(path: Path, data: bytes) -> None:
+    """Write bytes through a flushed same-directory temporary file."""
+
+    file_descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(file_descriptor, "wb") as file:
+            file.write(data)
+            file.flush()
+            os.fsync(file.fileno())
+        _replace_with_permission_retry(temporary_path, path)
+    except BaseException:
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise

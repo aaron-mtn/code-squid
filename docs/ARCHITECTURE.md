@@ -1585,6 +1585,17 @@ per chunk while assembling text, reasoning, and tool-call fragments into the
 same raw response shape used by non-streaming responses before `ModelAdapter`
 normalizes and validates the reply.
 
+Image input uses a request-only Core reference rather than embedding binary
+data in canonical messages. `ModelAdapter` asks the selected provider to prove
+vision support before loading an asset. LM Studio support is derived from its
+model metadata and requires an explicit `capabilities.vision` value; generic
+OpenAI-compatible providers fail closed. At the final transport boundary, the
+LM Studio path converts an image reference to an OpenAI data URL. Native
+Ollama checks `/api/show` for the model's `vision` capability and converts the
+same reference to Ollama's `images` field. Provider trace payloads redact those
+materialized values, while provider failures leave the durable session asset
+available for replay.
+
 The native Ollama provider exists and is experimental. `squid_core/providers/ollama.py`
 uses Ollama `/api/chat`, converts replayed messages into Ollama's expected
 shape, omits `parallel_tool_calls`, and adapts the response back to the
@@ -1909,12 +1920,26 @@ Each session folder contains:
 - `session.jsonl`
 - `model-view.jsonl`
 - `model-transcript.txt`
+- an `assets/` directory after the first successful image read
 
 `metadata.json` stores run-level metadata: session id, timestamps, repo root,
 task, status, and active leaf id. `session.jsonl` stores append-only entries for
 messages, compaction events, run-context events, and model reply diagnostics.
 Message entries include `id`, `parent_id`, `type`, `timestamp`, `message`, and
 optional `usage`.
+
+Session image assets are immutable, content-addressed snapshots named by the
+SHA-256 digest of their exact bytes plus a canonical extension. They are
+written through a flushed same-directory temporary file and atomic replace;
+identical reads deduplicate naturally. `SessionStore` accepts only fixed-format
+asset IDs, verifies the digest on every load, and resolves both the assets
+directory and target below the session directory so traversal and symlink
+escapes fail closed. Canonical Tool results persist only the asset ID and image
+metadata. Base64 transport data is created only immediately before a capable
+provider request and is never written to `session.jsonl`, `model-view.jsonl`,
+or `model-transcript.txt`. Resumed and compacted conversations therefore use
+the original session snapshot even if the workspace file changes; a missing or
+corrupt snapshot produces a clear model-request failure.
 
 Session transcript readers parse non-empty records in append order. If the
 final non-empty line is malformed after a valid JSON prefix, readers treat it
@@ -1975,6 +2000,14 @@ text; successful `write_file` results contain only status and path. Assistant
 Tool calls and their Tool messages retain the original `tool_call_id` pairing.
 Unknown tools retain their canonical serialization because Core cannot infer
 which caller-defined fields are safe to omit.
+
+A successful image `read_file` result remains a normal paired Tool message
+with compact metadata. Once every result from that assistant Tool-call batch
+is present, request rendering appends one synthetic user message containing a
+short image marker and an internal `image_asset` reference. Placing the image
+after the completed sibling batch preserves provider Tool-call/result ordering.
+These synthetic blocks are request-only: compaction, canonical replay, Hooks,
+and storage continue to consume the structured Tool result.
 
 Age-based Tool-result retention follows assistant batch boundaries as well as
 the configured result count. Results from the just-completed assistant Tool
@@ -2108,7 +2141,16 @@ root-level properties.
 `read_file`:
 
 - requires an absolute path
-- reads UTF-8 text
+- reads UTF-8 text for ordinary files
+- recognizes PNG, JPG/JPEG, and WebP by extension, validates the actual Pillow
+  format and dimensions, and snapshots the exact source bytes into the active
+  session before returning success
+- limits image inputs to 32 MiB and 40 million pixels, rejects corrupt images,
+  extension/content mismatches, and `ranges` on images, and returns only a
+  versioned descriptor with asset ID, SHA-256, MIME type, format, dimensions,
+  and byte size
+- requires session-backed snapshot storage for an image read; snapshot failure
+  fails the Tool result without exposing inline binary data
 - describes ranged reads as the default for known relevant source and reserves
   range omission for decisions that genuinely need file-wide context
 - uses an optional `ranges` list for every targeted read; it accepts one to
@@ -2282,6 +2324,9 @@ multiple runs or provides an event bus, daemon, or server.
 
 `squid_core/model_adapter.py` owns provider response normalization and replay message
 shaping. Provider-specific HTTP/API calls stay in `squid_core/providers/`.
+`squid_core/image_content.py` owns the small provider-neutral image validation,
+descriptor, marker, and internal-reference contract. It does not own session
+paths or provider wire formats.
 
 `squid_core/compaction/compactor.py` owns transcript compression mechanics;
 `squid_core/compaction/prompts.py` owns the generic continuation-summary

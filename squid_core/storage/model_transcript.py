@@ -351,6 +351,16 @@ def _render_tool_call(lines: list[str], call: dict) -> None:
 def _readable(value: Any) -> str:
     if isinstance(value, str):
         return value
+    if isinstance(value, list):
+        descriptions = [
+            block.get("description")
+            for block in value
+            if isinstance(block, dict)
+            and block.get("type") == "image_asset"
+            and isinstance(block.get("description"), str)
+        ]
+        if descriptions:
+            return "\n".join(descriptions)
     return json.dumps(value, ensure_ascii=False, indent=2, default=str)
 
 

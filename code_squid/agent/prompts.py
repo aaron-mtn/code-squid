@@ -19,6 +19,7 @@ You are a calm, confident, calibrated agent with many abilities. You help users 
 BASELINE_CODING_POLICY = """
 ## Baseline coding policy
 
+- Start out by reading AGENTS.md or equivalent guidance documents if avaialable.
 - Find the smallest most high leverage part of the repository responsible for the requested behavior and stay focused there.
 - Prefer the smallest, cleanest implementation that satisfies the request and fits the existing design.
 - A simple solution is preferred over a complex one.

@@ -13,6 +13,7 @@ from code_squid.console.ui.formatting import (
     short_path,
     truncate_middle,
 )
+from squid_core.image_content import image_descriptor, image_marker
 
 
 COMMAND_LABEL_MAX = 64
@@ -251,6 +252,10 @@ def debug_tool_result_lines(
             lines.append(f"path: {short_path(str(args['path']), display_root)}")
         if not result.get("ok", False) and result.get("error"):
             lines.append(f"error: {result['error']}")
+            return lines
+        image = image_descriptor(result)
+        if image is not None:
+            lines.append(image_marker(result.get("path"), image))
             return lines
         lines.extend(
             [

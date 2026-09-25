@@ -30,6 +30,7 @@ class ToolExecutor:
         tools: dict | None = None,
         platform_context: PlatformContext | None = None,
         read_file_settings: ReadFileSettings | None = None,
+        snapshot_asset=None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> None:
         self.repo_root = repo_root
@@ -39,6 +40,7 @@ class ToolExecutor:
         self.tools = TOOLS if tools is None else tools
         self.platform_context = platform_context
         self.read_file_settings = read_file_settings or ReadFileSettings()
+        self.snapshot_asset = snapshot_asset
         self.should_cancel = should_cancel or (lambda: False)
         # The executor is constructed per agent run, which bounds candidate lifetime
         # without coupling diagnostic recovery to persisted Session history.
@@ -113,7 +115,11 @@ class ToolExecutor:
             elif tool["execute"] is BUILTIN_APPLY_PATCH:
                 execute_args = {**args, "candidate_store": self.patch_candidates}
             elif tool["execute"] is BUILTIN_READ_FILE:
-                execute_args = {**args, "settings": self.read_file_settings}
+                execute_args = {
+                    **args,
+                    "settings": self.read_file_settings,
+                    "snapshot_asset": self.snapshot_asset,
+                }
 
             result = tool["execute"](self.repo_root, **execute_args)
             if not result.get("ok") and provisional_snapshot_path is not None:

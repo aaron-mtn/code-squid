@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import time
 import uuid
@@ -42,6 +43,26 @@ class OllamaProvider(BaseProvider):
     def supports_streaming(self) -> bool:
         return True
 
+    def supports_image_input(self, model: str) -> bool:
+        """Ask Ollama for the selected model's advertised capabilities."""
+
+        cache = getattr(self, "_image_capability_cache", {})
+        if model in cache:
+            return cache[model]
+        body = json.dumps({"model": model, "verbose": False}).encode("utf-8")
+        http_request = request.Request(
+            f"{self.base_url}/api/show",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with request.urlopen(http_request, timeout=self.request_timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        supported = "vision" in (payload.get("capabilities") or [])
+        cache[model] = supported
+        self._image_capability_cache = cache
+        return supported
+
     def is_ready(self) -> bool:
         """Use Ollama's lightweight model-list request as its readiness probe."""
         try:
@@ -80,10 +101,11 @@ class OllamaProvider(BaseProvider):
         tools: list[dict],
         tool_choice=None,
         please_stop_contemplating_the_void: bool = False,
+        asset_loader=None,
     ) -> object:
         payload = {
             "model": model,
-            "messages": convert_messages(messages),
+            "messages": convert_messages(messages, asset_loader=asset_loader),
             "tools": tools,
             "stream": False,
         }
@@ -109,10 +131,11 @@ class OllamaProvider(BaseProvider):
         please_stop_contemplating_the_void: bool = False,
         should_cancel=None,
         on_reasoning_delta=None,
+        asset_loader=None,
     ) -> object:
         payload = {
             "model": model,
-            "messages": convert_messages(messages),
+            "messages": convert_messages(messages, asset_loader=asset_loader),
             "tools": tools,
             "stream": True,
         }
@@ -143,7 +166,7 @@ class OllamaProvider(BaseProvider):
                 "provider": "ollama",
                 "model": model,
                 "base_url": self.base_url,
-                "payload": payload,
+                "payload": _redacted_trace_payload(payload),
             },
         )
 
@@ -304,7 +327,7 @@ def _native_base_url(base_url: str | None) -> str:
     return normalized
 
 
-def convert_messages(messages: list[dict]) -> list[dict]:
+def convert_messages(messages: list[dict], asset_loader=None) -> list[dict]:
     converted = []
     tool_call_names: dict[str, str] = {}
 
@@ -314,10 +337,13 @@ def convert_messages(messages: list[dict]) -> list[dict]:
             converted.append(_convert_tool_result(message, tool_call_names))
             continue
 
+        content, images = _ollama_content(message.get("content"), asset_loader)
         converted_message = {
             "role": role,
-            "content": message.get("content") or "",
+            "content": content,
         }
+        if images:
+            converted_message["images"] = images
 
         if role == "assistant" and message.get("tool_calls"):
             converted_tool_calls = []
@@ -342,6 +368,38 @@ def convert_messages(messages: list[dict]) -> list[dict]:
         converted.append(converted_message)
 
     return converted
+
+
+def _ollama_content(content, asset_loader) -> tuple[str, list[str]]:
+    """Convert provider-neutral blocks into Ollama text plus image arrays."""
+
+    if not isinstance(content, list):
+        return content or "", []
+    text_parts = []
+    images = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "text" and isinstance(block.get("text"), str):
+            text_parts.append(block["text"])
+        elif block.get("type") == "image_asset":
+            if asset_loader is None:
+                raise RuntimeError("session image asset loader is unavailable")
+            image_bytes = asset_loader(block.get("asset_id"))
+            images.append(base64.b64encode(image_bytes).decode("ascii"))
+    return "\n".join(text_parts), images
+
+
+def _redacted_trace_payload(payload: dict) -> dict:
+    messages = [
+        (
+            {**message, "images": ["[session image data]"] * len(message["images"])}
+            if message.get("images")
+            else message
+        )
+        for message in payload.get("messages", [])
+    ]
+    return {**payload, "messages": messages}
 
 
 def _convert_tool_result(message: dict, tool_call_names: dict[str, str]) -> dict:

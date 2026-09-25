@@ -1,5 +1,6 @@
 """Own disk persistence mechanics for one Squid Core session."""
 
+import hashlib
 import json
 import re
 import secrets
@@ -7,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from squid_core.storage.atomic_json import atomic_write_json
+from squid_core.storage.atomic_json import atomic_write_bytes, atomic_write_json
 from squid_core.storage.model_transcript import (
     TRANSCRIPT_TITLE,
     write_model_transcript,
@@ -41,12 +42,14 @@ class SessionStore:
     # - session.jsonl: append-only transcript entries
     # - model-view.jsonl: the final model-visible representation per request
     # - model-transcript.txt: a readable, deduplicated projection of both logs
+    # - assets/: lazily created immutable image snapshots referenced by Tool results
     def __init__(self, session_dir: Path) -> None:
         self.session_dir = session_dir
         self.metadata_path = session_dir / "metadata.json"
         self.jsonl_path = session_dir / "session.jsonl"
         self.model_view_path = session_dir / "model-view.jsonl"
         self.model_transcript_path = session_dir / "model-transcript.txt"
+        self.assets_dir = session_dir / "assets"
 
     @classmethod
     def create(
@@ -335,6 +338,53 @@ class SessionStore:
     @property
     def session_id(self) -> str:
         return self._read_metadata()["session_id"]
+
+    def snapshot_asset(self, data: bytes, extension: str) -> str:
+        """Store exact immutable bytes once and return their safe session asset ID."""
+
+        if not isinstance(data, bytes):
+            raise TypeError("session asset data must be bytes")
+        if extension not in {".png", ".jpg", ".webp"}:
+            raise ValueError(f"unsupported session asset extension: {extension!r}")
+        digest = hashlib.sha256(data).hexdigest()
+        asset_id = f"{digest}{extension}"
+        asset_path = self._asset_path(asset_id)
+        self.assets_dir.mkdir(parents=True, exist_ok=True)
+        if asset_path.exists():
+            if self.load_asset(asset_id) != data:
+                raise OSError(f"session asset content mismatch: {asset_id}")
+            return asset_id
+        atomic_write_bytes(asset_path, data)
+        return asset_id
+
+    def load_asset(self, asset_id: str) -> bytes:
+        """Load and verify one content-addressed asset without accepting paths."""
+
+        if not isinstance(asset_id, str):
+            raise ValueError(f"invalid session asset ID: {asset_id!r}")
+        match = re.fullmatch(r"([0-9a-f]{64})\.(png|jpg|webp)", asset_id)
+        if match is None:
+            raise ValueError(f"invalid session asset ID: {asset_id!r}")
+        asset_path = self._asset_path(asset_id)
+        try:
+            data = asset_path.read_bytes()
+        except FileNotFoundError as error:
+            raise FileNotFoundError(f"Missing session image asset: {asset_id}") from error
+        if hashlib.sha256(data).hexdigest() != match.group(1):
+            raise OSError(f"Corrupt session image asset: {asset_id}")
+        return data
+
+    def _asset_path(self, asset_id: str) -> Path:
+        """Resolve a fixed-format asset ID below this session, including symlinks."""
+
+        resolved_session = self.session_dir.resolve()
+        resolved_assets = self.assets_dir.resolve()
+        if not resolved_assets.is_relative_to(resolved_session):
+            raise ValueError("session asset directory escapes the session directory")
+        asset_path = (resolved_assets / asset_id).resolve()
+        if not asset_path.is_relative_to(resolved_assets):
+            raise ValueError(f"session asset path escapes asset directory: {asset_id!r}")
+        return asset_path
 
     # Return the next linear entry number for session.jsonl.
     #

@@ -12,6 +12,11 @@ from copy import deepcopy
 from typing import Callable
 
 from squid_core.hooks.runner import ReadResultTrimmedContext
+from squid_core.image_content import (
+    image_descriptor,
+    image_marker,
+    image_reference_block,
+)
 from squid_core.settings import ToolResultTrimmingSettings
 
 
@@ -46,10 +51,12 @@ def render_messages_for_model(
     old_indexes = set(tool_indexes[:old_count]) - first_exposure_indexes
 
     tool_names = _tool_names_by_call_id(messages)
+    image_injections = _image_injections(messages)
     rendered = []
     for index, message in enumerate(messages):
         if message.get("role") != "tool":
             rendered.append(message)
+            rendered.extend(image_injections.get(index, ()))
             continue
 
         rendered.append(
@@ -61,7 +68,63 @@ def render_messages_for_model(
                 is_recent=index not in old_indexes,
             )
         )
+        rendered.extend(image_injections.get(index, ()))
     return rendered
+
+
+def _image_injections(messages: list[dict]) -> dict[int, list[dict]]:
+    """Place image messages after every complete sibling Tool-result batch."""
+
+    injections: dict[int, list[dict]] = {}
+    for assistant_index, message in enumerate(messages):
+        if message.get("role") != "assistant":
+            continue
+        calls = message.get("tool_calls")
+        if not isinstance(calls, list) or not calls:
+            continue
+        call_ids = [call.get("id") for call in calls if isinstance(call, dict)]
+        if len(call_ids) != len(calls) or any(
+            not isinstance(item, str) for item in call_ids
+        ):
+            continue
+
+        results: dict[str, tuple[int, dict]] = {}
+        for index in range(assistant_index + 1, len(messages)):
+            candidate = messages[index]
+            if candidate.get("role") == "assistant":
+                break
+            call_id = candidate.get("tool_call_id")
+            if candidate.get("role") != "tool" or call_id not in call_ids:
+                continue
+            content = candidate.get("content")
+            if not isinstance(content, str):
+                continue
+            try:
+                result = json.loads(content)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(result, dict):
+                results[call_id] = (index, result)
+
+        if set(results) != set(call_ids):
+            continue
+        blocks = []
+        for call_id in call_ids:
+            result = results[call_id][1]
+            reference = image_reference_block(result)
+            if reference is not None:
+                blocks.extend(
+                    (
+                        {"type": "text", "text": reference["description"]},
+                        reference,
+                    )
+                )
+        if blocks:
+            final_result_index = max(index for index, _result in results.values())
+            injections.setdefault(final_result_index, []).append(
+                {"role": "user", "content": blocks}
+            )
+    return injections
 
 
 def _latest_completed_tool_batch_indexes(messages: list[dict]) -> set[int]:
@@ -251,6 +314,16 @@ def _format_read_result(
     path = _text(result.get("path"), "(unknown)")
     if result.get("ok") is not True:
         return _format_simple_failure("READ_FILE", result, path=path)
+
+    image = image_descriptor(source_result)
+    if image is not None:
+        return "\n".join(
+            (
+                "READ_FILE IMAGE OK",
+                f"path: {path}",
+                image_marker(source_result.get("path"), image),
+            )
+        )
 
     returned_ranges = _read_ranges(source_result)
     if result.get("already_covered") is True:

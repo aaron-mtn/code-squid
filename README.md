@@ -316,6 +316,16 @@ Requests smaller than 150 lines include balanced surrounding context where the
 file has enough lines. Normalized overlapping or adjacent regions merge, and
 their combined source coverage must remain within the same 1,000-line budget.
 
+`read_file` also accepts PNG, JPG/JPEG, and WebP images. It validates the image,
+stores an immutable content-addressed copy under the current session, and sends
+that copy only to a provider/model that explicitly reports vision support.
+Images are limited to 32 MiB and 40 million pixels, and image reads do not
+accept text line ranges. Current vision transports are LM Studio (when model
+metadata declares vision capability) and native Ollama (when `/api/show`
+declares `vision`); other OpenAI-compatible providers fail closed. Session logs
+and transcripts store only compact image metadata, never inline base64 data.
+PDFs and other image/media formats are not supported yet.
+
 `run_command` runs a shell command from the current/configured repo root by
 default. It uses the local shell, has a timeout, and can mutate files or perform
 other local side effects. The required boolean `verification` records the

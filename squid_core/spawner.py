@@ -276,6 +276,9 @@ def build_agent_loop(
             tool_call_content_mode=tool_call_content_mode(settings.provider),
             provider_name=settings.provider.provider,
         )
+    set_asset_loader = getattr(model_adapter, "set_asset_loader", None)
+    if callable(set_asset_loader):
+        set_asset_loader(session_store.load_asset)
     if compactor is None:
         compactor = Compactor(
             settings.compaction,
@@ -292,6 +295,7 @@ def build_agent_loop(
             tools={} if tools is None else tools,
             platform_context=platform_context,
             read_file_settings=settings.read_file,
+            snapshot_asset=session_store.snapshot_asset,
             should_cancel=should_cancel,
         )
     if tool_results is None:

@@ -24,6 +24,19 @@ _SECRET_PATTERNS = (
 )
 
 
+def _request_has_image_assets(request: dict) -> bool:
+    """Return whether a prepared request contains a request-only image reference."""
+
+    for message in request.get("messages", []):
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, list) and any(
+            isinstance(block, dict) and block.get("type") == "image_asset"
+            for block in content
+        ):
+            return True
+    return False
+
+
 class ModelRequestError(RuntimeError):
     """Raised when provider transport or response handling fails."""
 
@@ -263,6 +276,12 @@ class ModelAdapter:
             None,
         )
         self._request_observer = request_observer
+        self._asset_loader = None
+
+    def set_asset_loader(self, loader: Callable[[str], bytes] | None) -> None:
+        """Set the session-scoped loader used only for provider image transport."""
+
+        self._asset_loader = loader
 
     def set_request_observer(
         self,
@@ -297,6 +316,16 @@ class ModelAdapter:
                 if streaming
                 else self.provider.create_response
             )
+            if _request_has_image_assets(request):
+                supports_images = getattr(self.provider, "supports_image_input", None)
+                if not callable(supports_images) or not supports_images(request["model"]):
+                    raise RuntimeError(
+                        f"Provider/model {self.provider_name}/{request['model']} does not "
+                        "support image input"
+                    )
+                if self._asset_loader is None:
+                    raise RuntimeError("session image asset loader is unavailable")
+                transport_options["asset_loader"] = self._asset_loader
             return transport(**request, **transport_options)
         except StreamCancelled:
             # Cooperative cancellation is loop control, not a provider failure.

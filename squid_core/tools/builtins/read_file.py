@@ -1,8 +1,16 @@
 """Owns the read_file tool schema and file-reading behavior; must not own agent policy, loop control, or message formatting."""
 
+import hashlib
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
+from squid_core.image_content import (
+    MAX_IMAGE_BYTES,
+    SUPPORTED_IMAGE_SUFFIXES,
+    UNSUPPORTED_IMAGE_SUFFIXES,
+    ImageValidationError,
+    inspect_image_bytes,
+)
 from squid_core.settings import ReadFileSettings
 
 TOOL_NAME = "read_file"
@@ -17,7 +25,9 @@ def tool_definition() -> dict:
         "function": {
             "name": TOOL_NAME,
             "description": (
-                "Read a UTF-8 file at an absolute path. Use ranges for one or several "
+                "Read a UTF-8 text file or supported PNG, JPG/JPEG, or WebP image at "
+                "an absolute path. Image reads do not accept ranges. Use ranges for "
+                "one or several "
                 "known relevant 1-based inclusive regions of the same file, combining "
                 "regions needed for the same decision. Omit ranges only when file-wide "
                 "context is needed; full-file reads return at most "
@@ -64,6 +74,7 @@ def execute(
     ranges: list[dict[str, int]] | None = None,
     *,
     settings: ReadFileSettings = DEFAULT_SETTINGS,
+    snapshot_asset: Callable[[bytes, str], str] | None = None,
 ) -> dict:
     file_path = Path(path)
     if not file_path.is_absolute():
@@ -81,6 +92,16 @@ def execute(
             "tool": TOOL_NAME,
             "path": path,
             "error": range_error,
+        }
+
+    if file_path.suffix.lower() in SUPPORTED_IMAGE_SUFFIXES:
+        return _read_image(file_path, path, ranges, snapshot_asset)
+    if file_path.suffix.lower() in UNSUPPORTED_IMAGE_SUFFIXES:
+        return {
+            "ok": False,
+            "tool": TOOL_NAME,
+            "path": path,
+            "error": f"unsupported image extension: {file_path.suffix.lower()}",
         }
 
     content = file_path.read_text(encoding="utf-8")
@@ -140,6 +161,80 @@ def execute(
             "ranges to inspect the missing relevant section."
         )
     return result
+
+
+def _read_image(
+    file_path: Path,
+    path: str,
+    ranges: list[dict[str, int]] | None,
+    snapshot_asset: Callable[[bytes, str], str] | None,
+) -> dict:
+    """Validate and snapshot an image while preserving its exact source bytes."""
+
+    if ranges is not None:
+        return {
+            "ok": False,
+            "tool": TOOL_NAME,
+            "path": path,
+            "error": "line ranges are not supported for image files",
+        }
+    if snapshot_asset is None:
+        return {
+            "ok": False,
+            "tool": TOOL_NAME,
+            "path": path,
+            "error": "image reads require active session asset storage",
+        }
+
+    try:
+        size_bytes = file_path.stat().st_size
+        if size_bytes > MAX_IMAGE_BYTES:
+            raise ImageValidationError(
+                f"image is {size_bytes} bytes; maximum supported size is "
+                f"{MAX_IMAGE_BYTES} bytes"
+            )
+        data = file_path.read_bytes()
+        metadata = inspect_image_bytes(data, file_path.suffix)
+    except (ImageValidationError, OSError) as error:
+        return {
+            "ok": False,
+            "tool": TOOL_NAME,
+            "path": path,
+            "error": str(error),
+        }
+
+    digest = hashlib.sha256(data).hexdigest()
+    try:
+        asset_id = snapshot_asset(data, metadata["canonical_extension"])
+        expected_asset_id = f"{digest}{metadata['canonical_extension']}"
+        if asset_id != expected_asset_id:
+            raise OSError(
+                "session asset storage returned an unexpected content identifier"
+            )
+    except Exception as error:
+        return {
+            "ok": False,
+            "tool": TOOL_NAME,
+            "path": path,
+            "error": f"could not snapshot image into the session: {error}",
+        }
+
+    return {
+        "ok": True,
+        "tool": TOOL_NAME,
+        "path": path,
+        "media_type": "image",
+        "image": {
+            "version": 1,
+            "asset_id": asset_id,
+            "sha256": digest,
+            "mime_type": metadata["mime_type"],
+            "format": metadata["format"],
+            "width": metadata["width"],
+            "height": metadata["height"],
+            "size_bytes": metadata["size_bytes"],
+        },
+    }
 
 
 def _read_ranges(

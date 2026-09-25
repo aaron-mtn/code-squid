@@ -2,6 +2,7 @@
 
 """OpenAI-compatible chat-completions provider transport."""
 
+import base64
 import json
 import time
 from types import SimpleNamespace
@@ -45,6 +46,33 @@ class OpenAICompatibleProvider(BaseProvider):
 
     def supports_streaming(self) -> bool:
         return True
+
+    def supports_image_input(self, model: str) -> bool:
+        """Use LM Studio's advertised capability and fail closed elsewhere."""
+
+        if self.provider_name != "lm_studio":
+            return False
+        cache = getattr(self, "_image_capability_cache", {})
+        if model in cache:
+            return cache[model]
+        supported = False
+        for candidate in self._lm_studio_models():
+            instance_ids = [
+                instance.get("id")
+                for instance in candidate.get("loaded_instances", [])
+                if isinstance(instance, dict)
+            ]
+            if model != candidate.get("key") and model not in instance_ids:
+                continue
+            capabilities = candidate.get("capabilities")
+            supported = (
+                isinstance(capabilities, dict)
+                and capabilities.get("vision") is True
+            )
+            break
+        cache[model] = supported
+        self._image_capability_cache = cache
+        return supported
 
     def is_ready(self) -> bool:
         """Probe the backend using the most useful provider-native contract."""
@@ -113,6 +141,7 @@ class OpenAICompatibleProvider(BaseProvider):
         tools: list[dict],
         tool_choice=None,
         please_stop_contemplating_the_void: bool = False,
+        asset_loader=None,
     ) -> object:
         payload = self._payload(
             model=model,
@@ -120,6 +149,7 @@ class OpenAICompatibleProvider(BaseProvider):
             tools=tools,
             tool_choice=tool_choice,
             please_stop_contemplating_the_void=please_stop_contemplating_the_void,
+            asset_loader=asset_loader,
         )
 
         return self._inference_client().chat.completions.create(**payload)
@@ -136,6 +166,7 @@ class OpenAICompatibleProvider(BaseProvider):
         please_stop_contemplating_the_void: bool = False,
         should_cancel=None,
         on_reasoning_delta=None,
+        asset_loader=None,
     ) -> object:
         payload = self._payload(
             model=model,
@@ -143,6 +174,7 @@ class OpenAICompatibleProvider(BaseProvider):
             tools=tools,
             tool_choice=tool_choice,
             please_stop_contemplating_the_void=please_stop_contemplating_the_void,
+            asset_loader=asset_loader,
         )
         payload["stream"] = True
 
@@ -175,7 +207,7 @@ class OpenAICompatibleProvider(BaseProvider):
                 ),
                 "model": model,
                 "base_url": getattr(self, "base_url", None),
-                "payload": payload,
+                "payload": _redacted_trace_payload(payload),
             },
         )
 
@@ -335,10 +367,11 @@ class OpenAICompatibleProvider(BaseProvider):
         tools: list[dict],
         tool_choice=None,
         please_stop_contemplating_the_void: bool = False,
+        asset_loader=None,
     ) -> dict:
         payload = {
             "model": model,
-            "messages": messages,
+            "messages": _messages_with_image_data(messages, asset_loader),
             "tools": tools,
         }
         if self.temperature is not None:
@@ -490,4 +523,58 @@ def _unique_ids(values) -> list[str]:
             seen.add(value)
             model_ids.append(value)
     return model_ids
+
+
+def _messages_with_image_data(messages: list[dict], asset_loader) -> list[dict]:
+    """Materialize internal image references only at the transport boundary."""
+
+    converted = []
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            converted.append(message)
+            continue
+        parts = []
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "image_asset":
+                parts.append(block)
+                continue
+            if asset_loader is None:
+                raise RuntimeError("session image asset loader is unavailable")
+            data = asset_loader(block.get("asset_id"))
+            encoded = base64.b64encode(data).decode("ascii")
+            parts.append(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{block.get('mime_type')};base64,{encoded}",
+                    },
+                }
+            )
+        converted.append({**message, "content": parts})
+    return converted
+
+
+def _redacted_trace_payload(payload: dict) -> dict:
+    """Keep trace diagnostics useful without retaining ephemeral image data."""
+
+    messages = []
+    for message in payload.get("messages", []):
+        content = message.get("content")
+        if not isinstance(content, list):
+            messages.append(message)
+            continue
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "image_url":
+                parts.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "[session image data]"},
+                    }
+                )
+            else:
+                parts.append(block)
+        messages.append({**message, "content": parts})
+    return {**payload, "messages": messages}
 

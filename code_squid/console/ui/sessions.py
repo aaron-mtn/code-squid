@@ -5,12 +5,14 @@ from pathlib import Path
 
 from code_squid.app_paths import workspace_sessions_dir
 from code_squid.console.ui.formatting import SQUID_GLYPH
+from squid_core.image_content import image_descriptor, image_marker
 from squid_core.storage.session_index import (
     latest_session_id,
     list_sessions,
     load_session_entries,
     session_dir_for,
 )
+
 
 def print_sessions(repo_root: Path) -> None:
     """Print a compact index of saved sessions."""
@@ -71,7 +73,17 @@ def print_session(repo_root: Path, session_id: str) -> bool:
 
         print()
         print(f"[{message.get('role', '')}]")
-        print(message.get("content", ""))
+        content = message.get("content", "")
+        if message.get("role") == "tool" and isinstance(content, str):
+            try:
+                result = json.loads(content)
+            except json.JSONDecodeError:
+                result = None
+            image = image_descriptor(result)
+            if image is not None:
+                print(image_marker(result.get("path"), image))
+                continue
+        print(content)
 
     return True
 

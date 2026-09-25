@@ -1,3 +1,24 @@
+- 2026-09-25: Added focused image support to the existing `read_file` Tool for
+  PNG, JPG/JPEG, and WebP. Core validates format, dimensions, a 32 MiB byte
+  limit, and a 40-million-pixel limit with Pillow, then atomically snapshots
+  exact bytes as a content-addressed per-session asset before returning a
+  versioned descriptor. Model request rendering preserves Tool-call/result
+  pairing and injects a request-only asset reference after its complete sibling
+  batch. LM Studio requires explicit vision metadata and native Ollama requires
+  `/api/show` vision capability; other OpenAI-compatible transports fail
+  closed. Base64 exists only at the provider payload boundary and is redacted
+  from trace payloads, canonical JSONL, model-view logs, and the readable
+  transcript. Resume and post-compaction replay load the immutable session
+  snapshot, while missing or corrupt assets fail clearly. Text reads, workspace
+  checks, Hooks, and Tool accounting retain their existing behavior. Focused
+  image coverage passed 20 tests; the broader read/provider/session/transcript/
+  compaction suite passed 339 tests. Production and test packages compiled,
+  affected imports succeeded, and `git diff --check` passed. The full suite
+  completed with 1,483 passing and the same 54 unrelated existing prompt/
+  Hook-default/Hook-guidance expectation failures documented by preceding
+  work. The configured LM Studio server was reachable, but its only loaded
+  model reported no vision capability, so no live visual inference was run.
+
 - 2026-09-24: Completed live provider-reasoning presentation. The built-in
   OpenAI-compatible and Ollama streaming transports now forward the first
   populated `reasoning`, `reasoning_content`, or `thinking` chunk through an
