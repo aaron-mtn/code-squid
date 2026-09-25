@@ -296,6 +296,7 @@ def build_agent_loop(
             platform_context=platform_context,
             read_file_settings=settings.read_file,
             snapshot_asset=session_store.snapshot_asset,
+            ensure_generated_image=session_store.ensure_generated_image,
             should_cancel=should_cancel,
         )
     if tool_results is None:

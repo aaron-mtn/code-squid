@@ -31,6 +31,7 @@ class ToolExecutor:
         platform_context: PlatformContext | None = None,
         read_file_settings: ReadFileSettings | None = None,
         snapshot_asset=None,
+        ensure_generated_image=None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> None:
         self.repo_root = repo_root
@@ -41,6 +42,7 @@ class ToolExecutor:
         self.platform_context = platform_context
         self.read_file_settings = read_file_settings or ReadFileSettings()
         self.snapshot_asset = snapshot_asset
+        self.ensure_generated_image = ensure_generated_image
         self.should_cancel = should_cancel or (lambda: False)
         # The executor is constructed per agent run, which bounds candidate lifetime
         # without coupling diagnostic recovery to persisted Session history.
@@ -119,6 +121,7 @@ class ToolExecutor:
                     **args,
                     "settings": self.read_file_settings,
                     "snapshot_asset": self.snapshot_asset,
+                    "ensure_generated_image": self.ensure_generated_image,
                 }
 
             result = tool["execute"](self.repo_root, **execute_args)

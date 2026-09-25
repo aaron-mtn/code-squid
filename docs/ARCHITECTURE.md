@@ -1850,6 +1850,12 @@ verification output is omitted. Failure output is retained verbatim when short,
 or as a fixed-size raw head and tail separated by an omission marker when long;
 the provider does not parse or rank failure lines.
 
+Successful PDF `read_file` results in that canonical prefix also contribute a
+deduplicated list of source-page-to-rendered-PNG paths. This is runtime-generated
+compaction context, not model-authored summary memory: every compaction derives
+it again from persisted canonical Tool results. Only paths and page numbers are
+carried forward; image bytes and base64 are never placed in compaction context.
+
 `AgentLoop` supplies one callback that persists each lifecycle event through
 `SessionStore.append_compaction_event(...)` when storage is wired in, publishes
 the authoritative start event through the loop's existing observer seam, and
@@ -1920,7 +1926,7 @@ Each session folder contains:
 - `session.jsonl`
 - `model-view.jsonl`
 - `model-transcript.txt`
-- an `assets/` directory after the first successful image read
+- an `assets/` directory after the first successful image or PDF read
 
 `metadata.json` stores run-level metadata: session id, timestamps, repo root,
 task, status, and active leaf id. `session.jsonl` stores append-only entries for
@@ -1940,6 +1946,20 @@ provider request and is never written to `session.jsonl`, `model-view.jsonl`,
 or `model-transcript.txt`. Resumed and compacted conversations therefore use
 the original session snapshot even if the workspace file changes; a missing or
 corrupt snapshot produces a clear model-request failure.
+
+PDF page renders share that session asset root but use stable, model-readable
+paths rather than provider-facing asset IDs. `SessionStore.ensure_generated_image`
+contains each named PNG below `assets/<PDF stem> rendered images/`, validates it
+through the same image safety code, writes it atomically, and persists a small
+cache key beside it. If distinct PDFs have the same stem, the first keeps that
+folder and later documents use stable `... rendered images 2`, `... 3`, and
+subsequent numbered folders. The PDF digest prefix in existing page cache keys
+identifies folder ownership, so resumed reads reuse the same folder and no
+existing folder is renamed or moved. The full key also includes page number and
+render settings, so resume can reuse an unchanged page without rendering it
+again. A later ordinary `read_file` of the named PNG snapshots its exact bytes
+through the existing content-addressed image path before request-only provider
+injection; PDF reads themselves never inject images.
 
 Session transcript readers parse non-empty records in append order. If the
 final non-empty line is malformed after a valid JSON prefix, readers treat it
@@ -1994,6 +2014,9 @@ four built-ins are shown to the model as compact text. `read_file` source is
 emitted as ordinary multiline text under per-region path and exact-line
 headers; every disjoint or trimmed gap has an explicit omitted interval.
 Repeated-read partial and skipped results use the same notation.
+PDF results use a separate page-oriented rendering that exposes selected-page
+metadata, extracted text, and each durable rendered PNG path without pretending
+PDF pages are text line ranges or injecting the PNGs into the current request.
 `run_command` exposes command, exit status, concise failure metadata, and an
 output block; `apply_patch` keeps recovery IDs, ranges, and current candidate
 text; successful `write_file` results contain only status and path. Assistant
@@ -2127,7 +2150,7 @@ session workflow in the current MVP.
 
 The protected built-in Tool surface is:
 
-- `read_file(path, ranges=None)`
+- `read_file(path, ranges=None, pages=None)`
 - `write_file(path, content)`
 - `apply_patch(path, old_text, new_text)` or candidate selection with `match_id`
 - `run_command(command, verification)`
@@ -2142,6 +2165,20 @@ root-level properties.
 
 - requires an absolute path
 - reads UTF-8 text for ordinary files
+- detects `.pdf` before text decoding and uses PyMuPDF for both text extraction
+  and page rendering
+- accepts a PDF-only `pages` list containing one to eight inclusive
+  `start_page`/`end_page` ranges, merges overlaps, and permits at most 20
+  selected pages per call; omission selects the whole document only through
+  that same 20-page ceiling
+- returns extracted text with an explicit marker for every selected page and
+  reports every rendered PNG's absolute path; pages without extractable text
+  retain a clear placeholder and remain inspectable through their PNG
+- renders only selected pages at up to 2x scale, reducing scale when needed to
+  stay within 40 million pixels, and limits source PDFs to 64 MiB
+- stores pages below the active session as
+  `assets/<PDF stem> rendered images/page-<number>.png`; deterministic cache
+  keys reuse valid persisted pages across later reads and resumed runs
 - recognizes PNG, JPG/JPEG, and WebP by extension, validates the actual Pillow
   format and dimensions, and snapshots the exact source bytes into the active
   session before returning success

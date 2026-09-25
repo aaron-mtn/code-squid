@@ -315,6 +315,9 @@ def _format_read_result(
     if result.get("ok") is not True:
         return _format_simple_failure("READ_FILE", result, path=path)
 
+    if source_result.get("media_type") == "pdf":
+        return _format_pdf_result(result, source_result, path)
+
     image = image_descriptor(source_result)
     if image is not None:
         return "\n".join(
@@ -378,6 +381,48 @@ def _format_read_result(
 
     if not source_regions and was_trimmed:
         lines.extend(("", "<<< CODE SQUID SOURCE OMITTED FROM OLDER RESULT >>>"))
+    return "\n".join(lines).rstrip()
+
+
+def _format_pdf_result(result: dict, source_result: dict, path: str) -> str:
+    """Expose PDF text and durable page-image paths without injecting images."""
+
+    lines = ["READ_FILE PDF OK", f"path: {path}"]
+    _append_scalar(lines, "total_pages", source_result.get("total_pages"))
+    page_ranges = source_result.get("returned_page_ranges")
+    if isinstance(page_ranges, list):
+        rendered_ranges = []
+        for item in page_ranges:
+            if not isinstance(item, dict):
+                continue
+            start = item.get("start_page")
+            end = item.get("end_page")
+            if _valid_line_range(start, end):
+                rendered_ranges.append(
+                    str(start) if start == end else f"{start}-{end}"
+                )
+        if rendered_ranges:
+            lines.append(f"pages: {', '.join(rendered_ranges)}")
+
+    for item in source_result.get("rendered_pages") or []:
+        if not isinstance(item, dict):
+            continue
+        page = item.get("page")
+        image_path = item.get("path")
+        if (
+            isinstance(page, int)
+            and not isinstance(page, bool)
+            and page > 0
+            and isinstance(image_path, str)
+            and image_path
+        ):
+            lines.append(f"rendered_page_{page}: {image_path}")
+
+    if result.get("model_content_truncated") is True:
+        lines.append("truncated: yes")
+    content = result.get("content")
+    if isinstance(content, str) and content:
+        lines.extend(("", "<<< PDF TEXT >>>", content))
     return "\n".join(lines).rstrip()
 
 

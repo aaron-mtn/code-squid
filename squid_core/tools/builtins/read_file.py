@@ -1,6 +1,7 @@
 """Owns the read_file tool schema and file-reading behavior; must not own agent policy, loop control, or message formatting."""
 
 import hashlib
+import math
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -16,6 +17,16 @@ from squid_core.settings import ReadFileSettings
 TOOL_NAME = "read_file"
 DEFAULT_SETTINGS = ReadFileSettings()
 MAX_REQUESTED_RANGES = 8
+MAX_REQUESTED_PAGE_RANGES = 8
+MAX_PDF_BYTES = 64 * 1024 * 1024
+MAX_PDF_PAGES_PER_READ = 20
+MAX_PDF_RENDER_PIXELS = 40_000_000
+PDF_RENDER_SCALE = 2.0
+
+GeneratedImageStore = Callable[
+    [str, str, str, Callable[[], bytes], str | None],
+    tuple[str, bool],
+]
 
 
 # Return the tool definition shown to the model.
@@ -25,8 +36,10 @@ def tool_definition() -> dict:
         "function": {
             "name": TOOL_NAME,
             "description": (
-                "Read a UTF-8 text file or supported PNG, JPG/JPEG, or WebP image at "
-                "an absolute path. Image reads do not accept ranges. Use ranges for "
+                "Read a UTF-8 text file, PDF, or supported PNG, JPG/JPEG, or WebP "
+                "image at an absolute path. For PDFs, use pages for 1-based inclusive "
+                "page ranges; the selected pages are text-extracted and lazily rendered "
+                "to session PNG files. Image reads do not accept ranges. Use ranges for "
                 "one or several "
                 "known relevant 1-based inclusive regions of the same file, combining "
                 "regions needed for the same decision. Omit ranges only when file-wide "
@@ -59,6 +72,25 @@ def tool_definition() -> dict:
                         "minItems": 1,
                         "maxItems": MAX_REQUESTED_RANGES,
                     },
+                    "pages": {
+                        "type": "array",
+                        "description": (
+                            "Optional targeted 1-based inclusive PDF page ranges. "
+                            "Valid only for PDF files; omit to read all pages when the "
+                            f"document has at most {MAX_PDF_PAGES_PER_READ} pages."
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "start_page": {"type": "integer"},
+                                "end_page": {"type": "integer"},
+                            },
+                            "required": ["start_page", "end_page"],
+                            "additionalProperties": False,
+                        },
+                        "minItems": 1,
+                        "maxItems": MAX_REQUESTED_PAGE_RANGES,
+                    },
                 },
                 "required": ["path"],
                 "additionalProperties": False,
@@ -72,9 +104,11 @@ def execute(
     _repo_root: Path,
     path: str,
     ranges: list[dict[str, int]] | None = None,
+    pages: list[dict[str, int]] | None = None,
     *,
     settings: ReadFileSettings = DEFAULT_SETTINGS,
     snapshot_asset: Callable[[bytes, str], str] | None = None,
+    ensure_generated_image: GeneratedImageStore | None = None,
 ) -> dict:
     file_path = Path(path)
     if not file_path.is_absolute():
@@ -94,9 +128,28 @@ def execute(
             "error": range_error,
         }
 
-    if file_path.suffix.lower() in SUPPORTED_IMAGE_SUFFIXES:
+    page_error = _validate_page_ranges(pages)
+    if page_error is not None:
+        return {
+            "ok": False,
+            "tool": TOOL_NAME,
+            "path": path,
+            "error": page_error,
+        }
+
+    suffix = file_path.suffix.lower()
+    if suffix == ".pdf":
+        return _read_pdf(file_path, path, ranges, pages, ensure_generated_image)
+    if pages is not None:
+        return {
+            "ok": False,
+            "tool": TOOL_NAME,
+            "path": path,
+            "error": "page ranges are supported only for PDF files",
+        }
+    if suffix in SUPPORTED_IMAGE_SUFFIXES:
         return _read_image(file_path, path, ranges, snapshot_asset)
-    if file_path.suffix.lower() in UNSUPPORTED_IMAGE_SUFFIXES:
+    if suffix in UNSUPPORTED_IMAGE_SUFFIXES:
         return {
             "ok": False,
             "tool": TOOL_NAME,
@@ -161,6 +214,168 @@ def execute(
             "ranges to inspect the missing relevant section."
         )
     return result
+
+
+def _read_pdf(
+    file_path: Path,
+    path: str,
+    ranges: list[dict[str, int]] | None,
+    pages: list[dict[str, int]] | None,
+    ensure_generated_image: GeneratedImageStore | None,
+) -> dict:
+    """Extract and lazily render only the selected pages of one PDF."""
+
+    if ranges is not None:
+        return _pdf_error(path, "line ranges are not supported for PDF files; use pages")
+    if ensure_generated_image is None:
+        return _pdf_error(path, "PDF reads require active session asset storage")
+
+    try:
+        size_bytes = file_path.stat().st_size
+        if size_bytes > MAX_PDF_BYTES:
+            return _pdf_error(
+                path,
+                f"PDF is {size_bytes} bytes; maximum supported size is {MAX_PDF_BYTES} bytes",
+            )
+        pdf_data = file_path.read_bytes()
+        if len(pdf_data) > MAX_PDF_BYTES:
+            return _pdf_error(
+                path,
+                f"PDF is {len(pdf_data)} bytes; maximum supported size is "
+                f"{MAX_PDF_BYTES} bytes",
+            )
+        import pymupdf
+
+        document = pymupdf.open(stream=pdf_data, filetype="pdf")
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
+        return _pdf_error(path, f"invalid or unreadable PDF: {error}")
+
+    try:
+        if document.needs_pass:
+            return _pdf_error(path, "encrypted PDFs are not supported")
+        total_pages = document.page_count
+        selected_ranges, selection_error = _selected_pdf_ranges(pages, total_pages)
+        if selection_error is not None:
+            return _pdf_error(path, selection_error)
+
+        source_digest = hashlib.sha256(pdf_data).hexdigest()
+        folder_name = f"{file_path.stem} rendered images"
+        folder_identity = f"pdf-sha256={source_digest}"
+        rendered_pages = []
+        text_parts = []
+        for start_page, end_page in selected_ranges:
+            for page_number in range(start_page, end_page + 1):
+                page = document.load_page(page_number - 1)
+                extracted = page.get_text("text")
+                text_parts.append(f"<<< PDF PAGE {page_number} >>>\n")
+                text_parts.append(
+                    extracted if extracted.strip() else "[no extractable text on this page]\n"
+                )
+                if extracted and not extracted.endswith("\n"):
+                    text_parts.append("\n")
+
+                filename = f"page-{page_number}.png"
+                cache_key = (
+                    f"pdf-sha256={source_digest};page={page_number};"
+                    f"renderer={pymupdf.VersionBind};scale={PDF_RENDER_SCALE};"
+                    f"max-pixels={MAX_PDF_RENDER_PIXELS}"
+                )
+                rendered_path, reused = ensure_generated_image(
+                    folder_name,
+                    filename,
+                    cache_key,
+                    lambda page=page: _render_pdf_page(page, pymupdf),
+                    folder_identity,
+                )
+                rendered_pages.append(
+                    {
+                        "page": page_number,
+                        "path": rendered_path,
+                        "reused": reused,
+                    }
+                )
+    except (OSError, RuntimeError, ValueError) as error:
+        return _pdf_error(path, f"could not read or render PDF: {error}")
+    finally:
+        document.close()
+
+    content = "".join(text_parts)
+    return {
+        "ok": True,
+        "tool": TOOL_NAME,
+        "path": path,
+        "media_type": "pdf",
+        "content": content,
+        "content_truncated": False,
+        "content_original_chars": len(content),
+        "content_returned_chars": len(content),
+        "total_pages": total_pages,
+        "returned_page_ranges": [
+            {"start_page": start, "end_page": end}
+            for start, end in selected_ranges
+        ],
+        "rendered_pages": rendered_pages,
+    }
+
+
+def _render_pdf_page(page, pymupdf_module) -> bytes:
+    """Render a PDF page within the same pixel ceiling used for image ingest."""
+
+    page_pixels = page.rect.width * page.rect.height
+    if page_pixels <= 0:
+        raise ValueError("PDF page dimensions must be positive")
+    scale = min(
+        PDF_RENDER_SCALE,
+        math.sqrt(MAX_PDF_RENDER_PIXELS / page_pixels),
+    )
+    pixmap = page.get_pixmap(
+        matrix=pymupdf_module.Matrix(scale, scale),
+        alpha=False,
+    )
+    if pixmap.width * pixmap.height > MAX_PDF_RENDER_PIXELS:
+        raise ValueError(
+            "rendered PDF page exceeds the maximum supported pixel count"
+        )
+    return pixmap.tobytes("png")
+
+
+def _selected_pdf_ranges(
+    requested: list[dict[str, int]] | None,
+    total_pages: int,
+) -> tuple[list[tuple[int, int]], str | None]:
+    """Normalize PDF page selection without applying text-line expansion rules."""
+
+    if total_pages < 1:
+        return [], "PDF contains no pages"
+    if requested is None:
+        if total_pages > MAX_PDF_PAGES_PER_READ:
+            return [], (
+                f"PDF has {total_pages} pages; request pages explicitly with at most "
+                f"{MAX_PDF_PAGES_PER_READ} pages per read"
+            )
+        return [(1, total_pages)], None
+
+    normalized = []
+    for item in requested:
+        if item["start_page"] > total_pages:
+            return [], (
+                f"start_page {item['start_page']} exceeds PDF page count {total_pages}"
+            )
+        normalized.append(
+            (item["start_page"], min(item["end_page"], total_pages))
+        )
+    merged = _merge_ranges(normalized)
+    selected_count = sum(end - start + 1 for start, end in merged)
+    if selected_count > MAX_PDF_PAGES_PER_READ:
+        return [], (
+            f"requested PDF read covers {selected_count} pages; maximum is "
+            f"{MAX_PDF_PAGES_PER_READ} pages"
+        )
+    return merged, None
+
+
+def _pdf_error(path: str, error: str) -> dict:
+    return {"ok": False, "tool": TOOL_NAME, "path": path, "error": error}
 
 
 def _read_image(
@@ -369,6 +584,32 @@ def _validate_read_ranges(ranges: object) -> str | None:
         error = _validate_range(item_start, item_end)
         if error is not None:
             return f"ranges[{index}]: {error}"
+    return None
+
+
+def _validate_page_ranges(pages: object) -> str | None:
+    """Validate the PDF-only page selection independently of line ranges."""
+
+    if pages is None:
+        return None
+    if not isinstance(pages, list) or not pages:
+        return "pages must be a non-empty list"
+    if len(pages) > MAX_REQUESTED_PAGE_RANGES:
+        return f"pages may contain at most {MAX_REQUESTED_PAGE_RANGES} items"
+
+    for index, item in enumerate(pages):
+        if not isinstance(item, dict):
+            return f"pages[{index}] must be an object"
+        if set(item) != {"start_page", "end_page"}:
+            return f"pages[{index}] requires only start_page and end_page"
+        start_page = item["start_page"]
+        end_page = item["end_page"]
+        if not _is_line_number(start_page) or not _is_line_number(end_page):
+            return f"pages[{index}] start_page and end_page must be integers"
+        if start_page < 1:
+            return f"pages[{index}]: start_page must be >= 1"
+        if end_page < start_page:
+            return f"pages[{index}]: end_page must be >= start_page"
     return None
 
 

@@ -1,4 +1,5 @@
 openai
 Pillow
+PyMuPDF
 prompt_toolkit
 wcwidth

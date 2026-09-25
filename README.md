@@ -301,7 +301,7 @@ command summary.
 Code Squid exposes four local tools to the model:
 
 - `apply_patch(patch)`
-- `read_file(path, ranges=None)`
+- `read_file(path, ranges=None, pages=None)`
 - `write_file(path, content)`
 - `run_command(command, verification)`
 
@@ -324,7 +324,16 @@ accept text line ranges. Current vision transports are LM Studio (when model
 metadata declares vision capability) and native Ollama (when `/api/show`
 declares `vision`); other OpenAI-compatible providers fail closed. Session logs
 and transcripts store only compact image metadata, never inline base64 data.
-PDFs and other image/media formats are not supported yet.
+
+PDF reads are text-first. Use the PDF-only `pages` list for one to eight
+inclusive `start_page`/`end_page` ranges; at most 20 merged pages may be read at
+once. Omitting `pages` reads the whole PDF only when it has at most 20 pages.
+The same requested pages are rendered lazily under the current session's
+`assets/<PDF stem> rendered images/` folder as `page-<number>.png`, and their
+absolute paths are returned with page-delimited extracted text. Reading one of
+those PNG paths later uses the normal image path above. PDFs are limited to 64
+MiB, rendered pages to 40 million pixels, and unchanged rendered pages are
+reused. OCR and eager whole-document rendering are not performed.
 
 `run_command` runs a shell command from the current/configured repo root by
 default. It uses the local shell, has a timeout, and can mutate files or perform

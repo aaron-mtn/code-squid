@@ -69,6 +69,12 @@ def authoritative_compaction_context(messages: list[dict]) -> str | None:
         "# Authoritative Runtime Facts",
         "Tool activity:\n\n" + "\n".join(_render_activity(events)),
     ]
+    rendered_pdf_pages = _rendered_pdf_page_locations(events)
+    if rendered_pdf_pages:
+        sections.append(
+            "Rendered PDF pages available to read as images:\n\n"
+            + "\n".join(rendered_pdf_pages)
+        )
     if latest_mutation is not None:
         sections.append(
             "Latest known direct mutation:\n\n"
@@ -111,6 +117,39 @@ def _render_activity(events: list[_ToolEvent]) -> list[str]:
         failed = sum(event.result.get("ok") is False for event in tool_events)
         lines.append(f"- {tool}: {successful} successful, {failed} failed")
     return lines
+
+
+def _rendered_pdf_page_locations(events: list[_ToolEvent]) -> list[str]:
+    """Recover durable named PDF page images from canonical tool results."""
+
+    locations: dict[str, tuple[str, int]] = {}
+    for event in events:
+        if (
+            event.tool != "read_file"
+            or event.result.get("ok") is not True
+            or event.result.get("media_type") != "pdf"
+        ):
+            continue
+        source = event.result.get("path")
+        if not isinstance(source, str):
+            source = "unknown PDF"
+        for rendered in event.result.get("rendered_pages") or []:
+            if not isinstance(rendered, dict):
+                continue
+            page = rendered.get("page")
+            image_path = rendered.get("path")
+            if (
+                isinstance(page, int)
+                and not isinstance(page, bool)
+                and page > 0
+                and isinstance(image_path, str)
+                and image_path
+            ):
+                locations[image_path] = (source, page)
+    return [
+        f"- {_code(source)} page {page}: {_code(image_path)}"
+        for image_path, (source, page) in locations.items()
+    ]
 
 
 def _tool_events(messages: list[dict]) -> list[_ToolEvent]:

@@ -2277,3 +2277,30 @@
   distinct Hook identities, stable Hook reloads, and fresh Tool identities.
   Verification: 114 focused loader/Mod/Skill/runner/Core-boundary tests passed;
   compilation and `git diff --check` passed; the full suite passed 1,434 tests.
+- 2026-09-25: Added minimal text-first PDF support to the existing `read_file`
+  tool. A PDF-only `pages` range list selects at most 20 pages; PyMuPDF extracts
+  their text and renders only those pages to bounded PNGs under the current
+  session's `<PDF stem> rendered images` folder. Session storage validates and
+  atomically materializes named images, using a persisted source/render cache
+  key to reuse unchanged pages across resume. PDF Tool results expose text and
+  PNG paths without request-time image injection, while a later ordinary read
+  of a rendered PNG follows the existing content-addressed image pipeline.
+  Code Squid's deterministic compaction context now re-derives rendered-page
+  locations from canonical persisted Tool results, without image bytes or
+  base64. Added PyMuPDF as the sole PDF dependency; no OCR, embedded-image
+  extraction, native provider PDF handling, or document framework was added.
+  Verification: 202 focused PDF/image/read-result/compaction/session/executor
+  tests passed; compilation and `git diff --check` passed. The full suite had
+  1,489 passing and 54 unrelated failures in untouched prompt and built-in Hook
+  policy tests whose checked-in implementations already disagree with their
+  assertions.
+- 2026-09-25: Prevented same-stem PDFs from overwriting each other's rendered
+  page folders. Session storage now uses the PDF digest prefix already present
+  in page cache keys to reuse a folder owned by the same document or select the
+  next readable numbered folder for a different document. Existing folders are
+  never renamed or moved, page filenames and render-cache keys are unchanged,
+  and pre-change folders remain recognizable from their persisted page keys.
+  Focused coverage exercises first-use naming, same-PDF reuse, second and third
+  collisions, preservation of the first folder, and cached-page reuse.
+  Verification: 63 PDF, image, and session-storage tests passed; compilation
+  and `git diff --check` passed.

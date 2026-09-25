@@ -6,8 +6,9 @@ import re
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+from squid_core.image_content import inspect_image_bytes
 from squid_core.storage.atomic_json import atomic_write_bytes, atomic_write_json
 from squid_core.storage.model_transcript import (
     TRANSCRIPT_TITLE,
@@ -32,6 +33,18 @@ RUNTIME_LIFECYCLE_EVENTS = {
 }
 
 
+def _safe_asset_component(value: object) -> bool:
+    """Accept one ordinary path component, never a path or dot directory."""
+
+    return (
+        isinstance(value, str)
+        and value not in {"", ".", ".."}
+        and Path(value).name == value
+        and "/" not in value
+        and "\\" not in value
+    )
+
+
 class SessionStore:
     """Persist one Squid Core session to an explicitly supplied directory."""
 
@@ -42,7 +55,7 @@ class SessionStore:
     # - session.jsonl: append-only transcript entries
     # - model-view.jsonl: the final model-visible representation per request
     # - model-transcript.txt: a readable, deduplicated projection of both logs
-    # - assets/: lazily created immutable image snapshots referenced by Tool results
+    # - assets/: immutable image snapshots and lazily generated session images
     def __init__(self, session_dir: Path) -> None:
         self.session_dir = session_dir
         self.metadata_path = session_dir / "metadata.json"
@@ -356,6 +369,102 @@ class SessionStore:
             return asset_id
         atomic_write_bytes(asset_path, data)
         return asset_id
+
+    def ensure_generated_image(
+        self,
+        folder_name: str,
+        filename: str,
+        cache_key: str,
+        generate: Callable[[], bytes],
+        folder_identity: str | None = None,
+    ) -> tuple[str, bool]:
+        """Materialize one named PNG once for a deterministic generation key.
+
+        Named images are model-readable files, while ``snapshot_asset`` remains
+        the immutable content-addressed storage used for provider injection.
+        Keeping both below the session asset root gives generated pages the same
+        containment and durable session lifetime as ordinary image snapshots.
+
+        When ``folder_identity`` is supplied, an occupied folder belongs to the
+        caller only when one of its persisted cache keys has that prefix. This
+        lets same-named source documents keep separate readable folders without
+        moving an existing folder or weakening per-image cache validation.
+        """
+
+        if not isinstance(cache_key, str) or not cache_key:
+            raise ValueError("generated image cache key must be a non-empty string")
+        if folder_identity is not None and (
+            not isinstance(folder_identity, str) or not folder_identity
+        ):
+            raise ValueError("generated image folder identity must be a non-empty string")
+        if not _safe_asset_component(folder_name):
+            raise ValueError(f"invalid generated image folder: {folder_name!r}")
+        if not _safe_asset_component(filename) or not filename.lower().endswith(".png"):
+            raise ValueError(f"invalid generated image filename: {filename!r}")
+
+        resolved_session = self.session_dir.resolve()
+        resolved_assets = self.assets_dir.resolve()
+        if not resolved_assets.is_relative_to(resolved_session):
+            raise ValueError("session asset directory escapes the session directory")
+        folder = self._generated_image_folder(
+            resolved_assets,
+            folder_name,
+            folder_identity,
+        )
+        image_path = (folder / filename).resolve()
+        if not image_path.is_relative_to(folder):
+            raise ValueError("generated image path escapes its asset folder")
+        key_path = folder / f".{filename}.cache-key"
+        folder.mkdir(parents=True, exist_ok=True)
+
+        try:
+            existing_key = key_path.read_text(encoding="utf-8")
+            existing_data = image_path.read_bytes()
+            inspect_image_bytes(existing_data, ".png")
+            if existing_key == cache_key:
+                return str(image_path), True
+        except (FileNotFoundError, OSError, UnicodeError, ValueError):
+            # A partial or corrupt cache is safely regenerated below.
+            pass
+
+        data = generate()
+        inspect_image_bytes(data, ".png")
+        atomic_write_bytes(image_path, data)
+        atomic_write_bytes(key_path, cache_key.encode("utf-8"))
+        return str(image_path), False
+
+    @staticmethod
+    def _generated_image_folder(
+        resolved_assets: Path,
+        folder_name: str,
+        folder_identity: str | None,
+    ) -> Path:
+        """Choose the first unused or already-owned readable image folder."""
+
+        index = 1
+        while True:
+            candidate_name = folder_name if index == 1 else f"{folder_name} {index}"
+            folder = (resolved_assets / candidate_name).resolve()
+            if not folder.is_relative_to(resolved_assets):
+                raise ValueError("generated image folder escapes the asset directory")
+            if folder_identity is None or not folder.exists():
+                return folder
+            if folder.is_dir():
+                key_paths = list(folder.glob(".*.cache-key"))
+                folder_owned = bool(key_paths)
+                for key_path in key_paths:
+                    try:
+                        existing_key = key_path.read_text(encoding="utf-8")
+                    except (OSError, UnicodeError):
+                        folder_owned = False
+                        break
+                    if not existing_key.startswith(f"{folder_identity};"):
+                        folder_owned = False
+                        break
+                if folder_owned:
+                    return folder
+            # Unknown and differently owned folders are left untouched.
+            index += 1
 
     def load_asset(self, asset_id: str) -> bytes:
         """Load and verify one content-addressed asset without accepting paths."""

@@ -646,13 +646,13 @@ def test_read_file_range_past_eof_is_empty_and_sets_empty_range_end_line(tmp_pat
     }
 
 
-def test_read_file_definition_exposes_only_path_and_optional_ranges() -> None:
+def test_read_file_definition_exposes_text_ranges_and_pdf_pages() -> None:
     function = read_file_definition()["function"]
     parameters = function["parameters"]
 
     assert "Omit ranges only when file-wide context is needed" in function["description"]
     assert parameters["required"] == ["path"]
-    assert set(parameters["properties"]) == {"path", "ranges"}
+    assert set(parameters["properties"]) == {"path", "ranges", "pages"}
     assert parameters["additionalProperties"] is False
     ranges = parameters["properties"]["ranges"]
     assert ranges["type"] == "array"
@@ -660,6 +660,12 @@ def test_read_file_definition_exposes_only_path_and_optional_ranges() -> None:
     assert ranges["maxItems"] == 8
     assert ranges["items"]["required"] == ["start_line", "end_line"]
     assert ranges["items"]["additionalProperties"] is False
+    pages = parameters["properties"]["pages"]
+    assert pages["type"] == "array"
+    assert pages["minItems"] == 1
+    assert pages["maxItems"] == 8
+    assert pages["items"]["required"] == ["start_page", "end_page"]
+    assert pages["items"]["additionalProperties"] is False
 
 
 def test_read_file_execute_no_longer_accepts_top_level_line_bounds(
