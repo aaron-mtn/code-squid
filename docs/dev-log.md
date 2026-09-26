@@ -1,3 +1,19 @@
+- 2026-09-25: Completed the conservative cleanup and regression pass for the
+  file-reader refactor. Confirmed the one-way Tool-to-registry-to-reader
+  dependency, common `FileReadContext` contract, provider-neutral reader layer,
+  and session-owned generated-image persistence remain intact. Added focused
+  coverage for built-in suffix lookup and the unknown-suffix UTF-8 fallback
+  through the public `read_file` path; no runtime behavior or architecture
+  changes were needed. Public-path smoke checks covered text, image, PDF text,
+  rendered-page paths, rereading a rendered PNG, and the exact folder-level
+  cache layout. Verification: all 38 focused reader/image/PDF tests, all 25
+  `read_file` Tool tests, and all 217 broader storage/executor/result/compaction
+  tests passed. The full suite completed with 1,498 passing, the same 54
+  unrelated prompt/Hook expectation failures documented by preceding work,
+  and three additional unrelated Windows/environment failures in process-tree
+  cancellation/timeout and terminal hyperlink rendering. Relevant modules and
+  tests compiled and imported successfully, and `git diff --check` passed.
+
 - 2026-09-25: Consolidated generated PDF page cache state into one versioned
   JSON `.cache-key` per rendered-image folder. The file records source-folder
   ownership and per-PNG render-settings keys, preserving lazy page-level render

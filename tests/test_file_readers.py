@@ -3,8 +3,34 @@
 from pathlib import Path
 
 from squid_core.file_readers.context import FileReadContext
-from squid_core.file_readers.registry import read_with_registered_reader
+from squid_core.file_readers.image import read_image
+from squid_core.file_readers.pdf import read_pdf
+from squid_core.file_readers.registry import (
+    read_with_registered_reader,
+    reader_for_suffix,
+)
+from squid_core.file_readers.text import read_text
 from squid_core.settings import ReadFileSettings
+from squid_core.tools.builtins.read_file import execute as read_file
+
+
+def test_registry_selects_builtin_readers_by_suffix() -> None:
+    assert reader_for_suffix(".pdf") is read_pdf
+    assert reader_for_suffix(".PDF") is read_pdf
+    for suffix in (".png", ".jpg", ".jpeg", ".webp"):
+        assert reader_for_suffix(suffix) is read_image
+
+
+def test_unknown_suffix_falls_back_to_text_through_public_tool(tmp_path: Path) -> None:
+    source = tmp_path / "notes.future"
+    source.write_text("ordinary UTF-8 text \N{SQUID}\n", encoding="utf-8")
+
+    result = read_file(tmp_path, str(source))
+
+    assert reader_for_suffix(source.suffix) is read_text
+    assert result["ok"] is True
+    assert result["content"] == "ordinary UTF-8 text \N{SQUID}\n"
+    assert result["ranged"] is False
 
 
 def test_registry_invokes_registered_reader_with_unchanged_context(

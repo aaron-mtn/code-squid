@@ -13,6 +13,7 @@ MAX_PDF_PAGES_PER_READ = 20
 MAX_PDF_RENDER_PIXELS = 40_000_000
 PDF_RENDER_SCALE = 2.0
 
+
 def read_pdf(context: FileReadContext) -> dict:
     """Extract and lazily render only the selected pages of one PDF."""
 
