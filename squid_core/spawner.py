@@ -297,6 +297,7 @@ def build_agent_loop(
             read_file_settings=settings.read_file,
             snapshot_asset=session_store.snapshot_asset,
             ensure_generated_image=session_store.ensure_generated_image,
+            supports_image_input=getattr(model_adapter, "supports_image_input", None),
             should_cancel=should_cancel,
         )
     if tool_results is None:

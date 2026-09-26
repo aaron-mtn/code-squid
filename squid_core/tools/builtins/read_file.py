@@ -10,7 +10,11 @@ from squid_core.file_readers import (
     read_with_registered_reader,
 )
 from squid_core.file_readers.pdf import MAX_PDF_PAGES_PER_READ
-from squid_core.image_content import UNSUPPORTED_IMAGE_SUFFIXES
+from squid_core.image_content import (
+    SUPPORTED_IMAGE_SUFFIXES,
+    UNSUPPORTED_IMAGE_SUFFIXES,
+    VISION_UNAVAILABLE_MESSAGE,
+)
 from squid_core.settings import ReadFileSettings
 
 
@@ -98,6 +102,7 @@ def execute(
     settings: ReadFileSettings = DEFAULT_SETTINGS,
     snapshot_asset: SnapshotAsset | None = None,
     ensure_generated_image: GeneratedImageStore | None = None,
+    image_input_supported: bool | None = None,
 ) -> dict:
     """Validate model-facing arguments and dispatch to the shared reader system."""
 
@@ -118,6 +123,8 @@ def execute(
         return _tool_error(path, "page ranges are supported only for PDF files")
     if suffix in UNSUPPORTED_IMAGE_SUFFIXES:
         return _tool_error(path, f"unsupported image extension: {suffix}")
+    if suffix in SUPPORTED_IMAGE_SUFFIXES and image_input_supported is False:
+        return _tool_error(path, VISION_UNAVAILABLE_MESSAGE)
 
     return read_with_registered_reader(
         FileReadContext(

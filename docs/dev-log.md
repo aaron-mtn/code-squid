@@ -1,3 +1,19 @@
+- 2026-09-25: Made image reads fail at the Tool boundary when the active model
+  cannot verify vision support. `ToolExecutor` now passes the adapter's narrow
+  capability result into `read_file`, which returns a structured failure before
+  image snapshotting; vision-capable reads retain their existing descriptor and
+  session-asset behavior. `ModelAdapter` also replaces request-only historical
+  image references with an explicit vision-unavailable notice for non-vision
+  models, preserving canonical session records and assets while ensuring image
+  content never reaches provider transport. Added regressions for both fresh
+  capability outcomes and non-mutating historical-session fallback.
+  Verification: all 23 focused image tests and all 327 related Tool, executor,
+  result-rendering, session, provider/adapter, and Agent-loop tests passed. The
+  full suite completed with 1,504 passing and the same 54 unrelated existing
+  prompt/Hook expectation failures documented by preceding work. Production
+  and test packages compiled, touched imports loaded successfully, and
+  `git diff --check` passed.
+
 - 2026-09-25: Completed the conservative cleanup and regression pass for the
   file-reader refactor. Confirmed the one-way Tool-to-registry-to-reader
   dependency, common `FileReadContext` contract, provider-neutral reader layer,

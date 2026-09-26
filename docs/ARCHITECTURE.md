@@ -1586,8 +1586,12 @@ same raw response shape used by non-streaming responses before `ModelAdapter`
 normalizes and validates the reply.
 
 Image input uses a request-only Core reference rather than embedding binary
-data in canonical messages. `ModelAdapter` asks the selected provider to prove
-vision support before loading an asset. LM Studio support is derived from its
+data in canonical messages. The application supplies the active adapter's
+fail-closed vision-capability check to `ToolExecutor`; a supported-image
+`read_file` on a non-vision model therefore returns an ordinary structured Tool
+failure before validating or snapshotting image bytes. `ModelAdapter` also
+asks the selected provider to prove vision support before loading an asset.
+LM Studio support is derived from its
 model metadata and requires an explicit `capabilities.vision` value; generic
 OpenAI-compatible providers fail closed. At the final transport boundary, the
 LM Studio path converts an image reference to an OpenAI data URL. Native
@@ -2042,7 +2046,12 @@ is present, request rendering appends one synthetic user message containing a
 short image marker and an internal `image_asset` reference. Placing the image
 after the completed sibling batch preserves provider Tool-call/result ordering.
 These synthetic blocks are request-only: compaction, canonical replay, Hooks,
-and storage continue to consume the structured Tool result.
+and storage continue to consume the structured Tool result. If an older or
+resumed transcript contains such a block while the active model cannot verify
+vision support, `ModelAdapter` removes only the request-only asset reference
+and adds an explicit vision-unavailable notice. The canonical successful Tool
+result and session asset remain unchanged, while unsupported image content
+cannot reach provider transport.
 
 Age-based Tool-result retention follows assistant batch boundaries as well as
 the configured result count. Results from the just-completed assistant Tool

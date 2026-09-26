@@ -17,6 +17,7 @@ from squid_core.hooks.redundant_read import RepeatedReadNudge
 from squid_core.hooks.runner import ToolResultContext
 from squid_core.hooks.too_many_reads import TooManyReadsNudge
 from squid_core.model_adapter import ModelAdapter, ModelRequestError
+from squid_core.image_content import VISION_UNAVAILABLE_MESSAGE
 from squid_core.providers.ollama import (
     OllamaProvider,
     _redacted_trace_payload as redact_ollama_trace,
@@ -392,6 +393,86 @@ def test_provider_failure_after_snapshot_leaves_replayable_asset(tmp_path: Path)
     assert store.load_asset(result["image"]["asset_id"]) == original
 
 
+@pytest.mark.parametrize("vision_supported", [True, False])
+def test_fresh_image_read_obeys_active_model_vision_capability(
+    tmp_path: Path,
+    vision_supported: bool,
+) -> None:
+    store = SessionStore.create(tmp_path / "sessions", "fresh capability")
+    source = tmp_path / "fixture.png"
+    source.write_bytes(image_bytes("PNG"))
+    session = SimpleNamespace(
+        mark_file_read=lambda _path: None,
+        mark_file_written=lambda _path: None,
+    )
+    executor = ToolExecutor(
+        tmp_path,
+        session,
+        snapshot_asset=store.snapshot_asset,
+        supports_image_input=lambda: vision_supported,
+    )
+
+    result = executor.execute(
+        {"tool": "read_file", "args": {"path": str(source)}}
+    )
+
+    assert result["ok"] is vision_supported
+    if vision_supported:
+        assert result["media_type"] == "image"
+        assert store.load_asset(result["image"]["asset_id"]) == source.read_bytes()
+    else:
+        assert result == {
+            "ok": False,
+            "tool": "read_file",
+            "path": str(source),
+            "error": VISION_UNAVAILABLE_MESSAGE,
+        }
+        assert not store.assets_dir.exists()
+
+
+def test_non_vision_adapter_replaces_historical_image_without_mutating_it() -> None:
+    class TextOnlyProvider:
+        def __init__(self) -> None:
+            self.payload = None
+
+        def supports_image_input(self, _model: str) -> bool:
+            return False
+
+        def create_response(self, **payload):
+            self.payload = payload
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content="continued", tool_calls=[]),
+                        finish_reason="stop",
+                    )
+                ],
+                usage=None,
+            )
+
+    historical = {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "[image: old.png]"},
+            {
+                "type": "image_asset",
+                "asset_id": "historical.png",
+                "mime_type": "image/png",
+            },
+        ],
+    }
+    provider = TextOnlyProvider()
+    adapter = ModelAdapter(provider, "text-only")
+
+    reply = adapter.respond([historical], [])
+
+    assert reply["message"]["content"] == "continued"
+    assert provider.payload is not None
+    assert "image_asset" not in json.dumps(provider.payload)
+    assert VISION_UNAVAILABLE_MESSAGE in json.dumps(provider.payload)
+    assert historical["content"][1]["type"] == "image_asset"
+
+
 def test_lm_studio_capability_is_read_from_model_metadata() -> None:
     provider = OpenAICompatibleProvider.__new__(OpenAICompatibleProvider)
     provider.provider_name = "lm_studio"
@@ -404,23 +485,23 @@ def test_lm_studio_capability_is_read_from_model_metadata() -> None:
     assert provider.supports_image_input("text") is False
 
     adapter = ModelAdapter(provider, "text", provider_name="lm_studio")
-    adapter.set_asset_loader(lambda _asset_id: b"unused")
-    with pytest.raises(ModelRequestError, match="does not support image input"):
-        adapter.respond(
-            [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_asset",
-                            "asset_id": "asset.png",
-                            "mime_type": "image/png",
-                        }
-                    ],
-                }
-            ],
-            [],
-        )
+    request = adapter.prepare_request(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_asset",
+                        "asset_id": "asset.png",
+                        "mime_type": "image/png",
+                    }
+                ],
+            }
+        ],
+        [],
+    )
+    assert "image_asset" not in json.dumps(request)
+    assert VISION_UNAVAILABLE_MESSAGE in json.dumps(request)
 
 
 def test_generic_openai_provider_fails_closed_for_images() -> None:
@@ -433,8 +514,9 @@ def test_generic_openai_provider_fails_closed_for_images() -> None:
         "content": [{"type": "image_asset", "asset_id": "x", "mime_type": "image/png"}],
     }
 
-    with pytest.raises(ModelRequestError, match="does not support image input"):
-        adapter.respond([message], [])
+    request = adapter.prepare_request([message], [])
+    assert "image_asset" not in json.dumps(request)
+    assert VISION_UNAVAILABLE_MESSAGE in json.dumps(request)
 
 
 def test_ollama_translation_and_capability(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -475,9 +557,9 @@ def test_ollama_translation_and_capability(monkeypatch: pytest.MonkeyPatch) -> N
     text_provider = OllamaProvider()
     assert text_provider.supports_image_input("text-model") is False
     adapter = ModelAdapter(text_provider, "text-model", provider_name="ollama")
-    adapter.set_asset_loader(lambda _asset_id: data)
-    with pytest.raises(ModelRequestError, match="does not support image input"):
-        adapter.respond([message], [])
+    request = adapter.prepare_request([message], [])
+    assert "image_asset" not in json.dumps(request)
+    assert VISION_UNAVAILABLE_MESSAGE in json.dumps(request)
 
 
 def test_canonical_persistence_replay_and_logs_keep_only_asset_reference(

@@ -5,6 +5,7 @@ import json
 import re
 from collections.abc import Callable
 
+from squid_core.image_content import VISION_UNAVAILABLE_MESSAGE
 from squid_core.providers.base import StreamCancelled
 
 TOOL_CALL_CONTENT_MODES = {"omit", "empty", "null"}
@@ -366,6 +367,20 @@ class ModelAdapter:
     def supports_streaming(self) -> bool:
         return bool(getattr(self.provider, "supports_streaming", lambda: False)())
 
+    def supports_image_input(self) -> bool:
+        """Return whether the active provider can verify vision support."""
+
+        supports_images = getattr(self.provider, "supports_image_input", None)
+        if not callable(supports_images):
+            return False
+        try:
+            return bool(supports_images(self.model_name))
+        except Exception:
+            # Capability checks are guards, not model requests. If discovery is
+            # unavailable, fail closed so image bytes never reach an uncertain
+            # transport.
+            return False
+
     def respond_streaming(
         self,
         messages: list[dict],
@@ -514,9 +529,30 @@ class ModelAdapter:
         return metadata
 
     def _messages_for_provider(self, messages: list[dict]) -> list[dict]:
+        has_images = _request_has_image_assets({"messages": messages})
+        allow_images = not has_images or self.supports_image_input()
         provider_messages = []
         for message in messages:
             provider_message = dict(message)
+            content = provider_message.get("content")
+            if not allow_images and isinstance(content, list):
+                filtered_content = [
+                    block
+                    for block in content
+                    if not (
+                        isinstance(block, dict)
+                        and block.get("type") == "image_asset"
+                    )
+                ]
+                if len(filtered_content) != len(content):
+                    # Historical image results remain canonical in the session.
+                    # Only their request-only asset block is replaced, and the
+                    # replacement tells the model that no visual inspection
+                    # occurred.
+                    filtered_content.append(
+                        {"type": "text", "text": VISION_UNAVAILABLE_MESSAGE}
+                    )
+                    provider_message["content"] = filtered_content
             if (
                 provider_message.get("role") == "assistant"
                 and provider_message.get("tool_calls")

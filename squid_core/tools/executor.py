@@ -3,9 +3,11 @@
 from pathlib import Path
 from typing import Callable
 
+from squid_core.image_content import SUPPORTED_IMAGE_SUFFIXES
 from squid_core.platform_context import PlatformContext
 from squid_core.safety.workspace_boundary import workspace_boundary_reason
 from squid_core.settings import ReadFileSettings
+
 from .builtins import TOOLS
 from .builtins.apply_patch import PatchCandidateStore
 
@@ -32,6 +34,7 @@ class ToolExecutor:
         read_file_settings: ReadFileSettings | None = None,
         snapshot_asset=None,
         ensure_generated_image=None,
+        supports_image_input: Callable[[], bool] | None = None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> None:
         self.repo_root = repo_root
@@ -43,6 +46,7 @@ class ToolExecutor:
         self.read_file_settings = read_file_settings or ReadFileSettings()
         self.snapshot_asset = snapshot_asset
         self.ensure_generated_image = ensure_generated_image
+        self.supports_image_input = supports_image_input
         self.should_cancel = should_cancel or (lambda: False)
         # The executor is constructed per agent run, which bounds candidate lifetime
         # without coupling diagnostic recovery to persisted Session history.
@@ -117,11 +121,20 @@ class ToolExecutor:
             elif tool["execute"] is BUILTIN_APPLY_PATCH:
                 execute_args = {**args, "candidate_store": self.patch_candidates}
             elif tool["execute"] is BUILTIN_READ_FILE:
+                image_input_supported = None
+                path = args.get("path")
+                if (
+                    isinstance(path, str)
+                    and Path(path).suffix.lower() in SUPPORTED_IMAGE_SUFFIXES
+                    and self.supports_image_input is not None
+                ):
+                    image_input_supported = self.supports_image_input()
                 execute_args = {
                     **args,
                     "settings": self.read_file_settings,
                     "snapshot_asset": self.snapshot_asset,
                     "ensure_generated_image": self.ensure_generated_image,
+                    "image_input_supported": image_input_supported,
                 }
 
             result = tool["execute"](self.repo_root, **execute_args)

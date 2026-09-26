@@ -13,6 +13,10 @@ from PIL import Image, UnidentifiedImageError
 MAX_IMAGE_BYTES = 32 * 1024 * 1024
 MAX_IMAGE_PIXELS = 40_000_000
 SUPPORTED_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+VISION_UNAVAILABLE_MESSAGE = (
+    "Vision not available for current model. "
+    "Use an AI model with vision capability to view images."
+)
 # GIF is deliberately recognized only to produce a useful unsupported-media
 # error instead of falling through to a confusing UTF-8 decoding failure.
 UNSUPPORTED_IMAGE_SUFFIXES = frozenset({".gif"})
