@@ -301,7 +301,7 @@ command summary.
 Code Squid exposes four local tools to the model:
 
 - `apply_patch(patch)`
-- `read_file(path, ranges=None, pages=None)`
+- `read_file(path, ranges=None, pages=None, sheet=None, rows=None)`
 - `write_file(path, content)`
 - `run_command(command, verification)`
 
@@ -315,6 +315,17 @@ head and tail with the actual ranges when needed. Every targeted read uses a
 Requests smaller than 150 lines include balanced surrounding context where the
 file has enough lines. Normalized overlapping or adjacent regions merge, and
 their combined source coverage must remain within the same 1,000-line budget.
+
+`read_file` supports read-only `.xlsx` and `.ods` spreadsheets. It returns a
+workbook summary, sheet names, used ranges, and TSV-like rows, with formulas
+marked explicitly. XLSX formulas include their stored cached result when the
+file contains one; the reader never calculates formulas. A whole-workbook read
+uses no spreadsheet selection. Pass an exact `sheet` name to read one sheet and
+optionally pass `rows={"start_row": N, "end_row": M}` for a 1-based inclusive
+source-row interval. Spreadsheet reads do not accept text `ranges`; normalized
+output beyond the normal 1,000-line limit remains bounded with head/tail output.
+Charts, embedded images, macros, pivots, formula recalculation, legacy `.xls`,
+and spreadsheet writing are not supported.
 
 `read_file` also accepts PNG, JPG/JPEG, and WebP images. It validates the image,
 stores an immutable content-addressed copy under the current session, and sends

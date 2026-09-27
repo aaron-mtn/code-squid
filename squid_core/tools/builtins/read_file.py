@@ -32,8 +32,11 @@ def tool_definition() -> dict:
         "function": {
             "name": TOOL_NAME,
             "description": (
-                "Read a UTF-8 text file, PDF, or supported PNG, JPG/JPEG, or WebP "
-                "image at an absolute path. For PDFs, use pages for 1-based inclusive "
+                "Read a UTF-8 text file, XLSX or ODS spreadsheet, PDF, or supported "
+                "PNG, JPG/JPEG, or WebP image at an absolute path. Spreadsheet reads "
+                "return formula-preserving workbook text and do not accept ranges; "
+                "use sheet and optional rows for targeted spreadsheet reads. "
+                "For PDFs, use pages for 1-based inclusive "
                 "page ranges; the selected pages are text-extracted and lazily rendered "
                 "to session PNG files. Image reads do not accept ranges. Use ranges for "
                 "one or several "
@@ -85,6 +88,26 @@ def tool_definition() -> dict:
                         "minItems": 1,
                         "maxItems": MAX_REQUESTED_PAGE_RANGES,
                     },
+                    "sheet": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": (
+                            "Optional exact sheet name for an XLSX or ODS read"
+                        ),
+                    },
+                    "rows": {
+                        "type": "object",
+                        "description": (
+                            "Optional 1-based inclusive source row range within the "
+                            "selected spreadsheet sheet"
+                        ),
+                        "properties": {
+                            "start_row": {"type": "integer"},
+                            "end_row": {"type": "integer"},
+                        },
+                        "required": ["start_row", "end_row"],
+                        "additionalProperties": False,
+                    },
                 },
                 "required": ["path"],
                 "additionalProperties": False,
@@ -98,6 +121,8 @@ def execute(
     path: str,
     ranges: list[dict[str, int]] | None = None,
     pages: list[dict[str, int]] | None = None,
+    sheet: str | None = None,
+    rows: dict[str, int] | None = None,
     *,
     settings: ReadFileSettings = DEFAULT_SETTINGS,
     snapshot_asset: SnapshotAsset | None = None,
@@ -118,9 +143,18 @@ def execute(
     if page_error is not None:
         return _tool_error(path, page_error)
 
+    spreadsheet_error = _validate_spreadsheet_selection(sheet, rows)
+    if spreadsheet_error is not None:
+        return _tool_error(path, spreadsheet_error)
+
     suffix = file_path.suffix.lower()
+    is_spreadsheet = suffix in {".xlsx", ".ods"}
     if suffix != ".pdf" and pages is not None:
         return _tool_error(path, "page ranges are supported only for PDF files")
+    if not is_spreadsheet and (sheet is not None or rows is not None):
+        return _tool_error(
+            path, "sheet and rows are supported only for XLSX and ODS files"
+        )
     if suffix in UNSUPPORTED_IMAGE_SUFFIXES:
         return _tool_error(path, f"unsupported image extension: {suffix}")
     if suffix in SUPPORTED_IMAGE_SUFFIXES and image_input_supported is False:
@@ -132,6 +166,8 @@ def execute(
             path=path,
             ranges=ranges,
             pages=pages,
+            sheet=sheet,
+            rows=rows,
             settings=settings,
             snapshot_asset=snapshot_asset,
             ensure_generated_image=ensure_generated_image,
@@ -205,6 +241,30 @@ def _validate_page_ranges(pages: object) -> str | None:
             return f"pages[{index}]: start_page must be >= 1"
         if end_page < start_page:
             return f"pages[{index}]: end_page must be >= start_page"
+    return None
+
+
+def _validate_spreadsheet_selection(sheet: object, rows: object) -> str | None:
+    """Validate the deliberately small spreadsheet-only selection contract."""
+
+    if sheet is not None and (not isinstance(sheet, str) or not sheet):
+        return "sheet must be a non-empty string"
+    if rows is None:
+        return None
+    if sheet is None:
+        return "rows requires a selected sheet"
+    if not isinstance(rows, dict):
+        return "rows must be an object"
+    if set(rows) != {"start_row", "end_row"}:
+        return "rows requires only start_row and end_row"
+    start_row = rows["start_row"]
+    end_row = rows["end_row"]
+    if not _is_line_number(start_row) or not _is_line_number(end_row):
+        return "rows start_row and end_row must be integers"
+    if start_row < 1:
+        return "rows: start_row must be >= 1"
+    if end_row < start_row:
+        return "rows: end_row must be >= start_row"
     return None
 
 

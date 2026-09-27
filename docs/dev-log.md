@@ -1,3 +1,34 @@
+- 2026-09-26: Added the focused spreadsheet-reader follow-up: `read_file` now
+  accepts an exact XLSX/ODS `sheet` plus optional 1-based inclusive
+  `rows={start_row, end_row}`, while preserving whole-workbook reads and keeping
+  text `ranges` and PDF `pages` independent. Selected output reports its source
+  rows, full sheet used range, and returned intersection; unknown sheets and
+  invalid selections use the ordinary structured Tool error. XLSX now pairs a
+  read-only formula-source workbook with a read-only `data_only` workbook so a
+  stored cached result is rendered alongside the formula when present, without
+  recalculation or writes. Added focused coverage for both formats, validation,
+  bounded recovery after truncation, and cached/missing formula results.
+  Verification: all 14 focused spreadsheet tests and all 111 related
+  spreadsheet, shared file-reader, public Tool, image, and PDF tests passed.
+  The full suite completed with 1,518 passing and the same 54 unrelated
+  prompt/Hook expectation failures documented by the initial spreadsheet
+  patch. Production and test packages compiled, touched reader imports loaded
+  successfully, and `git diff --check` passed.
+
+- 2026-09-26: Added initial read-only `.xlsx` and `.ods` support to the existing
+  `read_file` registry using openpyxl and odfpy. Spreadsheet reads return a
+  workbook summary plus sheet-delimited TSV-like values, explicit formulas,
+  used ranges, and sensible empty-sheet markers. They are whole-workbook-only,
+  use the normal 1,000-line head/tail output ceiling, and bound input size and
+  expanded sheet area; charts and other unsupported objects are ignored rather
+  than interpreted. Added focused dispatch, value, formula, empty-sheet,
+  unsupported-chart, range-contract, and output-truncation coverage.
+  Verification: all 5 focused spreadsheet tests and all 102 related reader,
+  image, PDF, and public Tool tests passed. The full suite completed with 1,509
+  passing and the same 54 unrelated existing prompt/Hook expectation failures
+  documented by preceding work. Production and test packages compiled, touched
+  reader imports loaded successfully, and `git diff --check` passed.
+
 - 2026-09-25: Made image reads fail at the Tool boundary when the active model
   cannot verify vision support. `ToolExecutor` now passes the adapter's narrow
   capability result into `read_file`, which returns a structured failure before

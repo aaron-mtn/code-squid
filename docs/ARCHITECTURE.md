@@ -2171,7 +2171,7 @@ session workflow in the current MVP.
 
 The protected built-in Tool surface is:
 
-- `read_file(path, ranges=None, pages=None)`
+- `read_file(path, ranges=None, pages=None, sheet=None, rows=None)`
 - `write_file(path, content)`
 - `apply_patch(path, old_text, new_text)` or candidate selection with `match_id`
 - `run_command(command, verification)`
@@ -2180,9 +2180,10 @@ The model-facing `squid_core/tools/builtins/read_file.py` adapter owns the
 schema, argument validation, path requirements, unsupported-media errors, and
 the public Tool entry point. It dispatches one-way into the reusable
 `squid_core/file_readers` package. That package has a deliberately static
-suffix registry: `.pdf` selects the PDF reader, `.png`/`.jpg`/`.jpeg`/`.webp`
-select the image reader, and every other suffix retains the UTF-8 text-reader
-fallback. `text.py`, `image.py`, and `pdf.py` own their format-specific read
+suffix registry: `.xlsx` and `.ods` select their spreadsheet readers, `.pdf`
+selects the PDF reader, `.png`/`.jpg`/`.jpeg`/`.webp` select the image reader,
+and every other suffix retains the UTF-8 text-reader fallback. `text.py`,
+`xlsx.py`, `ods.py`, `image.py`, and `pdf.py` own their format-specific read
 behavior; none depends on the Tool adapter. The adapter packages each validated
 request and its optional session-storage callbacks into one immutable
 `FileReadContext`. Every registered reader accepts that same context, so the
@@ -2200,6 +2201,25 @@ root-level properties.
 
 - requires an absolute path
 - reads UTF-8 text for ordinary files
+- reads `.xlsx` through openpyxl and `.ods` through odfpy, returning a
+  provider-neutral spreadsheet result with workbook format, ordered sheet
+  names, used ranges, and TSV-like text for each sheet
+- loads XLSX twice in read-only mode, once for formula source and once for
+  stored cached values, then pairs corresponding cells; a cached result is
+  shown before its formula when present, and Core never recalculates either
+  XLSX or ODS formulas
+- accepts an exact spreadsheet-only `sheet` name and an optional 1-based,
+  inclusive `rows={start_row, end_row}` selection; selected output reports the
+  sheet's full used range and the returned intersection, while an unknown sheet
+  remains an ordinary structured Tool error
+- keeps spreadsheet source rows distinct from text source lines: spreadsheets
+  reject `ranges`, while whole-workbook and targeted rendering both retain the
+  normal 1,000-line head/tail ceiling and direct oversized selections toward a
+  narrower row interval; the readers ignore charts and other drawing content
+  and do not expose images, macros, pivots, or editing
+- limits spreadsheet containers to 64 MiB, their ZIP-expanded contents to 256
+  MiB, and each normalized sheet area to one million cells so compression,
+  declared dimensions, and ODF repetitions cannot trigger unbounded expansion
 - detects `.pdf` before text decoding and uses PyMuPDF for both text extraction
   and page rendering
 - accepts a PDF-only `pages` list containing one to eight inclusive

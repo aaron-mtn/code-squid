@@ -22,6 +22,8 @@ class FileReadContext:
     path: str
     ranges: list[dict[str, int]] | None
     pages: list[dict[str, int]] | None
+    sheet: str | None
+    rows: dict[str, int] | None
     settings: ReadFileSettings
     snapshot_asset: SnapshotAsset | None
     ensure_generated_image: GeneratedImageStore | None

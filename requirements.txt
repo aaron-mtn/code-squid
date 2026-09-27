@@ -1,4 +1,6 @@
 openai
+odfpy
+openpyxl
 Pillow
 PyMuPDF
 prompt_toolkit
