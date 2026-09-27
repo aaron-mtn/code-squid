@@ -591,6 +591,24 @@ def test_tiny_live_viewport_keeps_valid_panel_state(monkeypatch) -> None:
     assert display.streaming_narration_active is False
 
 
+def test_tiny_live_viewport_wraps_reasoning_label_without_crashing(monkeypatch) -> None:
+    """A narrow resize must not let fixed reasoning text kill the UI thread."""
+    display, stream = interactive_display(
+        monkeypatch,
+        size=[Size(rows=10, columns=9)],
+        show_reasoning=True,
+    )
+
+    display.handle_event({"type": "assistant_message_started"})
+    display.handle_event(
+        {"type": "assistant_reasoning_delta", "delta": "Inspecting the workbook."}
+    )
+
+    assert display._streaming_reasoning.active is True
+    assert "Reas" in stream.getvalue()
+    display.handle_event({"type": "reply_rejected"})
+
+
 def test_live_renderer_contains_no_code_owned_repaint_sequences() -> None:
     source = inspect.getsource(sys.modules[StreamingNarration.__module__])
 

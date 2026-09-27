@@ -194,6 +194,10 @@ def test_wider_panel_preserves_established_narration_wrapping_and_adds_padding(
     assert PANEL_CONTENT_WIDTH == 56
 
 
-def test_panel_rejects_content_beyond_its_intended_width() -> None:
-    with pytest.raises(ValueError, match="content exceeds its fixed width"):
-        TerminalDisplay()._render_panel_lines(["x" * (PANEL_CONTENT_WIDTH + 1)])
+def test_panel_wraps_content_beyond_its_intended_width() -> None:
+    lines = TerminalDisplay()._render_panel_lines(
+        ["x" * (PANEL_CONTENT_WIDTH + 1)]
+    )
+
+    assert len(lines) == 4
+    assert all(_display_width(line) == RUN_PANEL_WIDTH for line in lines)

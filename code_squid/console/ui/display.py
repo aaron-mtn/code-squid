@@ -907,12 +907,31 @@ class TerminalDisplay:
             raise ValueError("run panel content width exceeds its physical width")
         horizontal = "─" * (panel_width - 2)
         rendered = [styled_text(f"╭{horizontal}╮", DIM_STYLE)]
+        physical_lines: list[str] = []
         for line in lines:
             visible_width = _display_width(line)
-            # All variable content is cell-wrapped before reaching this fixed
-            # geometry seam; fail close to the violating caller if that changes.
-            if visible_width > content_width:
-                raise ValueError("run panel content exceeds its fixed width")
+            if visible_width <= content_width:
+                physical_lines.append(line)
+                continue
+
+            # Most callers wrap before this geometry seam, but fixed labels and
+            # unexpected model text must remain safe after a live resize. Strip
+            # embedded decoration only on this defensive path so wrapping can
+            # never split an ANSI/OSC control sequence; the panel-level style is
+            # still applied below.
+            plain_line = formatting.ANSI_ESCAPE_PATTERN.sub("", line)
+            physical_lines.extend(
+                wrapped_display_lines(
+                    plain_line,
+                    initial_indent="",
+                    subsequent_indent="",
+                    width=content_width,
+                )
+                or [""]
+            )
+
+        for line in physical_lines:
+            visible_width = _display_width(line)
             # The renderer reserves all physical width beyond the stable content
             # column as right padding; it never feeds that space back to wrapping.
             padding = " " * (
