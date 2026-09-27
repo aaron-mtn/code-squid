@@ -978,6 +978,215 @@ def test_run_command_cancellation_stops_promptly(tmp_path: Path) -> None:
     assert run_command_module.time.monotonic() - started < 2
 
 
+def test_run_command_keyboard_interrupt_cleans_up_owned_process(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from squid_core.platform_context import PlatformContext
+
+    cleanups = []
+
+    class InterruptingProcess:
+        returncode = None
+
+        def communicate(self, timeout=None):
+            raise KeyboardInterrupt
+
+    process = InterruptingProcess()
+    monkeypatch.setattr(
+        run_command_module.subprocess,
+        "Popen",
+        lambda *args, **kwargs: process,
+    )
+    monkeypatch.setattr(
+        run_command_module,
+        "_cleanup_owned_process",
+        lambda owned, is_windows, windows_job=None: cleanups.append(
+            (owned, is_windows, windows_job)
+        ) or b"",
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        run_command(
+            tmp_path,
+            "sleep forever",
+            verification=False,
+            platform_context=PlatformContext("Linux", "sh", "/bin/sh", "/", False),
+        )
+
+    assert cleanups == [(process, False, None)]
+
+
+def test_run_command_cleanup_closes_retained_pipe_without_unbounded_wait(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from squid_core.platform_context import PlatformContext
+
+    class Pipe:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    class RetainedPipeProcess:
+        pid = 1234
+        returncode = None
+
+        def __init__(self) -> None:
+            self.stdout = Pipe()
+            self.stderr = None
+            self.stdin = None
+            self.killed = False
+            self.wait_timeouts = []
+
+        def communicate(self, timeout=None):
+            raise run_command_module.subprocess.TimeoutExpired(
+                "retained-pipe",
+                timeout,
+                output=b"partial output\n",
+            )
+
+        def poll(self):
+            return None
+
+        def kill(self):
+            self.killed = True
+
+        def wait(self, timeout=None):
+            self.wait_timeouts.append(timeout)
+            raise run_command_module.subprocess.TimeoutExpired("retained-pipe", timeout)
+
+    process = RetainedPipeProcess()
+    monkeypatch.setattr(
+        run_command_module.subprocess,
+        "Popen",
+        lambda *args, **kwargs: process,
+    )
+    monkeypatch.setattr(run_command_module, "_terminate_process_tree", lambda *args: None)
+    monkeypatch.setattr(run_command_module, "PROCESS_DRAIN_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(run_command_module, "PROCESS_WAIT_TIMEOUT_SECONDS", 0.01)
+
+    started = run_command_module.time.monotonic()
+    result = run_command(
+        tmp_path,
+        "retains pipe",
+        verification=False,
+        should_cancel=lambda: True,
+        platform_context=PlatformContext("Linux", "sh", "/bin/sh", "/", False),
+    )
+
+    assert run_command_module.time.monotonic() - started < 0.5
+    assert result["cancelled"] is True
+    assert result["output"] == "partial output\n"
+    assert process.stdout.closed is True
+    assert process.killed is True
+    assert process.wait_timeouts == [0.01]
+
+
+def test_run_command_timeout_uses_bounded_cleanup_and_keeps_classification(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from squid_core.platform_context import PlatformContext
+
+    class Process:
+        returncode = None
+
+    process = Process()
+    cleanups = []
+    monkeypatch.setattr(
+        run_command_module.subprocess,
+        "Popen",
+        lambda *args, **kwargs: process,
+    )
+    monkeypatch.setattr(run_command_module, "DEFAULT_TIMEOUT_SECONDS", 0)
+    monkeypatch.setattr(
+        run_command_module,
+        "_cleanup_owned_process",
+        lambda owned, is_windows, windows_job=None: cleanups.append(owned) or b"",
+    )
+
+    result = run_command(
+        tmp_path,
+        "times out",
+        verification=True,
+        platform_context=PlatformContext("Linux", "sh", "/bin/sh", "/", False),
+    )
+
+    assert cleanups == [process]
+    assert result["cancelled"] is False
+    assert result["timed_out"] is True
+    assert result["failure_class"] == "timeout"
+
+
+def test_taskkill_fallback_has_bounded_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    class HangingTaskkill:
+        def __init__(self) -> None:
+            self.killed = False
+            self.waits = []
+
+        def wait(self, timeout=None):
+            self.waits.append(timeout)
+            raise run_command_module.subprocess.TimeoutExpired("taskkill", timeout)
+
+        def kill(self):
+            self.killed = True
+
+    taskkill = HangingTaskkill()
+    monkeypatch.setattr(
+        run_command_module.subprocess,
+        "Popen",
+        lambda *args, **kwargs: taskkill,
+    )
+    monkeypatch.setattr(run_command_module, "TASKKILL_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(run_command_module, "PROCESS_WAIT_TIMEOUT_SECONDS", 0.01)
+
+    started = run_command_module.time.monotonic()
+    run_command_module._run_taskkill_bounded(1234)
+
+    assert run_command_module.time.monotonic() - started < 0.5
+    assert taskkill.killed is True
+    assert taskkill.waits == [0.01, 0.01]
+
+
+def test_taskkill_launch_failure_is_non_blocking(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_launch(*args, **kwargs):
+        raise OSError("taskkill unavailable")
+
+    monkeypatch.setattr(run_command_module.subprocess, "Popen", fail_launch)
+
+    run_command_module._run_taskkill_bounded(1234)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group regression")
+def test_posix_cleanup_kills_surviving_group_after_leader_exits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signals = []
+
+    class ExitedLeader:
+        pid = 4321
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(run_command_module, "PROCESS_TREE_GRACE_SECONDS", 0)
+    monkeypatch.setattr(run_command_module, "_process_group_exists", lambda _pid: True)
+    monkeypatch.setattr(
+        run_command_module.os,
+        "killpg",
+        lambda pid, sent_signal: signals.append((pid, sent_signal)),
+    )
+
+    run_command_module._terminate_process_tree(ExitedLeader(), is_windows=False)
+
+    assert signals == [
+        (4321, run_command_module.signal.SIGTERM),
+        (4321, run_command_module.signal.SIGKILL),
+    ]
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows process-tree regression")
 def test_run_command_timeout_terminates_descendant_tree(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -1008,6 +1217,46 @@ def test_run_command_timeout_terminates_descendant_tree(
 
     assert result["timed_out"] is True
     assert marker.exists() is False
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows process-tree regression")
+def test_run_command_repeated_cancellation_terminates_descendants(
+    tmp_path: Path,
+) -> None:
+    markers = []
+    for attempt in range(5):
+        marker = tmp_path / f"descendant-finished-{attempt}.txt"
+        markers.append(marker)
+        child = tmp_path / f"child-{attempt}.py"
+        child.write_text(
+            "import pathlib, time\ntime.sleep(1)\npathlib.Path(r'"
+            + str(marker)
+            + "').write_text('late', encoding='utf-8')\n",
+            encoding="utf-8",
+        )
+        parent = tmp_path / f"parent-{attempt}.py"
+        parent.write_text(
+            "import subprocess, sys, time\n"
+            f"subprocess.Popen([sys.executable, r'{child}'])\n"
+            "time.sleep(5)\n",
+            encoding="utf-8",
+        )
+        started = run_command_module.time.monotonic()
+
+        result = run_command(
+            tmp_path,
+            _python_script_command(parent),
+            verification=False,
+            should_cancel=lambda: run_command_module.time.monotonic() - started > 0.2,
+        )
+
+        assert result["cancelled"] is True
+        assert run_command_module.time.monotonic() - started < 2
+
+    # Each child would create its marker one second after launch if any tree
+    # member survived cancellation.
+    run_command_module.time.sleep(1.2)
+    assert not any(marker.exists() for marker in markers)
 
 
 def test_run_command_classifies_powershell_invalid_separator(

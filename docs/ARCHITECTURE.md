@@ -2344,10 +2344,22 @@ editing.
 - decodes the merged process stream as UTF-8 with replacement for malformed
   bytes, independent of the host platform's locale
 - polls an owned process while checking cooperative cancellation and times out
-  after 15 seconds
+  after 60 seconds
 - returns distinct normalized `cancelled` and `timed_out` flags; either boundary
-  terminates the complete owned process tree (Windows `taskkill /T`, or a
-  dedicated POSIX process group) before returning
+  terminates the complete owned process tree before returning; Windows assigns
+  the launched shell to a kill-on-close Job Object and supplements Job
+  termination with a short bounded `taskkill /T` sweep, while POSIX uses a
+  dedicated process group and escalates from `SIGTERM` to `SIGKILL` based on
+  surviving group membership rather than only the original shell process
+- treats `KeyboardInterrupt` as an ownership boundary: the same tree cleanup
+  runs before the interrupt propagates to the Agent loop and CLI
+- bounds every cancellation/timeout termination, direct-process wait, and pipe
+  drain; if a missed or detached descendant retains an inherited pipe beyond
+  that deadline, Core closes its parent-side pipe handles instead of waiting
+  indefinitely for EOF
+- disarms the Job's kill-on-close limit after ordinary command completion so
+  cleanup hardening does not change the established behavior of an explicitly
+  detached process on a successful command
 - returns `ok` based on process return code
 - attaches `failure_class` to every failed execution using only timeout state,
   launch errors, return code, platform/shell identity, and narrowly recognized

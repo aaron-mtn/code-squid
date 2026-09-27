@@ -1,3 +1,23 @@
+- 2026-09-27: Hardened `run_command` cancellation and timeout teardown without
+  changing Agent-loop or provider cancellation. Windows commands are now
+  assigned to a ctypes-backed kill-on-close Job Object, with a bounded
+  `taskkill /T` pre-sweep for the process-creation assignment race and hosts
+  where Job assignment is unavailable. POSIX cleanup now checks the process
+  group after its `SIGTERM` grace period and sends `SIGKILL` even when the
+  original shell has already exited. `KeyboardInterrupt` enters the same owned
+  tree cleanup before propagating. All taskkill, process wait, and pipe-drain
+  operations now have explicit short deadlines; retained pipe handles are
+  closed after the drain deadline instead of reaching an unbounded final
+  `communicate()`. Added focused interrupt, retained-pipe, timeout-classification,
+  taskkill failure/hang, POSIX surviving-group, and repeated Windows descendant
+  regressions. Verification: all 98 Tool/executor tests passed with one POSIX-only
+  test skipped on Windows; the focused cancellation/timeout/Windows-tree subset
+  passed; direct Windows construction confirmed Job assignment; production and
+  test packages compiled; and `git diff --check` passed. The full suite completed
+  with 1,528 passing, one platform skip, and the same 54 unrelated prompt/Hook
+  expectation failures documented by the preceding patches. Ruff was unavailable
+  in the active Python environment.
+
 - 2026-09-26: Fixed request-only rendering for successful `read_file` results
   whose model-ready text has no source-line coordinates. Canonical spreadsheet
   results were complete, but the generic formatter emitted only status and path
