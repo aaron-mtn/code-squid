@@ -2029,10 +2029,14 @@ complete and structured for Hooks, replay, trimming, and storage, while the
 four built-ins are shown to the model as compact text. `read_file` source is
 emitted as ordinary multiline text under per-region path and exact-line
 headers; every disjoint or trimmed gap has an explicit omitted interval.
-Repeated-read partial and skipped results use the same notation.
-PDF results use a separate page-oriented rendering that exposes selected-page
-metadata, extracted text, and each durable rendered PNG path without pretending
-PDF pages are text line ranges or injecting the PNGs into the current request.
+Repeated-read partial and skipped results use the same notation. Successful
+readers whose model-ready text has no source-line coordinates emit that payload
+under a generic content header. This preserves the complete first exposure
+without inventing provenance, while older payloads still use the configured
+character bound. PDF results use a separate page-oriented rendering that
+exposes selected-page metadata, extracted text, and each durable rendered PNG
+path without pretending PDF pages are text line ranges or injecting the PNGs
+into the current request.
 `run_command` exposes command, exit status, concise failure metadata, and an
 output block; `apply_patch` keeps recovery IDs, ranges, and current candidate
 text; successful `write_file` results contain only status and path. Assistant

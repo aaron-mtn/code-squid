@@ -155,6 +155,73 @@ def test_newest_results_are_textual_without_changing_pairing() -> None:
     assert rendered[-1]["tool_call_id"] == messages[-1]["tool_call_id"]
 
 
+def test_large_recent_spreadsheet_read_keeps_content_on_first_exposure() -> None:
+    content = (
+        "Workbook: spreadsheet (xlsx)\n"
+        "Sheets (2): Orders, Summary\n\n"
+        "<<< SHEET: Orders >>>\n"
+        "Used range: A1:J101\n"
+        + "2\tPB-100001\t[formula: =G2*H2]\n" * 300
+    )
+    canonical_result = {
+        "ok": True,
+        "tool": "read_file",
+        "path": "C:/repo/orders.xlsx",
+        "media_type": "spreadsheet",
+        "format": "xlsx",
+        "sheet_names": ["Orders", "Summary"],
+        "content": content,
+        "content_truncated": False,
+        "content_original_chars": len(content),
+        "content_returned_chars": len(content),
+        "total_lines": len(content.splitlines()),
+        "ranged": False,
+    }
+    messages = _tool_turn("read", "read_file", canonical_result)
+    before = copy.deepcopy(messages)
+
+    rendered = render_messages_for_model(
+        messages,
+        ToolResultTrimmingSettings(recent_full_results=0, read_old_content_chars=0),
+    )
+
+    assert content.rstrip() in rendered[-1]["content"]
+    assert "Orders, Summary" in rendered[-1]["content"]
+    assert "[formula: =G2*H2]" in rendered[-1]["content"]
+    assert messages == before
+
+
+def test_old_range_less_read_content_still_uses_the_configured_bound() -> None:
+    content = "Workbook: spreadsheet (ods)\n" + "sheet payload\n" * 100
+    canonical_result = {
+        "ok": True,
+        "tool": "read_file",
+        "path": "C:/repo/orders.ods",
+        "media_type": "spreadsheet",
+        "content": content,
+        "content_truncated": False,
+        "total_lines": len(content.splitlines()),
+    }
+    messages = _after_exposure(_tool_turn("read", "read_file", canonical_result))
+    before = copy.deepcopy(messages)
+
+    rendered = render_messages_for_model(
+        messages,
+        ToolResultTrimmingSettings(
+            recent_full_results=0,
+            read_old_content_chars=80,
+        ),
+    )
+
+    observation = rendered[-2]["content"]
+    assert observation.startswith(
+        "READ_FILE OK\npath: C:/repo/orders.ods\ntruncated: yes\n\n<<< CONTENT >>>"
+    )
+    assert "[older payload truncated]" in observation
+    assert len(observation) < len(content)
+    assert messages == before
+
+
 def test_large_current_batch_preserves_first_exposure_for_mixed_results() -> None:
     read_content = "first source line\nsecond source line\n"
     calls = [
@@ -711,7 +778,51 @@ def test_agent_loop_sends_trimmed_view_but_keeps_session_history_canonical() -> 
 
     assert messages == before
     assert adapter.messages[-2]["content"].startswith("READ_FILE OK")
-    assert "SOURCE OMITTED FROM OLDER RESULT" in adapter.messages[-2]["content"]
+    assert "<<< CONTENT >>>" in adapter.messages[-2]["content"]
+    assert "[older payload truncated" in adapter.messages[-2]["content"]
+
+
+def test_agent_loop_sends_complete_recent_range_less_read_to_adapter() -> None:
+    content = "Workbook: spreadsheet (xlsx)\n" + "formula: =A1*B1\n" * 500
+    messages = _tool_turn(
+        "read",
+        "read_file",
+        {
+            "ok": True,
+            "tool": "read_file",
+            "path": "C:/repo/orders.xlsx",
+            "media_type": "spreadsheet",
+            "content": content,
+            "content_truncated": False,
+            "total_lines": len(content.splitlines()),
+        },
+    )
+    before = copy.deepcopy(messages)
+
+    class RecordingAdapter:
+        def respond(self, messages: list[dict], tool_definitions: list[dict]) -> dict:
+            self.messages = messages
+            return {"message": {"role": "assistant", "content": "done"}}
+
+    adapter = RecordingAdapter()
+    loop = AgentLoop(
+        session=SimpleNamespace(messages=messages, repo_root="C:/repo"),
+        model_adapter=adapter,
+        tool_executor=object(),
+        tool_results=ToolResults(),
+        agent=object(),
+        display=object(),
+        action_preflight=object(),
+        tool_result_trimming=ToolResultTrimmingSettings(
+            recent_full_results=0,
+            read_old_content_chars=0,
+        ),
+    )
+
+    loop._respond([])
+
+    assert content.rstrip() in adapter.messages[-1]["content"]
+    assert messages == before
 
 
 def test_agent_loop_exposes_entire_just_completed_batch_once() -> None:

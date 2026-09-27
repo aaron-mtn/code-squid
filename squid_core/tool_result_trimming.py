@@ -345,6 +345,17 @@ def _format_read_result(
     if result.get("content_truncated") is True or was_trimmed:
         lines.append("truncated: yes")
 
+    # Some readers return model-ready text that is not addressable as source
+    # lines. Keep that payload visible without inventing line provenance; old
+    # results have already passed through the ordinary character bound above.
+    if not returned_ranges:
+        content = result.get("content")
+        if isinstance(content, str) and content:
+            lines.extend(("", "<<< CONTENT >>>", content))
+        elif was_trimmed:
+            lines.extend(("", "<<< CODE SQUID CONTENT OMITTED FROM OLDER RESULT >>>"))
+        return "\n".join(lines).rstrip()
+
     source_regions = _source_regions(source_result, visible_ranges)
     omitted = _read_ranges_from_field(result, "omitted_line_ranges")
     omitted_reason = " already available unchanged" if partial else ""

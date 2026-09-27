@@ -1,3 +1,19 @@
+- 2026-09-26: Fixed request-only rendering for successful `read_file` results
+  whose model-ready text has no source-line coordinates. Canonical spreadsheet
+  results were complete, but the generic formatter emitted only status and path
+  for untruncated XLSX/ODS reads because it required text line-range metadata.
+  Range-less content now remains complete on first exposure and uses the
+  existing character bound after it becomes historical; canonical history is
+  still unchanged. Added regressions for a large recent workbook payload and
+  bounded older range-less content. Verification: all 75 focused trimming and
+  compaction tests, 288 Agent-loop/provider/session tests, and 45 related
+  reader/result tests passed. Replaying the reported session preserved all
+  12,392 canonical workbook-content characters through OpenRouter request
+  preparation. The full suite completed with 1,521 passing and the same 54
+  unrelated prompt/Hook expectation failures documented by the spreadsheet
+  patches. Production and test packages compiled, and `git diff --check`
+  passed.
+
 - 2026-09-26: Added the focused spreadsheet-reader follow-up: `read_file` now
   accepts an exact XLSX/ODS `sheet` plus optional 1-based inclusive
   `rows={start_row, end_row}`, while preserving whole-workbook reads and keeping
