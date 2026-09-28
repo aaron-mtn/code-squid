@@ -32,10 +32,12 @@ def tool_definition() -> dict:
         "function": {
             "name": TOOL_NAME,
             "description": (
-                "Read a UTF-8 text file, DOCX document, XLSX or ODS spreadsheet, PDF, "
+                "Read a UTF-8 text file, DOCX document or EPUB book, XLSX or ODS "
+                "spreadsheet, PDF, "
                 "or supported PNG, JPG/JPEG, or WebP image at an absolute path. Use "
                 "ranges for one or several known relevant 1-based inclusive lines of "
-                "text or deterministic DOCX text. Spreadsheet reads return "
+                "text, deterministic DOCX text, or EPUB text. Spreadsheet reads "
+                "return "
                 "formula-preserving workbook text and instead use sheet and optional "
                 "rows. PDFs instead use pages for 1-based inclusive page ranges; the "
                 "selected pages are text-extracted and lazily rendered to session PNG "

@@ -6,6 +6,7 @@ from squid_core.image_content import SUPPORTED_IMAGE_SUFFIXES
 
 from .context import FileReadContext
 from .docx import read_docx
+from .epub import read_epub
 from .image import read_image
 from .ods import read_ods
 from .pdf import read_pdf
@@ -18,6 +19,7 @@ Reader = Callable[[FileReadContext], dict]
 # Unknown suffixes intentionally retain the historical UTF-8 text fallback.
 _READERS_BY_SUFFIX: dict[str, Reader] = {
     ".docx": read_docx,
+    ".epub": read_epub,
     ".ods": read_ods,
     ".pdf": read_pdf,
     ".xlsx": read_xlsx,

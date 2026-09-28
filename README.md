@@ -324,6 +324,16 @@ use the same 1,000-line head/tail bound as text files. Word page selection,
 comments, tracked-change reconstruction, embedded images, drawings/text boxes,
 layout fidelity, and document writing are not supported.
 
+`read_file` supports read-only `.epub` books through epub-utils. It follows the
+package spine's primary reading order and emits deterministic Markdown-like
+text for reliable line `ranges`: selected metadata, explicit section
+boundaries, headings, paragraphs, lists, blockquotes, preformatted content,
+hyperlinks, tables, and image alt/reference text. Navigation documents and
+non-linear spine resources are not duplicated as book prose. EPUB content is
+strictly passive: Code Squid does not fetch links, run scripts, send embedded
+images to vision, reproduce CSS/layout, bypass DRM, select native chapters, or
+write EPUBs.
+
 `read_file` supports read-only `.xlsx` and `.ods` spreadsheets. It returns a
 workbook summary, sheet names, used ranges, and TSV-like rows, with formulas
 marked explicitly. XLSX formulas include their stored cached result when the

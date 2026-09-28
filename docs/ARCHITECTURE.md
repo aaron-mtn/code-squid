@@ -2191,10 +2191,11 @@ schema, argument validation, path requirements, unsupported-media errors, and
 the public Tool entry point. It dispatches one-way into the reusable
 `squid_core/file_readers` package. That package has a deliberately static
 suffix registry: `.xlsx` and `.ods` select their spreadsheet readers, `.pdf`
-selects the PDF reader, `.docx` selects the DOCX reader,
+selects the PDF reader, `.docx` and `.epub` select their document readers,
 `.png`/`.jpg`/`.jpeg`/`.webp` select the image reader, and every other suffix
-retains the UTF-8 text-reader fallback. `text.py`, `docx.py`, `xlsx.py`,
-`ods.py`, `image.py`, and `pdf.py` own their format-specific read behavior;
+retains the UTF-8 text-reader fallback. `text.py`, `docx.py`, `epub.py`,
+`xlsx.py`, `ods.py`, `image.py`, and `pdf.py` own their format-specific read
+behavior;
 none depends on the Tool adapter. The adapter packages each validated request
 and its optional session-storage callbacks into one immutable
 `FileReadContext`. Every registered reader accepts that same context, so the
@@ -2223,6 +2224,23 @@ root-level properties.
 - treats DOCX as read-only semantic content: it does not reconstruct comments,
   tracked changes, drawings or text boxes, embedded images, typography, page
   layout, or page-number selection
+- reads `.epub` through epub-utils, using the package spine rather than ZIP
+  member or filename order; only primary (`linear="yes"`) XHTML/HTML resources
+  are treated as prose, and EPUB 3 navigation resources are excluded even if
+  a producer places them in the spine
+- keeps epub-utils objects inside `epub.py`, normalizes selected metadata and
+  each spine resource into EPUB-specific immutable book/section/block values,
+  and renders explicit section boundaries plus Markdown-like headings,
+  paragraphs, nested lists, blockquotes, fenced preformatted content, links,
+  tables, and image alt/reference text
+- applies ordinary text line targeting and the 1,000-line full-read ceiling to
+  rendered EPUB text; EPUB does not expose chapter selectors and rejects the
+  PDF-only and spreadsheet-only selectors at the public Tool boundary
+- treats EPUB content as local, passive, and read-only: it does not render CSS,
+  execute scripts, fetch links or remote resources, send embedded images to
+  vision, bypass encrypted/DRM content, reproduce page layout, or write books;
+  navigation/TOC data determines structural exclusion but is not separately
+  emitted, avoiding duplicate chapter labels
 - reads `.xlsx` through openpyxl and `.ods` through odfpy, returning a
   provider-neutral spreadsheet result with workbook format, ordered sheet
   names, used ranges, and TSV-like text for each sheet
@@ -2239,7 +2257,7 @@ root-level properties.
   normal 1,000-line head/tail ceiling and direct oversized selections toward a
   narrower row interval; the readers ignore charts and other drawing content
   and do not expose images, macros, pivots, or editing
-- validates DOCX, XLSX, and ODS containers through one narrow
+- validates DOCX, EPUB, XLSX, and ODS containers through one narrow
   `file_readers/container.py` helper that limits each source to 64 MiB and its
   declared ZIP-expanded members to 256 MiB before format parsing; callers own
   their format-specific public error wording, and spreadsheet-only cell limits

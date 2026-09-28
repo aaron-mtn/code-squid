@@ -1,3 +1,21 @@
+- 2026-09-27: Added first-class, read-only EPUB 2/3 support to Core's existing
+  `read_file` registry using the Apache-2.0 `epub-utils==0.1.0a1` dependency.
+  The EPUB reader keeps package/parser objects local, follows primary spine
+  order, excludes navigation and non-linear resources from prose, normalizes
+  selected metadata and common XHTML semantics into EPUB-specific immutable
+  values, and renders deterministic Markdown-like text through the established
+  line-range and full-read truncation machinery. It uses the shared 64 MiB
+  compressed/256 MiB declared-expanded ZIP checks with EPUB-specific sanitized
+  failures. Native chapter selection, separate TOC output, CSS/layout, scripts,
+  remote fetching, DRM bypass, embedded-image vision, and writing remain
+  intentionally unsupported. Verification: all 132 focused EPUB, DOCX,
+  spreadsheet, PDF, image, shared-reader, and public Tool tests passed with one
+  platform skip. The full suite completed with 1,551 passing, one platform
+  skip, and the same 54 unrelated prompt/Hook expectation failures documented
+  by preceding patches. Production and test packages compiled, touched imports
+  loaded successfully, and `git diff --check` passed. Ruff was unavailable in
+  the active Python environment.
+
 - 2026-09-27: Added first-class, read-only DOCX support to the existing
   `read_file` registry using python-docx. The new reader validates bounded ZIP
   containers, normalizes paragraphs, common headings and lists, hyperlinks,
