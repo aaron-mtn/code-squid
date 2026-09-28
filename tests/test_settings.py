@@ -7,6 +7,7 @@ from code_squid.app_paths import settings_path
 from code_squid.settings import (
     DEFAULT_BUILT_IN_HOOK_SETTINGS,
     load_settings,
+    trust_command,
     write_approval_mode,
     write_provider,
 )
@@ -52,6 +53,7 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert settings.display.debug is False
     assert settings.display.show_reasoning is False
     assert settings.runtime.approval_mode == "never"
+    assert settings.runtime.trusted_commands == ()
     assert settings.runtime.max_tool_steps is None
     assert settings.runtime.stream_assistant_text is False
     assert settings.runtime.built_in_hook_settings == DEFAULT_BUILT_IN_HOOK_SETTINGS
@@ -822,3 +824,25 @@ def test_write_approval_mode_preserves_settings_and_json_format(tmp_path: Path) 
         '  "runtime": {\n    "approval_mode": "guarded"\n  }\n}\n'
     )
     assert load_settings(tmp_path).runtime.approval_mode == "guarded"
+
+
+def test_trusted_command_survives_settings_reload(tmp_path: Path) -> None:
+    write_settings(
+        tmp_path,
+        {"runtime": {"approval_mode": "guarded", "trusted_commands": [" pytest "]}},
+    )
+
+    trust_command(tmp_path, "GIT")
+    trust_command(tmp_path, "git")
+
+    assert load_settings(tmp_path).runtime.trusted_commands == ("pytest", "git")
+    persisted = json.loads(settings_path().read_text(encoding="utf-8"))
+    assert persisted["runtime"]["trusted_commands"] == ["pytest", "git"]
+
+
+@pytest.mark.parametrize("value", ["git", [""], [1]])
+def test_invalid_trusted_commands_raise(tmp_path: Path, value: object) -> None:
+    write_settings(tmp_path, {"runtime": {"trusted_commands": value}})
+
+    with pytest.raises(ValueError, match="runtime.trusted_commands"):
+        load_settings(tmp_path)

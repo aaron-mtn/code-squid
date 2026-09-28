@@ -1,3 +1,17 @@
+- 2026-09-28: Replaced guarded-mode shell-semantic classification with explicit
+  per-command trust. Guarded mode now prompts for each untrusted `run_command`
+  identity, offers approve-once, persistent `Always approve <command> commands`,
+  or denial, and keeps structured in-workspace file tools prompt-free. Trusted
+  identities are normalized first tokens stored application-wide in
+  `runtime.trusted_commands`; arguments are intentionally not inspected.
+  Deleted `squid_core/safety/command_safety.py` and its command-specific Git,
+  search, find, pytest, ls, Node, mutation, path, and shell-syntax tests. Kept
+  workspace-boundary and denial behavior intact. Verification: 544 focused
+  safety, settings, terminal, construction, and tool-execution tests passed;
+  compilation and `git diff --check` passed. The full suite passed 1,546 tests
+  with 1 skip and retained 54 unrelated pre-existing prompt and built-in Hook
+  policy failures.
+
 - 2026-09-27: Added first-class, read-only EPUB 2/3 support to Core's existing
   `read_file` registry using the Apache-2.0 `epub-utils==0.1.0a1` dependency.
   The EPUB reader keeps package/parser objects local, follows primary spine

@@ -320,7 +320,12 @@ class TerminalDisplay:
         self._has_run_output = True
         self._needs_leading_blank = True
         response = prompt_multiline_input(prompt)
-        approved = response.strip() == ""
+        normalized_response = response.strip().casefold()
+        always_approve_command = (
+            bool(action.get("allow_persistent_command_approval"))
+            and normalized_response == "always"
+        )
+        approved = normalized_response == "" or always_approve_command
         instruction = "" if approved else response
         can_compact = (
             can_compact_approval_prompt(
@@ -335,7 +340,11 @@ class TerminalDisplay:
         elif not approved:
             self._print_rejected_approval_result(instruction)
             self._compacted_denied_action = action
-        return ApprovalDecision(approved=approved, instruction=instruction)
+        return ApprovalDecision(
+            approved=approved,
+            instruction=instruction,
+            always_approve_command=always_approve_command,
+        )
 
     def _action_text(self, action: dict) -> str:
         return action_label(action, "start", self._display_root())

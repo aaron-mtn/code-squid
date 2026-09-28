@@ -128,6 +128,33 @@ def test_run_construction_uses_supplied_display_for_approvals(tmp_path: Path) ->
     assert run.loop.approval_policy.prompter is display
 
 
+def test_run_construction_uses_persisted_trusted_commands(tmp_path: Path) -> None:
+    settings = _provider_settings("lm_studio")
+    settings = Settings(
+        model=settings.model,
+        display=settings.display,
+        runtime=RuntimeSettings(
+            approval_mode="guarded",
+            trusted_commands=("git",),
+        ),
+        compaction=settings.compaction,
+    )
+
+    run = build_coding_task_run(
+        tmp_path,
+        "Use command trust",
+        settings=settings,
+        model_adapter=object(),
+    )
+
+    assert run.loop.approval_policy.check(
+        {"tool": "run_command", "args": {"command": "git status"}}
+    ).approved
+    assert not run.loop.approval_policy.check(
+        {"tool": "run_command", "args": {"command": "python script.py"}}
+    ).approved
+
+
 def test_run_coding_task_passes_callbacks_to_agent_loop(monkeypatch, tmp_path) -> None:
     callbacks = []
 

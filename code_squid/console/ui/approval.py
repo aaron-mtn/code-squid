@@ -56,7 +56,13 @@ def approval_panel(
             )
         )
     lines.append(approval_line(structural_text(bottom)))
-    return lines, approval_prompt(debug=debug, detail_indent=detail_indent)
+    return lines, approval_prompt(
+        debug=debug,
+        detail_indent=detail_indent,
+        command_identity=action.get("command_identity")
+        if action.get("allow_persistent_command_approval")
+        else None,
+    )
 
 
 def approval_reason_label(action: dict) -> str:
@@ -67,9 +73,20 @@ def approval_reason_label(action: dict) -> str:
     return reason
 
 
-def approval_prompt(*, debug: bool, detail_indent: str) -> AnyFormattedText:
+def approval_prompt(
+    *,
+    debug: bool,
+    detail_indent: str,
+    command_identity: str | None = None,
+) -> AnyFormattedText:
     """Build the formatted multiline-input prompt for an approval decision."""
-    prompt_text = "Enter to approve, or type guidance instead:\n"
+    if command_identity is None:
+        prompt_text = "Enter to approve, or type guidance instead:\n"
+    else:
+        prompt_text = (
+            "Enter: Approve once | always: "
+            f"Always approve {command_identity} commands | deny/guidance: Deny\n"
+        )
     if not debug:
         prompt_text = _indented_line(prompt_text, detail_indent)
     return FormattedText(

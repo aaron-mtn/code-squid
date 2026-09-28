@@ -311,7 +311,6 @@ def build_agent_loop(
     if action_preflight is None:
         action_preflight = ActionPreflight(
             workspace_root=repo_root,
-            approval_mode=settings.approval_mode,
         )
     if hook_runner is None:
         hook_runner = HookRunner()

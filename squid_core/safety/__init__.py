@@ -8,6 +8,7 @@ from .approval import (
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalPrompter,
+    command_identity,
     denied_result,
 )
 from .preflight import ActionPreflight, ActionPreflightDecision
@@ -22,5 +23,6 @@ __all__ = [
     "ApprovalDecision",
     "ApprovalPolicy",
     "ApprovalPrompter",
+    "command_identity",
     "denied_result",
 ]

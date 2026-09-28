@@ -2332,7 +2332,7 @@ def test_guarded_asks_for_outside_workspace_file_tool(tmp_path) -> None:
     assert "outside the workspace root" in prompter.actions[0]["approval_reason"]
 
 
-def test_guarded_allows_low_risk_run_command_without_approval(tmp_path) -> None:
+def test_guarded_asks_for_every_untrusted_run_command(tmp_path) -> None:
     prompter = FakePrompter(ApprovalDecision(approved=False))
 
     _, tool_executor, _, _ = run_loop(
@@ -2344,13 +2344,11 @@ def test_guarded_allows_low_risk_run_command_without_approval(tmp_path) -> None:
         repo_root=tmp_path,
     )
 
-    assert prompter.actions == []
-    assert tool_executor.actions == [
-        {"tool": "run_command", "args": {"command": "pwd"}}
-    ]
+    assert tool_executor.actions == []
+    assert prompter.actions[0]["command_identity"] == "pwd"
 
 
-def test_guarded_asks_for_risky_run_command(tmp_path) -> None:
+def test_guarded_trusted_command_runs_without_approval(tmp_path) -> None:
     prompter = FakePrompter(ApprovalDecision(approved=False))
 
     _, tool_executor, _, _ = run_loop(
@@ -2361,17 +2359,15 @@ def test_guarded_asks_for_risky_run_command(tmp_path) -> None:
             ),
             reply("TASK COMPLETE"),
         ],
-        approval_policy=ApprovalPolicy("guarded", prompter=prompter),
+        approval_policy=ApprovalPolicy(
+            "guarded", prompter=prompter, trusted_commands=("mkdir",)
+        ),
         repo_root=tmp_path,
     )
 
-    assert tool_executor.actions == []
-    assert prompter.actions == [
-        {
-            "tool": "run_command",
-            "args": {"command": "mkdir build"},
-            "approval_reason": "Command may modify files",
-        }
+    assert prompter.actions == []
+    assert tool_executor.actions == [
+        {"tool": "run_command", "args": {"command": "mkdir build"}}
     ]
 
 

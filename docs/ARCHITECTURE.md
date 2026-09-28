@@ -411,8 +411,8 @@ and application layer; `squid_core/` is the reusable agent runtime.
     observes runtime facts.
 
 - `squid_core/safety/`
-  - Tool-action preflight, approval policy, guarded-command classification, and
-    structured file-tool workspace boundaries.
+  - Tool-action preflight, approval policy, deliberately simple command trust,
+    and structured file-tool workspace boundaries.
   - This is an approval/preflight boundary, not a hardened sandbox.
 
 - `squid_core/spawner.py`
@@ -1339,6 +1339,7 @@ Missing settings are allowed. Defaults keep the CLI usable with LM Studio:
 - display debug: `false`
 - reasoning display: `false`
 - approval mode: `never`
+- trusted commands: none
 - max tool steps: unlimited
 - assistant text streaming: disabled
 - model-request retries: 2, with a 250 ms initial backoff
@@ -1358,6 +1359,7 @@ Supported settings sections and fields:
 - `display.debug`
 - `display.show_reasoning`
 - `runtime.approval_mode`
+- `runtime.trusted_commands`
 - `runtime.max_tool_steps`
 - `runtime.stream_assistant_text`
 - `runtime.model_request_max_retries`
@@ -1716,26 +1718,29 @@ Current modes:
   approved. In this mode `ToolExecutor` is also configured to allow structured
   file tools outside the workspace without an approval preflight.
 - `approval_mode = "guarded"` means balanced mode. Actions with no approval
-  reason are approved automatically; actions with an approval reason ask the
-  user before execution.
+  reason are approved automatically, except that `run_command` asks until its
+  command identity has been permanently trusted. Actions with an approval
+  reason still ask the user before execution.
 - `approval_mode = "always"` means strict mode and asks before every tool
   action.
 
 The policy is UI-agnostic and receives normalized tool actions before
 execution. `TerminalDisplay` is the current prompter used by the CLI.
-`squid_core/safety/preflight.py` supplies any workspace, guarded-command, or hook
-approval reason before this approval check.
+`squid_core/safety/preflight.py` supplies workspace and hook approval reasons
+before this approval check.
 
 If a user denies an action, the action is not executed. Denial returns a normal
 failed tool result to the model with `user denied tool action`.
 
-Guarded command safety is partial and only affects `run_command` in
-`approval_mode = "guarded"`. It allowlists simple low-risk commands such as
-`pwd`, `ls`, `find`, `rg`, `grep`, `git status`, `git diff`, `pytest`,
-`python -m pytest`, and `node --check` when obvious path arguments remain inside
-the workspace. It asks for approval for shell syntax, known mutating commands,
-unknown commands, package installs, destructive git commands, and obvious paths
-outside the workspace.
+Guarded command approval deliberately does not classify shell semantics. The
+first whitespace-delimited token is the command identity; a simply quoted first
+token is unquoted and identities are case-normalized. An untrusted identity
+offers `Approve once`, `Always approve <command> commands`, and `Deny`.
+Persistent approval stores only that identity in application-wide
+`runtime.trusted_commands`; later argument changes do not prompt. Approve-once
+does not change settings, and trusting one identity does not trust another.
+Shell operators, environment assignments, aliases, wrappers, and nested shell
+commands receive no special interpretation.
 
 Approval is not a hardened sandbox. Approved `run_command` actions still execute
 through the shell, and approved file tools still use absolute paths.
@@ -1765,8 +1770,9 @@ In `never`/yolo mode, outside-workspace file paths are allowed without approval.
 
 This is an approval and preflight boundary, not a process sandbox. It does not
 contain `run_command`; shell commands can still read or mutate outside the
-workspace if the command itself does so. Guarded mode only adds conservative
-approval prompts for some obvious `run_command` cases.
+workspace if the command itself does so. Guarded mode requires approval for
+every untrusted command identity, but it does not constrain what a trusted
+command can do.
 
 ## Compaction
 
@@ -2487,13 +2493,15 @@ memory.
 `squid_core/safety/approval.py` owns approval decisions without depending on a concrete UI.
 The loop enforces those decisions before tool execution.
 
-`squid_core/safety/preflight.py` owns accepted-action safety classification and
-translates workspace, guarded-command, and hook reasons into the two action
+`squid_core/safety/preflight.py` owns accepted-action boundary handling and
+translates workspace and hook reasons into the two action
 forms needed by approval and execution. It is a small collaborator, not a
 general policy framework.
 
-`squid_core/safety/command_safety.py` owns guarded-mode command classification. It should
-stay conservative and limited to deciding whether approval is required.
+`squid_core/safety/approval.py` also extracts the first command token and matches
+it against application-supplied trusted identities. Code Squid persists new
+identities through `code_squid/settings.py`; Core remains independent of the
+application's settings location.
 
 `squid_core/safety/workspace_boundary.py` owns structured file-tool workspace checks. It
 should remain a preflight/approval boundary unless a real sandbox is added
@@ -2524,7 +2532,7 @@ narration is encouraged by prompts.
 - Action notes are prompt-guided. Runtime rejects empty non-final replies and
   multi-tool replies, but it does not fully enforce action-note quality.
 - Command and file access is not a hardened sandbox. Workspace checks and
-  guarded command checks are approval/preflight mechanisms.
+  guarded command trust are approval mechanisms.
 - Compaction uses rough JSON/text length estimates, not exact tokenization.
 - Core records model request failures, unexpected run failures, requested
   cancellation, and boundary-level interruptions before preserving the existing

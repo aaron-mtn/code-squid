@@ -16,6 +16,7 @@ from code_squid.settings import (
     DEFAULT_BUILT_IN_HOOK_SETTINGS,
     Settings,
     load_settings,
+    trust_command,
 )
 from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.events import EventCallback
@@ -43,6 +44,7 @@ from squid_core.storage.session_index import register_session_root
 from squid_core.tools.builtins import TOOLS
 from squid_core.agent import Agent
 from squid_core.spawner import build_agent_loop as build_core_agent_loop
+from squid_core.safety import ApprovalPolicy
 
 
 SessionStoreFactory = Callable[[Path, str], SessionStore]
@@ -274,6 +276,13 @@ def build_coding_task_run(
         app_home=app_home,
         built_in_hook_settings=settings.runtime.built_in_hook_settings,
     )
+    if approval_policy is None:
+        approval_policy = ApprovalPolicy(
+            mode=settings.runtime.approval_mode,
+            prompter=display if approval_prompter is None else approval_prompter,
+            trusted_commands=settings.runtime.trusted_commands,
+            persist_trusted_command=lambda command: trust_command(repo_root, command),
+        )
     loop = build_core_agent_loop(
         repo_root=repo_root,
         session=session,

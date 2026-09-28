@@ -211,6 +211,35 @@ def test_approve_action_uses_multiline_prompt(
     assert prompts == [_approval_prompt()]
 
 
+def test_run_command_approval_offers_once_always_or_deny(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompts: list[AnyFormattedText] = []
+
+    def choose_always(prompt: AnyFormattedText) -> str:
+        prompts.append(prompt)
+        return "always"
+
+    monkeypatch.setattr(
+        "code_squid.console.ui.display.prompt_multiline_input", choose_always
+    )
+    decision = TerminalDisplay().approve_action(
+        {
+            "tool": "run_command",
+            "args": {"command": "git status"},
+            "command_identity": "git",
+            "allow_persistent_command_approval": True,
+        }
+    )
+
+    assert decision.approved is True
+    assert decision.always_approve_command is True
+    prompt_text = _prompt_plain_text(prompts[0])
+    assert "Approve once" in prompt_text
+    assert "Always approve git commands" in prompt_text
+    assert "Deny" in prompt_text
+
+
 @pytest.mark.parametrize(
     ("action", "tool", "label", "value"),
     [

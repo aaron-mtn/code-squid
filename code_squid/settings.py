@@ -82,6 +82,7 @@ class DisplaySettings:
 @dataclass(frozen=True)
 class RuntimeSettings:
     approval_mode: str = DEFAULT_APPROVAL_MODE
+    trusted_commands: tuple[str, ...] = ()
     max_tool_steps: int | None = DEFAULT_MAX_TOOL_STEPS
     stream_assistant_text: bool = DEFAULT_STREAM_ASSISTANT_TEXT
     built_in_hook_settings: dict[str, bool] = field(
@@ -236,6 +237,22 @@ def _approval_mode(runtime_settings: dict[str, Any], settings_path: Path) -> str
         )
 
     return approval_mode
+
+
+def _trusted_commands(
+    runtime_settings: dict[str, Any], settings_path: Path
+) -> tuple[str, ...]:
+    """Load normalized command identities trusted by guarded mode."""
+
+    value = runtime_settings.get("trusted_commands", [])
+    if not isinstance(value, list) or any(
+        not isinstance(command, str) or not command.strip() for command in value
+    ):
+        raise ValueError(
+            f"Invalid settings JSON in {settings_path}: "
+            "runtime.trusted_commands must be a list of non-empty strings"
+        )
+    return tuple(dict.fromkeys(command.strip().casefold() for command in value))
 
 
 def _max_tool_steps(runtime_settings: dict[str, Any], settings_path: Path) -> int | None:
@@ -628,6 +645,7 @@ def load_settings(repo_root: Path) -> Settings:
             "display.show_reasoning must be a boolean"
         )
     approval_mode = _approval_mode(runtime_settings, settings_path)
+    trusted_commands = _trusted_commands(runtime_settings, settings_path)
     max_tool_steps = _max_tool_steps(runtime_settings, settings_path)
     stream_assistant_text = _stream_assistant_text(runtime_settings, settings_path)
     built_in_hook_settings = _built_in_hook_settings(runtime_settings, settings_path)
@@ -658,6 +676,7 @@ def load_settings(repo_root: Path) -> Settings:
         ),
         runtime=RuntimeSettings(
             approval_mode=approval_mode,
+            trusted_commands=trusted_commands,
             max_tool_steps=max_tool_steps,
             stream_assistant_text=stream_assistant_text,
             built_in_hook_settings=built_in_hook_settings,
@@ -681,6 +700,24 @@ def write_approval_mode(repo_root: Path, approval_mode: str) -> None:
 
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_json(settings_path, raw_settings)
+
+
+def trust_command(repo_root: Path, command: str) -> None:
+    """Persist one normalized guarded-mode command identity."""
+
+    identity = command.casefold().strip()
+    if not identity:
+        raise ValueError("command identity must be non-empty")
+
+    settings_path, raw_settings = _read_application_settings(repo_root)
+    runtime_settings = _section(raw_settings, "runtime", settings_path)
+    trusted_commands = list(_trusted_commands(runtime_settings, settings_path))
+    if identity not in trusted_commands:
+        trusted_commands.append(identity)
+        runtime_settings["trusted_commands"] = trusted_commands
+        raw_settings["runtime"] = runtime_settings
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(settings_path, raw_settings)
 
 
 def write_show_reasoning(repo_root: Path, show_reasoning: bool) -> None:
