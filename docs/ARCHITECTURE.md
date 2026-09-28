@@ -426,9 +426,15 @@ and application layer; `squid_core/` is the reusable agent runtime.
 - `squid_core/providers/`
   - Core-owned provider contract and first-party provider transports.
   - `openai_compatible.py` owns OpenAI-compatible chat-completions transport,
-    including OpenRouter request quirks already supported by that path.
+    including OpenRouter request quirks already supported by that path. Each
+    cancellable stream owns an SDK client so cancellation can close the active
+    HTTP transport while response headers or chunks are blocked.
   - `ollama.py` owns native Ollama `/api/chat` transport, its finite request
-    timeout default, and response adaptation.
+    timeout default, and response adaptation. Cancellable native streams use an
+    independently closable HTTP client.
+  - `base.py` owns the small shared provider cancellation monitor. Provider I/O
+    remains on the caller; the bounded monitor thread only polls the host
+    predicate and aborts the active provider-owned transport.
   - `__init__.py` contains the small built-in construction helper and backend
     replay choice. It consumes effective `ProviderSettings` and has no Code
     Squid defaults, settings loading, environment, or presentation policy.
@@ -2489,15 +2495,26 @@ narration is encouraged by prompts.
 - Core records model request failures, unexpected run failures, requested
   cancellation, and boundary-level interruptions before preserving the existing
   exception or cancellation control flow for its host.
+- The interactive CLI owns one cancellation controller per active run. Its
+  SIGINT handler sets thread-safe state passed through application construction
+  to `AgentLoop`; embedded callers retain the KeyboardInterrupt boundary where
+  Python signal handlers are unavailable.
 - Streaming providers accept a response only after a provider-native terminal
   signal: native Ollama requires `done: true`, while OpenAI-compatible chat
   completions require a non-null choice `finish_reason`. EOF without that
   evidence is a provider failure, so partial text or Tool calls never become an
   accepted assistant response. Providers check cancellation between arriving
   chunks and once more before classifying incomplete EOF, then explicitly close
-  the active response iterator on completion, cancellation, or error.
-  Retry backoff uses the same cancellation predicate in short bounded waits.
-  A transport blocked before its first response data remains provider-dependent.
+  the active response iterator on completion, cancellation, or error. Built-in
+  providers additionally monitor cancellation during response-header and body
+  waits and close their per-request client/response to wake blocked I/O. The
+  monitor polls every 20 ms and its shutdown join is bounded at 200 ms. Retry
+  backoff uses the same cancellation predicate in short bounded waits.
+- AgentLoop uses a provider stream internally whenever the provider supports it,
+  even when live assistant presentation is disabled. Hidden deltas are accumulated
+  into the same normalized completed reply without UI events. Text-only compaction
+  uses the same path when a cancellation callback is present, so reasoning
+  visibility and presentation settings do not weaken transport cancellation.
 - The console frontend supplies `TerminalDisplay`; Code Squid application and
   generic Core construction use Core's `NullDisplay` when a host omits
   presentation.

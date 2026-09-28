@@ -2454,3 +2454,21 @@
   collisions, preservation of the first folder, and cached-page reuse.
   Verification: 63 PDF, image, and session-storage tests passed; compilation
   and `git diff --check` passed.
+- 2026-09-27: Hardened model/provider cancellation without changing Tool
+  cancellation. The interactive CLI now owns run-scoped thread-safe cancellation
+  state and translates Ctrl+C into the callback already consumed by AgentLoop.
+  Built-in OpenAI-compatible streams use independently closable SDK clients, and
+  cancellable native Ollama streams use independently closable HTTP clients; a
+  short-lived provider monitor closes active transport during response-header,
+  first-token, reasoning, or inter-chunk waits and has a 200 ms join bound.
+  AgentLoop now accumulates provider streams when live presentation is disabled,
+  and cancellable compaction text generation does the same. Requested cancellation
+  remains `StreamCancelled`/`run_interrupted` control flow and is not recorded as
+  `model_request_failed` or `compaction_failed`; genuine provider errors retain
+  their existing adapter failure path. Added blocking-transport regression tests
+  for both providers, transport closure, bounded return, monitor cleanup, CLI
+  callback/SIGINT wiring, hidden-stream behavior, and cancellation classification.
+  Verification: 508 focused provider/adapter/AgentLoop/CLI/compaction/hook tests
+  passed; compilation and `git diff --check` passed. The full suite passed 1,536
+  tests with 1 skip and retained 54 unrelated pre-existing prompt and built-in
+  Hook policy failures.

@@ -438,15 +438,29 @@ class ModelAdapter:
         self,
         messages: list[dict],
         please_stop_contemplating_the_void: bool = False,
+        should_cancel=None,
     ) -> dict:
         request_options = self.prepare_request(messages, [])
         if please_stop_contemplating_the_void:
             request_options["please_stop_contemplating_the_void"] = True
-        return self.complete_text_prepared(request_options)
+        return self.complete_text_prepared(
+            request_options,
+            should_cancel=should_cancel,
+        )
 
-    def complete_text_prepared(self, request: dict) -> dict:
+    def complete_text_prepared(self, request: dict, should_cancel=None) -> dict:
         """Complete one text-only request from its finalized representation."""
-        raw_response = self._send_prepared_request(request)
+        if should_cancel is not None and self.supports_streaming():
+            # Accumulating the provider stream preserves the completed response
+            # shape while making hidden/non-UI generation transport-cancellable.
+            raw_response = self._send_prepared_request(
+                request,
+                streaming=True,
+                on_text_delta=lambda _delta: None,
+                should_cancel=should_cancel,
+            )
+        else:
+            raw_response = self._send_prepared_request(request)
 
         raw_reply = self._raw_reply_from_response(raw_response)
         assistant = raw_reply["assistant"]

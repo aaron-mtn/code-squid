@@ -1,7 +1,10 @@
 """Run and session orchestration helpers for the Code Squid CLI."""
 
+from contextlib import contextmanager
 import os
 from pathlib import Path
+import signal
+import threading
 
 from code_squid.settings import Settings
 from code_squid.provider_setup import friendly_provider_name
@@ -17,6 +20,45 @@ from squid_core.storage import SessionStore, write_error_log
 from squid_core.storage.session_index import latest_session_id, session_dir_for
 from code_squid.console.ui.banner import FRIENDLY_APPROVAL_MODES, StartupInfo
 from code_squid.console.ui.display import TerminalDisplay
+
+
+class RunCancellationController:
+    """Own cancellation state and Ctrl+C handling for one interactive run."""
+
+    def __init__(self) -> None:
+        self._cancelled = threading.Event()
+
+    def cancel(self) -> None:
+        """Request cancellation for the active run."""
+        self._cancelled.set()
+
+    def should_cancel(self) -> bool:
+        """Return whether the active run has been cancelled."""
+        return self._cancelled.is_set()
+
+    def _handle_sigint(self, _signum, _frame) -> None:
+        """Request cancellation once, then preserve a second interrupt."""
+        if self.should_cancel():
+            # A second Ctrl+C remains an emergency escape if a foreign provider
+            # ignores transport closure despite the cooperative request.
+            raise KeyboardInterrupt
+        self.cancel()
+
+    @contextmanager
+    def handle_sigint(self):
+        """Translate Ctrl+C into cooperative run cancellation when supported."""
+        try:
+            previous = signal.getsignal(signal.SIGINT)
+            signal.signal(signal.SIGINT, self._handle_sigint)
+        except (ValueError, OSError):
+            # Signal handlers can only be installed by the main thread. Embedded
+            # callers retain the existing KeyboardInterrupt boundary below.
+            yield
+            return
+        try:
+            yield
+        finally:
+            signal.signal(signal.SIGINT, previous)
 
 
 def _session_dir_for_resume(repo_root: Path, session_id: str) -> Path | None:
@@ -62,10 +104,14 @@ def _run_loop(
     display: TerminalDisplay,
     session: Session,
     session_store: SessionStore,
+    cancellation: RunCancellationController | None = None,
 ) -> int:
+    cancellation = cancellation or RunCancellationController()
     try:
-        run_result = loop.run()
+        with cancellation.handle_sigint():
+            run_result = loop.run()
     except KeyboardInterrupt:
+        cancellation.cancel()
         session_store.update_status("interrupted")
         run_result = RunResult(status="interrupted", reason="user interrupted")
         display.interrupted()
@@ -118,6 +164,7 @@ def _run_new_session_task(
     mod_name: str | None = None,
 ) -> tuple[int, str | None]:
     display.run_started()
+    cancellation = RunCancellationController()
 
     run = build_coding_task_run(
         repo_root=repo_root,
@@ -125,11 +172,19 @@ def _run_new_session_task(
         settings=settings,
         display=display,
         on_event=getattr(display, "handle_event", None),
+        should_cancel=cancellation.should_cancel,
         skill_name=skill_name,
         mod_name=mod_name,
     )
 
-    status = _run_loop(repo_root, run.loop, display, run.session, run.session_store)
+    status = _run_loop(
+        repo_root,
+        run.loop,
+        display,
+        run.session,
+        run.session_store,
+        cancellation,
+    )
     return status, run.session_store.session_id
 
 
@@ -151,6 +206,7 @@ def _run_follow_up_task(
     session.add_messages(*session_store.load_messages())
 
     display.run_started()
+    cancellation = RunCancellationController()
     # Follow-ups use the application-owned path used by new runs, so a Mod
     # cannot lose its Skill, restricted Tools, or Hooks when a session resumes.
     run = build_coding_task_run(
@@ -159,6 +215,7 @@ def _run_follow_up_task(
         settings=settings,
         display=display,
         on_event=getattr(display, "handle_event", None),
+        should_cancel=cancellation.should_cancel,
         skill_name=skill_name,
         mod_name=mod_name,
         session=session,
@@ -169,5 +226,12 @@ def _run_follow_up_task(
     session_store.append_message(follow_up_message)
     session_store.update_status("active")
 
-    status = _run_loop(repo_root, run.loop, display, session, session_store)
+    status = _run_loop(
+        repo_root,
+        run.loop,
+        display,
+        session,
+        session_store,
+        cancellation,
+    )
     return status, session_store.session_id

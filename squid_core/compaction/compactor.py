@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import math
 from collections.abc import Callable
 
 from squid_core.compaction.prompts import COMPACTION_SYSTEM_PROMPT, compaction_prompt
 from squid_core.compaction.token_estimate import estimate_messages_tokens
+from squid_core.providers.base import StreamCancelled
 
 
 COMPACTED_CONTEXT_PREAMBLE = """# Compacted Working Context
@@ -26,12 +28,14 @@ class Compactor:
         settings,
         model_adapter,
         context_provider: Callable[[list[dict]], str | None] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> None:
         self.settings = settings
         self.model_adapter = model_adapter
         # Applications may preserve deterministic facts here without teaching
         # Core how to interpret their tools, events, or domain semantics.
         self.context_provider = context_provider
+        self.should_cancel = should_cancel
 
     def maybe_compact(
         self,
@@ -130,7 +134,26 @@ class Compactor:
                 self._emit(event_callback, request_event)
 
                 stage = "model_request"
-                summary_response = self.model_adapter.complete_text(request_messages)
+                complete_text = self.model_adapter.complete_text
+                try:
+                    complete_parameters = inspect.signature(complete_text).parameters
+                except (TypeError, ValueError):
+                    complete_parameters = {}
+                accepts_keywords = any(
+                    parameter.kind is inspect.Parameter.VAR_KEYWORD
+                    for parameter in complete_parameters.values()
+                )
+                if self.should_cancel is not None and (
+                    "should_cancel" in complete_parameters or accepts_keywords
+                ):
+                    summary_response = self.model_adapter.complete_text(
+                        request_messages,
+                        should_cancel=self.should_cancel,
+                    )
+                else:
+                    # Custom adapters predating cancellation keep their public
+                    # seam; built-in ModelAdapter accepts the callback above.
+                    summary_response = complete_text(request_messages)
 
                 stage = "response_parse"
                 try:
@@ -251,6 +274,9 @@ class Compactor:
                 },
             )
             return metadata
+        except StreamCancelled:
+            # Requested cancellation is run control, not a failed compaction.
+            raise
         except Exception as error:
             # Failure logging is best effort only when persistence itself has
             # failed; the original exception must always remain the one raised.

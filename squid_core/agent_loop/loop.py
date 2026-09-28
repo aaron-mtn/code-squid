@@ -331,20 +331,32 @@ class AgentLoop:
         while True:
             attempt_started_at = time.perf_counter()
             try:
-                if not self._should_stream_assistant_text():
+                supports_streaming_method = getattr(
+                    self.model_adapter,
+                    "supports_streaming",
+                    None,
+                )
+                supports_streaming = callable(supports_streaming_method) and bool(
+                    supports_streaming_method()
+                )
+                if not supports_streaming:
                     reply = self.model_adapter.respond(
                         messages=messages,
                         tool_definitions=tool_definitions,
                     )
                 else:
-                    self._emit_event(
-                        {
-                            "type": "assistant_message_started",
-                            "phase": "narration",
-                        }
-                    )
+                    present_stream = self._should_stream_assistant_text()
+                    if present_stream:
+                        self._emit_event(
+                            {
+                                "type": "assistant_message_started",
+                                "phase": "narration",
+                            }
+                        )
 
                     def on_text_delta(delta: str) -> None:
+                        if not present_stream:
+                            return
                         self._emit_event(
                             {
                                 "type": "assistant_delta",
@@ -354,6 +366,8 @@ class AgentLoop:
                         )
 
                     def on_reasoning_delta(delta: str) -> None:
+                        if not present_stream:
+                            return
                         self._emit_event(
                             {
                                 "type": "assistant_reasoning_delta",
@@ -363,6 +377,8 @@ class AgentLoop:
                         )
 
                     def on_tool_preparing(tool_call: dict) -> None:
+                        if not present_stream:
+                            return
                         self._emit_event(tool_preparing_event(tool_call))
 
                     reply = self.model_adapter.respond_streaming(
@@ -1066,7 +1082,7 @@ class AgentLoop:
                 follow_up_requests=run_finished.follow_up_requests,
                 hook_notes=self._hook_notes_from_decision(run_finished),
             )
-        except _CancellationRequested:
+        except (_CancellationRequested, StreamCancelled):
             run_finished = self._unwind_incomplete_run(
                 status="interrupted",
                 reason="cancelled",

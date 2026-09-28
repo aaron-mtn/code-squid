@@ -675,3 +675,5 @@ def test_cli_wires_display_event_handler_into_new_run(monkeypatch, tmp_path) -> 
 
     assert (status, session_id) == (0, "session-1")
     assert captured["on_event"] == display.handle_event
+    assert callable(captured["should_cancel"])
+    assert captured["should_cancel"]() is False

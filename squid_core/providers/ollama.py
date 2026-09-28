@@ -10,7 +10,9 @@ from types import SimpleNamespace
 from urllib import request
 from urllib.error import HTTPError, URLError
 
-from .base import BaseProvider, StreamCancelled
+import httpx
+
+from .base import BaseProvider, CancellationMonitor, StreamCancelled
 
 
 DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
@@ -170,60 +172,67 @@ class OllamaProvider(BaseProvider):
             },
         )
 
-        stream = self._post_chat_stream(payload)
+        uses_builtin_stream = type(self)._post_chat_stream is OllamaProvider._post_chat_stream
+        stream = (
+            self._post_chat_stream_interruptible(payload)
+            if should_cancel is not None and uses_builtin_stream
+            else self._post_chat_stream(payload)
+        )
+        monitor = CancellationMonitor(should_cancel, stream.close)
         try:
-            for chunk in stream:
-                if should_cancel is not None and should_cancel():
-                    raise StreamCancelled
-                chunk_elapsed = time.perf_counter() - request_started_at
-                raw_chunk_count += 1
-                if first_raw_chunk_elapsed is None:
-                    first_raw_chunk_elapsed = chunk_elapsed
-                response_id = response_id or chunk.get("id")
-                message = chunk.get("message") or {}
-                content_delta = message.get("content") or ""
-                reasoning_deltas = {
-                    name: message.get(name) or ""
-                    for name in ("reasoning", "reasoning_content", "thinking")
-                }
-                if content_delta:
-                    total_content_characters += len(content_delta)
-                    if first_content_delta_elapsed is None:
-                        first_content_delta_elapsed = chunk_elapsed
-                reasoning_character_count = sum(
-                    len(value) for value in reasoning_deltas.values()
-                )
-                if reasoning_character_count:
-                    total_reasoning_characters += reasoning_character_count
-                    if first_reasoning_delta_elapsed is None:
-                        first_reasoning_delta_elapsed = chunk_elapsed
+            with monitor:
+                monitor.raise_if_cancelled()
+                for chunk in stream:
+                    monitor.raise_if_cancelled()
+                    chunk_elapsed = time.perf_counter() - request_started_at
+                    raw_chunk_count += 1
+                    if first_raw_chunk_elapsed is None:
+                        first_raw_chunk_elapsed = chunk_elapsed
+                    response_id = response_id or chunk.get("id")
+                    message = chunk.get("message") or {}
+                    content_delta = message.get("content") or ""
+                    reasoning_deltas = {
+                        name: message.get(name) or ""
+                        for name in ("reasoning", "reasoning_content", "thinking")
+                    }
+                    if content_delta:
+                        total_content_characters += len(content_delta)
+                        if first_content_delta_elapsed is None:
+                            first_content_delta_elapsed = chunk_elapsed
+                    reasoning_character_count = sum(
+                        len(value) for value in reasoning_deltas.values()
+                    )
+                    if reasoning_character_count:
+                        total_reasoning_characters += reasoning_character_count
+                        if first_reasoning_delta_elapsed is None:
+                            first_reasoning_delta_elapsed = chunk_elapsed
 
-                self._trace(
-                    trace_callback,
-                    {
-                        "type": "raw_chunk",
-                        "elapsed": chunk_elapsed,
-                        "chunk_index": raw_chunk_count,
-                        "raw": chunk,
-                        "response_id": chunk.get("id"),
-                        "content_delta": content_delta,
-                        "reasoning_delta": reasoning_deltas["reasoning"],
-                        "reasoning_content_delta": reasoning_deltas["reasoning_content"],
-                        "thinking_delta": reasoning_deltas["thinking"],
-                        "finish_reason": chunk.get("done_reason"),
-                    },
-                )
-                _accumulate_stream_chunk(
-                    assembled,
-                    chunk,
-                    on_text_delta=on_text_delta,
-                    on_reasoning_delta=on_reasoning_delta,
-                    on_tool_preparing=on_tool_preparing,
-                    prepared_tool_call_indexes=prepared_tool_call_indexes,
-                )
-                if chunk.get("done") is True:
-                    saw_completion = True
-                    break
+                    self._trace(
+                        trace_callback,
+                        {
+                            "type": "raw_chunk",
+                            "elapsed": chunk_elapsed,
+                            "chunk_index": raw_chunk_count,
+                            "raw": chunk,
+                            "response_id": chunk.get("id"),
+                            "content_delta": content_delta,
+                            "reasoning_delta": reasoning_deltas["reasoning"],
+                            "reasoning_content_delta": reasoning_deltas["reasoning_content"],
+                            "thinking_delta": reasoning_deltas["thinking"],
+                            "finish_reason": chunk.get("done_reason"),
+                        },
+                    )
+                    _accumulate_stream_chunk(
+                        assembled,
+                        chunk,
+                        on_text_delta=on_text_delta,
+                        on_reasoning_delta=on_reasoning_delta,
+                        on_tool_preparing=on_tool_preparing,
+                        prepared_tool_call_indexes=prepared_tool_call_indexes,
+                    )
+                    if chunk.get("done") is True:
+                        saw_completion = True
+                        break
             if not saw_completion:
                 # EOF is not an Ollama completion signal. Check cancellation
                 # once more because it may have closed an otherwise idle stream.
@@ -232,9 +241,14 @@ class OllamaProvider(BaseProvider):
                 raise RuntimeError(
                     "Ollama stream ended before provider signaled completion"
                 )
+        except KeyboardInterrupt:
+            raise
+        except BaseException:
+            monitor.raise_if_cancelled()
+            raise
         finally:
             close = getattr(stream, "close", None)
-            if callable(close):
+            if callable(close) and not monitor.cancelled:
                 close()
             self._trace(
                 trace_callback,
@@ -313,6 +327,54 @@ class OllamaProvider(BaseProvider):
         except URLError as error:
             cause = error.reason if isinstance(error.reason, BaseException) else error
             raise RuntimeError(f"Ollama request failed: {error.reason}") from cause
+
+    def _post_chat_stream_interruptible(self, payload: dict):
+        # httpx gives the provider an owned client that can be closed from the
+        # cancellation monitor even while response headers or a body line are
+        # blocked. urllib does not expose such a handle until urlopen returns.
+        return _OllamaHTTPStream(
+            f"{self.base_url}/api/chat",
+            payload,
+            timeout=self.request_timeout,
+        )
+
+
+class _OllamaHTTPStream:
+    """One independently closable native Ollama streaming request."""
+
+    def __init__(self, url: str, payload: dict, *, timeout: float) -> None:
+        self._url = url
+        self._payload = payload
+        self._client = httpx.Client(timeout=timeout)
+        self._response = None
+        self._iterator = self._lines()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> dict:
+        return next(self._iterator)
+
+    def close(self) -> None:
+        if self._response is not None:
+            self._response.close()
+        self._client.close()
+
+    def _lines(self):
+        try:
+            with self._client.stream("POST", self._url, json=self._payload) as response:
+                self._response = response
+                if not response.is_success:
+                    details = response.read().decode("utf-8", errors="replace")
+                    raise RuntimeError(
+                        f"Ollama request failed with HTTP {response.status_code}: {details}"
+                    )
+                for line in response.iter_lines():
+                    line = line.strip()
+                    if line:
+                        yield json.loads(line)
+        except httpx.HTTPError as error:
+            raise RuntimeError(f"Ollama request failed: {error}") from error
 
 
 def _native_base_url(base_url: str | None) -> str:

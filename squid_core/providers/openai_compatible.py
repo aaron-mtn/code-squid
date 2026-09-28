@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 
 from openai import OpenAI
 
-from .base import BaseProvider, StreamCancelled
+from .base import BaseProvider, CancellationMonitor, StreamCancelled
 
 
 class OpenAICompatibleProvider(BaseProvider):
@@ -182,17 +182,19 @@ class OpenAICompatibleProvider(BaseProvider):
         reasoning_parts = {"reasoning": [], "reasoning_content": [], "thinking": []}
         tool_call_parts = {}
         prepared_tool_call_indexes = set()
-        usage = None
-        finish_reason = None
-        response_id = None
         request_started_at = time.perf_counter()
-        raw_chunk_count = 0
-        total_content_characters = 0
-        total_reasoning_characters = 0
-        first_raw_chunk_elapsed = None
-        first_content_delta_elapsed = None
-        first_reasoning_delta_elapsed = None
-        saw_completion = False
+        state = {
+            "usage": None,
+            "finish_reason": None,
+            "response_id": None,
+            "raw_chunk_count": 0,
+            "total_content_characters": 0,
+            "total_reasoning_characters": 0,
+            "first_raw_chunk_elapsed": None,
+            "first_content_delta_elapsed": None,
+            "first_reasoning_delta_elapsed": None,
+            "saw_completion": False,
+        }
 
         self._trace(
             trace_callback,
@@ -211,144 +213,206 @@ class OpenAICompatibleProvider(BaseProvider):
             },
         )
 
-        stream = self._inference_client().chat.completions.create(**payload)
+        client, owns_client = self._streaming_request_client()
+        stream = None
+
+        def abort_request() -> None:
+            # Before headers arrive only the client exists; afterwards closing
+            # both layers also covers injected SDK-compatible stream doubles.
+            close_stream = getattr(stream, "close", None)
+            if callable(close_stream):
+                close_stream()
+            close_client = getattr(client, "close", None)
+            if callable(close_client):
+                close_client()
+
+        monitor = CancellationMonitor(should_cancel, abort_request)
         try:
-            for chunk in stream:
-                if should_cancel is not None and should_cancel():
-                    raise StreamCancelled
-                chunk_elapsed = time.perf_counter() - request_started_at
-                if trace_callback is not None:
-                    raw_chunk_count += 1
-                    if first_raw_chunk_elapsed is None:
-                        first_raw_chunk_elapsed = chunk_elapsed
-                    chunk_content_deltas = []
-                    chunk_reasoning_deltas = {
-                        "reasoning": [],
-                        "reasoning_content": [],
-                        "thinking": [],
-                    }
-                    chunk_finish_reasons = []
-                    for choice in getattr(chunk, "choices", []) or []:
-                        choice_finish_reason = getattr(choice, "finish_reason", None)
-                        if choice_finish_reason is not None:
-                            chunk_finish_reasons.append(choice_finish_reason)
-                        delta = getattr(choice, "delta", None)
-                        if delta is None:
-                            continue
-                        content_delta = getattr(delta, "content", None)
-                        if content_delta:
-                            chunk_content_deltas.append(content_delta)
-                            total_content_characters += len(content_delta)
-                            if first_content_delta_elapsed is None:
-                                first_content_delta_elapsed = chunk_elapsed
-                        for name in chunk_reasoning_deltas:
-                            value = getattr(delta, name, None)
-                            if value:
-                                chunk_reasoning_deltas[name].append(value)
-                                total_reasoning_characters += len(value)
-                                if first_reasoning_delta_elapsed is None:
-                                    first_reasoning_delta_elapsed = chunk_elapsed
-
-                    # Emit before the original normalization loop and visible
-                    # callback so tracing cannot confuse provider and Desktop time.
-                    self._trace(
-                        trace_callback,
-                        {
-                            "type": "raw_chunk",
-                            "elapsed": chunk_elapsed,
-                            "chunk_index": raw_chunk_count,
-                            "raw": chunk,
-                            "response_id": getattr(chunk, "id", None),
-                            "content_delta": "".join(chunk_content_deltas),
-                            "reasoning_delta": "".join(chunk_reasoning_deltas["reasoning"]),
-                            "reasoning_content_delta": "".join(
-                                chunk_reasoning_deltas["reasoning_content"]
-                            ),
-                            "thinking_delta": "".join(chunk_reasoning_deltas["thinking"]),
-                            "finish_reason": chunk_finish_reasons,
-                        },
-                    )
-
-                # This is the pre-existing response assembly path. Trace mode
-                # only observes immediately before it; normal mode stays exact.
-                response_id = response_id or getattr(chunk, "id", None)
-                chunk_usage = getattr(chunk, "usage", None)
-                if chunk_usage is not None:
-                    usage = chunk_usage
-                for choice in getattr(chunk, "choices", []) or []:
-                    choice_finish_reason = getattr(choice, "finish_reason", None)
-                    if choice_finish_reason is not None:
-                        finish_reason = choice_finish_reason
-                        # Chat-completions marks its terminal choice with a
-                        # finish reason; transport EOF alone is not success.
-                        saw_completion = True
-                    delta = getattr(choice, "delta", None)
-                    if delta is None:
-                        continue
-                    for name, parts in reasoning_parts.items():
-                        value = getattr(delta, name, None)
-                        if value:
-                            parts.append(value)
-                    if on_reasoning_delta is not None:
-                        # Providers sometimes expose aliases for the same
-                        # reasoning stream. Match reply normalization by
-                        # forwarding only the first populated field.
-                        for name in reasoning_parts:
-                            value = getattr(delta, name, None)
-                            if value:
-                                on_reasoning_delta(value)
-                                break
-                    # When a provider places its last reasoning fragment and
-                    # first visible text in one chunk, preserve the semantic
-                    # reasoning-before-narration order at the callback seam.
-                    content_delta = getattr(delta, "content", None)
-                    if content_delta:
-                        content_parts.append(content_delta)
-                        on_text_delta(content_delta)
-                    for tool_call_delta in getattr(delta, "tool_calls", None) or []:
-                        self._accumulate_tool_call_delta(tool_call_parts, tool_call_delta)
-                        self._notify_tool_preparing(
-                            tool_call_parts=tool_call_parts,
-                            tool_call_delta=tool_call_delta,
-                            prepared_tool_call_indexes=prepared_tool_call_indexes,
-                            on_tool_preparing=on_tool_preparing,
-                        )
-            if not saw_completion:
-                # Cancellation remains authoritative when it caused an idle
-                # or otherwise incomplete provider stream to close.
-                if should_cancel is not None and should_cancel():
-                    raise StreamCancelled
-                raise RuntimeError(
-                    "OpenAI-compatible stream ended before provider signaled completion"
+            with monitor:
+                monitor.raise_if_cancelled()
+                stream = client.chat.completions.create(**payload)
+                self._consume_stream(
+                    stream,
+                    monitor,
+                    trace_callback,
+                    request_started_at,
+                    content_parts,
+                    reasoning_parts,
+                    tool_call_parts,
+                    prepared_tool_call_indexes,
+                    on_text_delta,
+                    on_reasoning_delta,
+                    on_tool_preparing,
+                    state,
                 )
+        except KeyboardInterrupt:
+            raise
+        except BaseException:
+            monitor.raise_if_cancelled()
+            raise
         finally:
-            close = getattr(stream, "close", None)
-            if callable(close):
-                close()
+            if stream is not None:
+                close = getattr(stream, "close", None)
+                if callable(close) and not monitor.cancelled:
+                    close()
+            if owns_client and not monitor.cancelled:
+                client.close()
             self._trace(
                 trace_callback,
                 {
                     "type": "request_complete",
                     "timestamp_unix": time.time(),
                     "elapsed": time.perf_counter() - request_started_at,
-                    "response_id": response_id,
-                    "finish_reason": finish_reason,
-                    "first_raw_chunk_elapsed": first_raw_chunk_elapsed,
-                    "first_reasoning_delta_elapsed": first_reasoning_delta_elapsed,
-                    "first_visible_content_delta_elapsed": first_content_delta_elapsed,
-                    "total_reasoning_characters": total_reasoning_characters,
-                    "total_visible_content_characters": total_content_characters,
-                    "total_raw_chunk_count": raw_chunk_count,
+                    "response_id": state["response_id"],
+                    "finish_reason": state["finish_reason"],
+                    "first_raw_chunk_elapsed": state["first_raw_chunk_elapsed"],
+                    "first_reasoning_delta_elapsed": state[
+                        "first_reasoning_delta_elapsed"
+                    ],
+                    "first_visible_content_delta_elapsed": state[
+                        "first_content_delta_elapsed"
+                    ],
+                    "total_reasoning_characters": state[
+                        "total_reasoning_characters"
+                    ],
+                    "total_visible_content_characters": state[
+                        "total_content_characters"
+                    ],
+                    "total_raw_chunk_count": state["raw_chunk_count"],
                 },
+            )
+
+        if not state["saw_completion"]:
+            if should_cancel is not None and should_cancel():
+                raise StreamCancelled
+            raise RuntimeError(
+                "OpenAI-compatible stream ended before provider signaled completion"
             )
 
         return self._assembled_stream_response(
             content="".join(content_parts),
             tool_call_parts=tool_call_parts,
-            usage=usage,
-            finish_reason=finish_reason,
-            response_id=response_id,
+            usage=state["usage"],
+            finish_reason=state["finish_reason"],
+            response_id=state["response_id"],
             reasoning_parts=reasoning_parts,
+        )
+
+    def _consume_stream(
+        self,
+        stream,
+        monitor,
+        trace_callback,
+        request_started_at,
+        content_parts,
+        reasoning_parts,
+        tool_call_parts,
+        prepared_tool_call_indexes,
+        on_text_delta,
+        on_reasoning_delta,
+        on_tool_preparing,
+        state,
+    ) -> None:
+        """Consume one SDK stream while its request client remains abortable."""
+        for chunk in stream:
+            monitor.raise_if_cancelled()
+            chunk_elapsed = time.perf_counter() - request_started_at
+            choices = getattr(chunk, "choices", []) or []
+            if trace_callback is not None:
+                self._trace_stream_chunk(
+                    chunk,
+                    choices,
+                    chunk_elapsed,
+                    state,
+                    trace_callback,
+                )
+
+            state["response_id"] = state["response_id"] or getattr(
+                chunk,
+                "id",
+                None,
+            )
+            chunk_usage = getattr(chunk, "usage", None)
+            if chunk_usage is not None:
+                state["usage"] = chunk_usage
+            for choice in choices:
+                choice_finish_reason = getattr(choice, "finish_reason", None)
+                if choice_finish_reason is not None:
+                    state["finish_reason"] = choice_finish_reason
+                    # Transport EOF alone is not evidence of a complete reply.
+                    state["saw_completion"] = True
+                delta = getattr(choice, "delta", None)
+                if delta is None:
+                    continue
+                for name, parts in reasoning_parts.items():
+                    value = getattr(delta, name, None)
+                    if value:
+                        parts.append(value)
+                if on_reasoning_delta is not None:
+                    for name in reasoning_parts:
+                        value = getattr(delta, name, None)
+                        if value:
+                            on_reasoning_delta(value)
+                            break
+                content_delta = getattr(delta, "content", None)
+                if content_delta:
+                    content_parts.append(content_delta)
+                    on_text_delta(content_delta)
+                for tool_call_delta in getattr(delta, "tool_calls", None) or []:
+                    self._accumulate_tool_call_delta(tool_call_parts, tool_call_delta)
+                    self._notify_tool_preparing(
+                        tool_call_parts=tool_call_parts,
+                        tool_call_delta=tool_call_delta,
+                        prepared_tool_call_indexes=prepared_tool_call_indexes,
+                        on_tool_preparing=on_tool_preparing,
+                    )
+
+    def _trace_stream_chunk(self, chunk, choices, elapsed, state, trace_callback) -> None:
+        """Record raw streamed timing without changing response normalization."""
+        state["raw_chunk_count"] += 1
+        if state["first_raw_chunk_elapsed"] is None:
+            state["first_raw_chunk_elapsed"] = elapsed
+        content_deltas = []
+        reasoning_deltas = {
+            name: [] for name in ("reasoning", "reasoning_content", "thinking")
+        }
+        finish_reasons = []
+        for choice in choices:
+            finish_reason = getattr(choice, "finish_reason", None)
+            if finish_reason is not None:
+                finish_reasons.append(finish_reason)
+            delta = getattr(choice, "delta", None)
+            if delta is None:
+                continue
+            content = getattr(delta, "content", None)
+            if content:
+                content_deltas.append(content)
+                state["total_content_characters"] += len(content)
+                if state["first_content_delta_elapsed"] is None:
+                    state["first_content_delta_elapsed"] = elapsed
+            for name in reasoning_deltas:
+                value = getattr(delta, name, None)
+                if value:
+                    reasoning_deltas[name].append(value)
+                    state["total_reasoning_characters"] += len(value)
+                    if state["first_reasoning_delta_elapsed"] is None:
+                        state["first_reasoning_delta_elapsed"] = elapsed
+        self._trace(
+            trace_callback,
+            {
+                "type": "raw_chunk",
+                "elapsed": elapsed,
+                "chunk_index": state["raw_chunk_count"],
+                "raw": chunk,
+                "response_id": getattr(chunk, "id", None),
+                "content_delta": "".join(content_deltas),
+                "reasoning_delta": "".join(reasoning_deltas["reasoning"]),
+                "reasoning_content_delta": "".join(
+                    reasoning_deltas["reasoning_content"]
+                ),
+                "thinking_delta": "".join(reasoning_deltas["thinking"]),
+                "finish_reason": finish_reasons,
+            },
         )
 
     def _trace(self, trace_callback, event: dict) -> None:
@@ -509,6 +573,16 @@ class OpenAICompatibleProvider(BaseProvider):
                 f"api_key is required for provider {self.provider_name!r} inference"
             )
         return self.client
+
+    def _streaming_request_client(self):
+        """Return an independently closable SDK client for one streamed call."""
+        if not hasattr(self, "_api_key"):
+            # Tests and embedders that inject a duck-typed client retain their
+            # established seam; production instances own per-request clients.
+            return self._inference_client(), False
+        if not self._api_key:
+            return self._inference_client(), False
+        return OpenAI(base_url=self.base_url, api_key=self._api_key), True
 
 
 def _unique_ids(values) -> list[str]:

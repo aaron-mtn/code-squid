@@ -1025,6 +1025,7 @@ def test_cancellation_during_streamed_output_unwinds_as_interrupted() -> None:
 
     assert result == RunResult(status="interrupted", reason="cancelled")
     assert [event["type"] for event in events].count("assistant_delta") == 1
+    assert "model_request_failed" not in [event["type"] for event in events]
     assert [event["type"] for event in events][-2:] == [
         "run_interrupted",
         "run_finished",
@@ -2024,6 +2025,35 @@ def test_streaming_enabled_but_unsupported_provider_falls_back_to_non_streaming(
     assert "assistant_message_started" not in [event["type"] for event in events]
     assert "assistant_delta" not in [event["type"] for event in events]
     assert "tool_preparing" not in [event["type"] for event in events]
+
+
+def test_non_streaming_presentation_still_uses_cancellable_provider_stream() -> None:
+    events = []
+    model_events = []
+    loop = AgentLoop(
+        session=Session(repo_root=None),
+        model_adapter=FakeModelAdapter(
+            [reply("TASK COMPLETE")],
+            events=model_events,
+            streaming=True,
+            deltas=["TASK ", "COMPLETE"],
+        ),
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=FakeAgent(),
+        display=NullDisplay(),
+        stream_assistant_text=False,
+        on_event=events.append,
+        should_cancel=lambda: False,
+    )
+
+    result = loop.run()
+
+    assert result == RunResult(status="complete")
+    assert model_events == ["respond_streaming:start", "respond_streaming:end"]
+    event_types = [event["type"] for event in events]
+    assert "assistant_message_started" not in event_types
+    assert "assistant_delta" not in event_types
 
 
 def test_assistant_message_event_includes_full_message() -> None:

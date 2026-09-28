@@ -723,6 +723,28 @@ def test_complete_text_exposes_normalized_reasoning_and_finish_reason() -> None:
     assert reply["finish_reason"] == "stop"
 
 
+def test_complete_text_uses_stream_transport_when_cancellation_is_supplied() -> None:
+    provider = StreamingProvider(
+        FakeResponse(FakeMessage(content="summary", tool_calls=[])),
+        deltas=["sum", "mary"],
+    )
+    adapter = ModelAdapter(provider=provider, model_name="test-model")
+
+    reply = adapter.complete_text(
+        messages=[{"role": "user", "content": "summarize"}],
+        should_cancel=lambda: False,
+    )
+
+    assert reply["content"] == "summary"
+    assert provider.requests == [
+        {
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "summarize"}],
+            "tools": [],
+        }
+    ]
+
+
 def test_complete_text_streaming_forwards_deltas_returns_content_and_disables_tools() -> None:
     provider = StreamingProvider(
         FakeResponse(FakeMessage(content="hello world", tool_calls=[])),

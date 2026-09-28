@@ -284,6 +284,7 @@ def build_agent_loop(
             settings.compaction,
             model_adapter,
             context_provider=compaction_context_provider,
+            should_cancel=should_cancel,
         )
     _wire_model_view_observer(model_adapter, session_store)
     if tool_executor is None:
