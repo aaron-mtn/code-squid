@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from squid_core.file_readers.context import FileReadContext
+from squid_core.file_readers.docx import read_docx
 from squid_core.file_readers.image import read_image
 from squid_core.file_readers.ods import read_ods
 from squid_core.file_readers.pdf import read_pdf
@@ -17,6 +18,8 @@ from squid_core.tools.builtins.read_file import execute as read_file
 
 
 def test_registry_selects_builtin_readers_by_suffix() -> None:
+    assert reader_for_suffix(".docx") is read_docx
+    assert reader_for_suffix(".DOCX") is read_docx
     assert reader_for_suffix(".xlsx") is read_xlsx
     assert reader_for_suffix(".XLSX") is read_xlsx
     assert reader_for_suffix(".ods") is read_ods

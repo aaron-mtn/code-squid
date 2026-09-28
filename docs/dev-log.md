@@ -1,3 +1,21 @@
+- 2026-09-27: Added first-class, read-only DOCX support to the existing
+  `read_file` registry using python-docx. The new reader validates bounded ZIP
+  containers, normalizes paragraphs, common headings and lists, hyperlinks,
+  and tables into parser-neutral blocks, renders deterministic Markdown-like
+  text in document order, and reuses the established text range/truncation
+  contract. Extracted only compressed-file and declared expanded-member size
+  checks into a narrow shared container helper used by DOCX, XLSX, and ODS;
+  spreadsheet cell policy and existing error wording remain spreadsheet-owned.
+  DOCX remains semantic and read-only: Word pages, comments, tracked changes,
+  embedded images, drawings/text boxes, exact layout, and editing are
+  intentionally unsupported. Verification: all 125 focused DOCX, spreadsheet,
+  shared reader, public Tool, image, and PDF tests passed with one platform
+  skip. The full suite completed with 1,544 passing, one platform skip, and the
+  same 54 unrelated prompt/Hook expectation failures documented by preceding
+  patches. Production and test packages compiled, touched imports loaded
+  successfully, and `git diff --check` passed. Ruff was unavailable in the
+  active Python environment.
+
 - 2026-09-27: Hardened `run_command` cancellation and timeout teardown without
   changing Agent-loop or provider cancellation. Windows commands are now
   assigned to a ctypes-backed kill-on-close Job Object, with a bounded

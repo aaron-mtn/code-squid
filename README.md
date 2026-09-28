@@ -316,6 +316,14 @@ Requests smaller than 150 lines include balanced surrounding context where the
 file has enough lines. Normalized overlapping or adjacent regions merge, and
 their combined source coverage must remain within the same 1,000-line budget.
 
+`read_file` supports read-only `.docx` documents through python-docx. It emits
+deterministic Markdown-like text for paragraphs, common heading and list
+styles, hyperlinks, and tables in document order. The normal `ranges` argument
+targets lines of that emitted representation, and large whole-document reads
+use the same 1,000-line head/tail bound as text files. Word page selection,
+comments, tracked-change reconstruction, embedded images, drawings/text boxes,
+layout fidelity, and document writing are not supported.
+
 `read_file` supports read-only `.xlsx` and `.ods` spreadsheets. It returns a
 workbook summary, sheet names, used ranges, and TSV-like rows, with formulas
 marked explicitly. XLSX formulas include their stored cached result when the

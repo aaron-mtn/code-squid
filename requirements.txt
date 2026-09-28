@@ -2,6 +2,7 @@ openai
 httpx
 odfpy
 openpyxl
+python-docx
 Pillow
 PyMuPDF
 prompt_toolkit

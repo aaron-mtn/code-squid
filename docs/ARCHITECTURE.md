@@ -2191,11 +2191,12 @@ schema, argument validation, path requirements, unsupported-media errors, and
 the public Tool entry point. It dispatches one-way into the reusable
 `squid_core/file_readers` package. That package has a deliberately static
 suffix registry: `.xlsx` and `.ods` select their spreadsheet readers, `.pdf`
-selects the PDF reader, `.png`/`.jpg`/`.jpeg`/`.webp` select the image reader,
-and every other suffix retains the UTF-8 text-reader fallback. `text.py`,
-`xlsx.py`, `ods.py`, `image.py`, and `pdf.py` own their format-specific read
-behavior; none depends on the Tool adapter. The adapter packages each validated
-request and its optional session-storage callbacks into one immutable
+selects the PDF reader, `.docx` selects the DOCX reader,
+`.png`/`.jpg`/`.jpeg`/`.webp` select the image reader, and every other suffix
+retains the UTF-8 text-reader fallback. `text.py`, `docx.py`, `xlsx.py`,
+`ods.py`, `image.py`, and `pdf.py` own their format-specific read behavior;
+none depends on the Tool adapter. The adapter packages each validated request
+and its optional session-storage callbacks into one immutable
 `FileReadContext`. Every registered reader accepts that same context, so the
 registry only selects a callable by suffix and invokes it; it has no
 format-specific dispatch branches, discovery, plugin lifecycle, or reader
@@ -2211,6 +2212,17 @@ root-level properties.
 
 - requires an absolute path
 - reads UTF-8 text for ordinary files
+- reads `.docx` through python-docx, normalizes body paragraphs, common Heading
+  styles, common bullet/numbered lists, hyperlinks, and tables into a small
+  internal block representation, then renders deterministic Markdown-like text
+  in document order; python-docx objects do not cross the reader boundary
+- applies ordinary text line targeting and the 1,000-line full-read ceiling to
+  that rendered DOCX text, so returned range coordinates describe Code Squid's
+  representation rather than Word pages or visual lines; DOCX rejects the
+  PDF-only and spreadsheet-only selectors at the public Tool boundary
+- treats DOCX as read-only semantic content: it does not reconstruct comments,
+  tracked changes, drawings or text boxes, embedded images, typography, page
+  layout, or page-number selection
 - reads `.xlsx` through openpyxl and `.ods` through odfpy, returning a
   provider-neutral spreadsheet result with workbook format, ordered sheet
   names, used ranges, and TSV-like text for each sheet
@@ -2227,9 +2239,13 @@ root-level properties.
   normal 1,000-line head/tail ceiling and direct oversized selections toward a
   narrower row interval; the readers ignore charts and other drawing content
   and do not expose images, macros, pivots, or editing
-- limits spreadsheet containers to 64 MiB, their ZIP-expanded contents to 256
-  MiB, and each normalized sheet area to one million cells so compression,
-  declared dimensions, and ODF repetitions cannot trigger unbounded expansion
+- validates DOCX, XLSX, and ODS containers through one narrow
+  `file_readers/container.py` helper that limits each source to 64 MiB and its
+  declared ZIP-expanded members to 256 MiB before format parsing; callers own
+  their format-specific public error wording, and spreadsheet-only cell limits
+  remain in the spreadsheet layer
+- limits each normalized spreadsheet sheet area to one million cells so
+  declared dimensions and ODF repetitions cannot trigger unbounded expansion
 - detects `.pdf` before text decoding and uses PyMuPDF for both text extraction
   and page rendering
 - accepts a PDF-only `pages` list containing one to eight inclusive

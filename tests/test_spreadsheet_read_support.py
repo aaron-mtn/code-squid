@@ -333,6 +333,33 @@ def test_xlsx_formula_shows_cached_value_without_recalculation(tmp_path: Path) -
     assert source.read_bytes() == original_bytes
 
 
+def test_shared_container_safety_preserves_spreadsheet_failures(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from squid_core.file_readers import spreadsheet
+
+    malformed = tmp_path / "malformed.xlsx"
+    malformed.write_bytes(b"not a zip")
+    malformed_result = read_file(tmp_path, str(malformed))
+
+    source = tmp_path / "bounded.xlsx"
+    Workbook().save(source)
+    monkeypatch.setattr(
+        spreadsheet, "MAX_SPREADSHEET_BYTES", source.stat().st_size - 1
+    )
+    compressed_result = read_file(tmp_path, str(source))
+    monkeypatch.setattr(spreadsheet, "MAX_SPREADSHEET_BYTES", 64 * 1024 * 1024)
+    monkeypatch.setattr(spreadsheet, "MAX_SPREADSHEET_EXPANDED_BYTES", 2)
+    expanded_result = read_file(tmp_path, str(source))
+
+    assert "invalid or unreadable spreadsheet container" in malformed_result["error"]
+    assert compressed_result["error"].startswith("spreadsheet is ")
+    assert "maximum supported size" in compressed_result["error"]
+    assert expanded_result["error"].startswith("expanded spreadsheet is ")
+    assert "maximum supported size is 2 bytes" in expanded_result["error"]
+
+
 def _ods_row(*values: object) -> TableRow:
     """Build a simple ODS row with portable displayed text and typed values."""
 

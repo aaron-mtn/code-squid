@@ -32,20 +32,19 @@ def tool_definition() -> dict:
         "function": {
             "name": TOOL_NAME,
             "description": (
-                "Read a UTF-8 text file, XLSX or ODS spreadsheet, PDF, or supported "
-                "PNG, JPG/JPEG, or WebP image at an absolute path. Spreadsheet reads "
-                "return formula-preserving workbook text and do not accept ranges; "
-                "use sheet and optional rows for targeted spreadsheet reads. "
-                "For PDFs, use pages for 1-based inclusive "
-                "page ranges; the selected pages are text-extracted and lazily rendered "
-                "to session PNG files. Image reads do not accept ranges. Use ranges for "
-                "one or several "
-                "known relevant 1-based inclusive regions of the same file, combining "
-                "regions needed for the same decision. Omit ranges only when file-wide "
-                "context is needed; full-file reads return at most "
+                "Read a UTF-8 text file, DOCX document, XLSX or ODS spreadsheet, PDF, "
+                "or supported PNG, JPG/JPEG, or WebP image at an absolute path. Use "
+                "ranges for one or several known relevant 1-based inclusive lines of "
+                "text or deterministic DOCX text. Spreadsheet reads return "
+                "formula-preserving workbook text and instead use sheet and optional "
+                "rows. PDFs instead use pages for 1-based inclusive page ranges; the "
+                "selected pages are text-extracted and lazily rendered to session PNG "
+                "files. Images are whole-image reads. Combine regions needed for the "
+                "same decision. Omit ranges only when file-wide context is needed; "
+                "full-file text and DOCX reads return at most "
                 f"{DEFAULT_SETTINGS.default_max_lines} lines. Small ranges may include "
-                "surrounding context, and total normalized coverage must stay within the "
-                f"{DEFAULT_SETTINGS.default_max_lines}-line limit."
+                "surrounding context, and total normalized coverage must stay within "
+                f"the {DEFAULT_SETTINGS.default_max_lines}-line limit."
             ),
             "parameters": {
                 "type": "object",
@@ -56,7 +55,9 @@ def tool_definition() -> dict:
                     },
                     "ranges": {
                         "type": "array",
-                        "description": "Optional targeted 1-based inclusive regions in this file",
+                        "description": (
+                            "Optional targeted 1-based inclusive regions in this file"
+                        ),
                         "items": {
                             "type": "object",
                             "properties": {

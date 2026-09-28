@@ -3,8 +3,8 @@
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from zipfile import BadZipFile, ZipFile
 
+from .container import ContainerSafetyError, inspect_zip_container
 from .context import FileReadContext
 
 
@@ -48,27 +48,36 @@ def check_spreadsheet_size(context: FileReadContext) -> dict | None:
     """Reject unusually large containers before a parser expands their contents."""
 
     try:
-        size_bytes = context.file_path.stat().st_size
-    except OSError as error:
-        return spreadsheet_error(context.path, f"unreadable spreadsheet: {error}")
-    if size_bytes > MAX_SPREADSHEET_BYTES:
+        inspect_zip_container(
+            context.file_path,
+            max_file_bytes=MAX_SPREADSHEET_BYTES,
+            max_expanded_bytes=MAX_SPREADSHEET_EXPANDED_BYTES,
+        )
+    except ContainerSafetyError as error:
+        if error.reason == "unreadable_file":
+            return spreadsheet_error(
+                context.path, f"unreadable spreadsheet: {error.detail}"
+            )
+        if error.reason == "invalid_container":
+            return spreadsheet_error(
+                context.path,
+                f"invalid or unreadable spreadsheet container: {error.detail}",
+            )
+        if error.reason == "file_too_large":
+            assert error.actual_bytes is not None
+            assert error.maximum_bytes is not None
+            return spreadsheet_error(
+                context.path,
+                f"spreadsheet is {error.actual_bytes} bytes; maximum supported size is "
+                f"{error.maximum_bytes} bytes",
+            )
+        assert error.reason == "expanded_too_large"
+        assert error.actual_bytes is not None
+        assert error.maximum_bytes is not None
         return spreadsheet_error(
             context.path,
-            f"spreadsheet is {size_bytes} bytes; maximum supported size is "
-            f"{MAX_SPREADSHEET_BYTES} bytes",
-        )
-    try:
-        with ZipFile(context.file_path) as archive:
-            expanded_bytes = sum(member.file_size for member in archive.infolist())
-    except (BadZipFile, OSError) as error:
-        return spreadsheet_error(
-            context.path, f"invalid or unreadable spreadsheet container: {error}"
-        )
-    if expanded_bytes > MAX_SPREADSHEET_EXPANDED_BYTES:
-        return spreadsheet_error(
-            context.path,
-            f"expanded spreadsheet is {expanded_bytes} bytes; maximum supported "
-            f"size is {MAX_SPREADSHEET_EXPANDED_BYTES} bytes",
+            f"expanded spreadsheet is {error.actual_bytes} bytes; maximum supported "
+            f"size is {error.maximum_bytes} bytes",
         )
     return None
 

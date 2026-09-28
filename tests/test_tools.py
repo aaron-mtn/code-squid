@@ -651,6 +651,8 @@ def test_read_file_definition_exposes_targeted_read_shapes() -> None:
     parameters = function["parameters"]
 
     assert "Omit ranges only when file-wide context is needed" in function["description"]
+    assert "DOCX document" in function["description"]
+    assert "deterministic DOCX text" in function["description"]
     assert parameters["required"] == ["path"]
     assert set(parameters["properties"]) == {
         "path",

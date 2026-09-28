@@ -14,6 +14,12 @@ def read_text(context: FileReadContext) -> dict:
     """Read an ordinary UTF-8 file and preserve the public read result shape."""
 
     content = context.file_path.read_text(encoding="utf-8")
+    return read_text_content(context, content)
+
+
+def read_text_content(context: FileReadContext, content: str) -> dict:
+    """Apply established line targeting and truncation to normalized text."""
+
     lines = content.splitlines(keepends=True)
     total_lines = len(lines)
 
