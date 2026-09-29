@@ -345,8 +345,6 @@ def test_one_session_switches_default_mods_and_back_as_coherent_runs(
             "hook-a",
             "Code Squid",
             "Code Squid",
-            "Code Squid",
-            "Code Squid",
         ),
     )
     assert observed[1][:3] == (
@@ -356,15 +354,11 @@ def test_one_session_switches_default_mods_and_back_as_coherent_runs(
             "hook-b",
             "Code Squid",
             "Code Squid",
-            "Code Squid",
-            "Code Squid",
         ),
     )
     assert observed[2][0] is None
     assert set(observed[2][1]) == set(TOOLS)
     assert observed[2][2] == (
-        "Code Squid",
-        "Code Squid",
         "Code Squid",
         "Code Squid",
     )

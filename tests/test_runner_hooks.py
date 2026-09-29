@@ -27,9 +27,6 @@ from squid_core.hooks import (
     HookResponse,
 )
 from code_squid.agent_setup import (
-    NO_PROGRESS_GUIDANCE,
-    RUN_COMMAND_RECOVERY_GUIDANCE,
-    RUN_COMMAND_TIMEOUT_RECOVERY_GUIDANCE,
     build_coding_task_run,
     build_hook_runner,
 )
@@ -172,11 +169,19 @@ class ManualContextHook:
         )
 
 
-def _settings() -> Settings:
+def _settings(
+    built_in_hook_settings: dict[str, bool] | None = None,
+) -> Settings:
     return Settings(
         model=ModelSettings(),
         display=DisplaySettings(debug=False),
-        runtime=RuntimeSettings(),
+        runtime=RuntimeSettings(
+            built_in_hook_settings=(
+                dict(DEFAULT_BUILT_IN_HOOK_SETTINGS)
+                if built_in_hook_settings is None
+                else built_in_hook_settings
+            )
+        ),
         compaction=CompactionSettings(enabled=False),
     )
 
@@ -258,22 +263,14 @@ def test_default_runner_behavior_does_not_load_user_hooks(
     assert "DISK_DEFAULT_MARKER" not in _message_text(messages)
 
 
-def test_code_squid_enables_all_built_in_hooks_by_default() -> None:
+def test_code_squid_enables_configured_built_in_hooks_by_default() -> None:
     runner = build_hook_runner()
 
-    assert isinstance(runner.hooks[-4], RepeatedReadNudge)
-    assert runner.hooks[-4].source == "Code Squid"
-    assert isinstance(runner.hooks[-3], TooManyReadsNudge)
-    assert runner.hooks[-3].source == "Code Squid"
-    assert isinstance(runner.hooks[-2], PostVerificationNudge)
-    assert runner.hooks[-2].source == "Code Squid"
-    assert isinstance(runner.hooks[-1], RepeatedFailureNudge)
-    assert runner.hooks[-1].guidance == NO_PROGRESS_GUIDANCE
-    assert runner.hooks[-1].run_command_guidance == RUN_COMMAND_RECOVERY_GUIDANCE
-    assert (
-        runner.hooks[-1].run_command_timeout_guidance
-        == RUN_COMMAND_TIMEOUT_RECOVERY_GUIDANCE
-    )
+    assert [type(hook) for hook in runner.hooks] == [
+        TooManyReadsNudge,
+        PostVerificationNudge,
+    ]
+    assert all(hook.source == "Code Squid" for hook in runner.hooks)
 
 
 @pytest.mark.parametrize(
@@ -285,14 +282,15 @@ def test_code_squid_enables_all_built_in_hooks_by_default() -> None:
         ("repeated_failure", RepeatedFailureNudge),
     ],
 )
-def test_each_built_in_hook_can_be_disabled_independently(
+def test_each_built_in_hook_can_be_enabled_independently(
     hook_id: str,
     hook_type: type,
 ) -> None:
-    runner = build_hook_runner(built_in_hook_settings={hook_id: False})
+    configured = dict.fromkeys(DEFAULT_BUILT_IN_HOOK_SETTINGS, False)
+    configured[hook_id] = True
+    runner = build_hook_runner(built_in_hook_settings=configured)
 
-    assert not any(isinstance(hook, hook_type) for hook in runner.hooks)
-    assert len(runner.hooks) == len(DEFAULT_BUILT_IN_HOOK_SETTINGS) - 1
+    assert [type(hook) for hook in runner.hooks] == [hook_type]
 
 
 def test_all_built_in_hooks_can_be_disabled_together() -> None:
@@ -351,6 +349,7 @@ def test_coding_task_settings_select_built_in_hooks(
                 **DEFAULT_BUILT_IN_HOOK_SETTINGS,
                 "repeated_read": False,
                 "post_verification": False,
+                "repeated_failure": True,
             }
         ),
         compaction=CompactionSettings(enabled=False),
@@ -462,7 +461,12 @@ def _run_overlapping_reads(tmp_path: Path, second_start: int):
         repo_root=tmp_path,
         task="Inspect overlapping ranges",
         display=FakeDisplay(),
-        settings=_settings(),
+        settings=_settings(
+            {
+                **DEFAULT_BUILT_IN_HOOK_SETTINGS,
+                "repeated_read": True,
+            }
+        ),
         agent=RuntimeAgent(),
         model_adapter=model,
         tool_executor=ReadFileExecutor(tmp_path),
@@ -478,15 +482,14 @@ def _run_overlapping_reads(tmp_path: Path, second_start: int):
     return model, entries
 
 
-def test_default_runtime_repeated_read_fires_and_is_logged(tmp_path: Path) -> None:
+def test_enabled_runtime_repeated_read_fires_and_is_logged(tmp_path: Path) -> None:
     model, entries = _run_overlapping_reads(tmp_path, second_start=46)
 
     configured = next(entry for entry in entries if entry["type"] == "hooks_configured")
-    assert configured["hooks"][-4:] == [
+    assert configured["hooks"][-3:] == [
         "RepeatedReadNudge",
         "TooManyReadsNudge",
         "PostVerificationNudge",
-        "RepeatedFailureNudge",
     ]
     read_events = [
         entry
@@ -514,7 +517,7 @@ def test_default_runtime_repeated_read_fires_and_is_logged(tmp_path: Path) -> No
     assert "hook_execution" not in str(model.calls)
 
 
-def test_default_runtime_low_overlap_is_filtered_and_logged(tmp_path: Path) -> None:
+def test_enabled_runtime_low_overlap_is_filtered_and_logged(tmp_path: Path) -> None:
     model, entries = _run_overlapping_reads(tmp_path, second_start=47)
 
     read_events = [

@@ -63,25 +63,20 @@ def test_skill_replacements_cannot_erase_core_protocol_or_narration() -> None:
         "review", skill=_skill_with_replacements(), prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS
     ).initial_messages()[0]["content"]
 
-    assert "Batch multiple tool calls only when both their arguments and their necessity" in prompt
-    assert "Independent known-required calls are valid." in prompt
+    assert "Batch multiple tool calls when it is efficient and the arguments are known." in prompt
     assert "could eliminate the need for a later call or materially change" in prompt
     assert "wait for the earlier result before issuing the later call" in prompt
     assert "A final response contains no tool call" in prompt
-    assert "Prefer a brief natural note before tool calls when useful." in prompt
+    assert "Prefer a brief natural note or narration before tool calls when useful." in prompt
     assert "A non-final turn uses one or more real tool calls." in prompt
     assert "[one or more independent tool calls]" in prompt
 
 
-def test_default_prompt_requires_known_necessity_without_disabling_batches() -> None:
+def test_default_prompt_allows_efficient_batches_without_speculative_calls() -> None:
     prompt = Agent("inspect it").initial_messages()[0]["content"]
 
     assert "A non-final turn uses one or more real tool calls." in prompt
-    assert (
-        "Batch multiple tool calls only when both their arguments and their "
-        "necessity are already known from the current context."
-    ) in prompt
-    assert "Independent known-required calls are valid." in prompt
+    assert "Batch multiple tool calls when it is efficient and the arguments are known." in prompt
     assert (
         "If an earlier call's result could eliminate the need for a later call "
         "or materially change what that later call should do, wait for the "
@@ -98,9 +93,9 @@ def test_skill_replacements_cannot_erase_code_squid_baseline_policy() -> None:
     ).initial_messages()[0]["content"]
 
     assert BASELINE_CODING_POLICY in prompt
-    assert "Find the smallest part of the repository responsible" in prompt
-    assert "Keep changes small and relevant." in prompt
-    assert "Verify the behavior that changed with practical, relevant checks." in prompt
+    assert "smallest most high leverage part of the repository" in prompt
+    assert "Prefer the smallest, cleanest implementation" in prompt
+    assert "complete and adequately verified" in prompt
     assert "Specialized intro." in prompt
     assert "Return review findings." in prompt
 
@@ -113,6 +108,5 @@ def test_prompt_encourages_narration_but_validation_does_not_require_it() -> Non
         "actions": [{"tool": "read_file", "args": {}, "tool_call_id": "call_1"}],
     }
 
-    assert "Prefer a brief natural note before tool calls when useful." in prompt
-    assert "Visible narration is preferred but not required." in prompt
+    assert "Prefer a brief natural note or narration before tool calls when useful." in prompt
     assert agent.validate_reply(reply) == {"ok": True, "reason": ""}

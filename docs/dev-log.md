@@ -1,3 +1,19 @@
+- 2026-09-28: Reconciled the 54 pre-existing prompt and built-in Hook test
+  failures with intended current behavior. The failures grouped into stale
+  prompt-copy contracts, stale Hook guidance copy, old `TooManyReadsNudge`
+  3/5 action thresholds, and tests that still assumed all four built-in Hooks
+  were enabled by default. Updated behavioral and exact model-facing copy
+  assertions as appropriate, retained Hook state-transition coverage, and made
+  repeated-read runtime integration tests opt in to that disabled-by-default
+  Hook. No production regression or ambiguous product decision was found, so
+  no production Python changed. Corrected the current architecture description
+  to document 5/8 read thresholds and the application-owned defaults:
+  `too_many_reads` and `post_verification` enabled, `repeated_read` and
+  `repeated_failure` disabled. Verification: 167 focused prompt/Hook/Mod tests
+  passed; the full suite passed 1,612 tests with one platform skip; affected
+  tests compiled; relevant prompt, setup, settings, and Hook modules imported;
+  and `git diff --check` passed.
+
 - 2026-09-28: Replaced guarded-mode shell-semantic classification with explicit
   per-command trust. Guarded mode now prompts for each untrusted `run_command`
   identity, offers approve-once, persistent `Always approve <command> commands`,

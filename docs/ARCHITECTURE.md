@@ -680,16 +680,19 @@ mechanisms while `code_squid.agent_setup` owns the guidance texts and enables
 them for Code Squid runs. Its `source` remains configuration metadata used by
 hosts; it no longer controls prompt rendering.
 
-Code Squid wires Core's `RepeatedReadNudge`, `TooManyReadsNudge`, and
-`PostVerificationNudge` immediately before the repeated-failure Hook.
+Code Squid can wire Core's `RepeatedReadNudge`, `TooManyReadsNudge`,
+`PostVerificationNudge`, and `RepeatedFailureNudge` in that order. The
+application's default configuration enables only `TooManyReadsNudge` and
+`PostVerificationNudge`; the other implementations remain available for
+explicit configuration.
 `TooManyReadsNudge` counts successful `read_file` results and the source lines
 they returned since the last successful `write_file` or `apply_patch`.
 Commands, other Tools, and all failed results are neutral: they neither
 increment nor reset either counter. Its `tool_result` handler updates those
 counters without emitting state-dependent text. At the next
 `before_model_turn` boundary it supplies one-turn advisory context when current
-state has reached the third successful read or 1,500 returned source lines,
-whichever comes first. Stronger context applies from the fifth read or 3,000
+state has reached the fifth successful read or 1,500 returned source lines,
+whichever comes first. Stronger context applies from the eighth read or 3,000
 returned lines onward and continues after later reads. If one batch crosses
 both thresholds, only the stronger current warning is rendered. These are
 advisory thresholds rather than a read budget: the Hook never blocks or
@@ -714,14 +717,16 @@ remain constructor arguments in Core, while Code Squid enables the Hook by
 default. Application settings expose the small
 `runtime.built_in_hook_settings` mapping, whose stable IDs are
 `repeated_read`, `too_many_reads`, `post_verification`, and
-`repeated_failure`. All four default to enabled. `code_squid.agent_setup`
-consults those IDs while assembling a run and omits each disabled built-in
-from the `HookRunner`; the generic Core Hook implementations do not know about
-application enablement. Caller-supplied, Mod, and loaded user Hooks remain
-separate inputs and are not filtered by this mapping. An explicitly supplied
-`HookRunner` likewise retains its Hooks before the enabled Code Squid
-built-ins are appended. This explicit mapping is the configuration seam for a
-future Mod or user override without making Hook classes own product policy.
+`repeated_failure`. `too_many_reads` and `post_verification` default to enabled;
+`repeated_read` and `repeated_failure` default to disabled.
+`code_squid.agent_setup` consults those IDs while assembling a run and omits
+each disabled built-in from the `HookRunner`; the generic Core Hook
+implementations do not know about application enablement. Caller-supplied,
+Mod, and loaded user Hooks remain separate inputs and are not filtered by this
+mapping. An explicitly supplied `HookRunner` likewise retains its Hooks before
+the enabled Code Squid built-ins are appended. This explicit mapping is the
+configuration seam for a future Mod or user override without making Hook
+classes own product policy.
 
 Sibling reads in one assistant batch pass through this pipeline synchronously.
 Each final transformed result updates read counts, returned-line volume, and

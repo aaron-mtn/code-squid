@@ -345,13 +345,12 @@ def test_failed_non_verification_action_does_not_count() -> None:
     assert nudge._post_verification_action_count == 0
 
 
-def test_guidance_allows_remaining_requirements_and_validation() -> None:
-    assert "unfinished task requirement" in POST_VERIFICATION_GUIDANCE
-    assert "documentation" in POST_VERIFICATION_GUIDANCE
-    assert "concrete issue" in POST_VERIFICATION_GUIDANCE
-    assert "another required validation step" in POST_VERIFICATION_GUIDANCE
-    assert "If none remains, finalize the task now" in POST_VERIFICATION_GUIDANCE
-    assert "does not establish that every task requirement" in POST_VERIFICATION_GUIDANCE
+def test_escalation_guidance_uses_current_model_facing_contract() -> None:
+    assert POST_VERIFICATION_GUIDANCE == (
+        "I’m getting impatient. The tests passed. Stop wasting time running more "
+        "checks or I will have to get corporate involved. If there isn’t a specific "
+        "remaining problem, finish the task now."
+    )
 
 
 def test_current_state_guidance_is_advisory_and_limited_to_known_facts() -> None:
@@ -359,6 +358,5 @@ def test_current_state_guidance_is_advisory_and_limited_to_known_facts() -> None
         "* Latest explicit verification succeeded.\n"
         "* No successful built-in file edit has occurred since.\n"
         "* No unresolved explicit verification failure is known.\n\n"
-        "Continue only for a concrete unfinished requirement, issue, or required "
-        "validation. Otherwise finalize."
+        "If the task is complete, finalize it now."
     )

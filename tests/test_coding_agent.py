@@ -283,7 +283,9 @@ def test_initial_prompts_encourage_compact_useful_narration() -> None:
     combined_prompt = "\n".join(message["content"] for message in messages)
 
     assert "## Visible action notes" in combined_prompt
-    assert "Prefer a brief natural note before tool calls when useful." in combined_prompt
+    assert "Prefer a brief natural note or narration before tool calls when useful." in (
+        combined_prompt
+    )
     assert "Say what you found, changed, or are checking next." in combined_prompt
     assert "Keep it short" in combined_prompt
     assert "do not restate the whole plan or explain obvious actions" in combined_prompt
@@ -322,32 +324,26 @@ def test_default_tool_usage_guidance_is_used_without_skill() -> None:
     assert TOOL_USAGE_GUIDANCE in system_prompt()
 
 
-def test_read_guidance_prefers_coherent_reads_over_incremental_ranges() -> None:
-    assert "Read only what the current decision or edit needs." in TOOL_USAGE_GUIDANCE
-    assert "For large files, use coherent relevant ranges" in TOOL_USAGE_GUIDANCE
-    assert "read the whole file only when its overall structure genuinely matters" in TOOL_USAGE_GUIDANCE
-    assert "Do not scatter speculative reads across files" in TOOL_USAGE_GUIDANCE
-    assert "Do not reread unchanged source merely for reassurance" in TOOL_USAGE_GUIDANCE
+def test_read_guidance_explains_targeted_and_truncated_reads() -> None:
+    assert "Use read_file to check a text file's contents." in TOOL_USAGE_GUIDANCE
+    assert "read ranges of lines from a file" in TOOL_USAGE_GUIDANCE
     assert "If a read is truncated, use returned_line_ranges" in TOOL_USAGE_GUIDANCE
 
 
-def test_baseline_policy_uses_corrective_failures_and_changes_stalled_approaches() -> None:
-    assert "Treat failures as information." in BASELINE_CODING_POLICY
-    assert "Address the reported cause or change approach" in BASELINE_CODING_POLICY
-    assert "never retry a failed action unchanged" in BASELINE_CODING_POLICY
+def test_baseline_policy_targets_the_high_leverage_implementation_area() -> None:
+    assert "smallest most high leverage part of the repository" in BASELINE_CODING_POLICY
 
 
-def test_baseline_policy_requires_behavioral_verification_against_the_request() -> None:
-    assert (
-        "Verify the behavior that changed with practical, relevant checks."
-        in BASELINE_CODING_POLICY
-    )
+def test_baseline_policy_prefers_a_simple_fitting_implementation() -> None:
+    assert "A simple solution is preferred over a complex one." in BASELINE_CODING_POLICY
+
+
+def test_baseline_policy_stops_after_adequate_verification() -> None:
+    assert "complete and adequately verified" in BASELINE_CODING_POLICY
 
 
 def test_baseline_policy_requires_explicit_run_command_verification_intent() -> None:
-    assert "Every run_command call must explicitly set verification" in (
-        TOOL_USAGE_GUIDANCE
-    )
+    assert "Every run_command call must set verification" in TOOL_USAGE_GUIDANCE
     assert "verification=true for tests, builds, lint, type or syntax checks" in (
         TOOL_USAGE_GUIDANCE
     )
@@ -355,26 +351,17 @@ def test_baseline_policy_requires_explicit_run_command_verification_intent() -> 
     assert "environment inspection, and ordinary execution" in TOOL_USAGE_GUIDANCE
 
 
-def test_baseline_policy_removes_replaced_implementations() -> None:
-    assert "When replacing an implementation, remove the obsolete path" in BASELINE_CODING_POLICY
-    assert "unless a concrete compatibility or fallback need remains" in BASELINE_CODING_POLICY
-
-
 def test_apply_patch_guidance_prefers_diagnostics_over_unconditional_rereads() -> None:
     assert "If a failure returns selectable candidates" in TOOL_USAGE_GUIDANCE
     assert "choose the intended match_id" in TOOL_USAGE_GUIDANCE
     assert "Reread only when the diagnostics are insufficient." in TOOL_USAGE_GUIDANCE
-    assert "Candidate selection still revalidates exact current text." in TOOL_USAGE_GUIDANCE
+    assert "old_text must exactly match current source" in TOOL_USAGE_GUIDANCE
 
 
 def test_tool_guidance_prevents_shell_workarounds_for_editing_tool_failures() -> None:
-    assert "Do not use run_command in place of read_file, apply_patch, or write_file." in (
-        TOOL_USAGE_GUIDANCE
-    )
-    assert "Use shell discovery to locate relevant files, symbols, tests, or workflows." in (
-        TOOL_USAGE_GUIDANCE
-    )
-    assert "switch to the dedicated file tools for source work" in TOOL_USAGE_GUIDANCE
+    assert "Use read_file to check files instead of commands" in TOOL_USAGE_GUIDANCE
+    assert "Use apply_patch to edit a file instead of" in TOOL_USAGE_GUIDANCE
+    assert "Use write_file instead of commands" in TOOL_USAGE_GUIDANCE
 
 
 def test_system_prompt_without_platform_context_preserves_compatibility() -> None:

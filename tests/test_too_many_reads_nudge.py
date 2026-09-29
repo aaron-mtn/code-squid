@@ -8,6 +8,8 @@ from squid_core.hooks import (
     BeforeModelTurnContext,
     BeforeRunContext,
     CompactionAppliedContext,
+    DEFAULT_FIRST_NUDGE_READS,
+    DEFAULT_STRONG_NUDGE_READS,
     HookRunner,
     TOO_MANY_READS_GUIDANCE,
     TOO_MANY_READS_STRONG_GUIDANCE,
@@ -55,11 +57,11 @@ def _guidance(hook: TooManyReadsNudge) -> str:
     return "\n\n".join(block.body for block in response.context_blocks)
 
 
-def test_third_successful_read_renders_first_nudge_at_model_boundary() -> None:
+def test_fifth_successful_read_renders_first_nudge_at_model_boundary() -> None:
     hook = TooManyReadsNudge()
-    responses = _successful_reads(hook, 3)
+    responses = _successful_reads(hook, DEFAULT_FIRST_NUDGE_READS)
 
-    assert responses == [None, None, None]
+    assert responses == [None] * DEFAULT_FIRST_NUDGE_READS
     assert _guidance(hook) == TOO_MANY_READS_GUIDANCE
     assert _guidance(hook) == ""
 
@@ -67,15 +69,17 @@ def test_third_successful_read_renders_first_nudge_at_model_boundary() -> None:
 @pytest.mark.parametrize("mutation", ["apply_patch", "write_file"])
 def test_later_mutation_discards_armed_read_guidance(mutation: str) -> None:
     hook = TooManyReadsNudge()
-    _successful_reads(hook, 3)
+    _successful_reads(hook, DEFAULT_FIRST_NUDGE_READS)
 
     assert _result(hook, mutation) is None
     assert _guidance(hook) == ""
 
 
-def test_fifth_and_later_successful_reads_produce_strong_nudge() -> None:
+def test_eighth_and_later_successful_reads_produce_strong_nudge() -> None:
     hook = TooManyReadsNudge()
-    assert _successful_reads(hook, 5) == [None] * 5
+    assert _successful_reads(hook, DEFAULT_STRONG_NUDGE_READS) == (
+        [None] * DEFAULT_STRONG_NUDGE_READS
+    )
     assert _guidance(hook) == TOO_MANY_READS_STRONG_GUIDANCE
 
     assert _result(hook, "read_file") is None
@@ -103,27 +107,20 @@ def test_broad_reads_nudge_earlier_by_returned_line_volume() -> None:
 
 def test_only_novel_ranges_from_shaped_result_add_read_volume() -> None:
     hook = TooManyReadsNudge()
-    ranges = [{"start_line": 1, "end_line": 400}]
+    ranges = [{"start_line": 1, "end_line": 200}]
 
-    assert _result(
-        hook,
-        "read_file",
-        result_metadata={"returned_line_ranges": ranges},
-    ) is None
-    assert _result(
-        hook,
-        "read_file",
-        result_metadata={"returned_line_ranges": ranges},
-    ) is None
+    results = [
+        _result(
+            hook,
+            "read_file",
+            result_metadata={"returned_line_ranges": ranges},
+        )
+        for _ in range(DEFAULT_FIRST_NUDGE_READS)
+    ]
 
-    # The count threshold still applies even though shaped novel coverage has
-    # not reached the independent 1,500-line threshold.
-    third = _result(
-        hook,
-        "read_file",
-        result_metadata={"returned_line_ranges": ranges},
-    )
-    assert third is None
+    # The action-count threshold still applies even though shaped novel coverage
+    # has not reached the independent 1,500-line threshold.
+    assert results == [None] * DEFAULT_FIRST_NUDGE_READS
     assert _guidance(hook) == TOO_MANY_READS_GUIDANCE
 
 
@@ -181,11 +178,9 @@ def test_successful_mutation_resets_returned_line_volume() -> None:
 
 def test_neutral_commands_do_not_make_reads_consecutive() -> None:
     hook = TooManyReadsNudge()
-    assert _result(hook, "read_file") is None
-    assert _result(hook, "run_command") is None
-    assert _result(hook, "read_file") is None
-    assert _result(hook, "run_command") is None
-
+    for _ in range(DEFAULT_FIRST_NUDGE_READS - 1):
+        assert _result(hook, "read_file") is None
+        assert _result(hook, "run_command") is None
     assert _result(hook, "read_file") is None
     assert _guidance(hook) == TOO_MANY_READS_GUIDANCE
 
@@ -193,17 +188,19 @@ def test_neutral_commands_do_not_make_reads_consecutive() -> None:
 @pytest.mark.parametrize("mutation", ["apply_patch", "write_file"])
 def test_successful_mutation_resets_read_count(mutation: str) -> None:
     hook = TooManyReadsNudge()
-    _successful_reads(hook, 2)
+    _successful_reads(hook, DEFAULT_FIRST_NUDGE_READS - 1)
     assert _result(hook, mutation) is None
 
-    assert _successful_reads(hook, 2) == [None, None]
+    assert _successful_reads(hook, DEFAULT_FIRST_NUDGE_READS - 1) == (
+        [None] * (DEFAULT_FIRST_NUDGE_READS - 1)
+    )
     assert _result(hook, "read_file") is None
     assert _guidance(hook) == TOO_MANY_READS_GUIDANCE
 
 
 def test_failed_mutation_does_not_reset_read_count() -> None:
     hook = TooManyReadsNudge()
-    _successful_reads(hook, 2)
+    _successful_reads(hook, DEFAULT_FIRST_NUDGE_READS - 1)
     assert _result(hook, "apply_patch", ok=False) is None
 
     assert _result(hook, "read_file") is None
@@ -212,7 +209,7 @@ def test_failed_mutation_does_not_reset_read_count() -> None:
 
 def test_failed_read_neither_increments_nor_resets() -> None:
     hook = TooManyReadsNudge()
-    _successful_reads(hook, 2)
+    _successful_reads(hook, DEFAULT_FIRST_NUDGE_READS - 1)
     assert _result(hook, "read_file", ok=False) is None
 
     assert _result(hook, "read_file") is None
@@ -222,7 +219,7 @@ def test_failed_read_neither_increments_nor_resets() -> None:
 def test_compaction_does_not_reset_read_count() -> None:
     hook = TooManyReadsNudge()
     runner = HookRunner([hook])
-    _successful_reads(hook, 2)
+    _successful_reads(hook, DEFAULT_FIRST_NUDGE_READS - 1)
     runner.compaction_applied(CompactionAppliedContext(None, "."))
 
     assert _result(hook, "read_file") is None
@@ -231,10 +228,12 @@ def test_compaction_does_not_reset_read_count() -> None:
 
 def test_before_run_resets_read_count() -> None:
     hook = TooManyReadsNudge()
-    _successful_reads(hook, 2)
+    _successful_reads(hook, DEFAULT_FIRST_NUDGE_READS - 1)
     hook.before_run(BeforeRunContext(None, ".", "task"))
 
-    assert _successful_reads(hook, 2) == [None, None]
+    assert _successful_reads(hook, DEFAULT_FIRST_NUDGE_READS - 1) == (
+        [None] * (DEFAULT_FIRST_NUDGE_READS - 1)
+    )
 
 
 def test_hook_does_not_modify_read_tool_output() -> None:
@@ -270,13 +269,14 @@ def test_thresholds_are_validated(kwargs: dict) -> None:
         TooManyReadsNudge(**kwargs)
 
 
-def test_read_guidance_names_concrete_needs_without_requiring_an_edit() -> None:
-    for guidance in (TOO_MANY_READS_GUIDANCE, TOO_MANY_READS_STRONG_GUIDANCE):
-        assert "missing fact" in guidance
-        assert "unmet task requirement" in guidance
-        assert "required verification" in guidance
-        assert "compaction" in guidance
-        assert "read-only tasks" in guidance.lower()
-        assert "make the next safe change now" not in guidance
-    assert "an edit is not required" in TOO_MANY_READS_STRONG_GUIDANCE
-    assert "Stop broad, speculative, or reassurance reading" in TOO_MANY_READS_STRONG_GUIDANCE
+def test_read_guidance_uses_current_model_facing_contract() -> None:
+    assert TOO_MANY_READS_GUIDANCE == (
+        "hey, dummy. do you think you have read enough yet? I think you have "
+        "consumed the whole repo at least once since I asked you to make this "
+        "simple patch."
+    )
+    assert TOO_MANY_READS_STRONG_GUIDANCE == (
+        "HIGH PRIORITY: Stop. I am getting impatient. If you read one more file "
+        "without making an edit, I am going to report you to management. Make the "
+        "edit now."
+    )
