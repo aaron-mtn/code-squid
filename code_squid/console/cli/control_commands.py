@@ -73,8 +73,10 @@ def undo_latest_run(repo_root: Path) -> bool:
     """Restore the latest-run undo buffer and report whether it was usable."""
 
     try:
-        results = UndoStore.open(workspace_undo_dir(repo_root)).restore()
-    except FileNotFoundError as error:
+        results = UndoStore.open(workspace_undo_dir(repo_root)).restore(
+            workspace_root=repo_root
+        )
+    except (OSError, ValueError) as error:
         print(error)
         return False
 

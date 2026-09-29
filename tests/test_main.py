@@ -25,7 +25,7 @@ from code_squid.settings import load_settings
 from squid_core.agent_loop import RunResult
 from squid_core.model_adapter import ModelRequestError
 from main import main
-from squid_core.storage import SessionStore
+from squid_core.storage import SessionStore, UndoStore
 from code_squid.console.ui.display import StartupInfo, TerminalDisplay
 
 
@@ -280,6 +280,28 @@ def test_missing_undo_buffer_fails(tmp_path, monkeypatch, capsys) -> None:
 
     assert run_cli(["undo"]) == 1
     assert "Missing undo metadata" in capsys.readouterr().out
+
+
+def test_undo_command_rejects_buffer_from_different_workspace(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    other_workspace = tmp_path / "other-workspace"
+    other_workspace.mkdir()
+    target = other_workspace / "target.txt"
+    target.write_text("before", encoding="utf-8")
+    store = UndoStore.create(
+        tmp_path / ".code-squid" / "undo", workspace_root=other_workspace
+    )
+    store.snapshot_file(str(target))
+    target.write_text("after", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert run_cli(["undo"]) == 1
+
+    assert "different workspace" in capsys.readouterr().out
+    assert target.read_text(encoding="utf-8") == "after"
+    metadata = json.loads(store.metadata_path.read_text(encoding="utf-8"))
+    assert metadata["status"] == "active"
 
 
 def test_safety_displays_strict_for_always(tmp_path, capsys) -> None:

@@ -2182,7 +2182,19 @@ Starting a new run or resume replaces the undo buffer. Before `write_file` or
 `apply_patch` mutates a target, `ToolExecutor` asks `UndoStore` to snapshot the
 file's pre-change state. Repeated writes or patches to the same path keep the
 first pre-change snapshot. `python main.py undo` restores existing-file
-snapshots and deletes files that did not exist before the write.
+snapshots and deletes files that did not exist before the write. Restore is a
+one-shot transition from `active` through `restoring` to `restored`; only an
+`active` buffer is eligible. The intermediate state is written after complete
+validation but before target mutation, so a failed or interrupted partial
+restore cannot be replayed over later user work.
+
+Undo metadata records the resolved workspace root that created the buffer.
+Restore requires that root to exactly match the currently opened workspace and
+prevalidates every normalized target as contained by that workspace before any
+target is mutated. Moving or copying a workspace therefore makes its stale undo
+buffer unavailable rather than following its absolute paths back to the old
+workspace. Snapshot paths are likewise required to remain under the buffer's
+`files` directory. There is intentionally no automatic undo-record migration.
 
 Ctrl+C marks the current session `interrupted` and prints the normal final
 session display. Model request failures mark the session `failed` and write a

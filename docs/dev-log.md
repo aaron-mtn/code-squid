@@ -2582,3 +2582,15 @@
   verification passed 242 tests; compilation and `git diff --check` passed. The
   full suite had 1,552 passing, 1 skipped, and the same 54 unrelated pre-existing
   prompt and built-in Hook policy failures.
+- 2026-09-28: Made latest-run undo restoration one-shot and workspace-bound.
+  `UndoStore.restore(...)` now requires the currently opened workspace, rejects
+  non-active buffers, requires an exact match with the recorded workspace root,
+  and prevalidates all normalized targets and snapshots before mutation. Restore
+  durably transitions through `restoring`, leaving partial or interrupted
+  attempts unavailable for replay, then records `restored` only after every
+  target operation succeeds. Moved or copied workspaces fail safely instead of
+  following stale absolute targets, and a second undo attempt cannot overwrite
+  later user edits or delete recreated files. No automatic record
+  migration or compatibility path was added. Focused undo/storage/executor/CLI
+  verification passed 224 tests. Compilation and `git diff --check` passed; the
+  full suite passed 1,625 tests with 1 skip.

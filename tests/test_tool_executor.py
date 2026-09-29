@@ -432,7 +432,7 @@ def test_candidate_selection_snapshots_original_target(tmp_path: Path) -> None:
 def test_successful_write_file_produces_usable_undo_state(tmp_path: Path) -> None:
     target = tmp_path / "target.txt"
     target.write_text("before", encoding="utf-8")
-    undo_store = UndoStore.create(tmp_path / ".undo")
+    undo_store = UndoStore.create(tmp_path / ".undo", workspace_root=tmp_path)
     executor = ToolExecutor(
         repo_root=tmp_path,
         session=Session(repo_root=tmp_path),
@@ -448,13 +448,13 @@ def test_successful_write_file_produces_usable_undo_state(tmp_path: Path) -> Non
 
     assert result["ok"] is True
     assert len(undo_store.load_index()) == 1
-    undo_store.restore()
+    undo_store.restore(workspace_root=tmp_path)
     assert target.read_text(encoding="utf-8") == "before"
 
 
 def test_failed_write_file_discards_new_undo_state(tmp_path: Path) -> None:
     target = tmp_path / "missing-parent" / "target.txt"
-    undo_store = UndoStore.create(tmp_path / ".undo")
+    undo_store = UndoStore.create(tmp_path / ".undo", workspace_root=tmp_path)
     executor = ToolExecutor(
         repo_root=tmp_path,
         session=Session(repo_root=tmp_path),
@@ -477,7 +477,7 @@ def test_failed_write_file_discards_new_undo_state(tmp_path: Path) -> None:
 def test_successful_apply_patch_produces_usable_undo_state(tmp_path: Path) -> None:
     target = tmp_path / "target.txt"
     target.write_text("before", encoding="utf-8")
-    undo_store = UndoStore.create(tmp_path / ".undo")
+    undo_store = UndoStore.create(tmp_path / ".undo", workspace_root=tmp_path)
     executor = ToolExecutor(
         repo_root=tmp_path,
         session=Session(repo_root=tmp_path),
@@ -493,14 +493,14 @@ def test_successful_apply_patch_produces_usable_undo_state(tmp_path: Path) -> No
 
     assert result["ok"] is True
     assert len(undo_store.load_index()) == 1
-    undo_store.restore()
+    undo_store.restore(workspace_root=tmp_path)
     assert target.read_text(encoding="utf-8") == "before"
 
 
 def test_failed_apply_patch_discards_new_undo_state(tmp_path: Path) -> None:
     target = tmp_path / "target.txt"
     target.write_text("before", encoding="utf-8")
-    undo_store = UndoStore.create(tmp_path / ".undo")
+    undo_store = UndoStore.create(tmp_path / ".undo", workspace_root=tmp_path)
     executor = ToolExecutor(
         repo_root=tmp_path,
         session=Session(repo_root=tmp_path),
@@ -525,7 +525,7 @@ def test_failed_mutation_preserves_previous_successful_undo_state(tmp_path: Path
     unchanged = tmp_path / "unchanged.txt"
     changed.write_text("original", encoding="utf-8")
     unchanged.write_text("untouched", encoding="utf-8")
-    undo_store = UndoStore.create(tmp_path / ".undo")
+    undo_store = UndoStore.create(tmp_path / ".undo", workspace_root=tmp_path)
     executor = ToolExecutor(
         repo_root=tmp_path,
         session=Session(repo_root=tmp_path),
@@ -548,7 +548,7 @@ def test_failed_mutation_preserves_previous_successful_undo_state(tmp_path: Path
     assert successful_result["ok"] is True
     assert failed_result["ok"] is False
     assert [record["path"] for record in undo_store.load_index()] == [str(changed)]
-    undo_store.restore()
+    undo_store.restore(workspace_root=tmp_path)
     assert changed.read_text(encoding="utf-8") == "original"
     assert unchanged.read_text(encoding="utf-8") == "untouched"
 
@@ -556,7 +556,7 @@ def test_failed_mutation_preserves_previous_successful_undo_state(tmp_path: Path
 def test_mutation_exception_retains_snapshot_for_possible_partial_write(tmp_path: Path) -> None:
     target = tmp_path / "target.txt"
     target.write_text("before", encoding="utf-8")
-    undo_store = UndoStore.create(tmp_path / ".undo")
+    undo_store = UndoStore.create(tmp_path / ".undo", workspace_root=tmp_path)
 
     def partially_write_then_raise(_repo_root: Path, **args) -> dict:
         Path(args["path"]).write_text("partial", encoding="utf-8")
@@ -579,7 +579,7 @@ def test_mutation_exception_retains_snapshot_for_possible_partial_write(tmp_path
     assert result["ok"] is False
     assert target.read_text(encoding="utf-8") == "partial"
     assert len(undo_store.load_index()) == 1
-    undo_store.restore()
+    undo_store.restore(workspace_root=tmp_path)
     assert target.read_text(encoding="utf-8") == "before"
 
 

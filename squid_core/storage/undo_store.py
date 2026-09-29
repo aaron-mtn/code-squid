@@ -149,11 +149,48 @@ class UndoStore:
             return False
         return self.discard_snapshot(path)
 
-    def restore(self) -> list[dict]:
-        results = []
+    def restore(self, *, workspace_root: Path) -> list[dict]:
+        """Restore one active buffer owned by ``workspace_root`` exactly once.
 
-        for record in self.load_index():
-            original_path = Path(record["path"])
+        Every record is validated before the buffer is claimed or any target is
+        touched. Once claimed, a failed or interrupted restore remains in the
+        ``restoring`` state: replaying a partly applied buffer could overwrite
+        user work created after the failure.
+        """
+
+        metadata = self._read_metadata()
+        if not isinstance(metadata, dict):
+            raise ValueError("Undo metadata must contain an object")
+        if metadata.get("status") != "active":
+            raise ValueError(
+                "Undo buffer is not available: "
+                f"status is {metadata.get('status')!r}"
+            )
+
+        current_root = _resolve_path(Path(workspace_root).expanduser(), "workspace")
+        recorded_root_value = metadata.get("repo_root")
+        if not isinstance(recorded_root_value, str) or not recorded_root_value:
+            raise ValueError("Undo buffer has no valid recorded workspace root")
+        recorded_root_path = Path(recorded_root_value).expanduser()
+        if not recorded_root_path.is_absolute():
+            raise ValueError("Undo buffer has a non-absolute recorded workspace root")
+        recorded_root = _resolve_path(recorded_root_path, "recorded workspace")
+        if recorded_root != current_root:
+            raise ValueError(
+                "Undo buffer belongs to a different workspace: "
+                f"recorded {recorded_root}, current {current_root}"
+            )
+
+        records = self._validate_restore_records(current_root)
+
+        # Claim the buffer durably only after all validation succeeds, but before
+        # target mutation. A crash or partial failure must never make it replayable.
+        metadata["status"] = "restoring"
+        metadata["updated_at"] = _utc_now()
+        self._write_metadata(metadata)
+
+        results = []
+        for record, original_path, snapshot_path in records:
             result = {
                 "path": record["path"],
                 "restored": False,
@@ -161,7 +198,7 @@ class UndoStore:
             }
 
             if record["existed"]:
-                snapshot_path = self.undo_dir / record["snapshot_path"]
+                assert snapshot_path is not None
                 original_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(snapshot_path, original_path)
                 result["restored"] = True
@@ -171,11 +208,66 @@ class UndoStore:
 
             results.append(result)
 
-        metadata = self._read_metadata()
         metadata["status"] = "restored"
         metadata["updated_at"] = _utc_now()
         self._write_metadata(metadata)
         return results
+
+    def _validate_restore_records(
+        self, workspace_root: Path
+    ) -> list[tuple[dict, Path, Path | None]]:
+        """Validate every target and snapshot before restoration mutates files."""
+
+        index = self.load_index()
+        if not isinstance(index, list):
+            raise ValueError("Undo index must contain a list of records")
+
+        files_root = _resolve_path(self.files_dir, "undo files folder")
+        validated = []
+        for record in index:
+            if not isinstance(record, dict):
+                raise ValueError("Undo index contains an invalid record")
+
+            path_value = record.get("path")
+            if not isinstance(path_value, str) or not path_value:
+                raise ValueError("Undo record has no valid target path")
+            original_path = Path(path_value)
+            if not original_path.is_absolute():
+                raise ValueError(f"Undo target is not an absolute path: {path_value}")
+            resolved_target = _resolve_path(original_path, "undo target")
+            if not resolved_target.is_relative_to(workspace_root):
+                raise ValueError(
+                    f"Undo target is outside the current workspace: {path_value}"
+                )
+
+            existed = record.get("existed")
+            if not isinstance(existed, bool):
+                raise ValueError(
+                    f"Undo record has invalid existence state: {path_value}"
+                )
+
+            snapshot_path = None
+            snapshot_value = record.get("snapshot_path")
+            if existed:
+                if not isinstance(snapshot_value, str) or not snapshot_value:
+                    raise ValueError(f"Undo record has no valid snapshot: {path_value}")
+                snapshot_path = _resolve_path(
+                    self.undo_dir / snapshot_value, "undo snapshot"
+                )
+                if not snapshot_path.is_relative_to(files_root):
+                    raise ValueError(
+                        f"Undo snapshot is outside its files folder: {path_value}"
+                    )
+                if not snapshot_path.is_file():
+                    raise FileNotFoundError(f"Missing undo snapshot: {snapshot_path}")
+            elif snapshot_value is not None:
+                raise ValueError(
+                    f"Undo record for a newly created file has a snapshot: {path_value}"
+                )
+
+            validated.append((record, original_path, snapshot_path))
+
+        return validated
 
     def _read_metadata(self) -> dict[str, Any]:
         with self.metadata_path.open(encoding="utf-8") as file:
@@ -195,3 +287,12 @@ class UndoStore:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _resolve_path(path: Path, description: str) -> Path:
+    """Resolve a persisted path with an explicit validation failure."""
+
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError) as error:
+        raise ValueError(f"Unable to resolve {description}: {path}") from error
