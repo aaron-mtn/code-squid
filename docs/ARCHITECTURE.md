@@ -1228,7 +1228,11 @@ Agent's one intended system message; it never inserts the Agent's original
 initial user task again. The replacement is persisted as an append-only
 `system_message_reconciliation` event. `SessionStore.load_messages()` applies
 the latest such event during replay, so old specialization instructions do not
-return after restart and exactly one current system message is exposed.
+return after restart and exactly one current system message is exposed. Normal
+messages and system reconciliation replacements use the durable append as their
+commit point: when a store is present, `session.messages` changes only after the
+corresponding append succeeds. Store-less sessions retain their direct in-memory
+behavior.
 
 Each new run and follow-up appends a non-transcript `run_context` event to
 `session.jsonl`. This records the active `skill_name`, the actual filtered
@@ -1872,12 +1876,15 @@ compaction context, not model-authored summary memory: every compaction derives
 it again from persisted canonical Tool results. Only paths and page numbers are
 carried forward; image bytes and base64 are never placed in compaction context.
 
-`AgentLoop` supplies one callback that persists each lifecycle event through
-`SessionStore.append_compaction_event(...)` when storage is wired in, publishes
-the authoritative start event through the loop's existing observer seam, and
-dispatches the narrow `compaction_applied` Hook seam after successful
-application. The compactor writes a chronological diagnostic lifecycle beside
-normal transcript entries:
+`AgentLoop` supplies separate persistence and post-application callbacks for the
+real compactor. The first persists each lifecycle event through
+`SessionStore.append_compaction_event(...)` when storage is wired in and
+publishes start/failure boundaries. The second dispatches the narrow
+`compaction_applied` Hook seam and publishes that UI boundary only after the
+proposed transcript is active. This two-callback interface is the required
+compactor contract; persistence and post-commit observation are not combined in
+a compatibility seam. The compactor writes a chronological diagnostic lifecycle
+beside normal transcript entries:
 
 - `compaction_check` records the estimate, configured trigger, threshold result,
   whether compaction is possible, and compactable-selection diagnostics
@@ -1892,10 +1899,12 @@ normal transcript entries:
 - `compaction_applied` records before/after token estimates and message counts,
   the successful attempt number, and a versioned replay transform containing
   the exact compacted assistant message plus protected/preserved message counts;
-  it is emitted only after the in-memory rebuild succeeds, and failed event
-  persistence leaves no durable replay boundary
+  the event is persisted before the proposed transcript replaces
+  `session.messages`, so failed persistence leaves the pre-compaction transcript
+  unchanged; post-commit Hooks and UI observe it only after replacement
 - `compaction_failed` records `prepare`, `model_request`, `response_parse`,
-  `session_rebuild`, or `persistence` plus a concise exception description,
+  `session_rebuild`, `persistence`, or `post_commit` plus a concise exception
+  description,
   then the original exception continues through the existing error path. The
   first invalid-summary failure instead records `attempt=1` and
   `will_retry=true`; only that validation failure is recoverable, and its second

@@ -9,12 +9,12 @@ def record_message(
     message: dict[str, Any],
     usage: dict | None = None,
 ) -> None:
-    """Record one accepted message in memory and optional durable storage."""
+    """Record one accepted message, committing durable storage before memory."""
     # Rejected assistant replies intentionally bypass this central write path
     # so normal transcript history contains accepted messages only.
-    session.add_message(message)
     if session_store is not None:
         session_store.append_message(message, usage=usage)
+    session.add_message(message)
 
 
 def record_messages(session, session_store, *messages: dict[str, Any]) -> None:
@@ -38,15 +38,16 @@ def reconcile_system_message(
     ):
         return
 
-    # Specialization is allowed to change between runs, but the old system
-    # prompt must never remain authoritative beside the new Tool and Hook set.
-    # Keep every non-system message object, and its relative order, untouched.
-    session.messages[:] = [
+    # Build the replacement before persistence so a failed durable append cannot
+    # leave memory claiming that a reconciliation was committed. Keep every
+    # non-system message object, and its relative order, untouched.
+    reconciled_messages = [
         intended_message,
         *(message for message in session.messages if message.get("role") != "system"),
     ]
     if session_store is not None:
         session_store.append_system_message_reconciliation(intended_message)
+    session.messages[:] = reconciled_messages
 
 
 def user_instruction_message(instruction: str) -> dict[str, str]:

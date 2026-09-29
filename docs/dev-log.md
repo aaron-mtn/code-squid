@@ -2522,3 +2522,25 @@
   passed; compilation and `git diff --check` passed. The full suite passed 1,536
   tests with 1 skip and retained 54 unrelated pre-existing prompt and built-in
   Hook policy failures.
+- 2026-09-28: Made durable transcript persistence the commit point for normal
+  messages, system-message reconciliation, and compaction. Message and
+  reconciliation failures now leave `session.messages` untouched. Compaction
+  builds its proposed transcript and replay metadata without mutation, persists
+  `compaction_applied`, activates the transcript, and only then notifies Hooks
+  and UI through a split post-commit callback; the legacy custom-compactor event
+  seam remains supported. Added failure-injection regressions for all three
+  paths, ordered multi-message recording, unchanged successful compaction, and
+  Hook observation timing. Focused transcript/session/compaction/agent-loop
+  verification passed 242 tests; compilation and `git diff --check` passed. The
+  full suite had 1,552 passing, 1 skipped, and the same 54 unrelated pre-existing
+  prompt and built-in Hook policy failures documented by the preceding runtime
+  work.
+- 2026-09-28: Removed the temporary legacy compactor callback compatibility
+  path. `AgentLoop` now requires the split `event_callback` and
+  `post_apply_callback` contract directly, with no signature inspection,
+  fallback dispatch, or single-phase handler. Compactor test doubles now use
+  the required interface; persistence-before-mutation and post-commit Hook/UI
+  ordering are unchanged. Focused transcript/session/compaction/AgentLoop
+  verification passed 242 tests; compilation and `git diff --check` passed. The
+  full suite had 1,552 passing, 1 skipped, and the same 54 unrelated pre-existing
+  prompt and built-in Hook policy failures.

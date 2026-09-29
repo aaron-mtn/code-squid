@@ -42,8 +42,13 @@ class Compactor:
         session,
         *,
         event_callback: Callable[[dict], object] | None = None,
+        post_apply_callback: Callable[[dict], object] | None = None,
     ) -> dict | None:
-        """Compact eligible history and report durable lifecycle diagnostics."""
+        """Compact eligible history and report durable lifecycle diagnostics.
+
+        ``event_callback`` owns persistence of the application boundary, while
+        ``post_apply_callback`` observes it only after the transcript is active.
+        """
         if not self.settings.enabled:
             return None
 
@@ -239,16 +244,16 @@ class Compactor:
                 "role": "assistant",
                 "content": compacted_content,
             }
-            session.messages = [
+            proposed_messages = [
                 *protected_messages,
                 compacted_message,
                 *preserved_messages,
             ]
             metadata = {
                 "estimated_tokens_before": estimated_tokens_before,
-                "estimated_tokens_after": estimate_messages_tokens(session.messages),
+                "estimated_tokens_after": estimate_messages_tokens(proposed_messages),
                 "messages_before": messages_before,
-                "messages_after": len(session.messages),
+                "messages_after": len(proposed_messages),
                 "summary_chars": len(summary),
             }
 
@@ -263,16 +268,21 @@ class Compactor:
                 "compacted_message": compacted_message,
             }
 
+            applied_event = {
+                "type": "compaction_applied",
+                "attempt": attempt,
+                **metadata,
+                "replay": replay,
+            }
             stage = "persistence"
-            self._emit(
-                event_callback,
-                {
-                    "type": "compaction_applied",
-                    "attempt": attempt,
-                    **metadata,
-                    "replay": replay,
-                },
-            )
+            self._emit(event_callback, applied_event)
+
+            # The durable replay boundary is the commit point. Hooks and UI
+            # must not observe application until this exact state is active.
+            stage = "session_rebuild"
+            session.messages = proposed_messages
+            stage = "post_commit"
+            self._emit(post_apply_callback, applied_event)
             return metadata
         except StreamCancelled:
             # Requested cancellation is run control, not a failed compaction.

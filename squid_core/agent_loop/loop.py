@@ -268,29 +268,37 @@ class AgentLoop:
         except Exception:
             pass
 
-    def _handle_compaction_event(self, event: dict) -> None:
-        """Persist compaction diagnostics and dispatch successful application."""
+    def _persist_compaction_event(self, event: dict) -> None:
+        """Persist compaction lifecycle state before any applied notification."""
         # Persistence retains the complete lifecycle. Presentation observes
         # only boundaries needed to own and settle its transient status line.
         if self.session_store is not None:
             self.session_store.append_compaction_event(event)
         event_type = event.get("type")
-        if event_type == "compaction_applied":
-            # The compactor emits this only after replacing session.messages.
-            # Earlier lifecycle events and failures leave Hook state untouched.
-            self.hook_runner.compaction_applied(
-                CompactionAppliedContext(
-                    session_id=self._session_id(),
-                    repo_root=str(self.session.repo_root),
-                ),
-                event_sink=self._emit_hook_event,
-            )
         if event_type in {
             "compaction_started",
-            "compaction_applied",
             "compaction_failed",
         }:
             self._emit_event(event)
+
+    def _notify_compaction_applied(self, event: dict) -> None:
+        """Notify Hooks and UI after the compacted transcript becomes active."""
+        self.hook_runner.compaction_applied(
+            CompactionAppliedContext(
+                session_id=self._session_id(),
+                repo_root=str(self.session.repo_root),
+            ),
+            event_sink=self._emit_hook_event,
+        )
+        self._emit_event(event)
+
+    def _maybe_compact(self) -> None:
+        """Run compaction with distinct persistence and post-commit callbacks."""
+        self.compactor.maybe_compact(
+            self.session,
+            event_callback=self._persist_compaction_event,
+            post_apply_callback=self._notify_compaction_applied,
+        )
 
     def _should_stream_assistant_text(self) -> bool:
         if not self.stream_assistant_text:
@@ -633,10 +641,7 @@ class AgentLoop:
                 if self.compactor is not None:
                     run_stage = "compaction"
                     self._check_cancelled()
-                    self.compactor.maybe_compact(
-                        self.session,
-                        event_callback=self._handle_compaction_event,
-                    )
+                    self._maybe_compact()
                     self._check_cancelled()
 
                 # Ask the model for the next assistant reply and any tool actions.

@@ -8,6 +8,11 @@ import pytest
 
 import squid_core.agent_loop as agent_loop_module
 from code_squid.agent.coding import CodingAgent
+from squid_core.agent_loop.transcript_recording import (
+    reconcile_system_message,
+    record_message,
+    record_messages,
+)
 from squid_core.safety import ActionPreflightDecision
 from squid_core.agent_loop import AgentLoop, RunResult
 from squid_core.safety import ApprovalDecision, ApprovalPolicy
@@ -368,22 +373,38 @@ class FakeCompactor:
         self.events = events
         self.sessions = []
 
-    def maybe_compact(self, session: Session, *, event_callback=None) -> dict | None:
+    def maybe_compact(
+        self,
+        session: Session,
+        *,
+        event_callback=None,
+        post_apply_callback=None,
+    ) -> dict | None:
         if self.events is not None:
             self.events.append("compact")
         self.sessions.append(session)
         if self.metadata is not None and event_callback is not None:
-            event_callback({"type": "compaction_applied", **self.metadata})
+            event = {"type": "compaction_applied", **self.metadata}
+            event_callback(event)
+            post_apply_callback(event)
         return self.metadata
 
 
 class LifecycleCompactor:
     """Emit a minimal lifecycle for testing the loop's compaction event seam."""
 
-    def maybe_compact(self, session: Session, *, event_callback=None) -> None:
+    def maybe_compact(
+        self,
+        session: Session,
+        *,
+        event_callback=None,
+        post_apply_callback=None,
+    ) -> None:
         event_callback({"type": "compaction_check", "will_compact": True})
         event_callback({"type": "compaction_started", "messages_before": 4})
-        event_callback({"type": "compaction_applied", "messages_after": 2})
+        event = {"type": "compaction_applied", "messages_after": 2}
+        event_callback(event)
+        post_apply_callback(event)
 
 
 class StopImmediatelyAgent(FakeAgent):
@@ -1136,6 +1157,69 @@ def test_initial_and_valid_assistant_messages_are_persisted() -> None:
     ]
 
 
+def test_failed_message_persistence_leaves_session_unchanged() -> None:
+    class FailingStore:
+        def append_message(self, message: dict, usage=None) -> None:
+            raise RuntimeError("message persistence failed")
+
+    session = Session(repo_root=None)
+    original = {"role": "system", "content": "already committed"}
+    session.add_message(original)
+
+    with pytest.raises(RuntimeError, match="message persistence failed"):
+        record_message(
+            session,
+            FailingStore(),
+            {"role": "user", "content": "not committed"},
+        )
+
+    assert session.messages == [original]
+
+
+def test_record_messages_keeps_order_and_commits_only_successful_prefix() -> None:
+    class SecondAppendFails:
+        def __init__(self) -> None:
+            self.messages = []
+
+        def append_message(self, message: dict, usage=None) -> None:
+            if len(self.messages) == 1:
+                raise RuntimeError("second append failed")
+            self.messages.append(message)
+
+    session = Session(repo_root=None)
+    store = SecondAppendFails()
+    first = {"role": "user", "content": "first"}
+    second = {"role": "assistant", "content": "second"}
+
+    with pytest.raises(RuntimeError, match="second append failed"):
+        record_messages(session, store, first, second)
+
+    assert store.messages == [first]
+    assert session.messages == [first]
+
+
+def test_failed_system_reconciliation_persistence_leaves_session_unchanged() -> None:
+    class FailingStore:
+        def append_system_message_reconciliation(self, message: dict) -> None:
+            raise RuntimeError("reconciliation persistence failed")
+
+    original_messages = [
+        {"role": "system", "content": "old system"},
+        {"role": "user", "content": "keep me"},
+    ]
+    session = Session(repo_root=None)
+    session.add_messages(*original_messages)
+
+    with pytest.raises(RuntimeError, match="reconciliation persistence failed"):
+        reconcile_system_message(
+            session,
+            FailingStore(),
+            {"role": "system", "content": "new system"},
+        )
+
+    assert session.messages == original_messages
+
+
 def test_new_coding_session_sends_system_prompt_and_raw_task_without_runtime_wrapper() -> None:
     session = Session(repo_root=None)
     session_store = FakeSessionStore()
@@ -1370,7 +1454,7 @@ def test_failed_compaction_boundary_is_published_through_loop_events() -> None:
         on_event=events.append,
     )
 
-    loop._handle_compaction_event(
+    loop._persist_compaction_event(
         {"type": "compaction_failed", "stage": "model_request"}
     )
 
@@ -1406,11 +1490,13 @@ def test_only_applied_compaction_resets_repeated_read_state(tmp_path) -> None:
         {"type": "compaction_started"},
         {"type": "compaction_failed", "stage": "model_request"},
     ):
-        loop._handle_compaction_event(event)
+        loop._persist_compaction_event(event)
 
     assert hook.tool_result(context).updated_tool_output["already_covered"] is True
 
-    loop._handle_compaction_event({"type": "compaction_applied"})
+    applied_event = {"type": "compaction_applied"}
+    loop._persist_compaction_event(applied_event)
+    loop._notify_compaction_applied(applied_event)
 
     assert hook.tool_result(context) is None
 
@@ -1450,9 +1536,54 @@ def test_failed_compaction_event_persistence_does_not_reset_read_state(
     )
 
     with pytest.raises(RuntimeError, match="compaction persistence failed"):
-        loop._handle_compaction_event({"type": "compaction_applied"})
+        loop._persist_compaction_event({"type": "compaction_applied"})
 
     assert hook.tool_result(context).updated_tool_output["already_covered"] is True
+
+
+def test_compaction_hook_observes_already_active_compacted_transcript() -> None:
+    class ApplyingCompactor:
+        def maybe_compact(
+            self,
+            session,
+            *,
+            event_callback=None,
+            post_apply_callback=None,
+        ) -> None:
+            event = {"type": "compaction_applied", "messages_after": 1}
+            event_callback(event)
+            session.messages[:] = [{"role": "assistant", "content": "summary"}]
+            post_apply_callback(event)
+
+    observations = []
+    store = FakeSessionStore()
+
+    class ObservingHook:
+        def compaction_applied(self, ctx) -> None:
+            observations.append((list(store.compactions), list(session.messages)))
+
+    session = Session(repo_root=None)
+    session.add_message({"role": "user", "content": "old history"})
+    loop = AgentLoop(
+        session=session,
+        model_adapter=FakeModelAdapter([]),
+        tool_executor=FakeToolExecutor(),
+        tool_results=FakeToolResults(),
+        agent=StopImmediatelyAgent(),
+        display=NullDisplay(),
+        session_store=store,
+        compactor=ApplyingCompactor(),
+        hook_runner=HookRunner([ObservingHook()]),
+    )
+
+    loop._maybe_compact()
+
+    assert observations == [
+        (
+            [{"messages_after": 1}],
+            [{"role": "assistant", "content": "summary"}],
+        )
+    ]
 
 
 def test_compactor_is_not_called_when_session_already_stopped() -> None:

@@ -409,6 +409,47 @@ def test_complete_text_failure_does_not_mutate_session_messages() -> None:
     assert "compaction_applied" not in [event["type"] for event in events]
 
 
+def test_failed_applied_event_persistence_does_not_mutate_session_messages() -> None:
+    messages = compactable_messages()
+    original_messages = list(messages)
+    current_session = session(messages)
+    events = []
+
+    def fail_applied_persistence(event: dict) -> None:
+        events.append(event)
+        if event["type"] == "compaction_applied":
+            raise RuntimeError("compaction persistence failed")
+
+    with pytest.raises(RuntimeError, match="compaction persistence failed"):
+        Compactor(settings(), FakeModelAdapter("summary")).maybe_compact(
+            current_session,
+            event_callback=fail_applied_persistence,
+        )
+
+    assert current_session.messages == original_messages
+    assert [event["type"] for event in events[-2:]] == [
+        "compaction_applied",
+        "compaction_failed",
+    ]
+    assert events[-1]["stage"] == "persistence"
+
+
+def test_post_apply_callback_observes_compacted_transcript() -> None:
+    current_session = session(compactable_messages())
+    observed_messages = []
+
+    Compactor(settings(), FakeModelAdapter("summary")).maybe_compact(
+        current_session,
+        event_callback=lambda event: None,
+        post_apply_callback=lambda event: observed_messages.append(
+            list(current_session.messages)
+        ),
+    )
+
+    assert observed_messages == [current_session.messages]
+    assert observed_messages[0][2]["content"].endswith("summary")
+
+
 def test_invalid_summary_retries_once_and_applies_valid_second_response() -> None:
     messages = compactable_messages()
     original_messages = list(messages)
