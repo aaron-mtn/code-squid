@@ -2000,9 +2000,11 @@ the next numbered folder instead.
 
 Session transcript readers parse non-empty records in append order. If the
 final non-empty line is malformed after a valid JSON prefix, readers treat it
-as a torn interrupted append and expose only the complete prefix. A malformed
-record with any later non-empty record, or a file containing only a malformed
-record, remains corruption and raises the normal JSON decoding error.
+as a torn interrupted append and expose only the complete prefix. The same
+recovery applies when the physical file tail ends inside a multibyte UTF-8 code
+point. Other UTF-8 decoding failures, a malformed record with any later
+non-empty record, or a file containing only a malformed record remain
+corruption and raise the corresponding decoding error.
 Before appending continued history, `SessionStore` removes such a proven torn
 tail, then derives the next entry ID from the remaining valid records. This
 keeps resumed parent linkage and future reloads coherent without weakening the

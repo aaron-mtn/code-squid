@@ -430,6 +430,76 @@ def test_load_messages_ignores_truncated_final_record(tmp_path: Path) -> None:
     assert SessionStore.open(store.session_dir).load_messages() == messages
 
 
+@pytest.mark.parametrize("character", ["¢", "€", "🦑"])
+def test_truncated_final_utf8_record_recovers_and_can_resume(
+    tmp_path: Path,
+    character: str,
+) -> None:
+    store = SessionStore.create(tmp_path, "torn final UTF-8 record")
+    original = {"role": "user", "content": "complete"}
+    original_entry = store.append_message(original)
+    torn_record = (
+        b'{"id":"e_000002","type":"message","message":'
+        b'{"role":"assistant","content":"hello '
+        + character.encode("utf-8")[:-1]
+    )
+    with store.jsonl_path.open("ab") as file:
+        file.write(torn_record)
+
+    assert SessionStore.open(store.session_dir).load_messages() == [original]
+
+    continued = {"role": "assistant", "content": f"continued {character}"}
+    continued_entry = store.append_message(continued)
+    reloaded = SessionStore.open(store.session_dir)
+
+    assert reloaded.load_messages() == [original, continued]
+    assert read_entries(reloaded) == [original_entry, continued_entry]
+    assert continued_entry["id"] == "e_000002"
+    assert continued_entry["parent_id"] == original_entry["id"]
+
+
+def test_valid_unicode_records_load_normally(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path, "valid Unicode")
+    messages = [
+        {"role": "user", "content": "two-byte ¢"},
+        {"role": "assistant", "content": "three-byte €"},
+        {"role": "user", "content": "four-byte 🦑"},
+    ]
+    entries = [store.append_message(message) for message in messages]
+    store.jsonl_path.write_text(
+        "".join(f"{json.dumps(entry, ensure_ascii=False)}\n" for entry in entries),
+        encoding="utf-8",
+    )
+
+    assert SessionStore.open(store.session_dir).load_messages() == messages
+
+
+def test_load_messages_rejects_invalid_utf8_in_middle_record(tmp_path: Path) -> None:
+    store = SessionStore.create(tmp_path, "invalid UTF-8 middle record")
+    store.append_message({"role": "user", "content": "before"})
+    store.append_message({"role": "assistant", "content": "after"})
+    valid_lines = store.jsonl_path.read_bytes().splitlines()
+    corrupt_middle = b'{"type":"message","message":{"content":"\xff"}}'
+    store.jsonl_path.write_bytes(
+        valid_lines[0] + b"\n" + corrupt_middle + b"\n" + valid_lines[1] + b"\n"
+    )
+
+    with pytest.raises(UnicodeDecodeError):
+        store.load_messages()
+
+
+def test_load_messages_rejects_invalid_utf8_before_physical_tail(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore.create(tmp_path, "invalid UTF-8 final record")
+    store.append_message({"role": "user", "content": "before"})
+    with store.jsonl_path.open("ab") as file:
+        file.write(b'{"type":"message","message":{"content":"\xffafter"}}')
+
+    with pytest.raises(UnicodeDecodeError):
+        store.load_messages()
+
+
 def test_load_messages_ignores_malformed_final_record_before_blank_lines(
     tmp_path: Path,
 ) -> None:

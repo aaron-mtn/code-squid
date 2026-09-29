@@ -2454,6 +2454,17 @@
   compilation and `git diff --check` passed. The full suite passed 1,399 tests
   and retained the unrelated Markdown heading indentation failure in
   `tests/test_markdown_formatting.py`.
+- 2026-09-28: Extended the existing session JSONL torn-tail recovery to an
+  append interrupted inside a multibyte UTF-8 code point. Recovery still
+  requires a valid record prefix and the final non-empty record, and UTF-8
+  recovery additionally requires an incomplete sequence at the physical file
+  end; invalid UTF-8 elsewhere continues to fail closed. The same pre-append
+  truncation path keeps resumed IDs and parent linkage coherent. Added byte-level
+  regression coverage for truncated 2-, 3-, and 4-byte characters, durable
+  append/resume, valid Unicode, and invalid middle/final UTF-8. Verification: 60
+  focused session/storage tests passed; compilation and `git diff --check`
+  passed. The full suite passed 1,558 tests with 1 skipped and retained 54
+  unrelated failures in the pre-existing prompt and built-in Hook behavior.
 - 2026-09-21: Contained expected settings persistence and setup failures at the
   console application boundaries. Slash-command mutations now report
   `OSError` and settings-validation `ValueError` failures while retaining the

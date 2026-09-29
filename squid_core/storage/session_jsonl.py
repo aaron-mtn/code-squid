@@ -23,11 +23,16 @@ def load_session_jsonl(
     for index, (line_offset, line) in enumerate(lines):
         try:
             records.append(json.loads(line.decode("utf-8")))
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
             # A process can stop midway through its final append. Recovery is
             # safe only when a complete prefix proves this is a session log and
             # no later record exists that would turn the failure into corruption.
-            if records and index == len(lines) - 1:
+            # For UTF-8, require an incomplete code point at the physical end;
+            # other decoding failures are corruption even in the final record.
+            torn_utf8_tail = not isinstance(error, UnicodeDecodeError) or (
+                error.reason == "unexpected end of data" and error.end == len(line)
+            )
+            if records and index == len(lines) - 1 and torn_utf8_tail:
                 if truncate_torn_tail:
                     # Continued persistence needs the bad bytes removed; merely
                     # appending a newline would make them middle corruption.
