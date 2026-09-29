@@ -29,10 +29,36 @@ class ApprovalDecision:
 
 
 _COMMAND_IDENTITY_PATTERN = re.compile(r"^\s*(?:\"([^\"]+)\"|'([^']+)'|(\S+))")
+_POWERSHELL_CALL_OPERATOR_PATTERN = re.compile(r"^\s*&(?=\s|$)")
+_POWERSHELL_LITERAL_IDENTITY_PATTERN = re.compile(
+    r'^(?:"([^"$`]+)"|\'([^\']+)\'|([^\s$`"\';&|<>(){}\[\],]+))(?=\s|$)'
+)
+_POWERSHELL_DYNAMIC_CALL_PREFIXES = ("$", "(", "{", "[", "@")
 
 
 def command_identity(command: str) -> str | None:
-    """Return the normalized first command token without interpreting the shell."""
+    """Return the normalized literal program token without parsing the shell.
+
+    PowerShell's leading call operator is skipped only when followed by a
+    straightforward literal token. Dynamic call expressions deliberately have
+    no trustable identity rather than risking persistent trust in ``&`` or in
+    a misleading fragment of an expression.
+    """
+
+    call_operator = _POWERSHELL_CALL_OPERATOR_PATTERN.match(command)
+    if call_operator is not None:
+        remainder = command[call_operator.end() :].lstrip(" \t")
+        match = _POWERSHELL_LITERAL_IDENTITY_PATTERN.match(remainder)
+        if match is None:
+            return None
+        double_quoted, single_quoted, bare = match.groups()
+        # These prefixes introduce variables, expressions, script blocks,
+        # type expressions, or splatting instead of a literal program name.
+        if bare is not None and bare.startswith(_POWERSHELL_DYNAMIC_CALL_PREFIXES):
+            return None
+        return next(
+            value for value in (double_quoted, single_quoted, bare) if value is not None
+        ).casefold()
 
     match = _COMMAND_IDENTITY_PATTERN.match(command)
     if match is None:

@@ -1743,13 +1743,16 @@ failed tool result to the model with `user denied tool action`.
 
 Guarded command approval deliberately does not classify shell semantics. The
 first whitespace-delimited token is the command identity; a simply quoted first
-token is unquoted and identities are case-normalized. An untrusted identity
-offers `Approve once`, `Always approve <command> commands`, and `Deny`.
-Persistent approval stores only that identity in application-wide
+token is unquoted and identities are case-normalized. The one operator-specific
+case is PowerShell's leading `&` call operator: a straightforward quoted or bare
+literal after it is the identity, while dynamic/interpolated call expressions
+have no trustable identity and therefore cannot be persistently approved. An
+untrusted identity offers `Approve once`, `Always approve <command> commands`,
+and `Deny`. Persistent approval stores only that identity in application-wide
 `runtime.trusted_commands`; later argument changes do not prompt. Approve-once
 does not change settings, and trusting one identity does not trust another.
-Shell operators, environment assignments, aliases, wrappers, and nested shell
-commands receive no special interpretation.
+Other shell operators, environment assignments, aliases, wrappers, and nested
+shell commands receive no special interpretation.
 
 Approval is not a hardened sandbox. Approved `run_command` actions still execute
 through the shell, and approved file tools still use absolute paths.

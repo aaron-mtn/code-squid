@@ -112,6 +112,38 @@ def test_guarded_persistent_approval_trusts_only_that_command() -> None:
     ]
 
 
+def test_guarded_call_operator_trusts_only_invoked_program() -> None:
+    persisted = []
+    prompter = FakePrompter(
+        ApprovalDecision(approved=True, always_approve_command=True)
+    )
+    policy = ApprovalPolicy(
+        "guarded",
+        prompter=prompter,
+        persist_trusted_command=persisted.append,
+    )
+
+    assert policy.check(
+        {
+            "tool": "run_command",
+            "args": {"command": '& "C:\\Program Files\\Tool\\tool.exe" --check'},
+        }
+    ).approved
+    prompter.decision = ApprovalDecision(approved=True)
+    assert policy.check(
+        {
+            "tool": "run_command",
+            "args": {"command": "& Remove-Item -Recurse important"},
+        }
+    ).approved
+
+    assert persisted == ["c:\\program files\\tool\\tool.exe"]
+    assert [action["command_identity"] for action in prompter.actions] == [
+        "c:\\program files\\tool\\tool.exe",
+        "remove-item",
+    ]
+
+
 @pytest.mark.parametrize(
     ("command", "expected"),
     [
@@ -123,6 +155,81 @@ def test_guarded_persistent_approval_trusts_only_that_command() -> None:
 )
 def test_command_identity_uses_only_normalized_first_token(command, expected) -> None:
     assert command_identity(command) == expected
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        (
+            '& "C:\\Program Files\\Tool\\tool.exe" --check',
+            "c:\\program files\\tool\\tool.exe",
+        ),
+        ("& Remove-Item -Recurse important", "remove-item"),
+        (
+            "& 'C:\\Program Files\\Tool\\tool.exe' --check",
+            "c:\\program files\\tool\\tool.exe",
+        ),
+    ],
+)
+def test_command_identity_skips_powershell_call_operator(command, expected) -> None:
+    assert command_identity(command) == expected
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "&",
+        "& $command",
+        "& ${command}",
+        "& $(Get-Command tool)",
+        "& (Get-Command tool)",
+        "& { Get-Command tool }",
+        "& @commands",
+        "&\nRemove-Item important",
+        '& "$command" --check',
+        '& "C:\\Tools\\$variant\\tool.exe" --check',
+        "& tool`-$variant",
+    ],
+)
+def test_dynamic_call_operator_has_no_trustable_identity(command) -> None:
+    assert command_identity(command) is None
+
+
+def test_call_operator_cannot_be_persisted_as_trusted_identity() -> None:
+    persisted = []
+    prompter = FakePrompter(
+        ApprovalDecision(approved=True, always_approve_command=True)
+    )
+    policy = ApprovalPolicy(
+        "guarded",
+        prompter=prompter,
+        trusted_commands=("&",),
+        persist_trusted_command=persisted.append,
+    )
+
+    assert policy.check(
+        {"tool": "run_command", "args": {"command": "&"}}
+    ).approved
+
+    assert persisted == []
+    assert prompter.actions[0]["approval_reason"] == "Command identity is missing"
+    assert "command_identity" not in prompter.actions[0]
+    assert "allow_persistent_command_approval" not in prompter.actions[0]
+
+
+def test_hook_reason_overrides_trusted_call_operator_identity() -> None:
+    action = {
+        "tool": "run_command",
+        "args": {"command": "& git status"},
+        "approval_reason": "hook requires confirmation",
+    }
+    prompter = FakePrompter(ApprovalDecision(approved=True))
+    policy = ApprovalPolicy(
+        "guarded", prompter=prompter, trusted_commands=("git",)
+    )
+
+    assert policy.check(action).approved is True
+    assert prompter.actions == [action]
 
 
 def test_approval_policy_always_approves_when_prompter_approves() -> None:

@@ -1,3 +1,14 @@
+- 2026-09-28: Corrected persistent command identity extraction for PowerShell's
+  leading `&` call operator. Straightforward quoted and bare literal invocations
+  now trust the invoked program rather than the generic operator; dynamic or
+  interpolated invocations have no persistable identity and continue to prompt.
+  The program-only trust model, argument handling, approval modes, and Hook
+  reason precedence are unchanged. Verification: all 554 focused approval,
+  preflight, workspace-boundary, settings, construction, terminal, executor,
+  and agent-loop tests passed; the full suite passed 1,642 tests with one
+  platform skip; affected modules and tests compiled; and `git diff --check`
+  passed. No unexpected regressions or deferred follow-ups.
+
 - 2026-09-28: Added the final optional ZIP-container audit guardrail at the
   existing shared DOCX, EPUB, XLSX, and ODS safety boundary. Containers with
   exactly 100,000 members remain allowed; larger member tables are rejected
