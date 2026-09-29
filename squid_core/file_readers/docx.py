@@ -72,6 +72,14 @@ def _check_docx_container(context: FileReadContext) -> dict | None:
                 f"DOCX is {error.actual_bytes} bytes; maximum supported size is "
                 f"{error.maximum_bytes} bytes",
             )
+        if error.reason == "too_many_members":
+            assert error.actual_members is not None
+            assert error.maximum_members is not None
+            return _docx_error(
+                context.path,
+                f"DOCX contains {error.actual_members} ZIP members; maximum supported "
+                f"count is {error.maximum_members}",
+            )
         assert error.reason == "expanded_too_large"
         assert error.actual_bytes is not None
         assert error.maximum_bytes is not None

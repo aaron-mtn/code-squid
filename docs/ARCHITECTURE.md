@@ -2281,9 +2281,10 @@ root-level properties.
   and do not expose images, macros, pivots, or editing
 - validates DOCX, EPUB, XLSX, and ODS containers through one narrow
   `file_readers/container.py` helper that limits each source to 64 MiB and its
-  declared ZIP-expanded members to 256 MiB before format parsing; callers own
-  their format-specific public error wording, and spreadsheet-only cell limits
-  remain in the spreadsheet layer
+  declared ZIP-expanded members to 256 MiB before format parsing; the same
+  boundary allows at most 100,000 ZIP members as a deliberately generous
+  pathological-container guard; callers own their format-specific public error
+  wording, and spreadsheet-only cell limits remain in the spreadsheet layer
 - limits each normalized spreadsheet sheet area to one million cells so
   declared dimensions and ODF repetitions cannot trigger unbounded expansion
 - detects `.pdf` before text decoding and uses PyMuPDF for both text extraction

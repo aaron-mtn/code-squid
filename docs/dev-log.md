@@ -1,3 +1,14 @@
+- 2026-09-28: Added the final optional ZIP-container audit guardrail at the
+  existing shared DOCX, EPUB, XLSX, and ODS safety boundary. Containers with
+  exactly 100,000 members remain allowed; larger member tables are rejected
+  before format parsing with format-specific sanitized errors. Existing 64 MiB
+  compressed-file and 256 MiB declared-expanded limits are unchanged. Boundary
+  coverage uses the count validator directly to avoid generating enormous test
+  archives. Verification: all 35 focused shared-container, DOCX, EPUB, and
+  spreadsheet tests passed; the full suite passed 1,618 tests with one platform
+  skip; touched modules and tests compiled and imported; and `git diff --check`
+  passed. No follow-ups were deferred.
+
 - 2026-09-28: Reconciled the 54 pre-existing prompt and built-in Hook test
   failures with intended current behavior. The failures grouped into stale
   prompt-copy contracts, stale Hook guidance copy, old `TooManyReadsNudge`

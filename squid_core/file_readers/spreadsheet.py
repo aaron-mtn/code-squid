@@ -71,6 +71,14 @@ def check_spreadsheet_size(context: FileReadContext) -> dict | None:
                 f"spreadsheet is {error.actual_bytes} bytes; maximum supported size is "
                 f"{error.maximum_bytes} bytes",
             )
+        if error.reason == "too_many_members":
+            assert error.actual_members is not None
+            assert error.maximum_members is not None
+            return spreadsheet_error(
+                context.path,
+                f"spreadsheet contains {error.actual_members} ZIP members; maximum "
+                f"supported count is {error.maximum_members}",
+            )
         assert error.reason == "expanded_too_large"
         assert error.actual_bytes is not None
         assert error.maximum_bytes is not None
