@@ -1,6 +1,6 @@
 """Mod metadata models and validation constants."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import re
 
@@ -14,24 +14,28 @@ ALLOWED_MOD_ACCENTS = (
     "red", "pink", "purple", "white", "gray",
 )
 DEFAULT_MOD_ACCENT = "cyan"
-MOD_FIELDS = {"name", "description", "default_skill", "accent", "tools", "hooks"}
+MOD_FIELDS = {"name", "description", "default_skill", "accent", "hooks"}
 
 
 @dataclass(frozen=True)
 class Mod:
+    """Package metadata and Skills keyed by their Mod-local directory IDs."""
+
     name: str
     description: str
     default_skill: str
     accent: str
-    tools: tuple[str, ...]
     hooks: tuple[str, ...]
     path: Path
+    skills: dict[str, Skill] = field(default_factory=dict)
     valid: bool = True
     errors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class ResolvedMod:
+    """One active Skill with its tool registry and the Mod-wide Hooks."""
+
     metadata: Mod
     skill: Skill
     tools: dict

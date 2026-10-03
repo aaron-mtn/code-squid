@@ -2605,3 +2605,32 @@
   migration or compatibility path was added. Focused undo/storage/executor/CLI
   verification passed 224 tests. Compilation and `git diff --check` passed; the
   full suite passed 1,625 tests with 1 skip.
+
+- 2026-10-02: Implemented multi-Skill Mod Patch 1 in Core. Removed manifest
+  `tools` and `Mod.tools`, including the duplicated ordered-equality contract
+  with default-Skill permissions; old manifests are rejected without fallback.
+  Mod metadata now exposes all direct packaged Skills in `Mod.skills`, keyed by
+  directory ID. Packages require at least one Skill, matching names/directories,
+  explicit allowed-tools on every Skill, and a packaged required default_skill.
+  Validation checks every profile and its dependencies without importing Tool
+  or Hook source, continuing across malformed sibling Skills. Standalone Skills
+  cannot satisfy missing packaged defaults or explicit selections.
+  `resolve_mod(..., selected_skill=...)` chooses exactly one active Skill;
+  omission selects the default, and missing explicit IDs raise ModResolutionError.
+  Only that Skill's allowed-tools enter the active registry, including an empty
+  registry for explicit []. Mod-wide Hooks, built-in protection, Mod-local/shared
+  Tool precedence, lazy Tool imports, and Mod-scoped implementations are preserved.
+  Preserved manifest parse diagnostics during resolution instead of replacing
+  them with errors about placeholder metadata. Updated existing fixtures to the
+  clean manifest contract and added selection, invalid-sibling, scoped-ID,
+  precedence, and active ToolExecutor regressions. No Agent/prompt/override/order,
+  application, Desktop, picker, session-field, provider, or import/export code
+  changed. Desktop/API consumers of removed Mod.tools/manifest tools, standalone
+  default fallback, or uniform profile permissions intentionally need Patch 2;
+  host inventory/selection adaptation is deferred. Existing hosts still select
+  the packaged default when they omit selected_skill.
+  Verification: `python -m pytest tests/test_mods.py tests/test_skills.py
+  tests/test_runner.py tests/test_runner_skills.py tests/test_runner_hooks.py -q`
+  passed 92 tests. `python -m pytest -q` passed 1,658 tests with 1 skip.
+  `python -m compileall -q squid_core/mods tests/test_mods.py`, public Core Mod
+  imports, and `git diff --check` passed. No live model inference was performed.

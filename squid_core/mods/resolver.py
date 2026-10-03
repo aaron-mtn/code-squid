@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from squid_core.hooks import HookInfo, HookLoadError, load_hook_infos, read_hook_info
-from squid_core.skills import Skill, discover_skills, parse_skill_file
+from squid_core.skills import Skill, parse_skill_file
 from squid_core.tools.builtins import TOOLS
 from squid_core.tools.user_tools import (
     UserTool,
@@ -73,25 +73,24 @@ def validate_mod(
     built_in_tools: dict | None = None,
 ) -> tuple[str, ...]:
     """Validate a Mod and referenced metadata without importing source code."""
+    # A manifest parse failure produces placeholder metadata. Preserve its
+    # actual diagnostic instead of validating the placeholder's empty fields.
+    if not mod.default_skill and mod.errors:
+        return mod.errors
     errors = list(_validate_manifest(mod))
     if errors:
         return tuple(errors)
 
-    try:
-        skill = _select_skill(mod, Path(app_home))
-    except (OSError, ValueError) as error:
-        errors.append(str(error))
-        return tuple(errors)
-
-    if not skill.allowed_tools_explicit:
-        errors.append(f"{skill.path}: Mod Skills must explicitly declare allowed-tools")
-    errors.extend(_validate_tool_contract(mod, skill))
-
+    skills, skill_errors = _discover_packaged_skills(mod)
+    errors.extend(skill_errors)
     protected_tools = TOOLS if built_in_tools is None else built_in_tools
-    try:
-        _select_tool_metadata(mod, Path(app_home), protected_tools)
-    except (ModResolutionError, UserToolError) as error:
-        errors.append(str(error))
+    # Validate every profile's dependencies, including inactive Skills. Never
+    # turn this package-wide inventory into the runtime's active permissions.
+    for skill in skills.values():
+        try:
+            _select_tool_metadata(mod, Path(app_home), protected_tools, skill.allowed_tools)
+        except (ModResolutionError, UserToolError) as error:
+            errors.append(str(error))
     try:
         _select_hook_metadata(mod, Path(app_home))
     except (ModResolutionError, HookLoadError) as error:
@@ -103,11 +102,12 @@ def resolve_mod(
     name: str,
     app_home: Path | str,
     *,
+    selected_skill: str | None = None,
     repo_root: Path | str | None = None,
     session_id: str | None = None,
     built_in_tools: dict | None = None,
 ) -> ResolvedMod:
-    """Resolve a host-selected Mod into its Skill, Tools, and loaded Hooks."""
+    """Resolve one packaged Skill (default when omitted) and Mod-wide Hooks."""
     app_home = Path(app_home)
     protected_tools = TOOLS if built_in_tools is None else built_in_tools
     mod = load_mod(name, app_home)
@@ -117,8 +117,13 @@ def resolve_mod(
             f"Mod {name} is invalid:\n" + "\n".join(f"- {error}" for error in errors)
         )
 
-    skill = _select_skill(mod, app_home)
-    selected_metadata = _select_tool_metadata(mod, app_home, protected_tools)
+    skill_name = mod.default_skill if selected_skill is None else selected_skill
+    if skill_name not in mod.skills:
+        raise ModResolutionError(f"Mod {name!r}: unknown selected Skill {skill_name!r}")
+    skill = mod.skills[skill_name]
+    # Only the selected Skill grants active tools; other profiles are validation
+    # inputs, never extra permissions for the ToolExecutor.
+    selected_metadata = _select_tool_metadata(mod, app_home, protected_tools, skill.allowed_tools)
     custom_registry = build_user_tool_registry_from_metadata(
         selected_metadata,
         repo_root=repo_root,
@@ -141,10 +146,11 @@ def _load_mod_dir(mod_dir: Path, *, app_home: Path) -> Mod | None:
             description=_string(metadata, "description", metadata_path),
             default_skill=_string(metadata, "default_skill", metadata_path),
             accent=_string(metadata, "accent", metadata_path, default=DEFAULT_MOD_ACCENT),
-            tools=_string_list(metadata, "tools", metadata_path),
             hooks=_string_list(metadata, "hooks", metadata_path),
             path=mod_dir,
         )
+        skills, _ = _discover_packaged_skills(mod)
+        mod = replace(mod, skills=skills)
         errors = validate_mod(mod, app_home)
         return replace(mod, valid=not errors, errors=errors)
     except (ModMetadataError, OSError) as error:
@@ -153,7 +159,6 @@ def _load_mod_dir(mod_dir: Path, *, app_home: Path) -> Mod | None:
             description="",
             default_skill="",
             accent=DEFAULT_MOD_ACCENT,
-            tools=(),
             hooks=(),
             path=mod_dir,
             valid=False,
@@ -174,7 +179,7 @@ def _validate_manifest(mod: Mod) -> tuple[str, ...]:
         errors.append(f"{path}: default_skill must be a safe non-empty name")
     if mod.accent not in ALLOWED_MOD_ACCENTS:
         errors.append(f"{path}: accent {mod.accent!r} must be one of: {', '.join(ALLOWED_MOD_ACCENTS)}")
-    for label, names in (("tools", mod.tools), ("hooks", mod.hooks)):
+    for label, names in (("hooks", mod.hooks),):
         duplicates = sorted({name for name in names if names.count(name) > 1})
         if duplicates:
             errors.append(f"{path}: duplicate {label}: {', '.join(duplicates)}")
@@ -184,40 +189,53 @@ def _validate_manifest(mod: Mod) -> tuple[str, ...]:
     return tuple(errors)
 
 
-def _select_skill(mod: Mod, app_home: Path) -> Skill:
-    local_path = mod.path / "skills" / mod.default_skill / "SKILL.md"
-    if local_path.is_file():
-        skill = parse_skill_file(local_path, source="mod", editable=False)
-    else:
-        skill = discover_skills(app_home=app_home).get(mod.default_skill)
-        if skill is None:
-            raise ModResolutionError(
-                f"{mod.path / 'mod.yaml'}: unknown default Skill {mod.default_skill!r}"
-            )
-    if skill.name != mod.default_skill:
-        raise ModResolutionError(
-            f"{skill.path}: Skill name {skill.name!r} must match default_skill {mod.default_skill!r}"
-        )
-    return skill
-
-
-def _validate_tool_contract(mod: Mod, skill: Skill) -> list[str]:
-    allowed = tuple(skill.allowed_tools)
+def _discover_packaged_skills(mod: Mod) -> tuple[dict[str, Skill], list[str]]:
+    """Read direct packaged children without consulting standalone Skills."""
+    skills: dict[str, Skill] = {}
     errors: list[str] = []
-    duplicates = sorted({name for name in allowed if allowed.count(name) > 1})
-    if duplicates:
-        errors.append(f"{skill.path}: duplicate allowed-tools: {', '.join(duplicates)}")
-    if mod.tools != allowed:
+    paths = sorted((mod.path / "skills").glob("*/SKILL.md"))
+    if not paths:
+        errors.append(f"{mod.path}: Mod must contain at least one packaged Skill")
+    for path in paths:
+        skill_id = path.parent.name
+        try:
+            skill = parse_skill_file(path, source="mod", editable=False)
+        except (OSError, ValueError) as error:
+            errors.append(str(error))
+            continue
+        # Directory identity keeps duplicate names from silently overwriting a
+        # sibling and permits the same local ID in unrelated Mod packages.
+        if not SAFE_MOD_NAME_RE.fullmatch(skill_id):
+            errors.append(f"{path}: Skill directory must be a safe non-empty name")
+        if skill.name != skill_id:
+            errors.append(f"{path}: Skill name {skill.name!r} must match directory {skill_id!r}")
+        if not skill.allowed_tools_explicit:
+            errors.append(f"{path}: Mod Skills must explicitly declare allowed-tools")
+        allowed = skill.allowed_tools
+        duplicates = sorted({name for name in allowed if allowed.count(name) > 1})
+        if duplicates:
+            errors.append(f"{path}: duplicate allowed-tools: {', '.join(duplicates)}")
+        invalid = [name for name in allowed if not SAFE_COMPONENT_NAME_RE.fullmatch(name)]
+        if invalid:
+            errors.append(f"{path}: invalid allowed-tools: {', '.join(invalid)}")
+        skills[skill_id] = skill
+    if mod.default_skill not in skills:
         errors.append(
-            f"{mod.path / 'mod.yaml'}: tools must exactly match the default Skill's allowed-tools in order"
+            f"{mod.path / 'mod.yaml'}: unknown default Skill {mod.default_skill!r}; "
+            "must name a packaged Skill in this Mod"
         )
-    return errors
+    return skills, errors
 
 
-def _select_tool_metadata(mod: Mod, app_home: Path, built_in_tools: dict) -> dict[str, UserTool]:
+def _select_tool_metadata(
+    mod: Mod,
+    app_home: Path,
+    built_in_tools: dict,
+    tool_names: tuple[str, ...],
+) -> dict[str, UserTool]:
     loose = discover_user_tools(app_home=app_home)
     selected: dict[str, UserTool] = {}
-    for name in mod.tools:
+    for name in tool_names:
         local_dir = mod.path / "tools" / name
         if name in built_in_tools:
             if local_dir.exists():
@@ -288,7 +306,7 @@ def _parse_mod_file(path: Path) -> dict[str, Any]:
             raise ModMetadataError(f"{path}:{line_number}: unsupported mod.yaml field: {key}")
         if key in data:
             raise ModMetadataError(f"{path}:{line_number}: duplicate mod.yaml field: {key}")
-        if key in {"tools", "hooks"}:
+        if key == "hooks":
             if raw == "":
                 data[key] = []
                 current_list = key

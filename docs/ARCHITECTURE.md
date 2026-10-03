@@ -1031,7 +1031,11 @@ under `code_squid/console/`; `main.py` only delegates to
 ### Core Mod resolution
 
 The host owns selection and passes a Mod name plus the application home to
-Core. `discover_mods(app_home)`, `load_mod(name, app_home)`, and
+Core, with an optional `selected_skill` keyword argument to `resolve_mod`.
+Omitting it selects `default_skill`; an explicit missing ID raises
+`ModResolutionError`. `Mod.skills` exposes packaged Skills keyed by their local
+directory IDs; `ResolvedMod.skill` remains exactly one active Skill.
+`discover_mods(app_home)`, `load_mod(name, app_home)`, and
 `validate_mod(mod, app_home)` operate on metadata; `resolve_mod(...)` produces
 one `ResolvedMod` containing validated metadata, the selected Skill, a
 normalized executable Tool registry, and loaded selected Hooks. There is no
@@ -1049,17 +1053,35 @@ The canonical user package is:
   hooks/<hook-name>/hook.py
 ```
 
-`mod.yaml` uses the fields `name`, `description`, `default_skill`, optional
-`accent`, `tools`, and `hooks`. The selected Skill must explicitly declare
-`allowed-tools`, and that ordered list must match the Mod Tool inventory
-exactly. Core preserves accent metadata but does not interpret its
-presentation.
+`mod.yaml` uses the fields `name`, `description`, required `default_skill`,
+optional `accent`, and `hooks`. Mod-level `tools` is unsupported and rejected;
+there is no legacy compatibility mode or duplicated tool-list equality rule.
+Core preserves accent metadata but does not interpret its presentation.
 
-A referenced component may be Mod-local or standalone under the same supplied
-application home. A Mod-local Skill, Tool, or Hook wins over a same-named loose
-user component. Built-in Tools are protected: they win over loose user
-collisions, and a Mod-local package may not define a replacement directory for
-a listed built-in name. Direct Mod-local Skill selection is package-scoped.
+A Mod must package at least one direct child `skills/<skill-id>/SKILL.md`.
+Every Skill name must match its safe directory ID, with IDs scoped to the Mod.
+Every packaged Skill must explicitly declare `allowed-tools`, including `[]`
+for no tools. Discovery and validation check all packaged Skills and their tool
+dependencies, including inactive profiles. `default_skill` must name one of
+these packaged Skills; standalone/global Skills never serve as a fallback.
+
+Runtime builds the active registry solely from the selected Skill's
+`allowed-tools`, preserving its order. Package-wide references are validation
+inputs only and never grant extra permissions to the active `ToolExecutor`.
+Tool precedence remains protected built-in, Mod-local custom Tool, then shared
+custom Tool under the supplied application home. Built-ins win shared-name
+collisions; a Mod-local replacement directory for a referenced built-in name
+invalidates the package. Packaged Tool implementations remain Mod-scoped.
+Hooks are Mod-wide: selecting a different Skill loads the same Hook names with
+unchanged Mod-local-before-shared resolution. Agent prompt assembly, Skill
+section override semantics, and prompt ordering are unchanged.
+
+Patch 1 changes only Core selection and the package contract. Hosts expecting
+`Mod.tools`, manifest `tools`, standalone default-Skill fallback, or equal
+permissions across all profiles must adapt. Desktop/API inventory and selection
+assumptions await Patch 2; no picker, routing, session-field rename, provider,
+or import/export changes are implemented here. Existing callers omitting
+`selected_skill` still resolve the packaged default.
 
 Discovery and validation parse `mod.yaml`, `SKILL.md`, `tool.yaml`, and
 `hook.yaml`, and verify Hook source presence, but do not import Tool or Hook
@@ -1295,8 +1317,8 @@ are:
 - `hooks/` stores user hook packages loaded by `squid_core.hooks` when callers
   opt into user hooks.
 - `tools/` stores standalone user Tool packages.
-- `mods/<mod-name>/mod.yaml` stores canonical user Mod packages with optional
-  package-local Skills, Tools, and Hooks.
+- `mods/<mod-name>/mod.yaml` stores canonical user Mod packages with required
+  packaged Skills and optional package-local Tools and Hooks.
 
 Core imports executable Hook and Tool source under neutral
 `squid_core_dynamic_*` module identities. Hook identities are stable for a
@@ -2461,9 +2483,9 @@ runner, or browser Tool. Discovery, verification, and most shell behavior use
 
 These four built-ins are the normal active registry when no Skill or Mod is
 selected. A standalone Skill can filter the built-ins and can activate named
-standalone user Tools from `<app-home>/tools/`. A selected Mod uses the exact
-ordered Tool inventory shared by `mod.yaml` and its default Skill, drawing
-custom Tools from the Mod first and then from standalone user Tools. Built-ins
+standalone user Tools from `<app-home>/tools/`. A selected Mod uses only its
+selected packaged Skill's ordered `allowed-tools`, drawing custom Tools from
+the Mod first and then from standalone user Tools. Built-ins
 win name collisions. Generic Core callers may instead supply their own Tool
 registry. An explicit `allowed-tools: []` produces an empty active registry.
 
