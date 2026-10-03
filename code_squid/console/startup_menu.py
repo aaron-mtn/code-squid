@@ -262,10 +262,13 @@ class StartupMenu:
             return False
 
         if self.mode == "mod":
-            self.mod_name, self.skill_name = apply_mod_selection(
-                selected,
-                self.skill_name,
-            )
+            # Clearing an active Mod clears its packaged Skill too. With no
+            # active Mod, choosing none leaves a standalone Skill untouched.
+            if selected != "none" or self.mod_name is not None:
+                self.mod_name, self.skill_name = apply_mod_selection(
+                    selected,
+                    self.skill_name,
+                )
         elif self.mode == "session":
             if self.selected_index == 0:
                 self.session_id = None

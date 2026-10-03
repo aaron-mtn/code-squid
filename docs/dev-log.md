@@ -2634,3 +2634,21 @@
   passed 92 tests. `python -m pytest -q` passed 1,658 tests with 1 skip.
   `python -m compileall -q squid_core/mods tests/test_mods.py`, public Core Mod
   imports, and `git diff --check` passed. No live model inference was performed.
+- 2026-10-03: Implemented multi-Skill Mod Patch 2 in the Code Squid application.
+  `agent_setup.py` accepts `mod_name` plus `skill_name` and forwards the latter
+  as `resolve_mod(selected_skill=...)`; omitted Skill uses the Mod default,
+  while no Mod preserves standalone-only lookup. CLI Mod/Skill commands,
+  prompt-loop forwarding, and startup Mod selection now retain one Mod/Skill
+  pair. A Mod selection resets to its default; `/skill` selects within that
+  Mod, `/skill none` resets its default, and clearing a Mod clears its packaged
+  Skill. Existing run-context storage records the actual resolved `mod_id`,
+  `skill_name`, active Tools, and override names without a schema rename.
+  Updated `ARCHITECTURE.md` and Mod, CLI, and startup tests. Switching coverage
+  exercises in-memory and reopened sessions, preserved conversation history,
+  one current system prompt, selected overrides/Tools, and Mod-wide Hooks.
+  Verification: 284 focused runner/Mod/Skill/session/CLI/startup tests passed;
+  the full suite passed 1,662 tests with one platform skip. Compilation/import
+  checks and `git diff --check` passed. Agent/prompt assembly, Core spawner,
+  built-in Hook policy, providers, and Desktop are unchanged. Desktop pair
+  selection/forwarding is deferred to Patch 3; routing, builder, and picker
+  changes remain out of scope.

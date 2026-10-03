@@ -1003,7 +1003,13 @@ them together as `resolved_skill` and `resolved_tools`. Core then skips Skill
 discovery while retaining ownership of run construction, metadata, and
 execution. The normal Code Squid builder also accepts `mod_name` and
 `app_home`; it asks `squid_core.mods.resolve_mod(...)` for the selected resources.
-Passing neither path preserves standalone `skill_name` discovery. Generic
+With `mod_name`, an optional `skill_name` is forwarded as `selected_skill` and
+names only a packaged Skill in that Mod; omission selects its `default_skill`.
+Without `mod_name`, `skill_name` still names only a standalone Skill. These
+namespaces never fall back to one another. Named Mod resolution cannot be
+combined with explicit resolved components. Each run context records the
+resolved `mod_id` and `skill_name`, the selected Tool registry, and the selected
+Skill's prompt override names. Generic
 `squid_core.spawner` receives only selected resources and remains unaware of
 Mod names, paths, discovery, or selection policy.
 
@@ -1210,12 +1216,13 @@ python main.py --skill <name>
 Inside the interactive CLI:
 
 - `/mod` shows the active Mod and available Mods.
-- `/mod <name>` selects that Mod for later tasks and follow-ups.
-- `/mod none` clears the Mod selection.
-- `/skill` shows the current active skill and available skills.
+- `/mod <name>` selects that Mod and its default Skill for later tasks and follow-ups.
+- `/mod none` clears the Mod and its packaged Skill selection.
+- `/skill` shows the current active Skill and available Skills within the active
+  Mod, or standalone Skills when no Mod is active.
 - `/skill <name>` sets the active skill for future tasks and follow-ups in the
   current CLI process.
-- `/skill none` clears the active skill.
+- `/skill none` resets to the active Mod's default Skill, or clears a standalone Skill.
 - `/provider` shows the friendly effective provider, readiness, and provider
   list. `/provider use <name>` selects a provider through the same
   operation as the startup menu. `/provider key <value>` and `/provider url
@@ -1241,10 +1248,12 @@ Inside the interactive CLI:
   remembers, and requests a full reconstruction around a new workspace root.
 - `/cwd` remains a compatible report-only alias for the current workspace root.
 
-Selections are process-local CLI state. Selecting a Mod clears a standalone
-Skill selection, and selecting a standalone Skill clears a Mod selection, so
-there is never an ambiguous simultaneous override. Each command's `none` form
-clears only that kind of selection. The startup panel shows `Skill: <name>`
+Selections are process-local CLI state, represented by `mod_name` and
+`skill_name` (one active Mod and one active Skill). Selecting a Mod replaces the
+previous Skill with that Mod's default; `/skill <name>` then selects only from
+its packaged Skills and keeps the Mod. To select a standalone Skill, clear the
+Mod first. Both names are forwarded on every new run and follow-up. The startup
+panel shows `Skill: <name>`
 when the CLI is launched with an active standalone Skill.
 
 Specialization may change between runs in one session. Each run must use a
@@ -1262,7 +1271,8 @@ corresponding append succeeds. Store-less sessions retain their direct in-memory
 behavior.
 
 Each new run and follow-up appends a non-transcript `run_context` event to
-`session.jsonl`. This records the active `skill_name`, the actual filtered
+`session.jsonl`. This records `mod_id` when a Mod is selected, the resolved
+active `skill_name` (including a Mod default), the actual filtered
 `allowed_tools`, and the `prompt_overrides` for that run:
 
 ```json

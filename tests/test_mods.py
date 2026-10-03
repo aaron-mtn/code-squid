@@ -1,6 +1,7 @@
 """Packaged Mod discovery, Skill selection, and runtime resource boundaries."""
 
 from pathlib import Path
+import json
 
 import pytest
 
@@ -20,6 +21,8 @@ from squid_core.skills import discover_skills
 from squid_core.tools.user_tools import discover_user_tools
 from squid_core import spawner as generic_spawner
 from squid_core.tools.builtins import TOOLS
+from squid_core.session import Session
+from squid_core.storage import SessionStore
 
 
 def _write_skill(path: Path, name: str, tools: tuple[str, ...], description: str) -> None:
@@ -372,6 +375,119 @@ def test_one_session_switches_default_mods_and_back_as_coherent_runs(
 def test_generic_spawner_remains_mod_agnostic() -> None:
     assert "mod_name" not in generic_spawner.build_agent_run.__annotations__
     assert "mod_name" not in generic_spawner.build_agent_run.__code__.co_varnames
+
+
+@pytest.mark.parametrize("reopen", [False, True])
+def test_session_switches_packaged_skills_and_mods(tmp_path: Path, reopen: bool) -> None:
+    """Exercise both in-memory hosts and the CLI's persisted follow-up path."""
+    home = tmp_path / "home"
+    selections = (
+        ("mod-a", "skill-one", "read_file", "hook-a"),
+        ("mod-a", "skill-two", "run_command", "hook-a"),
+        ("mod-b", "skill-one", "apply_patch", "hook-b"),
+    )
+    for mod_name, skill_name, tool, hook in selections:
+        mod_dir = home / "mods" / mod_name
+        if not mod_dir.exists():
+            _write_mod(home, mod_name, skill_name="skill-one", hooks=(hook,))
+            _write_hook(mod_dir / "hooks", hook, source=hook)
+        path = mod_dir / "skills" / skill_name / "SKILL.md"
+        _write_skill(path, skill_name, (tool,), "Selected profile")
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(f"\n## SYSTEM_PROMPT_INTRO replace\n\nProfile {mod_name}/{skill_name}.\n")
+
+    current = None
+    for index, (mod_name, skill_name, tool, hook) in enumerate(selections):
+        session = current.session if current else None
+        store = current.session_store if current else None
+        if current and reopen:
+            store = SessionStore.open(store.session_dir)
+            session = Session(repo_root=tmp_path)
+            session.add_messages(*store.load_messages())
+        prior = [message for message in session.messages if message["role"] != "system"] if session else []
+        adapter = _CompletingAdapter()
+        current = build_coding_task_run(
+            tmp_path, f"task {index}", settings=_settings(), display=_Display(),
+            app_home=home, mod_name=mod_name, skill_name=skill_name,
+            session=session, session_store=store, model_adapter=adapter,
+        )
+        if index:
+            follow_up = current.loop.agent.follow_up_message(current.loop.agent.task)
+            current.session.add_message(follow_up)
+            current.session_store.append_message(follow_up)
+        current.loop.run()
+        messages, definitions = adapter.requests[0]
+        assert sum(message["role"] == "system" for message in messages) == 1
+        assert messages[1:1 + len(prior)] == prior
+        assert f"Profile {mod_name}/{skill_name}." in messages[0]["content"]
+        for other_mod, other_skill, _, _ in selections:
+            if (other_mod, other_skill) != (mod_name, skill_name):
+                assert f"Profile {other_mod}/{other_skill}." not in messages[0]["content"]
+        assert current.loop.agent.skill_name == skill_name
+        assert list(current.loop.tool_executor.tools) == [tool]
+        assert [item["function"]["name"] for item in definitions] == [tool]
+        assert [item.source for item in current.loop.hook_runner.hooks] == [
+            hook, "Code Squid", "Code Squid",
+        ]
+        persisted = current.session_store.load_messages()
+        assert sum(message["role"] == "system" for message in persisted) == 1
+        assert persisted == current.session.messages
+
+    contexts = [json.loads(line) for line in current.session_store.jsonl_path.read_text().splitlines()
+                if json.loads(line)["type"] == "run_context"]
+    assert [(entry["mod_id"], entry["skill_name"]) for entry in contexts] == [
+        (mod, skill) for mod, skill, _, _ in selections
+    ]
+    assert [entry["allowed_tools"] for entry in contexts] == [[tool] for _, _, tool, _ in selections]
+    assert all(entry["prompt_overrides"] == ["SYSTEM_PROMPT_INTRO"] for entry in contexts)
+
+
+def test_application_skill_namespaces_do_not_fall_back(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _write_mod(home, "mod-a", skill_name="shared", tools=("read_file",))
+    _write_skill(home / "skills" / "shared" / "SKILL.md", "shared", ("run_command",), "Standalone")
+    _write_skill(home / "skills" / "loose" / "SKILL.md", "loose", (), "Loose")
+    kwargs = dict(settings=_settings(), app_home=home, model_adapter=object())
+    default = build_coding_task_run(tmp_path, "default", mod_name="mod-a", **kwargs)
+    packaged = build_coding_task_run(tmp_path, "packaged", mod_name="mod-a", skill_name="shared", **kwargs)
+    standalone = build_coding_task_run(tmp_path, "standalone", skill_name="shared", **kwargs)
+    assert list(default.loop.tool_executor.tools) == ["read_file"]
+    assert list(packaged.loop.tool_executor.tools) == ["read_file"]
+    assert list(standalone.loop.tool_executor.tools) == ["run_command"]
+    with pytest.raises(ModResolutionError, match="loose"):
+        build_coding_task_run(tmp_path, "missing packaged", mod_name="mod-a", skill_name="loose", **kwargs)
+    with pytest.raises(ValueError, match="Unknown skill: mod-a"):
+        build_coding_task_run(tmp_path, "missing standalone", skill_name="mod-a", **kwargs)
+
+
+def test_cli_selects_skills_only_within_active_mod(monkeypatch, tmp_path: Path, capsys) -> None:
+    from code_squid.console.cli.mod_commands import _handle_mod_input
+    from code_squid.console.cli.skill_commands import _handle_skill_input, _format_skill_status
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("CODE_SQUID_HOME", str(home))
+    mod_a = _write_mod(home, "mod-a", skill_name="skill-one", tools=("read_file",))
+    _write_skill(mod_a / "skills" / "skill-two" / "SKILL.md", "skill-two", ("run_command",), "Second")
+    _write_mod(home, "mod-b", skill_name="skill-one", tools=("apply_patch",))
+    _write_skill(home / "skills" / "loose" / "SKILL.md", "loose", (), "Standalone")
+
+    mod, skill = _handle_mod_input("/mod mod-a", None, "loose")
+    assert (mod, skill) == ("mod-a", "skill-one")
+    skill, mod = _handle_skill_input("/skill skill-two", skill, mod)
+    assert (mod, skill) == ("mod-a", "skill-two")
+    status = _format_skill_status(skill, mod)
+    assert "Current skill: skill-two" in status
+    assert "Tools: run_command" in status
+    assert "- skill-one:" in status and "- skill-two:" in status
+    assert "loose" not in status
+    assert _handle_skill_input("/skill loose", skill, mod) == (skill, mod)
+    assert _handle_skill_input("/skill none", skill, mod) == ("skill-one", "mod-a")
+    mod, skill = _handle_mod_input("/mod mod-b", mod, skill)
+    assert (mod, skill) == ("mod-b", "skill-one")
+    assert _handle_mod_input("/mod none", mod, skill) == (None, None)
+    assert _handle_skill_input("/skill loose", None, None) == ("loose", None)
+    assert _handle_skill_input("/skill skill-one", "loose", None) == ("loose", None)
+    assert _handle_mod_input("/mod none", None, "loose") == (None, "loose")
 
 
 def test_two_packaged_skills_resolve_one_profile_and_share_mod_hooks(tmp_path: Path) -> None:

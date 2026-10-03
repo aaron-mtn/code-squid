@@ -585,7 +585,7 @@ def test_safety_selection_uses_mapping_and_updates_panel(tmp_path) -> None:
 
 
 def test_mod_selection_and_none_preserve_specialization_rules(monkeypatch, tmp_path) -> None:
-    valid = SimpleNamespace(valid=True, name="review")
+    valid = SimpleNamespace(valid=True, name="review", default_skill="review-skill")
     discovery = lambda *_args, **_kwargs: {"review": valid}
     monkeypatch.setattr("code_squid.console.startup_menu.discover_mods", discovery)
     monkeypatch.setattr("code_squid.console.cli.mod_commands.discover_mods", discovery)
@@ -596,7 +596,7 @@ def test_mod_selection_and_none_preserve_specialization_rules(monkeypatch, tmp_p
     menu.activate()
     menu.selected_index = menu._options.index("review")
     menu.activate()
-    assert (menu.mod_name, menu.skill_name) == ("review", None)
+    assert (menu.mod_name, menu.skill_name) == ("review", "review-skill")
 
     menu.selected_index = 3
     menu.activate()

@@ -455,7 +455,8 @@ def test_help_text_lists_current_interactive_commands() -> None:
         "/cwd",
     ):
         assert command in HELP_TEXT
-    assert "advanced/direct" in HELP_TEXT
+    assert "available Skills in the active Mod" in HELP_TEXT
+    assert "standalone Skills when no Mod is active" in HELP_TEXT
     assert "python main.py" not in HELP_TEXT
 
 
@@ -520,7 +521,7 @@ def test_format_mod_status_lists_active_and_available_mods(monkeypatch) -> None:
 
 
 def test_mod_selection_and_clear_are_explicit(monkeypatch, capsys) -> None:
-    mod = SimpleNamespace(name="review-pack", description="Review", valid=True)
+    mod = SimpleNamespace(name="review-pack", description="Review", valid=True, default_skill="skill-one")
     monkeypatch.setattr(
         "code_squid.console.cli.mod_commands.discover_mods",
         lambda app_home: {"review-pack": mod},
@@ -529,7 +530,7 @@ def test_mod_selection_and_clear_are_explicit(monkeypatch, capsys) -> None:
     selected = _handle_mod_input("/mod review-pack", None, "direct-skill")
     cleared = _handle_mod_input("/mod none", selected[0], selected[1])
 
-    assert selected == ("review-pack", None)
+    assert selected == ("review-pack", "skill-one")
     assert cleared == (None, None)
     output = capsys.readouterr().out
     assert "Standalone skill direct-skill cleared by Mod selection." in output
@@ -537,7 +538,7 @@ def test_mod_selection_and_clear_are_explicit(monkeypatch, capsys) -> None:
     assert "Active Mod cleared." in output
 
 
-def test_standalone_skill_selection_clears_mod_and_default_is_not_an_alias(
+def test_standalone_skill_selection_and_default_is_not_an_alias(
     monkeypatch,
     capsys,
 ) -> None:
@@ -547,13 +548,12 @@ def test_standalone_skill_selection_clears_mod_and_default_is_not_an_alias(
         lambda app_home: {"direct-skill": skill},
     )
 
-    selected = _handle_skill_input("/skill direct-skill", None, "review-pack")
+    selected = _handle_skill_input("/skill direct-skill", None, None)
     unchanged = _handle_skill_input("/skill default", selected[0], selected[1])
 
     assert selected == ("direct-skill", None)
     assert unchanged == selected
     output = capsys.readouterr().out
-    assert "Active Mod review-pack cleared by standalone skill selection." in output
     assert "Unknown skill: default" in output
 
 
@@ -1549,7 +1549,16 @@ def test_interactive_mod_selection_is_used_for_new_and_follow_up_runs(
     monkeypatch,
     tmp_path,
 ) -> None:
-    mod = SimpleNamespace(name="review-pack", description="Review", valid=True)
+    mod = SimpleNamespace(name="review-pack", description="Review", valid=True, default_skill="skill-one")
+    other_mod = SimpleNamespace(name="other-pack", valid=True, default_skill="skill-one")
+    skills = {
+        name: SimpleNamespace(name=name, allowed_tools=())
+        for name in ("skill-one", "skill-two")
+    }
+    monkeypatch.setattr(
+        "code_squid.console.cli.skill_commands.load_mod",
+        lambda *_args: SimpleNamespace(skills=skills),
+    )
     new_runs = []
     follow_up_runs = []
 
@@ -1578,12 +1587,15 @@ def test_interactive_mod_selection_is_used_for_new_and_follow_up_runs(
 
     monkeypatch.setattr(
         "code_squid.console.cli.mod_commands.discover_mods",
-        lambda app_home: {"review-pack": mod},
+        lambda app_home: {"review-pack": mod, "other-pack": other_mod},
     )
     monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", BannerDisplay)
     monkeypatch.setattr(
         "code_squid.console.cli.prompt_loop._prompt_task",
-        _fake_prompt_tasks(["/mod review-pack", "first", "follow up", "/exit"]),
+        _fake_prompt_tasks([
+            "/mod review-pack", "first", "/skill skill-two", "follow up",
+            "/mod other-pack", "other follow up", "/exit",
+        ]),
     )
     monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_new_session_task", fake_new)
     monkeypatch.setattr(
@@ -1592,9 +1604,10 @@ def test_interactive_mod_selection_is_used_for_new_and_follow_up_runs(
     )
 
     assert _run_interactive(tmp_path) == 0
-    assert new_runs == [("first", None, "review-pack")]
+    assert new_runs == [("first", "skill-one", "review-pack")]
     assert follow_up_runs == [
-        ("active-session", "follow up", None, "review-pack")
+        ("active-session", "follow up", "skill-two", "review-pack"),
+        ("active-session", "other follow up", "skill-one", "other-pack"),
     ]
 
 

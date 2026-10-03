@@ -11,15 +11,17 @@ def apply_mod_selection(
     requested_mod: str,
     skill_name: str | None,
 ) -> tuple[str | None, str | None]:
-    """Apply the canonical Mod/standalone-Skill mutual-exclusion rules."""
+    """Select a Mod's default Skill, replacing the previous specialization."""
     if requested_mod == "none":
-        return None, skill_name
+        # A packaged Skill must not become a standalone lookup on clearing its
+        # owner. Callers preserve standalone state when there is no active Mod.
+        return None, None
     mod = discover_mods(code_squid_home()).get(requested_mod)
     if mod is None:
         raise ValueError(f"Unknown Mod: {requested_mod}")
     if not mod.valid:
         raise ValueError(f"Invalid Mod: {requested_mod}")
-    return mod.name, None
+    return mod.name, mod.default_skill
 
 
 def _is_mod_input(task: str) -> bool:
@@ -56,7 +58,7 @@ def _handle_mod_input(
     requested_mod = parts[1]
     if requested_mod == "none":
         print("Active Mod cleared.")
-        return apply_mod_selection(requested_mod, skill_name)
+        return (None, skill_name) if mod_name is None else apply_mod_selection(requested_mod, skill_name)
 
     mod = discover_mods(code_squid_home()).get(requested_mod)
     if mod is None:
@@ -69,7 +71,7 @@ def _handle_mod_input(
             print(f"- {error}")
         return mod_name, skill_name
 
-    if skill_name is not None:
+    if skill_name is not None and mod_name is None:
         print(f"Standalone skill {skill_name} cleared by Mod selection.")
     print(f"Active Mod set to: {mod.name}")
     return apply_mod_selection(requested_mod, skill_name)

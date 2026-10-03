@@ -65,12 +65,12 @@ Startup menu:
 
 Specialization:
   /mod shows the active Mod and available Mods.
-  /mod <name> selects a Mod for future tasks and follow-ups.
-  /mod none clears the active Mod.
-  /skill shows the active standalone Skill and available Skills
-    (advanced/direct).
-  /skill <name> selects a standalone Skill for future tasks and follow-ups.
-  /skill none clears the active standalone Skill.
+  /mod <name> selects a Mod and its default Skill for future tasks and follow-ups.
+  /mod none clears the active Mod and its packaged Skill.
+  /skill shows the active Skill and available Skills in the active Mod
+    or standalone Skills when no Mod is active.
+  /skill <name> selects a packaged Skill, or a standalone Skill without a Mod.
+  /skill none resets the Mod default, or clears the active standalone Skill.
 
 Runtime:
   /provider shows the current provider and available providers.
@@ -289,6 +289,7 @@ def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
                 settings,
                 display,
                 mod_name=menu.mod_name,
+                skill_name=menu.skill_name,
             )
         return status
     finally:
@@ -430,7 +431,8 @@ def _run_interactive(
                     )
                 else:
                     status, session_id = _run_new_session_task(
-                        repo_root, task, settings, display, mod_name=mod_name
+                        repo_root, task, settings, display, mod_name=mod_name,
+                        skill_name=skill_name,
                     )
             else:
                 if mod_name is None:
@@ -445,6 +447,7 @@ def _run_interactive(
                         settings,
                         display,
                         mod_name=mod_name,
+                        skill_name=skill_name,
                     )
 
             if session_id is not None:

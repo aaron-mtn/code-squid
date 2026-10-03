@@ -188,12 +188,16 @@ def build_coding_task_run(
     CLI code uses this when it needs direct access to the session and
     ``SessionStore`` for interactive follow-ups after the first run. Frontends
     supply their own display; omitted presentation uses Squid Core's default.
+
+    With ``mod_name``, ``skill_name`` selects only a packaged Skill in that Mod;
+    omitting it selects the Mod default. Without a Mod it names a standalone
+    Skill. These namespaces never fall back to each other.
     """
 
     if (resolved_skill is None) != (resolved_tools is None):
         raise ValueError("resolved_skill and resolved_tools must be supplied together")
-    if mod_name is not None and (skill_name is not None or resolved_skill is not None):
-        raise ValueError("mod_name cannot be combined with skill_name or resolved components")
+    if mod_name is not None and resolved_skill is not None:
+        raise ValueError("mod_name cannot be combined with resolved components")
 
     repo_root = Path(repo_root).resolve()
     app_home = code_squid_home(app_home)
@@ -239,6 +243,7 @@ def build_coding_task_run(
             app_home,
             repo_root=repo_root,
             session_id=session_store.session_id,
+            selected_skill=skill_name,
         )
         skill, active_tools = selected_mod.skill, selected_mod.tools
     elif resolved_skill is not None and resolved_tools is not None:
