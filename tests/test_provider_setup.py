@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from squid_core.model_response import ModelResponse
 from types import SimpleNamespace
 
 import pytest
@@ -225,8 +226,7 @@ class RecordingProvider:
 
     def create_response(self, *, model, messages, tools):
         self.models.append(model)
-        message = SimpleNamespace(content="ok", tool_calls=[])
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=None)
+        return ModelResponse("ok")
 
 
 @pytest.mark.parametrize("model_id", ["squid-model-a", "squid-model-b"])

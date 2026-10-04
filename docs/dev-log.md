@@ -2683,3 +2683,39 @@
   OpenAI-shaped responses/raw diagnostics, physical squid-providers extraction,
   and provider-specific settings ownership remain deferred to later provider
   patches; no registry, framework, or compatibility layer was added.
+
+
+- 2026-10-04: Implemented provider extraction Patch 2: added the small Core-owned
+  `model_response.py` contract with `ToolCall`, `TokenUsage`, and `ModelResponse`
+  dataclasses. Both OpenAI-compatible and native Ollama transports now translate
+  non-streaming and assembled streaming responses into that same contract.
+  Providers flatten ordered Tool calls while preserving raw argument strings,
+  resolve the first nonempty reasoning alias in the existing precedence order,
+  normalize token aliases without inventing missing counts, and expose one
+  response ID plus optional diagnostic finish reason. Ollama retains its existing
+  total calculation and unique fallback Tool-call IDs; its first native stream ID,
+  previously retained only in tracing, now also reaches completed diagnostics.
+  `ModelAdapter` no longer traverses SDK choices/functions, interprets provider
+  aliases, or serializes arbitrary completed provider objects. Core still owns
+  argument parsing/validation, exact boolean checks, whole-batch rejection,
+  actions, raw-argument recovery, and canonical assistant/Tool replay pairing.
+  Normal `raw_reply` diagnostics intentionally retain only normalized fields;
+  `raw_tool_calls` now contains flat id/name/arguments records. Multiple reasoning
+  aliases and arbitrary native Tool-call extras are dropped, without a metadata
+  bag or compatibility layer. Provider raw-chunk tracing, callback order,
+  completion signals, cancellation, transport failures, retries, and redaction
+  remain provider-owned and unchanged. Native OpenAI response translation errors
+  retain malformed-response classification and original exception causes;
+  unusable custom completed text responses likewise use the adapter error seam.
+  Updated construction/generation/image fixtures, provider/adapter regressions,
+  and architecture documentation. Regenerated the ignored local file-tree
+  reference because the module tree changed. Concrete providers, dependencies,
+  settings, authentication, selection, discovery, and application construction
+  ownership were not moved or redesigned; physical extraction and provider
+  settings ownership remain deferred to Patch 3.
+  Verification: 445 focused provider/adapter/spawner/provider-setup/cancellation/
+  AgentLoop/compaction/generation/image/storage/model-transcript/Tool-result tests
+  passed. The full suite passed 1,691 tests with one platform skip.
+  `python -m compileall -q code_squid squid_core tests`, Core response/adapter/
+  provider/spawner/generation imports, and `git diff --check` passed.
+  No live local or cloud model inference was performed.

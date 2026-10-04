@@ -6,11 +6,12 @@ import base64
 import json
 import time
 import uuid
-from types import SimpleNamespace
 from urllib import request
 from urllib.error import HTTPError, URLError
 
 import httpx
+
+from squid_core.model_response import ModelResponse, TokenUsage, ToolCall
 
 from .base import BaseProvider, CancellationMonitor, StreamCancelled
 
@@ -22,7 +23,7 @@ DEFAULT_OLLAMA_REQUEST_TIMEOUT = 300.0
 
 
 class OllamaProvider(BaseProvider):
-    """Owns native Ollama /api/chat calls and adapts them to the OpenAI-like shape ModelAdapter expects."""
+    """Owns native Ollama /api/chat calls and translates completed output into Core ModelResponse."""
 
     def __init__(
         self,
@@ -104,7 +105,7 @@ class OllamaProvider(BaseProvider):
         tool_choice=None,
         please_stop_contemplating_the_void: bool = False,
         asset_loader=None,
-    ) -> object:
+    ) -> ModelResponse:
         payload = {
             "model": model,
             "messages": convert_messages(messages, asset_loader=asset_loader),
@@ -134,7 +135,7 @@ class OllamaProvider(BaseProvider):
         should_cancel=None,
         on_reasoning_delta=None,
         asset_loader=None,
-    ) -> object:
+    ) -> ModelResponse:
         payload = {
             "model": model,
             "messages": convert_messages(messages, asset_loader=asset_loader),
@@ -489,7 +490,8 @@ def _parse_arguments(arguments):
     return parsed if isinstance(parsed, dict) else arguments
 
 
-def adapt_response(raw_response: dict) -> object:
+def adapt_response(raw_response: dict) -> ModelResponse:
+    """Translate native output, preserving raw arguments for Core validation."""
     message = raw_response.get("message", {})
     # Ollama may omit call IDs. One prefix per completed response keeps calls
     # readable by index without letting equal indexes in later turns collide.
@@ -499,38 +501,27 @@ def adapt_response(raw_response: dict) -> object:
         for index, tool_call in enumerate(message.get("tool_calls") or [])
     ]
 
-    message_fields = {
-        "content": message.get("content") or "",
-        "tool_calls": tool_calls,
-    }
-    for name in ("reasoning", "reasoning_content", "thinking"):
-        if message.get(name) is not None:
-            message_fields[name] = message[name]
-    adapted_message = SimpleNamespace(**message_fields)
-    return SimpleNamespace(
-        id=raw_response.get("id"),
-        choices=[
-            SimpleNamespace(
-                message=adapted_message,
-                finish_reason=raw_response.get("done_reason"),
-            )
-        ],
+    return ModelResponse(
+        content=message.get("content") or "",
+        reasoning=next((message.get(name)
+                        for name in ("reasoning", "reasoning_content", "thinking")
+                        if message.get(name)), None),
+        tool_calls=tool_calls,
         usage=_adapt_usage(raw_response),
+        finish_reason=raw_response.get("done_reason"),
+        response_id=raw_response.get("id"),
     )
 
-
-def _adapt_tool_call(index: int, tool_call: dict, fallback_id_prefix: str) -> object:
+def _adapt_tool_call(index: int, tool_call: dict, fallback_id_prefix: str) -> ToolCall:
     function = tool_call.get("function", {})
     arguments = function.get("arguments", {})
     if not isinstance(arguments, str):
         arguments = json.dumps(arguments)
 
-    return SimpleNamespace(
+    return ToolCall(
         id=tool_call.get("id") or f"{fallback_id_prefix}_{index}",
-        function=SimpleNamespace(
-            name=function.get("name"),
-            arguments=arguments,
-        ),
+        name=function.get("name"),
+        arguments=arguments,
     )
 
 
@@ -581,6 +572,7 @@ def _accumulate_stream_chunk(
         )
 
     for name in (
+        "id",
         "done",
         "done_reason",
         "total_duration",
@@ -591,7 +583,10 @@ def _accumulate_stream_chunk(
         "eval_duration",
     ):
         if name in chunk:
-            assembled[name] = chunk[name]
+            if name == "id":
+                assembled[name] = assembled.get(name) or chunk[name]
+            else:
+                assembled[name] = chunk[name]
 
 
 def _accumulate_tool_call(tool_calls: list[dict], index: int, tool_call: dict) -> None:
@@ -658,7 +653,7 @@ def _notify_tool_preparing(
     on_tool_preparing(event)
 
 
-def _adapt_usage(raw_response: dict) -> object | None:
+def _adapt_usage(raw_response: dict) -> TokenUsage | None:
     prompt_tokens = raw_response.get("prompt_eval_count")
     completion_tokens = raw_response.get("eval_count")
     if prompt_tokens is None and completion_tokens is None:
@@ -668,8 +663,8 @@ def _adapt_usage(raw_response: dict) -> object | None:
     if prompt_tokens is not None and completion_tokens is not None:
         total_tokens = prompt_tokens + completion_tokens
 
-    return SimpleNamespace(
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
+    return TokenUsage(
+        input_tokens=prompt_tokens,
+        output_tokens=completion_tokens,
         total_tokens=total_tokens,
     )

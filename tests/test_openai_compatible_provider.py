@@ -1,3 +1,6 @@
+"""Provider transport and generic completed-response regressions."""
+
+from squid_core.model_response import ModelResponse, TokenUsage, ToolCall
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +12,7 @@ from squid_core.providers.base import StreamCancelled
 class FakeCompletions:
     def __init__(self) -> None:
         self.payloads = []
-        self.response = object()
+        self.response = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="", tool_calls=[]))])
 
     def create(self, **payload):
         self.payloads.append(payload)
@@ -322,8 +325,8 @@ def test_stream_chat_requests_stream_true_and_assembles_text() -> None:
 
     assert client.chat.completions.payloads[0]["stream"] is True
     assert deltas == ["hello ", "world"]
-    assert response.choices[0].message.content == "hello world"
-    assert response.choices[0].message.tool_calls == []
+    assert response.content == "hello world"
+    assert response.tool_calls == []
 
 
 def test_stream_cancellation_stops_consumption_and_closes_response() -> None:
@@ -362,10 +365,10 @@ def test_stream_chat_preserves_exposed_reasoning_finish_reason_and_response_id()
         on_text_delta=lambda _delta: None,
     )
 
-    assert response.id == "chatcmpl_123"
-    assert response.choices[0].finish_reason == "stop"
-    assert response.choices[0].message.reasoning_content == "first second"
-    assert not hasattr(response.choices[0].message, "reasoning")
+    assert response.response_id == "chatcmpl_123"
+    assert response.finish_reason == "stop"
+    assert response.reasoning == "first second"
+    assert isinstance(response, ModelResponse)
 
 
 def test_stream_chat_forwards_normalized_reasoning_deltas() -> None:
@@ -481,12 +484,12 @@ def test_stream_chat_assembles_tool_call_fragments() -> None:
         on_text_delta=deltas.append,
     )
 
-    tool_call = response.choices[0].message.tool_calls[0]
+    tool_call = response.tool_calls[0]
     assert deltas == ["Reading file."]
-    assert response.choices[0].message.content == "Reading file."
+    assert response.content == "Reading file."
     assert tool_call.id == "call_1"
-    assert tool_call.function.name == "read_file"
-    assert tool_call.function.arguments == '{"path": "/tmp/a.txt"}'
+    assert tool_call.name == "read_file"
+    assert tool_call.arguments == '{"path": "/tmp/a.txt"}'
 
 
 def test_stream_chat_keeps_interleaved_arguments_with_their_tool_call_indexes() -> None:
@@ -525,7 +528,7 @@ def test_stream_chat_keeps_interleaved_arguments_with_their_tool_call_indexes() 
     )
 
     assert [
-        call.function.arguments for call in response.choices[0].message.tool_calls
+        call.arguments for call in response.tool_calls
     ] == [
         '{"path":"/tmp/a.html","content":"<main/>"}',
         '{"path":"/tmp/b.css","content":"body{}"}',
@@ -658,5 +661,81 @@ def test_openai_compatible_completed_stream_closes() -> None:
         on_text_delta=lambda _delta: None,
     )
 
-    assert response.choices[0].message.content == "complete"
+    assert response.content == "complete"
     assert stream.closed is True
+
+
+@pytest.mark.parametrize("aliases, expected", [
+    ({"reasoning": "first", "reasoning_content": "second", "thinking": "third"}, "first"),
+    ({"reasoning": "", "reasoning_content": "second", "thinking": "third"}, "second"),
+    ({"thinking": "third"}, "third"),
+    ({}, None),
+])
+def test_non_streaming_normalizes_native_completed_output(aliases, expected):
+    provider, client = provider_with_fake_client()
+    client.chat.completions.response = SimpleNamespace(
+        choices=[SimpleNamespace(
+            message=SimpleNamespace(content=None, **aliases, tool_calls=[
+                SimpleNamespace(id="a", extra="discard", function=SimpleNamespace(name="read_file", arguments='{"path":')),
+                SimpleNamespace(id="b", function=SimpleNamespace(name="read_file", arguments='{}')),
+            ]), finish_reason="tool_calls")],
+        usage=SimpleNamespace(prompt_tokens=0, completion_tokens=3),
+        id="response", request_id="ignored", extra="discard",
+    )
+    response = provider.create_response("test-model", [], [])
+    assert isinstance(response, ModelResponse)
+    assert response.content is None
+    assert response.reasoning == expected
+    assert response.usage == TokenUsage(0, 3, None)
+    assert response.response_id == "response"
+    assert response.finish_reason == "tool_calls"
+    assert response.tool_calls == [ToolCall("a", "read_file", '{"path":'), ToolCall("b", "read_file", '{}')]
+    assert not hasattr(response, "extra")
+    assert not hasattr(response.tool_calls[0], "extra")
+
+
+@pytest.mark.parametrize("id_name", ["response_id", "request_id", "_request_id"])
+def test_native_response_id_aliases_are_provider_owned(id_name):
+    provider, client = provider_with_fake_client()
+    setattr(client.chat.completions.response, id_name, "native-id")
+    assert provider.create_response("test-model", [], []).response_id == "native-id"
+
+
+def test_stream_normalizes_usage_and_reasoning_precedence():
+    first = chunk(reasoning_content="secondary", id="stream-id")
+    first.choices[0].delta.reasoning = "primary"
+    terminal = chunk(content="done", finish_reason="stop")
+    terminal.usage = SimpleNamespace(prompt_tokens=5, completion_tokens=2, total_tokens=7)
+    provider, client = provider_with_fake_client()
+    client.chat.completions.response = [first, terminal]
+    response = provider.stream_chat("test-model", [], [], lambda _delta: None)
+    assert isinstance(response, ModelResponse)
+    assert response.reasoning == "primary"
+    assert response.usage == TokenUsage(5, 2, 7)
+    assert response.response_id == "stream-id"
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+def test_native_usage_keeps_missing_total_and_prefers_generic_aliases(streaming):
+    provider, client = provider_with_fake_client()
+    usage = SimpleNamespace(input_tokens=0, prompt_tokens=9, output_tokens=2, completion_tokens=8)
+    if streaming:
+        terminal = chunk(content="done", finish_reason="stop")
+        terminal.usage = usage
+        client.chat.completions.response = [terminal]
+        response = provider.stream_chat("test-model", [], [], lambda _delta: None)
+    else:
+        client.chat.completions.response.usage = usage
+        response = provider.create_response("test-model", [], [])
+    assert response.usage == TokenUsage(0, 2, None)
+
+
+def test_native_malformed_response_retains_failure_class_and_cause():
+    from squid_core.model_adapter import ModelAdapter, ModelRequestError, model_request_error_details
+
+    provider, client = provider_with_fake_client()
+    client.chat.completions.response.choices = []
+    with pytest.raises(ModelRequestError) as caught:
+        ModelAdapter(provider, "test-model").respond([], [])
+    assert model_request_error_details(caught.value)["failure_class"] == "malformed_response"
+    assert isinstance(caught.value.__cause__.__cause__, IndexError)

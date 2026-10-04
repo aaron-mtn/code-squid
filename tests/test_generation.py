@@ -5,23 +5,11 @@ import inspect
 import pytest
 
 import squid_core.generation as generation
+from squid_core.model_response import ModelResponse
 from squid_core.model_adapter import ModelAdapter, ModelRequestError
 
 
-class FakeMessage:
-    def __init__(self, content: str) -> None:
-        self.content = content
-
-
-class FakeChoice:
-    def __init__(self, content: str) -> None:
-        self.message = FakeMessage(content)
-
-
-class FakeResponse:
-    def __init__(self, content: str) -> None:
-        self.choices = [FakeChoice(content)]
-        self.usage = None
+FakeResponse = ModelResponse
 
 
 class FakeProvider:

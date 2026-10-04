@@ -1,5 +1,6 @@
 """Tests for native Ollama transport, adaptation, and transcript replay."""
 
+from squid_core.model_response import ModelResponse, TokenUsage, ToolCall
 import json
 from urllib.error import URLError
 
@@ -129,8 +130,10 @@ def test_configured_timeout_is_passed_to_normal_and_streaming_transports(
         ("http://127.0.0.1:11434/api/chat", 12.5),
         ("http://127.0.0.1:11434/api/chat", 12.5),
     ]
-    assert normal.choices[0].message.content == "Done."
-    assert streamed.choices[0].message.content == "Streamed."
+    assert isinstance(normal, ModelResponse)
+    assert isinstance(streamed, ModelResponse)
+    assert normal.content == "Done."
+    assert streamed.content == "Streamed."
 
 
 def test_default_timeout_is_finite_and_provider_owned() -> None:
@@ -322,11 +325,11 @@ def test_unknown_tool_result_id_raises_clear_error() -> None:
         )
 
 
-def test_native_response_with_content_adapts_to_openai_like_shape() -> None:
+def test_native_response_with_content_adapts_to_generic_shape() -> None:
     response = adapt_response({"message": {"role": "assistant", "content": "Done."}})
 
-    assert response.choices[0].message.content == "Done."
-    assert response.choices[0].message.tool_calls == []
+    assert response.content == "Done."
+    assert response.tool_calls == []
 
 
 def test_native_response_preserves_available_thinking_finish_reason_and_id() -> None:
@@ -342,10 +345,10 @@ def test_native_response_preserves_available_thinking_finish_reason_and_id() -> 
         }
     )
 
-    assert response.id == "ollama_response_1"
-    assert response.choices[0].finish_reason == "stop"
-    assert response.choices[0].message.thinking == "provider-exposed thinking"
-    assert not hasattr(response.choices[0].message, "reasoning")
+    assert response.response_id == "ollama_response_1"
+    assert response.finish_reason == "stop"
+    assert response.reasoning == "provider-exposed thinking"
+    assert isinstance(response, ModelResponse)
 
 
 def test_native_tool_calls_get_generated_ids_and_json_string_arguments() -> None:
@@ -366,12 +369,12 @@ def test_native_tool_calls_get_generated_ids_and_json_string_arguments() -> None
         }
     )
 
-    tool_call = response.choices[0].message.tool_calls[0]
+    tool_call = response.tool_calls[0]
 
     assert tool_call.id.startswith("ollama_call_")
     assert tool_call.id.endswith("_0")
-    assert tool_call.function.name == "read_file"
-    assert json.loads(tool_call.function.arguments) == {"path": "/tmp/input.py"}
+    assert tool_call.name == "read_file"
+    assert json.loads(tool_call.arguments) == {"path": "/tmp/input.py"}
 
 
 def test_missing_ids_are_unique_across_non_streaming_responses() -> None:
@@ -388,8 +391,8 @@ def test_missing_ids_are_unique_across_non_streaming_responses() -> None:
     first = provider.create_response("test-model", [], [])
     second = provider.create_response("test-model", [], [])
 
-    first_id = first.choices[0].message.tool_calls[0].id
-    second_id = second.choices[0].message.tool_calls[0].id
+    first_id = first.tool_calls[0].id
+    second_id = second.tool_calls[0].id
     assert first_id != second_id
 
 
@@ -406,7 +409,7 @@ def test_multiple_missing_ids_share_a_response_prefix_but_not_an_id() -> None:
         }
     )
 
-    first, second = response.choices[0].message.tool_calls
+    first, second = response.tool_calls
     assert first.id != second.id
     assert first.id.rsplit("_", 1)[0] == second.id.rsplit("_", 1)[0]
     assert first.id.endswith("_0")
@@ -428,7 +431,7 @@ def test_provider_supplied_tool_call_id_is_preserved_exactly() -> None:
         }
     )
 
-    assert response.choices[0].message.tool_calls[0].id == "provider-call-123"
+    assert response.tool_calls[0].id == "provider-call-123"
 
 
 def test_temperature_none_omits_options_temperature_from_payload() -> None:
@@ -581,8 +584,8 @@ def test_streamed_missing_ids_are_unique_across_responses() -> None:
     first = provider.stream_chat("test-model", [], [], lambda _delta: None)
     second = provider.stream_chat("test-model", [], [], lambda _delta: None)
 
-    first_id = first.choices[0].message.tool_calls[0].id
-    second_id = second.choices[0].message.tool_calls[0].id
+    first_id = first.tool_calls[0].id
+    second_id = second.tool_calls[0].id
     assert first_id != second_id
 
 
@@ -712,7 +715,7 @@ def test_native_ollama_completed_stream_closes() -> None:
         on_text_delta=lambda _delta: None,
     )
 
-    assert response.choices[0].message.content == "complete"
+    assert response.content == "complete"
     assert stream.closed is True
 
 
@@ -895,3 +898,40 @@ def test_provider_selection_threads_temperature_to_ollama() -> None:
 
     assert isinstance(provider, OllamaProvider)
     assert provider.temperature == 0
+
+
+@pytest.mark.parametrize("counts, expected", [
+    ({}, None),
+    ({"prompt_eval_count": 0}, TokenUsage(0, None, None)),
+    ({"eval_count": 2}, TokenUsage(None, 2, None)),
+    ({"prompt_eval_count": 5, "eval_count": 2}, TokenUsage(5, 2, 7)),
+])
+def test_native_usage_normalization_preserves_missing_counts(counts, expected):
+    assert adapt_response({"message": {}, **counts}).usage == expected
+
+
+@pytest.mark.parametrize("aliases, expected", [
+    ({"reasoning": "first", "reasoning_content": "second", "thinking": "third"}, "first"),
+    ({"reasoning": "", "reasoning_content": "second", "thinking": "third"}, "second"),
+    ({"thinking": "third"}, "third"),
+])
+def test_native_reasoning_precedence(aliases, expected):
+    assert adapt_response({"message": aliases}).reasoning == expected
+
+
+def test_native_stream_normalizes_metadata_and_keeps_malformed_arguments(monkeypatch):
+    provider = OllamaProvider()
+    monkeypatch.setattr(provider, "_post_chat_stream", lambda _payload: (item for item in [
+        {"id": "stream-id", "message": {"reasoning_content": "secondary", "reasoning": "primary", "tool_calls": [
+            {"id": "a", "function": {"name": "read_file", "arguments": '{"path":'}},
+            {"id": "b", "function": {"name": "read_file", "arguments": '{}'}},
+        ]}},
+        {"done": True, "done_reason": "stop", "prompt_eval_count": 5, "eval_count": 2},
+    ]))
+    response = provider.stream_chat("test-model", [], [], lambda _delta: None)
+    assert isinstance(response, ModelResponse)
+    assert response.reasoning == "primary"
+    assert response.usage == TokenUsage(5, 2, 7)
+    assert response.response_id == "stream-id"
+    assert response.finish_reason == "stop"
+    assert response.tool_calls == [ToolCall("a", "read_file", '{"path":'), ToolCall("b", "read_file", '{}')]

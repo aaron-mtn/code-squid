@@ -1,3 +1,7 @@
+"""Core request preparation, generic response validation, and failure handling."""
+
+from squid_core.model_response import ModelResponse, TokenUsage, ToolCall
+
 import pytest
 
 from squid_core.model_adapter import (
@@ -9,34 +13,20 @@ from squid_core.tools.builtins.apply_patch import tool_definition as apply_patch
 from squid_core.tools.builtins.run_command import tool_definition as run_command_definition
 
 
-class FakeFunction:
-    def __init__(self, name: str, arguments: str) -> None:
-        self.name = name
-        self.arguments = arguments
-
-
-class FakeToolCall:
-    def __init__(self, id: str, name: str, arguments: str) -> None:
-        self.id = id
-        self.function = FakeFunction(name, arguments)
+FakeToolCall = ToolCall
 
 
 class FakeMessage:
-    def __init__(self, content: str | None, tool_calls: list[FakeToolCall] | None) -> None:
+    def __init__(self, content, tool_calls):
         self.content = content
-        self.tool_calls = tool_calls
+        self.tool_calls = tool_calls or []
+        self.reasoning = None
 
 
-class FakeChoice:
-    def __init__(self, message: FakeMessage, finish_reason=None) -> None:
-        self.message = message
-        self.finish_reason = finish_reason
-
-
-class FakeResponse:
-    def __init__(self, message: FakeMessage, usage=None, finish_reason=None) -> None:
-        self.choices = [FakeChoice(message, finish_reason)]
-        self.usage = usage
+def FakeResponse(message, usage=None, finish_reason=None):
+    return ModelResponse(message.content, reasoning=message.reasoning,
+                         tool_calls=message.tool_calls, usage=usage,
+                         finish_reason=finish_reason)
 
 
 class FakeProvider:
@@ -369,10 +359,10 @@ def test_malformed_tool_arguments_preserve_raw_reply_and_available_metadata() ->
         content="Trying the tool.",
         tool_calls=[FakeToolCall("call_bad", "local_tool", '{"path":')],
     )
-    message.reasoning_content = "provider-exposed reasoning"
-    response = FakeResponse(message, usage={"prompt_tokens": 7, "completion_tokens": 3})
-    response.id = "response_123"
-    response.choices[0].finish_reason = "tool_calls"
+    message.reasoning = "provider-exposed reasoning"
+    response = FakeResponse(message, usage=TokenUsage(**{"input_tokens": 7, "output_tokens": 3}))
+    response.response_id = "response_123"
+    response.finish_reason = "tool_calls"
     adapter = ModelAdapter(
         provider=FakeProvider(response),
         model_name="test-model",
@@ -396,13 +386,11 @@ def test_malformed_tool_arguments_preserve_raw_reply_and_available_metadata() ->
             "raw_tool_calls": [
                 {
                     "id": "call_bad",
-                    "function": {
-                        "name": "local_tool",
-                        "arguments": '{"path":',
-                    },
+                    "name": "local_tool",
+                    "arguments": '{"path":',
                 }
             ],
-            "reasoning_content": "provider-exposed reasoning",
+            "reasoning": "provider-exposed reasoning",
         },
         "usage": {"input_tokens": 7, "output_tokens": 3, "total_tokens": None},
         "finish_reason": "tool_calls",
@@ -429,7 +417,7 @@ def test_raw_reply_does_not_invent_unavailable_reasoning_or_metadata() -> None:
 
 def test_ordinary_reply_normalizes_provider_reasoning_content() -> None:
     message = FakeMessage(content="done", tool_calls=[])
-    message.reasoning_content = "provider reasoning"
+    message.reasoning = "provider reasoning"
     provider = FakeProvider(FakeResponse(message))
 
     reply = ModelAdapter(provider=provider, model_name="test-model").respond(
@@ -484,7 +472,7 @@ def test_multiple_raw_tool_calls_preserve_each_argument_payload_when_normalized(
     )
 
     assert [
-        call["function"]["arguments"]
+        call["arguments"]
         for call in reply["raw_reply"]["assistant"]["raw_tool_calls"]
     ] == raw_arguments
     assert [
@@ -538,7 +526,7 @@ def test_provider_emitted_empty_first_call_is_preserved_as_raw_diagnostic() -> N
     )
     assert reply["recoverable_raw_arguments"] == "{}"
     assert [
-        call["function"]["arguments"]
+        call["arguments"]
         for call in reply["raw_reply"]["assistant"]["raw_tool_calls"]
     ] == [
         "{}",
@@ -645,7 +633,7 @@ def test_provider_exception_is_wrapped_as_model_request_error() -> None:
 
 def test_malformed_provider_response_has_precise_failure_class() -> None:
     response = FakeResponse(FakeMessage(content="unused", tool_calls=[]))
-    response.choices = []
+    response = object()
     adapter = ModelAdapter(provider=FakeProvider(response), model_name="test-model")
 
     with pytest.raises(ModelRequestError) as exc_info:
@@ -653,7 +641,7 @@ def test_malformed_provider_response_has_precise_failure_class() -> None:
 
     details = model_request_error_details(exc_info.value)
     assert details["failure_class"] == "malformed_response"
-    assert details["underlying_error_type"] == "IndexError"
+    assert details["underlying_error_type"] == "AttributeError"
     assert details["_transient"] is False
 
 
@@ -679,7 +667,7 @@ def test_respond_includes_normalized_usage_when_provider_usage_exists() -> None:
     provider = FakeProvider(
         FakeResponse(
             FakeMessage(content="done", tool_calls=[]),
-            usage={"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14},
+            usage=TokenUsage(**{"input_tokens": 10, "output_tokens": 4, "total_tokens": 14}),
         )
     )
     adapter = ModelAdapter(provider=provider, model_name="test-model")
@@ -697,7 +685,7 @@ def test_complete_text_includes_normalized_usage_when_provider_usage_exists() ->
     provider = FakeProvider(
         FakeResponse(
             FakeMessage(content="summary", tool_calls=[]),
-            usage={"input_tokens": 20, "output_tokens": 6, "total_tokens": 26},
+            usage=TokenUsage(**{"input_tokens": 20, "output_tokens": 6, "total_tokens": 26}),
         )
     )
     adapter = ModelAdapter(provider=provider, model_name="test-model")
@@ -713,7 +701,7 @@ def test_complete_text_includes_normalized_usage_when_provider_usage_exists() ->
 
 def test_complete_text_exposes_normalized_reasoning_and_finish_reason() -> None:
     message = FakeMessage(content="summary", tool_calls=[])
-    message.reasoning_content = "provider reasoning"
+    message.reasoning = "provider reasoning"
     provider = FakeProvider(FakeResponse(message, finish_reason="stop"))
     adapter = ModelAdapter(provider=provider, model_name="test-model")
 
@@ -845,7 +833,7 @@ def test_respond_streaming_emits_deltas_and_returns_normalized_reply() -> None:
 
 def test_respond_streaming_forwards_reasoning_deltas_when_provider_supports_them() -> None:
     message = FakeMessage(content="done", tool_calls=[])
-    message.reasoning_content = "first second"
+    message.reasoning = "first second"
     provider = StreamingProvider(
         FakeResponse(message),
         deltas=["done"],
@@ -894,3 +882,32 @@ def test_respond_streaming_forwards_tool_preparing_callback() -> None:
             "tool_call_id": "call_1",
         }
     ]
+
+
+def test_core_diagnostics_discard_native_extras_before_whole_batch_validation():
+    from types import SimpleNamespace
+    from squid_core.providers.openai_compatible import adapt_response
+
+    native = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+        content="batch", reasoning_content="thought", thinking="discard", tool_calls=[
+            SimpleNamespace(id="a", extra="discard", function=SimpleNamespace(name="read_file", arguments='{"path":"ok"}')),
+            SimpleNamespace(id="b", extra="discard", function=SimpleNamespace(name="read_file", arguments='{"path":')),
+        ]))])
+    response = adapt_response(native)
+    reply = ModelAdapter(FakeProvider(response), "model").respond([], [tool_definition("read_file", ["path"])])
+    assert reply["actions"] == []
+    assert reply["format_error"].startswith("Tool arguments were not valid JSON:")
+    assert reply["recoverable_raw_arguments"] == '{"path":'
+    assert reply["raw_reply"]["assistant"] == {
+        "content": "batch", "reasoning": "thought", "raw_tool_calls": [
+            {"id": "a", "name": "read_file", "arguments": '{"path":"ok"}'},
+            {"id": "b", "name": "read_file", "arguments": '{"path":'},
+        ],
+    }
+
+
+def test_plain_text_invalid_generic_response_is_wrapped():
+    adapter = ModelAdapter(FakeProvider(object()), "model")
+    with pytest.raises(ModelRequestError) as caught:
+        adapter.complete_text([])
+    assert model_request_error_details(caught.value)["failure_class"] == "malformed_response"

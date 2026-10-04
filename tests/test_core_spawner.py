@@ -3,6 +3,7 @@
 import json
 from dataclasses import replace
 from pathlib import Path
+from squid_core.model_response import ModelResponse
 from types import SimpleNamespace
 
 import pytest
@@ -48,10 +49,8 @@ def _storage_paths(tmp_path: Path) -> dict:
     }
 
 
-def _provider_response(content: str = "done") -> SimpleNamespace:
-    message = SimpleNamespace(content=content, tool_calls=[])
-    choice = SimpleNamespace(message=message, finish_reason="stop")
-    return SimpleNamespace(choices=[choice], usage=None)
+def _provider_response(content: str = "done") -> ModelResponse:
+    return ModelResponse(content, finish_reason="stop")
 
 
 def test_generic_module_has_no_coding_or_terminal_ui_dependency() -> None:

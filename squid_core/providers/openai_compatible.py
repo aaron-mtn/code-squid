@@ -1,21 +1,20 @@
-# providers/openai_compatible.py
-
 """OpenAI-compatible chat-completions provider transport."""
 
 import base64
 import json
 import time
-from types import SimpleNamespace
 from urllib import request
 from urllib.error import HTTPError, URLError
 
 from openai import OpenAI
 
+from squid_core.model_response import ModelResponse, TokenUsage, ToolCall
+
 from .base import BaseProvider, CancellationMonitor, StreamCancelled
 
 
 class OpenAICompatibleProvider(BaseProvider):
-    """Owns raw OpenAI-compatible API calls; must not own response normalization, agent policy, or tool execution."""
+    """Owns raw OpenAI-compatible API calls; normalizes completed output but must not own agent policy or tool execution."""
 
     def __init__(
         self,
@@ -126,7 +125,7 @@ class OpenAICompatibleProvider(BaseProvider):
         root = self.base_url.rstrip("/")
         return root[:-3].rstrip("/") if root.endswith("/v1") else root
 
-    def _get_json(self, url: str, *, authenticated: bool = True) -> object:
+    def _get_json(self, url: str, *, authenticated: bool = True) -> ModelResponse:
         headers = {"Accept": "application/json"}
         if authenticated and self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
@@ -142,7 +141,7 @@ class OpenAICompatibleProvider(BaseProvider):
         tool_choice=None,
         please_stop_contemplating_the_void: bool = False,
         asset_loader=None,
-    ) -> object:
+    ) -> ModelResponse:
         payload = self._payload(
             model=model,
             messages=messages,
@@ -152,7 +151,7 @@ class OpenAICompatibleProvider(BaseProvider):
             asset_loader=asset_loader,
         )
 
-        return self._inference_client().chat.completions.create(**payload)
+        return adapt_response(self._inference_client().chat.completions.create(**payload))
 
     def stream_chat(
         self,
@@ -167,7 +166,7 @@ class OpenAICompatibleProvider(BaseProvider):
         should_cancel=None,
         on_reasoning_delta=None,
         asset_loader=None,
-    ) -> object:
+    ) -> ModelResponse:
         payload = self._payload(
             model=model,
             messages=messages,
@@ -542,28 +541,21 @@ class OpenAICompatibleProvider(BaseProvider):
         finish_reason=None,
         response_id=None,
         reasoning_parts=None,
-    ) -> object:
-        tool_calls = [
-            SimpleNamespace(
+    ) -> ModelResponse:
+        # Native chunk assembly stays here; Core sees only ordered flat calls.
+        return ModelResponse(
+            content=content,
+            reasoning=_normalized_reasoning({
+                name: "".join(parts) for name, parts in (reasoning_parts or {}).items()
+            }),
+            tool_calls=[ToolCall(
                 id=part["id"] or f"call_{index}",
-                type=part["type"] or "function",
-                function=SimpleNamespace(
-                    name=part["name"],
-                    arguments="".join(part["arguments"]),
-                ),
-            )
-            for index, part in sorted(tool_call_parts.items())
-        ]
-
-        message_fields = {"content": content, "tool_calls": tool_calls}
-        for name, parts in (reasoning_parts or {}).items():
-            if parts:
-                message_fields[name] = "".join(parts)
-        message = SimpleNamespace(**message_fields)
-        return SimpleNamespace(
-            id=response_id,
-            choices=[SimpleNamespace(message=message, finish_reason=finish_reason)],
-            usage=usage,
+                name=part["name"],
+                arguments="".join(part["arguments"]),
+            ) for index, part in sorted(tool_call_parts.items())],
+            usage=_adapt_usage(usage),
+            finish_reason=finish_reason,
+            response_id=response_id,
         )
 
     def _inference_client(self) -> OpenAI:
@@ -652,3 +644,64 @@ def _redacted_trace_payload(payload: dict) -> dict:
         messages.append({**message, "content": parts})
     return {**payload, "messages": messages}
 
+
+def _value(value, name):
+    """Read SDK objects or native diagnostic fixtures at the provider boundary."""
+    return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
+
+
+def _normalized_reasoning(message) -> str | None:
+    # Completed output keeps the historical first nonempty alias precedence;
+    # live deltas are independently handled by native stream assembly.
+    for name in ("reasoning", "reasoning_content", "thinking"):
+        value = _value(message, name)
+        if value:
+            return value
+    return None
+
+
+def _adapt_usage(usage) -> TokenUsage | None:
+    if usage is None:
+        return None
+
+    def count(*names):
+        for name in names:
+            value = _value(usage, name)
+            if value is not None:
+                return value
+        return None
+
+    return TokenUsage(
+        input_tokens=count("input_tokens", "prompt_tokens"),
+        output_tokens=count("output_tokens", "completion_tokens"),
+        total_tokens=count("total_tokens"),
+    )
+
+
+def adapt_response(response) -> ModelResponse:
+    """Translate a native completed SDK response without parsing tool arguments."""
+    try:
+        choice = response.choices[0]
+        message = choice.message
+        response_id = None
+        for name in ("id", "response_id", "request_id", "_request_id"):
+            response_id = _value(response, name)
+            if response_id is not None:
+                break
+        return ModelResponse(
+            content=message.content,
+            reasoning=_normalized_reasoning(message),
+            tool_calls=[ToolCall(call.id, call.function.name, call.function.arguments)
+                        for call in (_value(message, "tool_calls") or [])],
+            usage=_adapt_usage(_value(response, "usage")),
+            finish_reason=_value(choice, "finish_reason"),
+            response_id=response_id,
+        )
+    except (AttributeError, IndexError, KeyError, TypeError) as error:
+        # Translation moved out of the adapter; keep native shape failures
+        # classifiable as malformed responses with their original cause intact.
+        raise _ResponseValidationError("Invalid completed provider response") from error
+
+
+class _ResponseValidationError(ValueError):
+    """Native completed output could not satisfy the Core response contract."""

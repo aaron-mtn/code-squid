@@ -4,7 +4,9 @@ import inspect
 import json
 import re
 from collections.abc import Callable
+from dataclasses import asdict
 
+from squid_core.model_response import ModelResponse
 from squid_core.image_content import VISION_UNAVAILABLE_MESSAGE
 from squid_core.providers.base import StreamCancelled
 
@@ -308,7 +310,7 @@ class ModelAdapter:
         *,
         streaming: bool = False,
         **transport_options,
-    ):
+    ) -> ModelResponse:
         """Observe once at the common boundary, then invoke provider transport."""
         self._observe_request(request)
         try:
@@ -462,7 +464,10 @@ class ModelAdapter:
         else:
             raw_response = self._send_prepared_request(request)
 
-        raw_reply = self._raw_reply_from_response(raw_response)
+        try:
+            raw_reply = self._raw_reply_from_response(raw_response)
+        except (AttributeError, IndexError, KeyError, TypeError) as exc:
+            raise _request_error(exc, failure_class="malformed_response") from exc
         assistant = raw_reply["assistant"]
         reply = {
             "content": assistant.get("content") or "",
@@ -472,11 +477,8 @@ class ModelAdapter:
         # Text-only callers historically received content and usage. Preserve
         # those fields while exposing the same provider-neutral diagnostics
         # already retained for ordinary turns in ``raw_reply``.
-        for name in ("reasoning", "reasoning_content", "thinking"):
-            reasoning = assistant.get(name)
-            if reasoning:
-                reply["reasoning"] = reasoning
-                break
+        if assistant.get("reasoning"):
+            reply["reasoning"] = assistant["reasoning"]
         if "finish_reason" in raw_reply:
             reply["finish_reason"] = raw_reply["finish_reason"]
 
@@ -512,8 +514,7 @@ class ModelAdapter:
         )
 
         try:
-            assistant_message = raw_response.choices[0].message
-            return assistant_message.content or ""
+            return raw_response.content or ""
         except (AttributeError, IndexError, KeyError, TypeError) as exc:
             raise _request_error(exc, failure_class="malformed_response") from exc
 
@@ -593,25 +594,24 @@ class ModelAdapter:
     # We preserve the assistant tool_calls metadata on the transcript message
     # so stricter model templates can reconstruct valid assistant/tool turns
     # on later requests.
-    def _normalize_response(self, raw_response, tool_metadata: dict) -> dict:
+    def _normalize_response(self, raw_response: ModelResponse, tool_metadata: dict) -> dict:
         message = {
             "role": "assistant",
             "content": "",
         }
         actions = []
 
-        assistant_message = raw_response.choices[0].message
-        raw_tool_calls = assistant_message.tool_calls or []
+        raw_tool_calls = raw_response.tool_calls
 
-        if assistant_message.content:
-            message["content"] = assistant_message.content
+        if raw_response.content:
+            message["content"] = raw_response.content
 
         # Parse and validate each provider tool call before accepting it as a
         # real internal action. This keeps malformed tool output from slipping
         # into the loop as if it were valid.
         for tool_call in raw_tool_calls:
-            tool_name = tool_call.function.name
-            raw_arguments = tool_call.function.arguments
+            tool_name = tool_call.name
+            raw_arguments = tool_call.arguments
             try:
                 args = self._parse_args(raw_arguments)
                 self._validate_tool_action(tool_name, args, tool_metadata)
@@ -629,7 +629,7 @@ class ModelAdapter:
                 }
             )
 
-        # Preserve the provider tool_calls structure on the assistant message.
+        # Construct the canonical replay structure from generic tool calls.
         # This is important for replaying transcript history in a format that
         # stricter OpenAI-compatible model templates accept.
         if raw_tool_calls:
@@ -638,8 +638,8 @@ class ModelAdapter:
                     "id": tool_call.id,
                     "type": "function",
                     "function": {
-                        "name": tool_call.function.name,
-                        "arguments": tool_call.function.arguments,
+                        "name": tool_call.name,
+                        "arguments": tool_call.arguments,
                     },
                 }
                 for tool_call in raw_tool_calls
@@ -652,69 +652,33 @@ class ModelAdapter:
             "usage": self._usage_from_response(raw_response),
         }
 
-    def _usage_from_response(self, raw_response) -> dict | None:
-        if isinstance(raw_response, dict):
-            usage = raw_response.get("usage")
-        else:
-            usage = getattr(raw_response, "usage", None)
-        if usage is None:
-            return None
+    def _usage_from_response(self, response: ModelResponse) -> dict | None:
+        return asdict(response.usage) if response.usage is not None else None
 
-        return {
-            "input_tokens": self._usage_value(usage, "input_tokens", "prompt_tokens"),
-            "output_tokens": self._usage_value(usage, "output_tokens", "completion_tokens"),
-            "total_tokens": self._usage_value(usage, "total_tokens"),
-        }
-
-    def _usage_value(self, usage, *names: str):
-        for name in names:
-            if isinstance(usage, dict):
-                value = usage.get(name)
-            else:
-                value = getattr(usage, name, None)
-            if value is not None:
-                return value
-
-        return None
-
-    def _raw_reply_from_response(self, raw_response) -> dict:
-        """Extract only data the provider actually exposed, before parsing tool arguments."""
-        choices = self._value(raw_response, "choices") or []
-        choice = choices[0] if choices else None
-        assistant_message = self._value(choice, "message") or {}
-        raw_tool_calls = self._value(assistant_message, "tool_calls") or []
-
+    def _raw_reply_from_response(self, response: ModelResponse) -> dict:
+        """Capture normalized diagnostics before Core validates any tool calls."""
+        # This is a historical diagnostic key, not a raw transport payload.
+        # Provider extras belong in provider tracing, never in session replies.
         assistant = {
-            "content": self._json_value(self._value(assistant_message, "content")),
-            "raw_tool_calls": [self._json_value(tool_call) for tool_call in raw_tool_calls],
+            "content": response.content,
+            "raw_tool_calls": [asdict(call) for call in response.tool_calls],
         }
-        for name in ("reasoning", "reasoning_content", "thinking"):
-            value = self._value(assistant_message, name)
-            if value is not None:
-                assistant[name] = self._json_value(value)
-
-        raw_reply = {
+        if response.reasoning is not None:
+            assistant["reasoning"] = response.reasoning
+        reply = {
             "provider": self.provider_name,
             "model": self.model_name,
             "assistant": assistant,
         }
-        usage = self._usage_from_response(raw_response)
-        if usage is not None:
-            raw_reply["usage"] = usage
+        if response.usage is not None:
+            reply["usage"] = self._usage_from_response(response)
+        if response.finish_reason is not None:
+            reply["finish_reason"] = response.finish_reason
+        if response.response_id is not None:
+            reply["response_id"] = response.response_id
+        return reply
 
-        finish_reason = self._value(choice, "finish_reason")
-        if finish_reason is not None:
-            raw_reply["finish_reason"] = self._json_value(finish_reason)
-
-        for name in ("id", "response_id", "request_id", "_request_id"):
-            value = self._value(raw_response, name)
-            if value is not None:
-                raw_reply["response_id"] = self._json_value(value)
-                break
-
-        return raw_reply
-
-    def _reply_from_response(self, raw_response, tool_metadata: dict) -> dict:
+    def _reply_from_response(self, raw_response: ModelResponse, tool_metadata: dict) -> dict:
         raw_reply = self._raw_reply_from_response(raw_response)
         try:
             reply = self._normalize_response(raw_response, tool_metadata)
@@ -730,55 +694,20 @@ class ModelAdapter:
                 **self._recoverable_tool_fields(error),
             }
 
-        # Normalize the first provider-exposed reasoning field once, alongside
-        # content and actions, so presentation never needs provider-specific keys.
+        # Providers have already resolved their reasoning aliases.
         assistant = raw_reply["assistant"]
-        for name in ("reasoning", "reasoning_content", "thinking"):
-            reasoning = assistant.get(name)
-            if reasoning:
-                reply["reasoning"] = reasoning
-                break
+        if assistant.get("reasoning"):
+            reply["reasoning"] = assistant["reasoning"]
         reply["raw_reply"] = raw_reply
         return reply
 
-    def _reply_from_response_or_error(self, raw_response, tool_metadata: dict) -> dict:
+    def _reply_from_response_or_error(self, raw_response: ModelResponse, tool_metadata: dict) -> dict:
         """Identify structurally unusable provider responses at the adapter seam."""
 
         try:
             return self._reply_from_response(raw_response, tool_metadata)
         except (AttributeError, IndexError, KeyError, TypeError) as exc:
             raise _request_error(exc, failure_class="malformed_response") from exc
-
-    def _value(self, value, name: str):
-        if isinstance(value, dict):
-            return value.get(name)
-        return getattr(value, name, None)
-
-    def _json_value(self, value):
-        if value is None or isinstance(value, (str, int, float, bool)):
-            return value
-        if isinstance(value, dict):
-            return {str(key): self._json_value(item) for key, item in value.items()}
-        if isinstance(value, (list, tuple)):
-            return [self._json_value(item) for item in value]
-
-        model_dump = getattr(value, "model_dump", None)
-        if callable(model_dump):
-            try:
-                return self._json_value(model_dump(mode="json"))
-            except TypeError:
-                return self._json_value(model_dump())
-
-        try:
-            fields = vars(value).items()
-        except TypeError:
-            return str(value)
-        public_fields = {
-            name: self._json_value(field_value)
-            for name, field_value in fields
-            if not name.startswith("_")
-        }
-        return public_fields or str(value)
 
     def _recoverable_tool_fields(self, error: ValueError) -> dict:
         fields = {}
@@ -791,7 +720,7 @@ class ModelAdapter:
         return fields
 
     # Parse the provider's tool-call arguments into a normal dictionary.
-    # OpenAI-compatible APIs usually return tool arguments as a JSON string.
+    # The completed-response contract keeps arguments as raw JSON strings.
     #
     # Reject non-object JSON so that malformed tool arguments are handled as
     # format errors instead of reaching tool execution in a half-valid shape.

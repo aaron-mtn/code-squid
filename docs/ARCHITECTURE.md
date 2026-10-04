@@ -451,9 +451,10 @@ and application layer; `squid_core/` is the reusable agent runtime.
   - `events.py` owns observation; `generation.py` owns one-shot generation;
     `model_adapter.py` owns final provider request preparation, generic
     best-effort request observation at the shared transport boundary, and
-    response normalization. Its ordinary reply shape normalizes the first
-    available `reasoning`, `reasoning_content`, or `thinking` field to
-    `reply["reasoning"]`; its optional streaming callback forwards normalized
+    generic response validation and transcript reply construction.
+    `model_response.py` defines completed output types; providers resolve native
+    aliases before the adapter copies their single reasoning value to
+    `reply["reasoning"]`. Its optional streaming callback forwards normalized
     reasoning deltas from providers that support the seam. The Agent loop
     publishes `assistant_reasoning_delta` as chunks arrive and a non-empty
     `assistant_reasoning` event before the matching narration/final event and
@@ -1644,11 +1645,36 @@ are present. Providers may still return multiple tool calls. Code Squid retains
 those calls as one ordered assistant turn and executes them sequentially through
 the same per-action `ToolExecutor` path used by a one-call turn.
 
+Completed provider output crosses the transport-independent boundary defined in
+`squid_core/model_response.py`: `ToolCall(id, name, arguments)`,
+`TokenUsage(input_tokens, output_tokens, total_tokens)`, and
+`ModelResponse(content, reasoning, tool_calls, usage, finish_reason, response_id)`.
+Both concrete providers return this same type for normal and assembled streaming
+responses. OpenAI SDK objects and native Ollama JSON remain provider-owned.
+Providers flatten ordered calls without parsing argument strings and choose the
+first nonempty completed reasoning alias in `reasoning`, `reasoning_content`,
+`thinking` order. OpenAI-compatible usage maps input/prompt and output/completion
+aliases without inventing totals; Ollama maps evaluation counts and retains its
+existing total calculation only when both counts exist. OpenAI-compatible ID
+aliases resolve in `id`, `response_id`, `request_id`, `_request_id` order; Ollama
+preserves its native ID, including the first supplied stream ID.
+
+`ModelAdapter` consumes only these generic completed fields. Core still owns JSON
+object parsing, tool-name/schema/boolean validation, whole-batch rejection, action
+construction, and canonical OpenAI-style conversation replay dictionaries with
+Tool-call/result pairing. Finish reason is diagnostic information, never a task
+completion or execution signal. Successful responses contain no error fields;
+provider failures remain exceptions with existing wrapping, cancellation,
+classification, redaction, and retry behavior. Native stream terminal checks,
+callbacks, chunk assembly, and raw transport tracing remain provider-owned.
+Concrete files, SDK dependencies, and provider settings remain under Core pending
+physical extraction; application construction ownership is unchanged.
+
 The OpenAI-compatible provider also supports optional assistant text and
 reasoning streaming. Streaming forwards the first populated reasoning alias
 per chunk while assembling text, reasoning, and tool-call fragments into the
-same raw response shape used by non-streaming responses before `ModelAdapter`
-normalizes and validates the reply.
+same Core-owned `ModelResponse` used by non-streaming responses before
+`ModelAdapter` validates Tool arguments and constructs transcript-facing replies.
 
 Image input uses a request-only Core reference rather than embedding binary
 data in canonical messages. The application supplies the active adapter's
@@ -1667,8 +1693,8 @@ available for replay.
 
 The native Ollama provider exists and is experimental. `squid_core/providers/ollama.py`
 uses Ollama `/api/chat`, converts replayed messages into Ollama's expected
-shape, omits `parallel_tool_calls`, and adapts the response back to the
-OpenAI-like shape consumed by `ModelAdapter`. Provider-supplied Tool-call IDs
+shape, omits `parallel_tool_calls`, and translates completed responses into
+Core-owned `ModelResponse`. Provider-supplied Tool-call IDs
 are preserved exactly. When Ollama omits an ID, adaptation assigns a
 response-unique fallback prefix plus the response-local call index so distinct
 historical calls cannot collide during transcript replay or result trimming.
@@ -1738,7 +1764,7 @@ finalization does not depend on that marker.
 
 ### Tool Transcript Contract
 
-Assistant messages that used tools preserve provider `tool_calls` metadata.
+Assistant messages that used tools preserve canonical replay `tool_calls` metadata.
 Tool-result messages include the matching `tool_call_id`.
 
 `reply["actions"]` is the canonical ordered batch for every tool turn; a
@@ -2169,10 +2195,13 @@ Every provider reply is captured before agent validation as a diagnostic-only
 }
 ```
 
-`assistant.reasoning`, `assistant.reasoning_content`, and
-`assistant.thinking` appear only when the provider returned those fields. The
-same applies to finish reason, usage, and response ID. Raw tool-call objects
-retain the tool name and argument string seen before JSON parsing.
+`assistant.reasoning` contains the single provider-normalized reasoning value
+when supplied. Finish reason, usage, and response ID are likewise optional.
+The historical `raw_tool_calls` diagnostic key now contains only flat `id`,
+`name`, and raw JSON `arguments` fields, recorded before Core parsing. Arbitrary
+native Tool-call fields, SDK serialization, and multiple reasoning aliases are
+intentionally dropped. Deep native chunks remain in provider-side trace output;
+normal Core replies do not carry native responses or metadata bags.
 
 A rejected reply adds a linked diagnostic-only `reply_rejection` entry:
 
@@ -2556,8 +2585,9 @@ construction and passes that collaborator inward. `squid_core/spawner.py` owns
 generic selective construction and the null-display default. None orchestrates
 multiple runs or provides an event bus, daemon, or server.
 
-`squid_core/model_adapter.py` owns provider response normalization and replay message
-shaping. Provider-specific HTTP/API calls stay in `squid_core/providers/`.
+`squid_core/model_adapter.py` owns generic reply validation, action construction,
+and replay message shaping. Provider-specific response translation and HTTP/API
+calls stay in `squid_core/providers/`.
 `squid_core/image_content.py` owns the small provider-neutral image validation,
 descriptor, marker, and internal-reference contract. It does not own session
 paths or provider wire formats.
@@ -2655,7 +2685,7 @@ narration is encouraged by prompts.
 ## Practical Principles
 
 - Keep the tool set small and inspectable.
-- Keep provider transport separated from provider-response normalization.
+- Keep native response translation in providers and generic Tool validation in Core.
 - Keep prompt guidance separate from runtime enforcement.
 - Keep durable session storage append-only and boring.
 - Keep undo latest-only until a real workflow requires more.

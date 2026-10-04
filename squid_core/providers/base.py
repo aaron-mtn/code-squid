@@ -5,6 +5,8 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 
+from squid_core.model_response import ModelResponse
+
 
 CANCELLATION_POLL_SECONDS = 0.02
 CANCELLATION_MONITOR_JOIN_SECONDS = 0.2
@@ -114,7 +116,7 @@ class BaseProvider:
         tool_choice=None,
         please_stop_contemplating_the_void: bool = False,
         asset_loader=None,
-    ) -> object:
+    ) -> ModelResponse:
         raise NotImplementedError
 
     def stream_chat(
@@ -130,5 +132,5 @@ class BaseProvider:
         should_cancel=None,
         on_reasoning_delta=None,
         asset_loader=None,
-    ) -> object:
+    ) -> ModelResponse:
         raise NotImplementedError

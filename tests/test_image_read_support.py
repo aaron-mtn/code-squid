@@ -8,6 +8,7 @@ import importlib
 import json
 from io import BytesIO
 from pathlib import Path
+from squid_core.model_response import ModelResponse
 from types import SimpleNamespace
 
 import pytest
@@ -440,15 +441,7 @@ def test_non_vision_adapter_replaces_historical_image_without_mutating_it() -> N
 
         def create_response(self, **payload):
             self.payload = payload
-            return SimpleNamespace(
-                choices=[
-                    SimpleNamespace(
-                        message=SimpleNamespace(content="continued", tool_calls=[]),
-                        finish_reason="stop",
-                    )
-                ],
-                usage=None,
-            )
+            return ModelResponse("continued", finish_reason="stop")
 
     historical = {
         "role": "user",
