@@ -86,6 +86,10 @@ def test_coding_run_preserves_openai_compatible_provider_identity(
     provider = run.loop.model_adapter.provider
     assert isinstance(provider, OpenAICompatibleProvider)
     assert provider.provider_name == provider_name
+    assert run.loop.model_adapter.model_name == "test-model"
+    assert run.loop.model_adapter.tool_call_content_mode == (
+        "null" if provider_name == "openrouter" else "empty"
+    )
 
 
 def test_run_construction_uses_core_null_display_when_omitted(tmp_path: Path) -> None:
@@ -179,7 +183,7 @@ def test_run_coding_task_passes_callbacks_to_agent_loop(monkeypatch, tmp_path) -
         return False
 
     monkeypatch.setattr(
-        "squid_core.spawner.build_provider",
+        "code_squid.provider_setup.build_provider",
         lambda *args, **kwargs: object(),
     )
     monkeypatch.setattr("squid_core.spawner.AgentLoop", FakeAgentLoop)
@@ -206,7 +210,7 @@ def test_run_coding_task_returns_loop_run_result(monkeypatch, tmp_path: Path) ->
             return expected
 
     display = FakeDisplay()
-    monkeypatch.setattr("squid_core.spawner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("code_squid.provider_setup.build_provider", lambda *args, **kwargs: object())
     monkeypatch.setattr("squid_core.spawner.AgentLoop", FakeAgentLoop)
 
     result = run_coding_task(
@@ -239,7 +243,7 @@ def test_run_construction_supplies_detected_platform_and_resolved_workspace(
     monkeypatch.setattr("code_squid.agent_setup.detect_platform_context", lambda: context)
     monkeypatch.setattr("code_squid.agent_setup.Agent", FakeCodingAgent)
     monkeypatch.setattr("squid_core.spawner.ToolExecutor", FakeToolExecutor)
-    monkeypatch.setattr("squid_core.spawner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("code_squid.provider_setup.build_provider", lambda *args, **kwargs: object())
 
     build_coding_task_run(tmp_path / ".", "Do the thing", display=FakeDisplay())
 
@@ -276,7 +280,7 @@ def test_run_construction_uses_default_storage_factories(monkeypatch, tmp_path: 
 
     monkeypatch.setattr("code_squid.agent_setup.SessionStore.create", create_session)
     monkeypatch.setattr("code_squid.agent_setup.UndoStore.create", create_undo)
-    monkeypatch.setattr("squid_core.spawner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("code_squid.provider_setup.build_provider", lambda *args, **kwargs: object())
 
     run = build_coding_task_run(tmp_path, "Store defaults", display=FakeDisplay())
 
@@ -308,7 +312,7 @@ def test_run_construction_explicitly_registers_new_session(
         ),
     )
     monkeypatch.setattr(
-        "squid_core.spawner.build_provider",
+        "code_squid.provider_setup.build_provider",
         lambda *args, **kwargs: object(),
     )
 
@@ -349,7 +353,7 @@ def test_run_construction_uses_explicit_storage_factories(monkeypatch, tmp_path:
         return custom_undo
 
     monkeypatch.setattr("squid_core.spawner.ToolExecutor", FakeToolExecutor)
-    monkeypatch.setattr("squid_core.spawner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("code_squid.provider_setup.build_provider", lambda *args, **kwargs: object())
 
     run = build_coding_task_run(
         tmp_path / ".",
@@ -384,7 +388,7 @@ def test_storage_factories_can_be_overridden_independently(monkeypatch, tmp_path
         return original_undo_create(tmp_path / "default-undo", session_id)
 
     monkeypatch.setattr("code_squid.agent_setup.UndoStore.create", create_default_undo)
-    monkeypatch.setattr("squid_core.spawner.build_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("code_squid.provider_setup.build_provider", lambda *args, **kwargs: object())
 
     session_run = build_coding_task_run(
         tmp_path,
@@ -436,3 +440,24 @@ def test_run_coding_task_forwards_storage_factories(monkeypatch, tmp_path: Path)
 
     assert captured["session_store_factory"] is session_factory
     assert captured["undo_store_factory"] is undo_factory
+
+
+@pytest.mark.parametrize("with_adapter", [False, True])
+def test_custom_model_collaborators_bypass_application_provider_construction(
+    monkeypatch, tmp_path, with_adapter,
+) -> None:
+    def unexpected_construction(*args, **kwargs):
+        pytest.fail("application default provider was constructed")
+    monkeypatch.setattr("code_squid.provider_setup.build_provider", unexpected_construction)
+    provider = object()
+    adapter = object() if with_adapter else None
+    run = build_coding_task_run(
+        tmp_path, "Custom collaborators", settings=_provider_settings("openrouter"),
+        provider=provider, model_adapter=adapter,
+    )
+    if with_adapter:
+        assert run.loop.model_adapter is adapter
+    else:
+        assert run.loop.model_adapter.provider is provider
+        assert run.loop.model_adapter.model_name == "test-model"
+        assert run.loop.model_adapter.tool_call_content_mode == "null"

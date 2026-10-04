@@ -250,3 +250,40 @@ def test_code_squid_application_package_has_expected_layout() -> None:
         "provider_setup.py",
         "settings.py",
     ]
+
+
+
+def test_generic_core_imports_do_not_initialize_concrete_transports() -> None:
+    # Use a fresh process: application test imports may already have loaded SDKs.
+    script = """
+import sys
+class BlockTransports:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {"squid_core.providers.ollama", "squid_core.providers.openai_compatible", "openai", "httpx"}:
+            raise AssertionError(f"concrete transport dependency imported: {fullname}")
+        return None
+sys.meta_path.insert(0, BlockTransports())
+from squid_core.providers import BaseProvider, StreamCancelled
+import squid_core.spawner
+import squid_core.generation
+assert BaseProvider and StreamCancelled
+"""
+    subprocess.run([sys.executable, "-c", script], check=True,
+                   cwd=Path(__file__).resolve().parents[1])
+
+
+def test_core_does_not_select_or_construct_concrete_providers() -> None:
+    core_root = Path(__file__).resolve().parents[1] / "squid_core"
+    violations = []
+    for path in core_root.rglob("*.py"):
+        # Transports stay physically in Core for this patch, but nothing else
+        # may depend on them. Their protocol behavior is deliberately unchanged.
+        if "providers" in path.relative_to(core_root).parts:
+            continue
+        source = path.read_text(encoding="utf-8")
+        if any(name in source for name in (
+            "build_provider", "OpenAICompatibleProvider", "OllamaProvider",
+            "squid_core.providers.openai_compatible", "squid_core.providers.ollama",
+        )):
+            violations.append(path.relative_to(core_root).as_posix())
+    assert violations == []

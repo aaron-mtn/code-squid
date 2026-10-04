@@ -2652,3 +2652,34 @@
   built-in Hook policy, providers, and Desktop are unchanged. Desktop pair
   selection/forwarding is deferred to Patch 3; routing, builder, and picker
   changes remain out of scope.
+
+- 2026-10-04: Implemented provider extraction Patch 1: Code Squid now owns
+  concrete provider selection/construction and backend replay-mode policy in
+  `provider_setup.py`. Its existing readiness, discovery, and selection paths
+  use the same application-owned helper; `agent_setup.py` constructs the
+  effective configured transport only when neither a provider nor an adapter
+  was supplied, then injects it with the exact model name, provider label, and
+  replay mode. Core's spawner no longer calls `build_provider(settings.provider)`
+  or infers adapter inputs from provider settings. A ready adapter takes
+  precedence over any supplied provider; otherwise an injected provider plus
+  explicit model name is required, with optional label/replay inputs. Missing
+  collaborators and missing model names produce clear construction errors.
+  Generic `generate_text`/`stream_text` now require a ready keyword-only adapter;
+  the unused production settings-only generation path was removed. Core's
+  provider initializer exports only BaseProvider and StreamCancelled, without
+  eager transport/SDK imports or compatibility re-exports. Concrete transport
+  files and ProviderSettings remain in Core temporarily; no files were moved,
+  so file-tree regeneration was unnecessary. Completed responses, diagnostics,
+  tracing, request observation, cancellation, reasoning, retry, discovery, and
+  transport behavior are unchanged. Updated boundary/construction regressions
+  and application tests to patch the new ownership seam.
+  Verification: 391 focused provider/adapter/spawner/generation/settings/runner/
+  provider-setup/architecture tests passed, including fresh-process imports
+  with concrete transports and OpenAI/httpx imports blocked. The adjusted CLI
+  trace regression passed separately. `python -m pytest -q` passed 1,670 tests
+  with one platform skip. `python -m compileall -q code_squid squid_core tests`,
+  public Core/application construction imports, and `git diff --check` passed.
+  No live model inference was performed. Generic response contracts, removal of
+  OpenAI-shaped responses/raw diagnostics, physical squid-providers extraction,
+  and provider-specific settings ownership remain deferred to later provider
+  patches; no registry, framework, or compatibility layer was added.

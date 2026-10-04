@@ -1282,7 +1282,7 @@ def test_new_session_trace_does_not_push_presentation_into_provider(
 
     monkeypatch.setenv("CODE_SQUID_TRACE", "1")
     monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", CapturingDisplay)
-    monkeypatch.setattr("squid_core.providers.OpenAICompatibleProvider", CapturingProvider)
+    monkeypatch.setattr("code_squid.provider_setup.OpenAICompatibleProvider", CapturingProvider)
     monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _fake_prompt_task("Do the thing"))
     monkeypatch.setattr("code_squid.console.cli.session_runner._run_loop", lambda *args: 0)
 

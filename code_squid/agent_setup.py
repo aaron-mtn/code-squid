@@ -1,7 +1,8 @@
 """Code Squid application wiring for normal coding tasks.
 
 This layer owns Code Squid prompts, Skill/tool discovery, hooks, and application
-paths. Generic collaborator construction lives in ``squid_core.spawner``.
+paths, provider selection, and provider construction. Generic collaborator
+construction lives in ``squid_core.spawner``.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Callable, Mapping
 
 from code_squid.agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
+from code_squid import provider_setup
 from code_squid.compaction_context import CodeSquidCompactionContextProvider
 from code_squid.settings import (
     DEFAULT_BUILT_IN_HOOK_SETTINGS,
@@ -288,6 +290,11 @@ def build_coding_task_run(
             trusted_commands=settings.runtime.trusted_commands,
             persist_trusted_command=lambda command: trust_command(repo_root, command),
         )
+    # Application settings choose the transport; Core only receives collaborators.
+    # A ready adapter wins over even a supplied provider, and custom providers
+    # must never trigger default transport construction.
+    if model_adapter is None and provider is None:
+        provider = provider_setup.build_provider(runtime_settings.provider)
     loop = build_core_agent_loop(
         repo_root=repo_root,
         session=session,
@@ -303,6 +310,11 @@ def build_coding_task_run(
         platform_context=platform_context,
         provider=provider,
         model_adapter=model_adapter,
+        model_name=runtime_settings.provider.model_name,
+        provider_name=runtime_settings.provider.provider,
+        tool_call_content_mode=provider_setup.tool_call_content_mode(
+            runtime_settings.provider
+        ),
         compactor=compactor,
         compaction_context_provider=CodeSquidCompactionContextProvider(
             session_store.load_canonical_messages

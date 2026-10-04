@@ -10,7 +10,7 @@ from squid_core.model_adapter import (
     ModelRequestError,
     model_request_error_details,
 )
-from squid_core.providers import build_provider, tool_call_content_mode
+from code_squid.provider_setup import build_provider, tool_call_content_mode
 from squid_core.providers.base import StreamCancelled
 from squid_core.providers.ollama import (
     DEFAULT_OLLAMA_REQUEST_TIMEOUT,

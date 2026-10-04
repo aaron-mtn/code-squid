@@ -1,3 +1,5 @@
+"""Generic run construction requires caller-owned model collaborators."""
+
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -150,20 +152,17 @@ def test_code_squid_builder_supplies_application_prompt_defaults(
 
 
 def test_supplied_provider_is_used_without_default_provider(
-    monkeypatch, tmp_path: Path
+    tmp_path: Path
 ) -> None:
     supplied_provider = object()
-    monkeypatch.setattr(
-        core_spawner,
-        "build_provider",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("default provider")),
-    )
+    assert not hasattr(core_spawner, "build_provider")
 
     run = core_spawner.build_agent_run(
         tmp_path,
         "Provider task",
         settings=_settings(),
         provider=supplied_provider,
+        model_name="test-model",
         **_storage_paths(tmp_path),
     )
 
@@ -197,6 +196,8 @@ def test_runtime_wires_finalized_requests_to_session_model_view(tmp_path: Path) 
         "Observed requests",
         settings=settings,
         provider=provider,
+        model_name="test-model",
+        provider_name="openai_compatible",
         **_storage_paths(tmp_path),
     )
     prepared = run.loop.model_adapter.prepare_request(
@@ -242,6 +243,7 @@ def test_model_view_records_textual_tool_observation_not_canonical_json(
         "Observe a read",
         settings=_settings(),
         provider=Provider(),
+        model_name="test-model",
         **_storage_paths(tmp_path),
     )
     canonical_result = {
@@ -321,6 +323,8 @@ def test_each_real_retry_attempt_gets_its_own_model_view_record(
             model_request_retry_backoff_ms=0,
         ),
         provider=provider,
+        model_name="test-model",
+        provider_name="openai_compatible",
         agent=FinishingAgent(),
         tool_executor=object(),
         tool_results=ToolResults(),
@@ -345,11 +349,7 @@ def test_supplied_model_adapter_bypasses_provider_and_adapter_construction(
     monkeypatch, tmp_path: Path
 ) -> None:
     adapter = object()
-    monkeypatch.setattr(
-        core_spawner,
-        "build_provider",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("provider built")),
-    )
+    assert not hasattr(core_spawner, "build_provider")
     monkeypatch.setattr(
         core_spawner,
         "ModelAdapter",
@@ -361,6 +361,7 @@ def test_supplied_model_adapter_bypasses_provider_and_adapter_construction(
         "Adapter task",
         settings=_settings(),
         model_adapter=adapter,
+        provider=object(),
         **_storage_paths(tmp_path),
     )
 
@@ -496,3 +497,39 @@ def test_direct_agent_loop_construction_remains_available(tmp_path: Path) -> Non
     )
 
     assert isinstance(loop, AgentLoop)
+
+
+@pytest.mark.parametrize("entrypoint", ["build_agent_run", "build_agent_loop"])
+def test_core_requires_injected_model_collaborator(tmp_path, entrypoint) -> None:
+    kwargs = dict(repo_root=tmp_path, settings=_settings())
+    if entrypoint == "build_agent_run":
+        kwargs.update(task="No provider", **_storage_paths(tmp_path))
+    else:
+        kwargs.update(
+            session=Session(tmp_path), session_store=object(),
+            agent=object(), undo_store=None,
+        )
+    with pytest.raises(ValueError, match="provider or model_adapter must be supplied"):
+        getattr(core_spawner, entrypoint)(**kwargs)
+
+
+def test_explicit_provider_inputs_are_independent_of_provider_settings(tmp_path) -> None:
+    provider = object()
+    run = core_spawner.build_agent_run(
+        tmp_path, "Custom transport", settings=replace(_settings(), provider=None),
+        provider=provider, model_name="custom-model", provider_name="custom",
+        tool_call_content_mode="omit", **_storage_paths(tmp_path),
+    )
+    adapter = run.loop.model_adapter
+    assert adapter.provider is provider
+    assert adapter.model_name == "custom-model"
+    assert adapter.provider_name == "custom"
+    assert adapter.tool_call_content_mode == "omit"
+
+
+def test_provider_requires_explicit_model_name(tmp_path) -> None:
+    with pytest.raises(ValueError, match="model_name is required"):
+        core_spawner.build_agent_run(
+            tmp_path, "No model", settings=_settings(), provider=object(),
+            **_storage_paths(tmp_path),
+        )

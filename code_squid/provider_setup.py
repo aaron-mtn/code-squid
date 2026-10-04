@@ -1,8 +1,9 @@
 """Shared Code Squid provider identities and setup operations.
 
 This application layer owns friendly names, product defaults, readiness/model
-discovery orchestration, and persisted selections. Provider HTTP transports and
-provider-specific protocol details remain in :mod:`squid_core.providers`; CLI
+discovery orchestration, concrete provider construction, replay policy, and
+persisted selections. Provider HTTP transports and provider-specific protocol
+details remain in :mod:`squid_core.providers`; CLI
 and Desktop presentation should consume this module instead of duplicating the
 same provider rules.
 """
@@ -13,7 +14,58 @@ import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from squid_core.providers import build_provider
+from squid_core.providers.base import BaseProvider
+from squid_core.providers.ollama import DEFAULT_OLLAMA_BASE_URL, OllamaProvider
+from squid_core.providers.openai_compatible import OpenAICompatibleProvider
+from squid_core.settings import ProviderSettings
+
+
+OPENAI_COMPATIBLE_PROVIDERS = frozenset(
+    {"lm_studio", "openai_compatible", "openrouter", "squid_models"}
+)
+
+
+def build_provider(
+    settings: ProviderSettings,
+    *,
+    for_inference: bool = True,
+) -> BaseProvider:
+    """Construct Code Squid's configured transport for inference or discovery."""
+
+    # These imports still point into Core until physical extraction. Selection
+    # belongs here so generic Core callers never initialize a built-in transport.
+
+    if settings.provider == "ollama":
+        return OllamaProvider(
+            base_url=settings.base_url or DEFAULT_OLLAMA_BASE_URL,
+            temperature=settings.temperature,
+            request_timeout=getattr(settings, "ollama_request_timeout", None),
+        )
+
+    if settings.provider in OPENAI_COMPATIBLE_PROVIDERS:
+        if settings.base_url is None:
+            raise ValueError(f"base_url is required for provider {settings.provider!r}")
+        if not settings.api_key and (for_inference or settings.provider != "openrouter"):
+            raise ValueError(f"api_key is required for provider {settings.provider!r}")
+        return OpenAICompatibleProvider(
+            base_url=settings.base_url,
+            api_key=settings.api_key,
+            temperature=settings.temperature,
+            reasoning_mode=settings.reasoning_mode,
+            reasoning_token_budget=getattr(settings, "reasoning_token_budget", None),
+            provider_name=settings.provider,
+        )
+
+    raise ValueError(f"Unsupported built-in provider: {settings.provider}")
+
+
+def tool_call_content_mode(settings: ProviderSettings) -> str:
+    """Return replay content behavior intrinsic to the selected backend."""
+
+    # OpenRouter requires null content for assistant tool-call replay. Keep
+    # backend policy here; ModelAdapter only implements the selected mode.
+    return "null" if settings.provider == "openrouter" else "empty"
+
 
 
 @dataclass(frozen=True)

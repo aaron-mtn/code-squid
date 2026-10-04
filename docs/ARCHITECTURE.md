@@ -19,7 +19,10 @@ The construction and runtime shapes are:
 ```text
 console CLI -> code_squid.agent_setup -> squid_core -> AgentLoop
 desktop/other frontend -> code_squid.agent_setup -> squid_core -> AgentLoop
-settings -> provider -> model adapter -> Core Agent -> action preflight -> approval -> tools -> transcript/session storage
+Code Squid settings -> code_squid.provider_setup -> ready provider
+ready provider + explicit model/replay inputs -> squid_core.spawner -> ModelAdapter -> AgentLoop
+ready ModelAdapter -> squid_core.spawner -> AgentLoop
+model adapter -> Core Agent -> action preflight -> approval -> tools -> transcript/session storage
 ```
 
 `AgentLoop -> on_event callback` is an optional observer path for compact
@@ -49,7 +52,8 @@ and application layer; `squid_core/` is the reusable agent runtime.
     `agent/prompts.py` owns Code Squid identity, its non-replaceable baseline
     coding policy and intentionally replaceable tool/final-report defaults.
   - `agent_setup.py` owns Code Squid run preparation and wiring: settings,
-    prompt defaults, application/workspace paths, storage locations, resource
+    prompt defaults, configured provider construction/injection,
+    application/workspace paths, storage locations, resource
     resolution, hooks, platform context, Agent configuration, and translation
     into the generic `squid_core.spawner` seam. It is presentation-neutral and
     does not import the console frontend.
@@ -435,9 +439,10 @@ and application layer; `squid_core/` is the reusable agent runtime.
   - `base.py` owns the small shared provider cancellation monitor. Provider I/O
     remains on the caller; the bounded monitor thread only polls the host
     predicate and aborts the active provider-owned transport.
-  - `__init__.py` contains the small built-in construction helper and backend
-    replay choice. It consumes effective `ProviderSettings` and has no Code
-    Squid defaults, settings loading, environment, or presentation policy.
+  - `__init__.py` exports only `BaseProvider` and `StreamCancelled` from the
+    contract module. Importing it does not initialize either concrete transport
+    or their SDK dependencies. Transport files remain physically here for now;
+    `code_squid.provider_setup` owns backend construction and replay choice.
   - These built-ins are first-party conveniences, not permanent dependencies:
     callers can pass a custom provider or ready `ModelAdapter` through the
     spawner, or construct `AgentLoop` directly.
@@ -959,7 +964,8 @@ and Agent objects already selected by its caller.
 
 `squid_core.spawner.build_agent_run(...)` constructs a generic `Agent` by
 default and uses a no-op `NullDisplay` when no presentation collaborator is
-provided. It creates a provider, `ModelAdapter`, `Compactor`, `ToolExecutor`,
+provided. It creates a `ModelAdapter` around an injected provider, plus
+`Compactor`, `ToolExecutor`,
 `ToolResults`, `ApprovalPolicy`, `ActionPreflight`, `HookRunner`, `Session`,
 `SessionStore`, and `UndoStore` when those concerns are omitted. It requires
 typed settings supplied by the application and does not load Code Squid
@@ -970,18 +976,27 @@ Squid's application builder is what selects the four built-ins by default.
 Direct `Agent(...)` construction has its own default of the built-in registry.
 
 Callers may replace any of those major runtime collaborators selectively. A
-supplied `ModelAdapter` bypasses provider construction; a supplied provider is
-used to construct the default adapter; a supplied `ToolExecutor` bypasses its
-default construction and the otherwise implicit undo-store creation. A
+supplied `ModelAdapter` is used directly, taking precedence over a supplied
+provider and bypassing adapter construction; a supplied provider requires an
+explicit `model_name` and can receive explicit `provider_name` and
+`tool_call_content_mode` inputs (`None` and `"empty"` by default). These inputs
+are independent of the temporarily retained `RuntimeSettings.provider`. Missing
+both provider and adapter raises a clear construction `ValueError`. A supplied
+`ToolExecutor` bypasses its default construction and the otherwise implicit undo-store creation. A
 supplied approval policy or action preflight is used directly. Presentation
 and approval prompting are separate inputs, so a GUI need not imitate a
-terminal display. Built-in OpenAI-compatible/OpenRouter/Ollama construction is
-owned by `squid_core.providers`, not by either runner.
+terminal display. `code_squid.provider_setup.build_provider` constructs the
+configured OpenAI-compatible or Ollama transport from effective provider
+settings. `code_squid.agent_setup` calls it only when neither provider nor
+adapter was supplied, then injects the provider and exact model/label/replay
+inputs into Core. Custom providers bypass application default construction;
+custom adapters bypass both provider and adapter construction. Core never
+selects a backend from settings or calls a built-in provider factory.
 
-The generic generation API follows the same boundary: callers pass an explicit
-Core `RuntimeSettings` object or a ready `ModelAdapter`. It never reads the
-working directory or loads Code Squid configuration. A supplied adapter bypasses
-built-in provider construction.
+`generate_text` and `stream_text` require the keyword-only `model_adapter`
+collaborator. Their former settings-only construction API has been removed;
+they do not construct providers or adapters. There were no production Code
+Squid callers of that settings-only convenience path.
 
 Generic new-run construction requires explicit `sessions_dir` and `undo_dir`
 inputs when it creates the stores itself. It calls
@@ -1426,7 +1441,8 @@ Supported provider values are `squid_models`, `lm_studio`, `ollama`,
 `openrouter`, and `openai_compatible`. Their shared Code Squid application
 profiles live in `code_squid/provider_setup.py`; that module owns friendly
 identity, product defaults, readiness/discovery orchestration, and the shared
-provider/model mutation operations. CLI presentation remains under
+provider/model mutation operations, concrete transport construction, and backend
+replay policy. CLI presentation remains under
 `code_squid/console/`, and provider HTTP details remain in
 `squid_core/providers/`.
 Supported approval modes are `never`, `guarded`, and `always`.
@@ -1587,22 +1603,22 @@ command/startup operation can bootstrap provider-specific URL or credential
 configuration. Readiness still gates inference and remains visible in status.
 
 The selected model ID is never replaced by a provider profile. Startup model
-selection and `/model <name>` persist it verbatim; Core's spawner passes that
-same `ProviderSettings.model_name` into `ModelAdapter` and then provider
-inference. Provider switching preserves the configured ID and reports when the
+selection and `/model <name>` persist it verbatim; Code Squid passes that
+same `ProviderSettings.model_name` explicitly to Core's spawner, which uses it
+in `ModelAdapter` and then provider inference. Provider switching preserves the configured ID and reports when the
 new connected provider does not expose it.
 
 Model discovery calls each provider's `list_models()` directly instead of
 requiring `is_ready()` first. This preserves local discovery behaviorâ€”a stopped
 local service fails its own catalog requestâ€”while allowing public catalogs to
-remain visible independently of inference credentials. Core provider
+remain visible independently of inference credentials. Application provider
 construction defaults to the inference boundary and therefore still rejects a
 keyless OpenRouter configuration; the application discovery seam explicitly
 requests discovery-only construction.
 
 OpenRouter is supported through the OpenAI-compatible provider path by setting
 `model.provider` or `CODE_SQUID_PROVIDER` to `openrouter`. It still uses
-`OpenAICompatibleProvider`, while Core's small provider helper configures assistant
+`OpenAICompatibleProvider`, while Code Squid provider setup selects assistant
 tool-call replay with `content: null` for assistant messages that have
 `tool_calls` and no content. This provider-specific behavior is handled before
 messages are sent to the provider.

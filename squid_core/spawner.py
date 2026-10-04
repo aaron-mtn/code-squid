@@ -1,7 +1,7 @@
 """Generic construction helpers for a Squid Core agent run.
 
-Applications select prompts, tools, presentation, and any application-specific
-discovery policy before calling this module.  ``AgentLoop`` remains available
+Applications select model collaborators, prompts, tools, presentation, and
+any application-specific discovery policy before calling this module.  ``AgentLoop`` remains available
 for callers that want to construct every collaborator themselves.
 """
 
@@ -20,7 +20,6 @@ from squid_core.events import EventCallback
 from squid_core.hooks import HookRunner
 from squid_core.model_adapter import ModelAdapter
 from squid_core.platform_context import PlatformContext, detect_platform_context
-from squid_core.providers import build_provider, tool_call_content_mode
 from squid_core.session import Session
 from squid_core.settings import RuntimeSettings
 from squid_core.tools import ToolExecutor, ToolResults
@@ -130,6 +129,9 @@ def build_agent_run(
     agent=None,
     provider=None,
     model_adapter=None,
+    model_name: str | None = None,
+    provider_name: str | None = None,
+    tool_call_content_mode: str = "empty",
     compactor=None,
     compaction_context_provider: Callable[[list[dict]], str | None] | None = None,
     tool_executor=None,
@@ -153,8 +155,10 @@ def build_agent_run(
     """Construct a generic run without application discovery or terminal UI.
 
     Supplied high-level collaborators are used directly.  In particular, a
-    supplied model adapter bypasses provider construction and a supplied tool
-    executor bypasses default undo-store and executor construction. Default
+    supplied model adapter bypasses adapter construction and a supplied tool
+    executor bypasses default undo-store and executor construction.
+    With a provider, callers must also supply ``model_name`` and may select
+    ``provider_name`` and ``tool_call_content_mode`` explicitly. Default
     stores require explicit ``sessions_dir`` and ``undo_dir`` paths; store
     factories continue to receive the workspace root and own their path policy.
     """
@@ -221,6 +225,9 @@ def build_agent_run(
         tools=selected_tools,
         provider=provider,
         model_adapter=model_adapter,
+        model_name=model_name,
+        provider_name=provider_name,
+        tool_call_content_mode=tool_call_content_mode,
         compactor=compactor,
         compaction_context_provider=compaction_context_provider,
         tool_executor=tool_executor,
@@ -250,6 +257,9 @@ def build_agent_loop(
     approval_prompter=None,
     provider=None,
     model_adapter=None,
+    model_name: str | None = None,
+    provider_name: str | None = None,
+    tool_call_content_mode: str = "empty",
     compactor=None,
     compaction_context_provider: Callable[[list[dict]], str | None] | None = None,
     tool_executor=None,
@@ -261,20 +271,28 @@ def build_agent_loop(
     should_cancel: Callable[[], bool] | None = None,
     platform_context: PlatformContext | None = None,
 ) -> AgentLoop:
-    """Wire default Core collaborators around an Agent, with explicit seams."""
+    """Wire Core collaborators using a ready adapter or provider plus model name.
+
+    ``provider_name`` labels diagnostics/capabilities; ``tool_call_content_mode``
+    controls replay. The caller chooses these values, independently of settings.
+    """
 
     repo_root = Path(repo_root).resolve()
     display = NullDisplay() if display is None else display
     if model_adapter is None:
-        if settings.provider is None:
-            raise ValueError("provider settings are required unless model_adapter is supplied")
+        # Backend selection and replay policy belong to the embedding application.
+        # Do not infer either from the temporarily retained ProviderSettings.
         if provider is None:
-            provider = build_provider(settings.provider)
+            raise ValueError(
+                "provider or model_adapter must be supplied; Core does not choose a provider"
+            )
+        if model_name is None:
+            raise ValueError("model_name is required when supplying a provider")
         model_adapter = ModelAdapter(
             provider=provider,
-            model_name=settings.provider.model_name,
-            tool_call_content_mode=tool_call_content_mode(settings.provider),
-            provider_name=settings.provider.provider,
+            model_name=model_name,
+            tool_call_content_mode=tool_call_content_mode,
+            provider_name=provider_name,
         )
     set_asset_loader = getattr(model_adapter, "set_asset_loader", None)
     if callable(set_asset_loader):

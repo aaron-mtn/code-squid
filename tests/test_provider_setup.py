@@ -18,7 +18,7 @@ from code_squid.provider_setup import (
 )
 from code_squid.settings import load_settings
 from squid_core.model_adapter import ModelAdapter
-from squid_core.providers import build_provider
+from code_squid.provider_setup import build_provider
 from squid_core.providers.ollama import OllamaProvider
 from squid_core.providers.openai_compatible import OpenAICompatibleProvider
 

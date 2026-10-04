@@ -1,10 +1,11 @@
+"""Stateless generation uses ready adapters without selecting transports."""
+
 import inspect
 
 import pytest
 
 import squid_core.generation as generation
-from squid_core.model_adapter import ModelRequestError
-from squid_core.settings import CompactionSettings, ProviderSettings, RuntimeSettings
+from squid_core.model_adapter import ModelAdapter, ModelRequestError
 
 
 class FakeMessage:
@@ -56,35 +57,10 @@ class FailingProvider:
         raise self.error
 
 
-def settings(
-    *,
-    model_name: str = "generation-model",
-    provider: str = "openai_compatible",
-) -> RuntimeSettings:
-    return RuntimeSettings(
-        provider=ProviderSettings(
-            provider=provider,
-            model_name=model_name,
-            base_url="http://127.0.0.1:1234/v1",
-            api_key="test-key",
-        ),
-        approval_mode="never",
-        max_tool_steps=None,
-        stream_assistant_text=False,
-        compaction=CompactionSettings(
-            enabled=False,
-            trigger_input_tokens=25_000,
-            compact_fraction=0.8,
-            min_recent_chunks=2,
-        ),
-    )
-
-
-def test_string_input_becomes_user_message_and_request_uses_no_tools(monkeypatch) -> None:
+def test_string_input_becomes_user_message_and_request_uses_no_tools() -> None:
     provider = FakeProvider("a short title")
-    monkeypatch.setattr(generation, "build_provider", lambda supplied_settings: provider)
 
-    text = generation.generate_text("Give me a title.", settings=settings())
+    text = generation.generate_text("Give me a title.", model_adapter=ModelAdapter(provider, "generation-model"))
 
     assert text == "a short title"
     assert provider.requests == [
@@ -105,30 +81,25 @@ def test_reasoning_control_defaults_to_false() -> None:
     ].default is False
 
 
-def test_generate_text_forwards_requested_reasoning_control(monkeypatch) -> None:
+def test_generate_text_forwards_requested_reasoning_control() -> None:
     calls = []
 
     class CapturingAdapter:
-        def __init__(self, **_kwargs) -> None:
-            pass
-
         def complete_text(self, messages, **options):
             calls.append((messages, options))
             return {"content": "done", "usage": None}
 
-    monkeypatch.setattr(generation, "build_provider", lambda _settings: object())
-    monkeypatch.setattr(generation, "ModelAdapter", CapturingAdapter)
 
     generation.generate_text(
         "Hello",
-        settings=settings(),
+        model_adapter=CapturingAdapter(),
         please_stop_contemplating_the_void=True,
     )
 
     assert calls[0][1] == {"please_stop_contemplating_the_void": True}
 
 
-def test_message_list_is_passed_through_to_model_adapter(monkeypatch) -> None:
+def test_message_list_is_passed_through_to_model_adapter() -> None:
     messages = [
         {"role": "system", "content": "Be helpful."},
         {"role": "user", "content": "Hello"},
@@ -136,99 +107,56 @@ def test_message_list_is_passed_through_to_model_adapter(monkeypatch) -> None:
     calls = []
 
     class CapturingAdapter:
-        def __init__(self, **kwargs) -> None:
-            pass
-
         def complete_text(self, supplied_messages: list[dict]) -> dict:
             calls.append(supplied_messages)
             return {"content": "Hello!", "usage": None}
 
-    monkeypatch.setattr(generation, "build_provider", lambda supplied_settings: object())
-    monkeypatch.setattr(generation, "ModelAdapter", CapturingAdapter)
 
-    assert generation.generate_text(messages, settings=settings()) == "Hello!"
+    assert generation.generate_text(messages, model_adapter=CapturingAdapter()) == "Hello!"
     assert calls == [messages]
     assert calls[0] is messages
 
 
-def test_supplied_settings_configure_provider_and_model_adapter(monkeypatch) -> None:
-    supplied_settings = settings(model_name="custom-model", provider="openrouter")
-    provider = object()
-    provider_settings = []
-    adapter_kwargs = []
-
-    class CapturingAdapter:
-        def __init__(self, **kwargs) -> None:
-            adapter_kwargs.append(kwargs)
-
-        def complete_text(self, messages: list[dict]) -> dict:
-            return {"content": "done", "usage": None}
-
-    monkeypatch.setattr(
-        generation,
-        "build_provider",
-        lambda actual_settings: provider_settings.append(actual_settings) or provider,
-    )
-    monkeypatch.setattr(generation, "ModelAdapter", CapturingAdapter)
-
-    generation.generate_text("Hello", settings=supplied_settings)
-
-    assert provider_settings == [supplied_settings.provider]
-    assert adapter_kwargs == [
-        {
-            "provider": provider,
-            "model_name": "custom-model",
-            "tool_call_content_mode": "null",
-            "provider_name": "openrouter",
-        }
-    ]
+def test_generation_rejects_settings_only_construction() -> None:
+    with pytest.raises(TypeError, match="settings"):
+        generation.generate_text("Hello", settings=object())
+    with pytest.raises(TypeError, match="settings"):
+        generation.stream_text("Hello", lambda _delta: None, settings=object())
 
 
-def test_generation_requires_explicit_core_settings_or_adapter() -> None:
-    with pytest.raises(ValueError, match="settings or model_adapter"):
+def test_generation_requires_explicit_adapter() -> None:
+    with pytest.raises(TypeError, match="model_adapter"):
         generation.generate_text("Hello")
+    with pytest.raises(TypeError, match="model_adapter"):
+        generation.stream_text("Hello", lambda _delta: None)
 
 
-def test_supplied_adapter_bypasses_settings_and_provider_construction(monkeypatch) -> None:
+def test_supplied_adapter_bypasses_all_construction(monkeypatch) -> None:
     class Adapter:
         def complete_text(self, messages, **_options):
             return {"content": messages[0]["content"], "usage": None}
 
-    monkeypatch.setattr(
-        generation,
-        "build_provider",
-        lambda _settings: (_ for _ in ()).throw(AssertionError("provider built")),
-    )
-
+    monkeypatch.setattr(generation, "ModelAdapter", lambda **kwargs: pytest.fail("adapter built"))
     assert generation.generate_text("direct", model_adapter=Adapter()) == "direct"
 
 
-def test_model_request_failure_preserves_model_request_error(monkeypatch) -> None:
+def test_model_request_failure_preserves_model_request_error() -> None:
     provider_error = RuntimeError("provider unavailable")
-    monkeypatch.setattr(
-        generation,
-        "build_provider",
-        lambda supplied_settings: FailingProvider(provider_error),
-    )
-
+    adapter = ModelAdapter(FailingProvider(provider_error), "generation-model")
     with pytest.raises(ModelRequestError) as exc_info:
-        generation.generate_text("Hello", settings=settings())
-
-    assert str(exc_info.value) == (
-        "Model request failed: RuntimeError: provider unavailable"
-    )
+        generation.generate_text("Hello", model_adapter=adapter)
+    assert str(exc_info.value) == "Model request failed: RuntimeError: provider unavailable"
     assert exc_info.value.__cause__ is provider_error
 
 
-def test_stream_text_converts_string_input_forwards_deltas_and_returns_content(monkeypatch) -> None:
+def test_stream_text_converts_string_input_forwards_deltas_and_returns_content() -> None:
     provider = StreamingProvider("a short title", ["a short ", "title"])
-    monkeypatch.setattr(generation, "build_provider", lambda supplied_settings: provider)
     deltas = []
 
     text = generation.stream_text(
         "Give me a title.",
         deltas.append,
-        settings=settings(),
+        model_adapter=ModelAdapter(provider, "generation-model"),
     )
 
     assert text == "a short title"
@@ -242,32 +170,27 @@ def test_stream_text_converts_string_input_forwards_deltas_and_returns_content(m
     ]
 
 
-def test_stream_text_forwards_requested_reasoning_control(monkeypatch) -> None:
+def test_stream_text_forwards_requested_reasoning_control() -> None:
     calls = []
 
     class CapturingAdapter:
-        def __init__(self, **_kwargs) -> None:
-            pass
-
         def complete_text_streaming(self, messages, callback, **options):
             calls.append((messages, options))
             callback("done")
             return "done"
 
-    monkeypatch.setattr(generation, "build_provider", lambda _settings: object())
-    monkeypatch.setattr(generation, "ModelAdapter", CapturingAdapter)
 
     generation.stream_text(
         "Hello",
         lambda _delta: None,
-        settings=settings(),
+        model_adapter=CapturingAdapter(),
         please_stop_contemplating_the_void=True,
     )
 
     assert calls[0][1] == {"please_stop_contemplating_the_void": True}
 
 
-def test_stream_text_passes_message_list_through_unchanged(monkeypatch) -> None:
+def test_stream_text_passes_message_list_through_unchanged() -> None:
     messages = [
         {"role": "system", "content": "Be helpful."},
         {"role": "user", "content": "Hello"},
@@ -275,57 +198,43 @@ def test_stream_text_passes_message_list_through_unchanged(monkeypatch) -> None:
     calls = []
 
     class CapturingAdapter:
-        def __init__(self, **kwargs) -> None:
-            pass
-
         def complete_text_streaming(self, supplied_messages, on_text_delta) -> str:
             calls.append(supplied_messages)
             on_text_delta("Hello!")
             return "Hello!"
 
-    monkeypatch.setattr(generation, "build_provider", lambda supplied_settings: object())
-    monkeypatch.setattr(generation, "ModelAdapter", CapturingAdapter)
     deltas = []
 
-    assert generation.stream_text(messages, deltas.append, settings=settings()) == "Hello!"
+    assert generation.stream_text(messages, deltas.append, model_adapter=CapturingAdapter()) == "Hello!"
     assert deltas == ["Hello!"]
     assert calls == [messages]
     assert calls[0] is messages
 
 
-def test_stream_text_falls_back_when_provider_does_not_support_streaming(monkeypatch) -> None:
+def test_stream_text_falls_back_when_provider_does_not_support_streaming() -> None:
     provider = FakeProvider("completed response")
-    monkeypatch.setattr(generation, "build_provider", lambda supplied_settings: provider)
     deltas = []
 
-    text = generation.stream_text("Hello", deltas.append, settings=settings())
+    text = generation.stream_text("Hello", deltas.append, model_adapter=ModelAdapter(provider, "generation-model"))
 
     assert text == "completed response"
     assert deltas == ["completed response"]
 
 
-def test_stream_text_preserves_model_request_error_chaining(monkeypatch) -> None:
+def test_stream_text_preserves_model_request_error_chaining() -> None:
     provider_error = RuntimeError("provider unavailable")
 
     class FailingStreamingProvider:
-        def supports_streaming(self) -> bool:
+        def supports_streaming(self):
             return True
 
         def stream_chat(self, **kwargs):
             raise provider_error
 
-    monkeypatch.setattr(
-        generation,
-        "build_provider",
-        lambda supplied_settings: FailingStreamingProvider(),
-    )
-
+    adapter = ModelAdapter(FailingStreamingProvider(), "generation-model")
     with pytest.raises(ModelRequestError) as exc_info:
-        generation.stream_text("Hello", lambda _delta: None, settings=settings())
-
-    assert str(exc_info.value) == (
-        "Model request failed: RuntimeError: provider unavailable"
-    )
+        generation.stream_text("Hello", lambda _delta: None, model_adapter=adapter)
+    assert str(exc_info.value) == "Model request failed: RuntimeError: provider unavailable"
     assert exc_info.value.__cause__ is provider_error
 
 
