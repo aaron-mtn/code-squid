@@ -2,7 +2,12 @@
 
 from dataclasses import dataclass
 
-from squid_core.hooks import HookResponse, RepeatedFailureNudge
+from squid_core.hooks import (
+    HookResponse,
+)
+from code_squid.hooks import (
+    RepeatedFailureNudge,
+)
 
 
 GUIDANCE = "Choose a materially different next action."

@@ -2719,3 +2719,125 @@
   `python -m compileall -q code_squid squid_core tests`, Core response/adapter/
   provider/spawner/generation imports, and `git diff --check` passed.
   No live local or cloud model inference was performed.
+
+
+- 2026-10-04: Completed provider extraction Patch 3. Moved OpenAI-compatible
+  and native Ollama transports from `squid_core/providers/` into the separately
+  installable `squid_providers/` package; deleted the old transport paths without
+  compatibility re-exports. Providers import only Core's completed response
+  types and generic provider contract/control signal. Streaming assembly, native
+  completion checks, response normalization, discovery/readiness, image wire
+  conversion, raw tracing, and transport behavior remain unchanged. Corrected
+  `_get_json` to describe decoded discovery JSON rather than ModelResponse.
+  `BaseProvider` and the single `StreamCancelled` identity remain Core-owned;
+  the transport-only CancellationMonitor and its bounded watcher moved to
+  `squid_providers/cancellation.py`.
+  Moved ProviderSettings and reasoning-mode validation to application-owned
+  `code_squid/provider_settings.py`. Core RuntimeSettings no longer has a
+  provider field. `Settings.to_provider_settings()` resolves provider ID, model,
+  URL/key, temperature, reasoning mode/budget, and Ollama timeout separately from
+  generic runtime settings. Code Squid provider setup constructs transports
+  imported from squid-providers; agent setup injects them with explicit model,
+  diagnostic label, and replay mode. Ready adapters and custom providers retain
+  their precedence and bypass default transport construction.
+  Root pyproject builds only squid-core; provider-local pyproject builds only
+  squid-providers, requiring squid-core, OpenAI, and httpx. Core retains its
+  document/image-reader dependencies and has no SDK/transport dependencies.
+  Requirements install both local distributions editably plus terminal packages.
+  Package builds exclude cached bytecode; file-tree generation excludes build
+  and egg-info artifacts. Updated README/architecture and regenerated the ignored
+  file-tree reference. Transport/vision/cancellation tests moved under
+  `tests/providers/`; selection/replay construction moved to application provider
+  setup tests, CLI signal handling to its own application test, and provider
+  settings validation out of Core tests. Core adapter fixtures now use normalized
+  responses directly. Added fresh-process runtime import checks for the exact
+  allowed provider-to-Core seams and shared cancellation identity.
+  Verification: 578 focused tests passed, followed by the full suite with
+  1,692 passed and one platform skip. Final provider/CLI-cancellation/boundary
+  checks passed 107 tests after test ownership and package cleanup. Compilation
+  of Core, providers, application, tests, and the file-tree script passed;
+  git diff --check passed. Built and inspected both wheels, verified their
+  package contents and dependency metadata, and installed both editably. A
+  separate Core-only wheel installation imported spawner/generation with
+  squid-providers, OpenAI, httpx, and Code Squid blocked. Construction smoke
+  checks built all five configured application providers without requests;
+  focused spawner/runner tests verified custom provider and adapter injection.
+  No live inference was performed. Separate repository publication and a
+  standalone Code Squid application distribution remain deferred; the current
+  source workspace already builds independent Core/provider wheels. No registry,
+  plugin framework, compatibility layer, or unrelated runtime redesign was added.
+
+
+- 2026-10-04: Finished the physical repository split and remaining provider
+  catalog/config ownership after the earlier staged extraction. Initialized
+  sibling squid-core and squid-providers Git repositories; moved runtime,
+  transports, packaging and tests by ownership without keeping application-local
+  source copies or compatibility re-exports. Git history and the earlier staged
+  patch remain in Code Squid; no commits or remote publication were performed.
+  ProviderProfiles, IDs/names/defaults, constructor choice, readiness/discovery,
+  replay policy, credential variables, supported scoped config, shared transport
+  control validation and legacy config interpretation now live in Providers.
+  Code Squid consumes the catalog, persists arbitrary supported scoped overrides,
+  applies its environment overrides and preserves model-selection UX. Removed
+  application URL/key defaults and the named native timeout field; timeout is
+  providers.<id>.request_timeout in provider-owned config. No concrete provider
+  IDs/classes remain in production Code Squid or Core. Generic Core contracts,
+  injected adapter/provider precedence, normalized responses, tracing ownership
+  and cancellation semantics remain unchanged.
+  Each repository now builds its own distribution. Core has generic reader
+  dependencies only; Providers adds OpenAI/httpx; Code Squid depends on both
+  local packages plus terminal dependencies. Requirements supply sibling editable
+  paths together, avoiding lookup of unpublished packages. Updated README and
+  architecture docs in all repositories; provider-extraction.md records moves.
+  Split mixed agent/spawner/Mod/PDF/image tests; moved backend construction,
+  transport/config/vision tests to Providers and generic runtime tests to Core.
+  Retired old-path-only checks and added current import/source guards.
+  Verification: focused Core (231), Providers (125) and corrected application
+  settings/boundary/construction (120) checks passed during implementation.
+  Final full suites in a fresh environment with sibling editable installs:
+  Code Squid 706 passed; Core 847 passed, 1 platform skip; Providers 139 passed
+  (1,692 passed total). Compilation and file-tree generation passed. All three
+  wheels built and their contents/dependencies were inspected; they contain only
+  their intended packages, without tests/bytecode. Installed all wheels together
+  and imported them outside the checkout, constructed all catalog providers
+  without requests, ran pip check and installed CLI --help. A separate Core-only
+  wheel environment has no application, Providers, OpenAI or httpx and imported
+  spawner/generation with those dependencies explicitly blocked. Fresh-process
+  guards verify Providers imports only the two allowed Core modules with Code
+  Squid blocked; source guards/searches verify no provider IDs/classes in Core
+  or Code Squid. git diff --check passed in each repository; the complete
+  application working-tree diff against HEAD also passed. The prior staged
+  snapshot was left intact. No live inference was performed.
+  Wheel inspection detected stale Core files in the old app build cache. Moved
+  generated build/old distribution metadata to a temp archive and rebuilt cleanly;
+  deleting those generated artifacts had been rejected by automatic review with
+  the reason "blocked by policy". Deferred only commits, remote publication and
+  package releases; no architecture or runtime work remains deferred.
+
+- 2026-10-04: Made Code Squid own its concrete behavioral hooks under
+  code_squid/hooks/: no_progress.py, too_many_reads.py and post_verification.py
+  moved from sibling Core. agent_setup imports them from code_squid.hooks;
+  Core still supplies lifecycle contracts and HookRunner. Preserved thresholds,
+  guidance, state handling and composition order among surviving hooks exactly.
+  TooManyReadsNudge and PostVerificationNudge remain enabled by default;
+  RepeatedFailureNudge remains disabled. Deleted RepeatedReadNudge composition,
+  configuration and tests; there are no shims. Core's generic compaction_applied
+  and read_result_trimmed contracts and dispatch remain intact for host hooks.
+  Moved focused behavioral tests and mixed Core loop tests to application
+  ownership. Split the Providers image test so its behavioral assertion lives
+  with TooManyReadsNudge and its transport assertion stays in Providers.
+  Updated architecture, test-ownership notes, package-layout expectation and
+  generated file tree. Historical devlog entries remain unchanged.
+  Compatibility: consumers must import these concrete hooks/constants from
+  code_squid.hooks; remove obsolete repeated_read keys from runtime settings,
+  including disabled entries, because settings reject unknown hook IDs.
+  Verification: focused application hook/composition/settings/boundary tests
+  207 passed; full application suite 777 passed. Core focused 185 passed and
+  full 734 passed, 1 platform skip; Providers image tests 4 passed and full
+  139 passed. compileall passed for all three source/test trees. Core's
+  fresh-process import/host-hook smoke test blocks Code Squid and transports.
+  Source checks establish one-way dependencies and absence of deleted-hook
+  production references. Implementation ASTs match Core originals except for
+  relocated imports. File-tree generation and git diff --check passed.
+  No live inference; no implementation follow-ups deferred. Existing staged
+  and unrelated working-tree changes were preserved; no commits or release.

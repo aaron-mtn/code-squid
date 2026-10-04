@@ -8,13 +8,34 @@ from squid_core.hooks import (
     BeforeModelTurnContext,
     BeforeRunContext,
     CompactionAppliedContext,
+    HookRunner,
+    ToolResultContext,
+)
+from code_squid.hooks import (
     DEFAULT_FIRST_NUDGE_READS,
     DEFAULT_STRONG_NUDGE_READS,
-    HookRunner,
     TOO_MANY_READS_GUIDANCE,
     TOO_MANY_READS_STRONG_GUIDANCE,
     TooManyReadsNudge,
 )
+
+
+def test_image_read_without_source_ranges_emits_no_guidance(tmp_path) -> None:
+    """Image reads count as actions but have no textual source-line volume."""
+    result = {
+        "ok": True,
+        "tool": "read_file",
+        "path": str(tmp_path / "image.png"),
+        "media_type": "image",
+        "image": {},
+    }
+    context = ToolResultContext(
+        session_id="session",
+        repo_root=str(tmp_path),
+        action={"tool": "read_file", "args": {"path": result["path"]}},
+        result=result,
+    )
+    assert TooManyReadsNudge().tool_result(context) is None
 
 
 @dataclass(frozen=True)

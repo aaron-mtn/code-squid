@@ -16,8 +16,8 @@ from code_squid.settings import (
 from squid_core.agent_loop import RunResult
 from code_squid.agent_setup import build_coding_task_run, run_coding_task
 from squid_core.platform_context import PlatformContext
-from squid_core.providers.ollama import OllamaProvider
-from squid_core.providers.openai_compatible import OpenAICompatibleProvider
+from squid_providers.ollama import OllamaProvider
+from squid_providers.openai_compatible import OpenAICompatibleProvider
 from squid_core.spawner import NullDisplay
 
 

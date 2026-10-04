@@ -7,12 +7,13 @@ import pytest
 from squid_core.hooks import (
     BeforeModelTurnContext,
     BeforeRunContext,
-    CURRENT_VERIFICATION_STATE_GUIDANCE,
     HookRunner,
+    ToolResultContext,
+)
+from code_squid.hooks import (
+    CURRENT_VERIFICATION_STATE_GUIDANCE,
     POST_VERIFICATION_GUIDANCE,
     PostVerificationNudge,
-    RepeatedReadNudge,
-    ToolResultContext,
 )
 
 
@@ -242,40 +243,6 @@ def test_later_action_uses_count_accumulated_by_already_covered_read() -> None:
     assert nudge._post_verification_action_count == 0
 
 
-def test_repeated_read_guidance_is_not_stacked_with_post_verification() -> None:
-    post_verification = PostVerificationNudge(threshold=2)
-    runner = HookRunner([RepeatedReadNudge(), post_verification])
-    verification = _context(
-        "run_command", command="pytest focused.py", verification=True
-    )
-    read = _Context(
-        action={"tool": "read_file", "args": {"path": "a.py"}},
-        result={
-            "ok": True,
-            "tool": "read_file",
-            "path": "a.py",
-            "content": "source",
-            "start_line": 1,
-            "end_line": 10,
-        },
-    )
-    _observe(runner, verification)
-    _observe(runner, read)
-
-    repeated_read = _observe(runner, read)
-
-    assert repeated_read.updated_tool_output["already_covered"] is True
-    assert (
-        "You already read this unchanged source"
-        in repeated_read.additional_context
-    )
-    assert POST_VERIFICATION_GUIDANCE not in repeated_read.additional_context
-    assert post_verification._post_verification_action_count == 2
-
-    later = _observe(runner, verification)
-    assert later.additional_context == ""
-    assert _guidance(runner) == POST_VERIFICATION_GUIDANCE
-    assert post_verification._post_verification_action_count == 0
 
 
 def test_threshold_guidance_and_reset_remain_equivalent() -> None:

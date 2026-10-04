@@ -1,5 +1,6 @@
 """Architecture boundary checks for reusable and application-owned modules."""
 
+import squid_core
 import importlib
 from pathlib import Path
 import re
@@ -26,147 +27,6 @@ REUSABLE_MODULES = (
     "storage",
     "tools",
 )
-
-
-def test_reusable_runtime_modules_import_from_squid_core() -> None:
-    for module_name in REUSABLE_MODULES:
-        module = importlib.import_module(f"squid_core.{module_name}")
-        assert "squid_core" in Path(module.__file__).parts
-
-    from squid_core.agent_loop import AgentLoop, RunResult
-    from squid_core.compaction import Compactor
-
-    assert Compactor.__module__ == "squid_core.compaction.compactor"
-    assert AgentLoop.__module__ == "squid_core.agent_loop.loop"
-    assert RunResult.__module__ == "squid_core.agent_loop.loop"
-
-
-def test_subsystem_packages_expose_useful_public_seams() -> None:
-    from squid_core.hooks import BeforeRunContext, HookRunner
-    from squid_core.mods import (
-        Mod,
-        ResolvedMod,
-        discover_mods,
-        load_mod,
-        resolve_mod,
-        validate_mod,
-    )
-    from squid_core.safety import ActionPreflight, ApprovalPolicy
-    from squid_core.tools import TOOLS, ToolExecutor, ToolResults
-    from squid_core.tools.builtins import TOOLS as BUILTIN_TOOLS
-    from squid_core.storage import SessionStore, UndoStore, write_error_log
-
-    assert all((Mod, ResolvedMod, discover_mods, load_mod, resolve_mod, validate_mod))
-    assert all((HookRunner, BeforeRunContext, ActionPreflight, ApprovalPolicy))
-    assert all((ToolExecutor, ToolResults))
-    assert all((SessionStore, UndoStore, write_error_log))
-    assert TOOLS is BUILTIN_TOOLS
-
-
-def test_events_remains_a_flat_observation_module() -> None:
-    from squid_core import events
-
-    source = Path(events.__file__).read_text(encoding="utf-8")
-    assert "squid_core.hooks" not in source
-
-
-def test_old_root_tool_package_is_removed() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    assert not (repo_root / "tools").exists()
-
-
-def test_old_core_runner_module_is_removed() -> None:
-    package_root = Path(__file__).resolve().parents[1] / "squid_core"
-
-    assert not (package_root / "runner.py").exists()
-
-
-def test_old_flat_compaction_support_modules_are_removed() -> None:
-    package_root = Path(__file__).resolve().parents[1] / "squid_core"
-
-    assert not (package_root / "context_status.py").exists()
-    assert not (package_root / "token_estimate.py").exists()
-
-
-def test_old_provider_source_package_is_removed() -> None:
-    provider_root = Path(__file__).resolve().parents[1] / "providers"
-
-    assert not list(provider_root.glob("*.py"))
-
-
-def test_top_level_storage_package_is_removed() -> None:
-    storage_root = Path(__file__).resolve().parents[1] / "storage"
-
-    assert not storage_root.exists()
-
-
-def test_old_subsystem_import_paths_are_absent() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    stale_patterns = tuple(
-        f"squid_core.{module_name}"
-        for module_name in (
-            "tool_executor",
-            "tool_results",
-            "user_tools",
-            "action_preflight",
-            "approval",
-            "command_safety",
-            "workspace_boundary",
-            "hook_loader",
-        )
-    )
-
-    violations = []
-    for root_name in ("squid_core", "code_squid", "providers", "storage", "tests"):
-        for source_path in (repo_root / root_name).rglob("*.py"):
-            if source_path == Path(__file__).resolve():
-                continue
-            source = source_path.read_text(encoding="utf-8")
-            if any(pattern in source for pattern in stale_patterns):
-                violations.append(source_path.relative_to(repo_root).as_posix())
-
-    assert violations == []
-
-
-def test_squid_core_has_no_code_squid_application_imports() -> None:
-    package_root = Path(__file__).resolve().parents[1] / "squid_core"
-    forbidden = (
-        re.compile(r"^\s*(?:from|import)\s+code_squid(?:\.|\s|$)", re.MULTILINE),
-    )
-
-    violations = []
-    for source_path in package_root.rglob("*.py"):
-        source = source_path.read_text(encoding="utf-8")
-        if any(pattern.search(source) for pattern in forbidden):
-            violations.append(source_path.relative_to(package_root).as_posix())
-
-    assert violations == []
-
-
-def test_squid_core_storage_has_no_application_path_or_environment_policy() -> None:
-    storage_root = Path(__file__).resolve().parents[1] / "squid_core" / "storage"
-    forbidden = (".code-squid", "CODE_SQUID_", "code_squid.app_paths", "cli.", "ui.")
-
-    violations = []
-    for source_path in storage_root.rglob("*.py"):
-        source = source_path.read_text(encoding="utf-8")
-        if any(pattern in source for pattern in forbidden):
-            violations.append(source_path.relative_to(storage_root).as_posix())
-
-    assert violations == []
-
-
-def test_old_application_packages_are_removed() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-
-    for package_name in ("agent", "cli", "config", "core", "ui"):
-        assert not (repo_root / package_name).exists()
-
-
-def test_repo_root_bundled_skills_are_removed() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-
-    assert not (repo_root / "skills").exists()
 
 
 def test_application_setup_has_no_agent_loop_compatibility_wrapper() -> None:
@@ -247,43 +107,28 @@ def test_code_squid_application_package_has_expected_layout() -> None:
         "console/ui/startup_application.py",
         "console/ui/streaming_narration.py",
         "console/ui/tool_display.py",
+        "hooks/__init__.py",
+        "hooks/no_progress.py",
+        "hooks/post_verification.py",
+        "hooks/too_many_reads.py",
         "provider_setup.py",
         "settings.py",
     ]
 
 
-
-def test_generic_core_imports_do_not_initialize_concrete_transports() -> None:
-    # Use a fresh process: application test imports may already have loaded SDKs.
-    script = """
-import sys
-class BlockTransports:
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname in {"squid_core.providers.ollama", "squid_core.providers.openai_compatible", "openai", "httpx"}:
-            raise AssertionError(f"concrete transport dependency imported: {fullname}")
-        return None
-sys.meta_path.insert(0, BlockTransports())
-from squid_core.providers import BaseProvider, StreamCancelled
-import squid_core.spawner
-import squid_core.generation
-assert BaseProvider and StreamCancelled
-"""
-    subprocess.run([sys.executable, "-c", script], check=True,
-                   cwd=Path(__file__).resolve().parents[1])
-
-
-def test_core_does_not_select_or_construct_concrete_providers() -> None:
-    core_root = Path(__file__).resolve().parents[1] / "squid_core"
-    violations = []
-    for path in core_root.rglob("*.py"):
-        # Transports stay physically in Core for this patch, but nothing else
-        # may depend on them. Their protocol behavior is deliberately unchanged.
-        if "providers" in path.relative_to(core_root).parts:
-            continue
+def test_application_has_no_concrete_provider_names_or_classes():
+    import code_squid
+    from squid_providers.catalog import VALID_PROVIDERS
+    forbidden = tuple(VALID_PROVIDERS) + ("OpenAICompatibleProvider", "OllamaProvider")
+    for path in Path(code_squid.__file__).parent.rglob("*.py"):
         source = path.read_text(encoding="utf-8")
-        if any(name in source for name in (
-            "build_provider", "OpenAICompatibleProvider", "OllamaProvider",
-            "squid_core.providers.openai_compatible", "squid_core.providers.ollama",
-        )):
-            violations.append(path.relative_to(core_root).as_posix())
-    assert violations == []
+        assert not any(name in source for name in forbidden), path
+
+
+def test_runtime_packages_are_external_to_application_checkout():
+    import code_squid, squid_core, squid_providers
+    app_root = Path(__file__).resolve().parents[1]
+    assert not (app_root / "squid_core").exists()
+    assert not (app_root / "squid_providers").exists()
+    assert not Path(squid_core.__file__).resolve().is_relative_to(app_root)
+    assert not Path(squid_providers.__file__).resolve().is_relative_to(app_root)

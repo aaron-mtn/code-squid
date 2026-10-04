@@ -11,28 +11,29 @@ from typing import Any
 
 from code_squid.app_paths import settings_path as app_settings_path
 from code_squid.app_paths import workspace_state_dir
-from code_squid.provider_setup import PROFILES_BY_ID, VALID_PROVIDERS
+from squid_providers.catalog import (
+    DEFAULT_PROVIDER_ID, VALID_PROVIDERS, CONNECTION_FIELDS,
+    resolve_config, validate_config, legacy_model_config, remove_legacy_model_config,
+)
+from squid_providers.settings import (
+    ProviderSettings, validate_temperature, validate_reasoning_mode,
+    validate_reasoning_token_budget,
+)
 from squid_core.settings import (
     CompactionSettings as CoreCompactionSettings,
-    ProviderSettings,
     RuntimeSettings as CoreRuntimeSettings,
-    VALID_REASONING_MODES,
 )
 from squid_core.storage.atomic_json import atomic_write_json
 
 
-# Defaults keep Code Squid usable with a local OpenAI-compatible server,
-# especially LM Studio, without requiring a settings file.
-DEFAULT_BASE_URL = "http://127.0.0.1:1234/v1"
-DEFAULT_API_KEY = "lm-studio"
+# Backend defaults are resolved by the provider package, never by app settings.
 DEFAULT_MODEL_NAME = "qwen3.5-9b"
-DEFAULT_PROVIDER = "lm_studio"
+DEFAULT_PROVIDER = DEFAULT_PROVIDER_ID
 DEFAULT_DEBUG = False
 DEFAULT_SHOW_REASONING = False
 DEFAULT_TEMPERATURE = None
 DEFAULT_REASONING_MODE = None
 DEFAULT_REASONING_TOKEN_BUDGET = None
-DEFAULT_OLLAMA_REQUEST_TIMEOUT = None
 
 # Approval mode is parsed here, but enforcement belongs in the runtime/tool
 # execution path. "never" is the current trusted-local behavior.
@@ -46,7 +47,6 @@ DEFAULT_STREAM_ASSISTANT_TEXT = False
 # Stable application-level IDs keep enablement policy out of the generic Hook
 # implementations and let future Mod/user configuration target one built-in.
 DEFAULT_BUILT_IN_HOOK_SETTINGS = {
-    "repeated_read": False,
     "too_many_reads": True,
     "post_verification": True,
     "repeated_failure": False,
@@ -62,19 +62,23 @@ DEFAULT_COMPACTION_MIN_RECENT_CHUNKS = 2
 
 @dataclass(frozen=True)
 class ModelSettings:
-    base_url: str | None = DEFAULT_BASE_URL
-    api_key: str | None = DEFAULT_API_KEY
+    """Selected model, shared preferences and effective provider-owned config."""
+
+    base_url: str | None = None
+    api_key: str | None = None
     api_key_env: str | None = None
     name: str = DEFAULT_MODEL_NAME
     provider: str = DEFAULT_PROVIDER
     temperature: float | int | None = DEFAULT_TEMPERATURE
     reasoning_mode: str | None = DEFAULT_REASONING_MODE
     reasoning_token_budget: int | None = DEFAULT_REASONING_TOKEN_BUDGET
-    ollama_request_timeout: float | int | None = DEFAULT_OLLAMA_REQUEST_TIMEOUT
+    provider_config: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class DisplaySettings:
+    """Application presentation preferences."""
+
     debug: bool = DEFAULT_DEBUG
     show_reasoning: bool = DEFAULT_SHOW_REASONING
 
@@ -108,30 +112,37 @@ class Settings:
     display: DisplaySettings
     runtime: RuntimeSettings
     compaction: CompactionSettings = field(default_factory=CompactionSettings)
-    # Only explicitly saved connection fields live here. Missing providers and
+    # Only explicitly saved configuration overrides live here. Missing providers and
     # fields continue to inherit ProviderProfile defaults at resolution time.
-    providers: dict[str, dict[str, str | None]] = field(default_factory=dict)
+    providers: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def to_provider_settings(self) -> ProviderSettings:
+        """Resolve application transport values without putting them into Core."""
+
+        config = dict(self.model.provider_config)
+        # Directly constructed settings still inherit provider defaults. Loaded
+        # settings carry resolved config, including explicitly null credentials.
+        for name in ("base_url", "api_key", "api_key_env"):
+            value = getattr(self.model, name)
+            if value is not None:
+                config[name] = value
+        if not all(name in config for name in CONNECTION_FIELDS):
+            config = resolve_config(self.model.provider, config)
+        return ProviderSettings(
+            provider=self.model.provider,
+            model_name=self.model.name,
+            base_url=config["base_url"],
+            api_key=config["api_key"],
+            temperature=self.model.temperature,
+            reasoning_mode=self.model.reasoning_mode,
+            reasoning_token_budget=self.model.reasoning_token_budget,
+            config=config,
+        )
 
     def to_runtime_settings(self) -> CoreRuntimeSettings:
-        """Translate application configuration into effective Core settings."""
-
-        # An omitted Ollama endpoint means its conventional local endpoint;
-        # Code Squid's LM Studio default must not leak into Core construction.
-        base_url = self.model.base_url
-        if self.model.provider == "ollama" and base_url == DEFAULT_BASE_URL:
-            base_url = None
+        """Translate only generic execution settings into the Core contract."""
 
         return CoreRuntimeSettings(
-            provider=ProviderSettings(
-                provider=self.model.provider,
-                model_name=self.model.name,
-                base_url=base_url,
-                api_key=self.model.api_key,
-                temperature=self.model.temperature,
-                reasoning_mode=self.model.reasoning_mode,
-                reasoning_token_budget=self.model.reasoning_token_budget,
-                ollama_request_timeout=self.model.ollama_request_timeout,
-            ),
             approval_mode=self.runtime.approval_mode,
             max_tool_steps=self.runtime.max_tool_steps,
             stream_assistant_text=self.runtime.stream_assistant_text,
@@ -192,40 +203,6 @@ def _section(settings: dict[str, Any], name: str, settings_path: Path) -> dict[s
         raise ValueError(f"Invalid settings JSON in {settings_path}: {name} must be an object")
 
     return value
-
-
-def _resolve_api_key(
-    connection_settings: dict[str, Any],
-    settings_path: Path,
-    *,
-    provider: str,
-    field_prefix: str,
-) -> tuple[str | None, str | None]:
-    # Resolve API keys without requiring secrets in the app settings file.
-    # CODE_SQUID_API_KEY wins over api_key_env, which wins over api_key.
-    profile = PROFILES_BY_ID[provider]
-    api_key_env = connection_settings.get("api_key_env", profile.api_key_env)
-    if api_key_env is not None and not isinstance(api_key_env, str):
-        raise ValueError(
-            f"Invalid settings JSON in {settings_path}: {field_prefix}.api_key_env "
-            "must be a string or null"
-        )
-
-    env_api_key = os.getenv("CODE_SQUID_API_KEY")
-    if env_api_key is not None:
-        return env_api_key, api_key_env
-
-    if api_key_env is not None:
-        api_key = os.getenv(api_key_env)
-        if api_key is not None:
-            return api_key, api_key_env
-        if "api_key_env" in connection_settings:
-            raise ValueError(
-                f"Invalid settings JSON in {settings_path}: {field_prefix}.api_key_env "
-                f"names missing environment variable {api_key_env!r}"
-            )
-
-    return connection_settings.get("api_key", profile.api_key), api_key_env
 
 
 def _approval_mode(runtime_settings: dict[str, Any], settings_path: Path) -> str:
@@ -425,18 +402,8 @@ def _compaction_settings(
     )
 
 
-def _validate_temperature(value: Any, source: str) -> float | int | None:
-    if value is None:
-        return None
-
-    if isinstance(value, bool) or not isinstance(value, int | float) or not 0 <= value <= 2:
-        raise ValueError(f"Invalid {source}: model.temperature must be null or a number from 0 through 2")
-
-    return value
-
-
 def _temperature(model_settings: dict[str, Any], settings_path: Path) -> float | int | None:
-    temperature = _validate_temperature(
+    temperature = validate_temperature(
         model_settings.get("temperature", DEFAULT_TEMPERATURE),
         f"settings JSON in {settings_path}",
     )
@@ -449,7 +416,7 @@ def _temperature(model_settings: dict[str, Any], settings_path: Path) -> float |
         return None
 
     try:
-        return _validate_temperature(float(temperature_env), "CODE_SQUID_TEMPERATURE")
+        return validate_temperature(float(temperature_env), "CODE_SQUID_TEMPERATURE")
     except ValueError as error:
         if str(error).startswith("Invalid CODE_SQUID_TEMPERATURE"):
             raise
@@ -458,19 +425,8 @@ def _temperature(model_settings: dict[str, Any], settings_path: Path) -> float |
         ) from error
 
 
-def _validate_reasoning_mode(value: Any, source: str) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str) or value not in VALID_REASONING_MODES:
-        valid_modes = ", ".join(sorted(VALID_REASONING_MODES))
-        raise ValueError(
-            f"Invalid {source}: model.reasoning_mode must be null or one of {valid_modes}"
-        )
-    return value
-
-
 def _reasoning_mode(model_settings: dict[str, Any], settings_path: Path) -> str | None:
-    reasoning_mode = _validate_reasoning_mode(
+    reasoning_mode = validate_reasoning_mode(
         model_settings.get("reasoning_mode", DEFAULT_REASONING_MODE),
         f"settings JSON in {settings_path}",
     )
@@ -479,25 +435,14 @@ def _reasoning_mode(model_settings: dict[str, Any], settings_path: Path) -> str 
         return reasoning_mode
     if reasoning_mode_env == "":
         return None
-    return _validate_reasoning_mode(reasoning_mode_env, "CODE_SQUID_REASONING_MODE")
-
-
-def _validate_reasoning_token_budget(value: Any, source: str) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ValueError(
-            f"Invalid {source}: model.reasoning_token_budget must be null or a "
-            "non-negative integer"
-        )
-    return value
+    return validate_reasoning_mode(reasoning_mode_env, "CODE_SQUID_REASONING_MODE")
 
 
 def _reasoning_token_budget(
     model_settings: dict[str, Any],
     settings_path: Path,
 ) -> int | None:
-    budget = _validate_reasoning_token_budget(
+    budget = validate_reasoning_token_budget(
         model_settings.get(
             "reasoning_token_budget",
             DEFAULT_REASONING_TOKEN_BUDGET,
@@ -516,34 +461,10 @@ def _reasoning_token_budget(
             "Invalid CODE_SQUID_REASONING_TOKEN_BUDGET: "
             "model.reasoning_token_budget must be null or a non-negative integer"
         ) from error
-    return _validate_reasoning_token_budget(
+    return validate_reasoning_token_budget(
         parsed_budget,
         "CODE_SQUID_REASONING_TOKEN_BUDGET",
     )
-
-
-def _ollama_request_timeout(
-    model_settings: dict[str, Any],
-    settings_path: Path,
-) -> float | int | None:
-    """Read an optional Ollama-only timeout; the provider owns its default."""
-
-    timeout = model_settings.get(
-        "ollama_request_timeout",
-        DEFAULT_OLLAMA_REQUEST_TIMEOUT,
-    )
-    if timeout is None:
-        return None
-    if (
-        isinstance(timeout, bool)
-        or not isinstance(timeout, int | float)
-        or timeout <= 0
-    ):
-        raise ValueError(
-            f"Invalid settings JSON in {settings_path}: "
-            "model.ollama_request_timeout must be null or a positive number"
-        )
-    return timeout
 
 
 def _provider(model_settings: dict[str, Any], settings_path: Path) -> str:
@@ -557,17 +478,17 @@ def _provider(model_settings: dict[str, Any], settings_path: Path) -> str:
     return provider
 
 
-_CONNECTION_FIELDS = ("base_url", "api_key", "api_key_env")
+_CONNECTION_FIELDS = CONNECTION_FIELDS
 
 
 def _provider_connections(
     raw_settings: dict[str, Any],
     model_settings: dict[str, Any],
     settings_path: Path,
-) -> dict[str, dict[str, str | None]]:
+) -> dict[str, dict[str, Any]]:
     """Read scoped connections and interpret legacy flat fields in memory."""
     raw_providers = _section(raw_settings, "providers", settings_path)
-    providers: dict[str, dict[str, str | None]] = {}
+    providers: dict[str, dict[str, Any]] = {}
     for provider_id, value in raw_providers.items():
         if provider_id not in VALID_PROVIDERS:
             valid_providers = ", ".join(sorted(VALID_PROVIDERS))
@@ -580,31 +501,16 @@ def _provider_connections(
                 f"Invalid settings JSON in {settings_path}: providers.{provider_id} "
                 "must be an object"
             )
-        connection: dict[str, str | None] = {}
-        for name in _CONNECTION_FIELDS:
-            if name not in value:
-                continue
-            field_value = value[name]
-            if field_value is not None and not isinstance(field_value, str):
-                raise ValueError(
-                    f"Invalid settings JSON in {settings_path}: "
-                    f"providers.{provider_id}.{name} must be a string or null"
-                )
-            connection[name] = field_value
-        providers[provider_id] = connection
+        providers[provider_id] = validate_config(provider_id, value)
 
     saved_provider = model_settings.get("provider", DEFAULT_PROVIDER)
     if saved_provider in VALID_PROVIDERS:
-        legacy = {
-            name: model_settings[name]
-            for name in _CONNECTION_FIELDS
-            if name in model_settings
-        }
+        legacy = legacy_model_config(saved_provider, model_settings)
         if legacy:
-            # Scoped values win field-by-field if a partially migrated file has
-            # both shapes. Loading alone intentionally does not rewrite disk.
-            providers.setdefault(saved_provider, {})
-            providers[saved_provider] = legacy | providers[saved_provider]
+            # Loading interprets the old format; writers migrate it on disk.
+            providers[saved_provider] = validate_config(
+                saved_provider, legacy | providers.get(saved_provider, {})
+            )
     return providers
 
 
@@ -616,24 +522,20 @@ def load_settings(repo_root: Path) -> Settings:
     compaction_settings = _section(raw_settings, "compaction", settings_path)
 
     provider = _provider(model_settings, settings_path)
-    profile = PROFILES_BY_ID[provider]
     providers = _provider_connections(raw_settings, model_settings, settings_path)
-    connection_settings = providers.get(provider, {})
-    base_url = os.getenv(
-        "CODE_SQUID_BASE_URL",
-        connection_settings.get("base_url", profile.base_url),
+    connection_settings = dict(providers.get(provider, {}))
+    # Product-wide overrides outrank provider credential variables and saved keys.
+    if os.getenv("CODE_SQUID_BASE_URL") is not None:
+        connection_settings["base_url"] = os.environ["CODE_SQUID_BASE_URL"]
+    config = resolve_config(
+        provider, connection_settings,
+        api_key_override=os.getenv("CODE_SQUID_API_KEY"),
     )
-    api_key, api_key_env = _resolve_api_key(
-        connection_settings,
-        settings_path,
-        provider=provider,
-        field_prefix=f"providers.{provider}",
-    )
+    base_url, api_key, api_key_env = (config[name] for name in _CONNECTION_FIELDS)
     model_name = os.getenv("CODE_SQUID_MODEL", model_settings.get("name", DEFAULT_MODEL_NAME))
     temperature = _temperature(model_settings, settings_path)
     reasoning_mode = _reasoning_mode(model_settings, settings_path)
     reasoning_token_budget = _reasoning_token_budget(model_settings, settings_path)
-    ollama_request_timeout = _ollama_request_timeout(model_settings, settings_path)
     debug = display_settings.get("debug", DEFAULT_DEBUG)
     show_reasoning = display_settings.get(
         "show_reasoning",
@@ -668,7 +570,7 @@ def load_settings(repo_root: Path) -> Settings:
             temperature=temperature,
             reasoning_mode=reasoning_mode,
             reasoning_token_budget=reasoning_token_budget,
-            ollama_request_timeout=ollama_request_timeout,
+            provider_config=config,
         ),
         display=DisplaySettings(
             debug=bool(debug),
@@ -774,9 +676,7 @@ def write_model_name(repo_root: Path, model_name: str) -> None:
 
 
 def write_model_value(repo_root: Path, name: str, value: Any) -> None:
-    """Persist one connection value for the saved provider without exposing it."""
-    if name not in {"base_url", "api_key", "api_key_env"}:
-        raise ValueError(f"unsupported model setting: {name}")
+    """Persist one provider-validated config override without exposing secrets."""
     settings_path, raw_settings = _read_application_settings(repo_root)
     model_settings = _section(raw_settings, "model", settings_path)
     provider = model_settings.get("provider", DEFAULT_PROVIDER)
@@ -790,7 +690,8 @@ def write_model_value(repo_root: Path, name: str, value: Any) -> None:
         settings_path,
     )
     connection = providers.setdefault(provider, {})
-    connection[name] = value
+    connection = validate_config(provider, connection | {name: value})
+    providers[provider] = connection
     raw_settings["providers"] = providers
     raw_settings["model"] = model_settings
 
@@ -806,11 +707,8 @@ def _migrate_flat_provider_connection(
     """Move legacy flat connection fields under their saved provider."""
     providers = _section(raw_settings, "providers", settings_path)
     provider = model_settings.get("provider", DEFAULT_PROVIDER)
-    legacy = {
-        name: model_settings.pop(name)
-        for name in _CONNECTION_FIELDS
-        if name in model_settings
-    }
+    legacy = legacy_model_config(provider, model_settings)
+    remove_legacy_model_config(model_settings)
     if legacy and provider in VALID_PROVIDERS:
         existing = providers.get(provider, {})
         if not isinstance(existing, dict):

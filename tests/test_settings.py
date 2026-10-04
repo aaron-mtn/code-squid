@@ -1,3 +1,5 @@
+"""Application settings persistence and environment precedence."""
+
 import json
 from pathlib import Path
 
@@ -49,7 +51,6 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert settings.model.temperature is None
     assert settings.model.reasoning_mode is None
     assert settings.model.reasoning_token_budget is None
-    assert settings.model.ollama_request_timeout is None
     assert settings.display.debug is False
     assert settings.display.show_reasoning is False
     assert settings.runtime.approval_mode == "never"
@@ -65,12 +66,11 @@ def test_missing_settings_file_returns_defaults(tmp_path: Path) -> None:
     assert settings.compaction.min_recent_chunks == 2
 
     runtime_settings = settings.to_runtime_settings()
-    assert runtime_settings.provider.provider == "lm_studio"
-    assert runtime_settings.provider.model_name == "qwen3.5-9b"
-    assert runtime_settings.provider.api_key == "lm-studio"
-    assert runtime_settings.provider.reasoning_mode is None
-    assert runtime_settings.provider.reasoning_token_budget is None
-    assert runtime_settings.provider.ollama_request_timeout is None
+    assert settings.to_provider_settings().provider == "lm_studio"
+    assert settings.to_provider_settings().model_name == "qwen3.5-9b"
+    assert settings.to_provider_settings().api_key == "lm-studio"
+    assert settings.to_provider_settings().reasoning_mode is None
+    assert settings.to_provider_settings().reasoning_token_budget is None
     assert runtime_settings.approval_mode == "never"
     assert runtime_settings.compaction.compact_fraction == 0.8
     assert runtime_settings.compaction.min_recent_chunks == 2
@@ -216,9 +216,9 @@ def test_existing_application_settings_are_authoritative_over_legacy_workspace(
 def test_ollama_product_default_is_the_native_endpoint(tmp_path: Path) -> None:
     write_settings(tmp_path, {"model": {"provider": "ollama"}})
 
-    runtime_settings = load_settings(tmp_path).to_runtime_settings()
+    settings = load_settings(tmp_path)
 
-    assert runtime_settings.provider.base_url == "http://127.0.0.1:11434"
+    assert settings.to_provider_settings().base_url == "http://127.0.0.1:11434"
 
 
 def test_provider_scoped_settings_fall_back_field_by_field_to_profile_defaults(
@@ -429,7 +429,7 @@ def test_settings_file_accepts_reasoning_mode(
     settings = load_settings(tmp_path)
 
     assert settings.model.reasoning_mode == reasoning_mode
-    assert settings.to_runtime_settings().provider.reasoning_mode == reasoning_mode
+    assert settings.to_provider_settings().reasoning_mode == reasoning_mode
 
 
 @pytest.mark.parametrize("reasoning_token_budget", [0, 1, 4_000])
@@ -446,18 +446,18 @@ def test_settings_file_accepts_reasoning_token_budget(
 
     assert settings.model.reasoning_token_budget == reasoning_token_budget
     assert (
-        settings.to_runtime_settings().provider.reasoning_token_budget
+        settings.to_provider_settings().reasoning_token_budget
         == reasoning_token_budget
     )
 
 
 def test_settings_file_accepts_ollama_request_timeout(tmp_path: Path) -> None:
-    write_settings(tmp_path, {"model": {"ollama_request_timeout": 45.5}})
+    write_settings(tmp_path, {"model": {"provider": "ollama"}, "providers": {"ollama": {"request_timeout": 45.5}}})
 
     settings = load_settings(tmp_path)
 
-    assert settings.model.ollama_request_timeout == 45.5
-    assert settings.to_runtime_settings().provider.ollama_request_timeout == 45.5
+    assert settings.model.provider_config["request_timeout"] == 45.5
+    assert settings.to_provider_settings().config["request_timeout"] == 45.5
 
 
 @pytest.mark.parametrize("value", [0, -1, True, False, "45", []])
@@ -465,9 +465,9 @@ def test_invalid_ollama_request_timeout_raises(
     tmp_path: Path,
     value: object,
 ) -> None:
-    write_settings(tmp_path, {"model": {"ollama_request_timeout": value}})
+    write_settings(tmp_path, {"model": {"provider": "ollama"}, "providers": {"ollama": {"request_timeout": value}}})
 
-    with pytest.raises(ValueError, match=r"model\.ollama_request_timeout"):
+    with pytest.raises(ValueError, match=r"providers\.ollama\.request_timeout"):
         load_settings(tmp_path)
 
 
@@ -846,3 +846,29 @@ def test_invalid_trusted_commands_raise(tmp_path: Path, value: object) -> None:
 
     with pytest.raises(ValueError, match="runtime.trusted_commands"):
         load_settings(tmp_path)
+
+
+def test_provider_owned_option_round_trips_without_application_field_knowledge(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from squid_providers.catalog import DEFAULT_PROVIDER_ID, PROFILES_BY_ID
+    from code_squid.settings import write_model_value
+
+    profile = PROFILES_BY_ID[DEFAULT_PROVIDER_ID]
+    monkeypatch.setitem(PROFILES_BY_ID, DEFAULT_PROVIDER_ID,
+                        replace(profile, config_fields=("future_option",)))
+    write_model_value(tmp_path, "future_option", {"nested": True})
+    settings = load_settings(tmp_path)
+    assert settings.providers[DEFAULT_PROVIDER_ID]["future_option"] == {"nested": True}
+    assert settings.to_provider_settings().config["future_option"] == {"nested": True}
+
+
+def test_programmatic_settings_resolve_defaults_and_partial_scoped_config():
+    from code_squid.settings import Settings, ModelSettings, DisplaySettings, RuntimeSettings
+    from squid_providers.catalog import PROVIDER_PROFILES
+    profile = next(item for item in PROVIDER_PROFILES if item.config_fields)
+    settings = Settings(model=ModelSettings(provider=profile.provider_id,
+                                            provider_config={profile.config_fields[0]: 45}),
+                        display=DisplaySettings(), runtime=RuntimeSettings())
+    effective = settings.to_provider_settings()
+    assert effective.base_url == profile.base_url
+    assert effective.config[profile.config_fields[0]] == 45

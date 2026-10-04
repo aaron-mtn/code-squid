@@ -18,3 +18,8 @@ __pycache__/
 
 # OS/editor junk
 .DS_Store
+
+# Local Python package build metadata
+*.egg-info/
+build/
+dist/

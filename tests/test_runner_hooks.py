@@ -20,11 +20,12 @@ from squid_core.hooks import (
     BeforeRunContext,
     HookRunner,
     PromptContextBlock,
+    HookResponse,
+)
+from code_squid.hooks import (
     RepeatedFailureNudge,
-    RepeatedReadNudge,
     PostVerificationNudge,
     TooManyReadsNudge,
-    HookResponse,
 )
 from code_squid.agent_setup import (
     build_coding_task_run,
@@ -276,7 +277,6 @@ def test_code_squid_enables_configured_built_in_hooks_by_default() -> None:
 @pytest.mark.parametrize(
     ("hook_id", "hook_type"),
     [
-        ("repeated_read", RepeatedReadNudge),
         ("too_many_reads", TooManyReadsNudge),
         ("post_verification", PostVerificationNudge),
         ("repeated_failure", RepeatedFailureNudge),
@@ -303,8 +303,8 @@ def test_all_built_in_hooks_can_be_disabled_together() -> None:
 
 def test_external_hooks_remain_when_all_built_ins_are_disabled() -> None:
     # Disable only the application-created instances, even when a caller
-    # deliberately supplies another Hook of the same Core type.
-    external_hook = RepeatedReadNudge(source="external")
+    # deliberately supplies another Hook of the same application type.
+    external_hook = TooManyReadsNudge(source="external")
     runner = build_hook_runner(
         hooks=[external_hook],
         built_in_hook_settings=dict.fromkeys(DEFAULT_BUILT_IN_HOOK_SETTINGS, False),
@@ -347,7 +347,6 @@ def test_coding_task_settings_select_built_in_hooks(
         runtime=RuntimeSettings(
             built_in_hook_settings={
                 **DEFAULT_BUILT_IN_HOOK_SETTINGS,
-                "repeated_read": False,
                 "post_verification": False,
                 "repeated_failure": True,
             }
@@ -419,124 +418,10 @@ def test_manual_hooks_and_loaded_hooks_combine(
     )
 
 
-def _run_overlapping_reads(tmp_path: Path, second_start: int):
-    path = tmp_path / "deepseek_sample.py"
-    path.write_text(
-        "".join(f"line {line}\n" for line in range(1, 201)),
-        encoding="utf-8",
-    )
-    actions = [
-        {
-            "tool": "read_file",
-            "args": {
-                "path": str(path),
-                "ranges": [{"start_line": 1, "end_line": 100}],
-            },
-            "tool_call_id": "read-1",
-        },
-        {
-            "tool": "read_file",
-            "args": {
-                "path": str(path),
-                "ranges": [
-                    {
-                        "start_line": second_start,
-                        # Keep the coverage-boundary fixture at the configured minimum
-                        # so intentional small-range expansion is not involved.
-                        "end_line": second_start + 149,
-                    }
-                ],
-            },
-            "tool_call_id": "read-2",
-        },
-    ]
-    model = SequenceModelAdapter(
-        [
-            _reply("Read the first range.", actions[0]),
-            _reply("Read an overlapping range.", actions[1]),
-            _reply("TASK COMPLETE"),
-        ]
-    )
-    run = build_coding_task_run(
-        repo_root=tmp_path,
-        task="Inspect overlapping ranges",
-        display=FakeDisplay(),
-        settings=_settings(
-            {
-                **DEFAULT_BUILT_IN_HOOK_SETTINGS,
-                "repeated_read": True,
-            }
-        ),
-        agent=RuntimeAgent(),
-        model_adapter=model,
-        tool_executor=ReadFileExecutor(tmp_path),
-    )
-
-    assert run.loop.run() == RunResult(status="complete")
-    entries = [
-        json.loads(line)
-        for line in run.session_store.jsonl_path.read_text(
-            encoding="utf-8"
-        ).splitlines()
-    ]
-    return model, entries
 
 
-def test_enabled_runtime_repeated_read_fires_and_is_logged(tmp_path: Path) -> None:
-    model, entries = _run_overlapping_reads(tmp_path, second_start=46)
-
-    configured = next(entry for entry in entries if entry["type"] == "hooks_configured")
-    assert configured["hooks"][-3:] == [
-        "RepeatedReadNudge",
-        "TooManyReadsNudge",
-        "PostVerificationNudge",
-    ]
-    read_events = [
-        entry
-        for entry in entries
-        if entry["type"] == "hook_execution"
-        and entry["hook"] == "RepeatedReadNudge"
-        and entry["seam"] == "tool_result"
-    ]
-    assert [event["status"] for event in read_events] == ["no_effect", "effect"]
-    assert read_events[1]["effects"] == [
-        "updated_tool_output",
-        "additional_context",
-    ]
-    second_read_observation = next(
-        message["content"]
-        for message in reversed(model.calls[2])
-        if message.get("role") == "tool"
-    )
-    assert second_read_observation.startswith("READ_FILE PARTIAL")
-    assert "lines 46-150 already available unchanged" in second_read_observation
-    assert "SOURCE: deepseek_sample.py lines 151-195" in second_read_observation
-    assert "line 151\n" in second_read_observation
-    assert "line 150\n" not in second_read_observation
-    assert "If the next edit is already clear" in model.calls[2][-1]["content"]
-    assert "hook_execution" not in str(model.calls)
 
 
-def test_enabled_runtime_low_overlap_is_filtered_and_logged(tmp_path: Path) -> None:
-    model, entries = _run_overlapping_reads(tmp_path, second_start=47)
-
-    read_events = [
-        entry
-        for entry in entries
-        if entry["type"] == "hook_execution"
-        and entry["hook"] == "RepeatedReadNudge"
-        and entry["seam"] == "tool_result"
-    ]
-    assert [event["status"] for event in read_events] == ["no_effect", "effect"]
-    assert read_events[1]["produced_effect"] is True
-    assert any(
-        "READ_FILE PARTIAL" in str(message.get("content", ""))
-        for message in model.calls[2]
-    )
-    assert any(
-        "If the next edit is already clear" in str(message.get("content", ""))
-        for message in model.calls[2]
-    )
 
 
 def test_disabled_saved_hook_is_not_run(

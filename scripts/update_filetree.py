@@ -19,6 +19,8 @@ EXCLUDED_DIRS = {
     ".ruff_cache",
     ".code-squid",
     "node_modules",
+    "build",
+    "dist",
 }
 
 EXCLUDED_FILES = {
@@ -39,6 +41,10 @@ INCLUDED_SUFFIXES = {
 def should_skip(path: Path) -> bool:
     """Return True when a path should be excluded from the generated output."""
     relative_parts = set(path.relative_to(REPO_ROOT).parts)
+
+    # Local package builds must not appear as duplicate runtime source trees.
+    if any(part.endswith(".egg-info") for part in relative_parts):
+        return True
 
     if relative_parts & EXCLUDED_DIRS:
         return True

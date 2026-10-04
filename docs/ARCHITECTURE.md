@@ -36,6 +36,24 @@ and runtime wiring to reusable Squid Core components. Those reusable components
 do not import Code Squid prompt or policy modules. `code_squid/` is the product
 and application layer; `squid_core/` is the reusable agent runtime.
 
+```text
+Code Squid -> squid-core
+Code Squid -> squid-providers -> squid-core response/provider contracts
+squid-core -> no application or concrete transport imports
+```
+
+The packages are actual sibling Git repositories with independent packaging:
+
+```text
+<workspace>/code-squid/       # code_squid, main.py, application tests
+<workspace>/squid-core/       # squid_core, reusable runtime tests
+<workspace>/squid-providers/  # squid_providers, transport/catalog tests
+```
+
+Below, `squid_core/` and `squid_providers/` paths refer to their respective sibling
+repositories. Neither source package is bundled into Code Squid. Requirements
+install all three unpublished checkouts editably; see README for commands.
+
 ## Component Layout
 
 - `main.py`
@@ -76,6 +94,10 @@ and application layer; `squid_core/` is the reusable agent runtime.
     persistence and one-time adoption of the current workspace's legacy
     settings, applies product defaults and optional `CODE_SQUID_*` environment
     overrides, and translates the result to generic Core settings.
+    `squid_providers.settings` owns effective `ProviderSettings` validation and
+    reasoning-mode values. `Settings.to_provider_settings()` carries selection,
+    model, URL/key, shared sampling/reasoning controls, and provider-owned config;
+    `to_runtime_settings()` carries only generic execution settings.
   - `console/cli/` owns terminal workflow and control. `cli_options.py` handles
     CLI options and workspace resolution; `cli_commands.py` handles launch-time
     dispatch; `prompt_loop.py` owns the one persistent interpreter used by
@@ -279,7 +301,7 @@ and application layer; `squid_core/` is the reusable agent runtime.
     narration, with only a dim interior/text treatment, italic body text, and a
     `Reasoning:` label. `display.show_reasoning` is false by default and is the
     single persisted preference read by display construction and `/reasoning`.
-    It does not alter Core provider reasoning mode, effort, budget, prompts, or
+    It does not alter configured provider reasoning mode, effort, budget, prompts, or
     requests. The built-in OpenAI-compatible and Ollama transports normalize
     the first populated `reasoning`, `reasoning_content`, or `thinking` field
     in each chunk through an optional reasoning-delta callback. `AgentLoop`
@@ -428,24 +450,34 @@ and application layer; `squid_core/` is the reusable agent runtime.
     resource/Mod discovery.
 
 - `squid_core/providers/`
-  - Core-owned provider contract and first-party provider transports.
-  - `openai_compatible.py` owns OpenAI-compatible chat-completions transport,
-    including OpenRouter request quirks already supported by that path. Each
-    cancellable stream owns an SDK client so cancellation can close the active
-    HTTP transport while response headers or chunks are blocked.
-  - `ollama.py` owns native Ollama `/api/chat` transport, its finite request
-    timeout default, and response adaptation. Cancellable native streams use an
-    independently closable HTTP client.
-  - `base.py` owns the small shared provider cancellation monitor. Provider I/O
-    remains on the caller; the bounded monitor thread only polls the host
-    predicate and aborts the active provider-owned transport.
-  - `__init__.py` exports only `BaseProvider` and `StreamCancelled` from the
-    contract module. Importing it does not initialize either concrete transport
-    or their SDK dependencies. Transport files remain physically here for now;
-    `code_squid.provider_setup` owns backend construction and replay choice.
-  - These built-ins are first-party conveniences, not permanent dependencies:
-    callers can pass a custom provider or ready `ModelAdapter` through the
-    spawner, or construct `AgentLoop` directly.
+  - Only the generic `BaseProvider` contract and `StreamCancelled` control signal
+    remain here. Core and transports share the same cancellation exception
+    identity. Its initializer imports no transport or SDK.
+
+- `squid_providers/`
+  - Independent sibling `squid-providers` repository/distribution.
+    It imports only `squid_core.model_response` and `squid_core.providers.base`.
+    There is no reverse Core dependency and no old transport-path re-export.
+  - `openai_compatible.py` owns SDK requests, native payloads, response/stream
+    normalization, reasoning/usage aliases, raw tracing, discovery/readiness,
+    vision encoding, and supported OpenRouter quirks.
+  - `ollama.py` owns native `/api/chat` transport, finite request timeouts,
+    streaming completion checks, discovery/readiness, vision encoding, and
+    response normalization. Both transports return Core's `ModelResponse`.
+  - `cancellation.py` owns `CancellationMonitor`. Provider I/O remains on the
+    caller; the bounded watcher only polls the host predicate and aborts the
+    active provider-owned client, including blocked headers/body reads.
+  - `catalog.py` owns IDs, friendly names, profiles, URL/key defaults, credential
+    variable names, supported config and legacy interpretation, construction,
+    readiness/discovery, and replay policy. Public seams: `PROVIDER_PROFILES`,
+    `PROFILES_BY_ID`, `VALID_PROVIDERS`, `DEFAULT_PROVIDER_ID`,
+    `friendly_provider_name`, `resolve_provider_name`, `validate_config`,
+    `resolve_config`, `build_provider`, `provider_ready`, `discover_models`, and
+    `tool_call_content_mode`. `settings.py` owns effective `ProviderSettings`
+    and shared sampling/reasoning validators.
+  - `code_squid.provider_setup` consumes the catalog for saved choices and
+    status. It contains no concrete IDs or transport imports. A ready adapter
+    or custom provider bypasses default transport construction.
 
 - Flat `squid_core/*.py` runtime concepts
   - `events.py` owns observation; `generation.py` owns one-shot generation;
@@ -458,7 +490,7 @@ and application layer; `squid_core/` is the reusable agent runtime.
     reasoning deltas from providers that support the seam. The Agent loop
     publishes `assistant_reasoning_delta` as chunks arrive and a non-empty
     `assistant_reasoning` event before the matching narration/final event and
-    Tool start. `settings.py` owns generic provider/runtime/
+    Tool start. `settings.py` owns generic runtime/
     compaction and tool-result trimming semantics; `tool_result_trimming.py`
     owns the request-only rendering of older built-in Tool payloads and reports
     exact retained source-line ranges when it trims a `read_file` result;
@@ -474,16 +506,24 @@ and application layer; `squid_core/` is the reusable agent runtime.
   - `update_filetree.py` generates `docs/filetree.md` from the current
     repository tree and Python docstrings.
 
-- `tests/`
-  - Focused pytest coverage for settings, approval, completion rules, loop
-    behavior, model adaptation, provider transport adapters, tool behavior,
-    compaction, token estimates, session storage/indexing, undo, error logging,
-    spinner, terminal display, and CLI dispatch.
+- `tests/` in Code Squid covers persistence, selection/model UX, injection,
+  CLI/Desktop orchestration, and presentation. Core tests contracts,
+  adapter/retries, AgentLoop, generation/spawner injection, compaction, tools,
+  storage, and resource handling. Providers tests catalog/config, construction,
+  discovery/readiness, transports, normalization, tracing, cancellation, replay
+  quirks, and vision wire conversion. Mixed tests were split by ownership.
+  Fresh-process import guards and source checks enforce dependency direction.
 
-- Top-level support files
-  - `README.md` is the user-facing overview and basic usage entry point.
-  - `requirements.txt` is the Python dependency list for the CLI/test
-    environment.
+- Packaging and support files
+  - Code Squid's root `pyproject.toml` builds only `code_squid` and `main.py`,
+    requiring Core, Providers, prompt_toolkit, and wcwidth.
+  - `../squid-core/pyproject.toml` builds only Core with its generic document/image
+    reader dependencies, without OpenAI/httpx.
+  - `../squid-providers/pyproject.toml` builds only Providers, requiring Core,
+    OpenAI, and httpx. Metadata dependency names identify local distributions;
+    editable paths supply these unpublished packages together.
+  - `README.md` documents sibling installation and independent test commands.
+  - `docs/provider-extraction.md` records moved source/test ownership.
 
 ## Events And External Wrappers
 
@@ -659,12 +699,12 @@ model. Exactly identical per-action guidance is included only once; a later
 action with no guidance cannot erase an earlier contribution. A single-action
 turn follows the same path and retains its existing one-turn behavior.
 This accumulation contract remains available to custom/user Hooks and to
-event-specific built-ins such as failure recovery and repeated-read correction;
+event-specific application hooks such as failure recovery;
 the runner does not reinterpret arbitrary `additional_context` as recomputable
 state.
 
-Code Squid wires Core's small `RepeatedFailureNudge` Hook at this seam. The
-generic Hook retains its exact-action detector: three consecutive failures must
+Code Squid can enable its `RepeatedFailureNudge` Hook at this seam. The
+application Hook retains its exact-action detector: three consecutive failures must
 have the same Tool, JSON arguments, and scalar `error`; success, an
 uncategorized failure, or any changed action/category resets that streak. The
 same Hook also has an independently configured `run_command` detector. It
@@ -681,16 +721,16 @@ pre-execution failures have no `failure_class` and do not enter this counter.
 At either threshold the Hook returns cause-appropriate wording as transient
 `HookResponse.additional_context` and immediately resets the applicable
 counter, so another nudge requires three fresh failures. It never blocks,
-rewrites, or retries a Tool action. Squid Core owns these run-local detection
-mechanisms while `code_squid.agent_setup` owns the guidance texts and enables
-them for Code Squid runs. Its `source` remains configuration metadata used by
-hosts; it no longer controls prompt rendering.
+rewrites, or retries a Tool action. `code_squid/hooks/no_progress.py` owns these
+run-local detection mechanisms while `code_squid.agent_setup` owns the supplied guidance texts and
+composition. This hook defaults to disabled. Its `source` remains configuration
+metadata used by hosts; it no longer controls prompt rendering.
 
-Code Squid can wire Core's `RepeatedReadNudge`, `TooManyReadsNudge`,
-`PostVerificationNudge`, and `RepeatedFailureNudge` in that order. The
-application's default configuration enables only `TooManyReadsNudge` and
-`PostVerificationNudge`; the other implementations remain available for
-explicit configuration.
+Code Squid owns `RepeatedFailureNudge`, `TooManyReadsNudge`, and
+`PostVerificationNudge` in `code_squid/hooks/`, importing only generic lifecycle
+contracts from Core. Its composition order is `TooManyReadsNudge`,
+`PostVerificationNudge`, then `RepeatedFailureNudge`. The first two default to
+enabled; repeated-failure guidance defaults to disabled.
 `TooManyReadsNudge` counts successful `read_file` results and the source lines
 they returned since the last successful `write_file` or `apply_patch`.
 Commands, other Tools, and all failed results are neutral: they neither
@@ -708,25 +748,23 @@ The wording reports reads without a successful built-in edit, not inferred lack
 of progress; read-only work and needed context recovery after compaction remain
 legitimate reasons to read.
 
-The volume counter consumes the result left by earlier Hooks. Because
-`RepeatedReadNudge` runs first, partially overlapping reads contribute only
-their novel `returned_line_ranges`, while a fully covered `already_covered`
-result contributes no source lines but still counts as a read action. This
-reuses the existing coverage decision without exposing or duplicating its
-private state. Malformed or missing range metadata contributes no volume and
+The volume counter consumes the result left by earlier host Hooks. It uses
+`returned_line_ranges` when present and counts no source lines for an
+`already_covered` result, while still counting that read action.
+Malformed or missing range metadata contributes no volume and
 leaves the action-count behavior intact. Unlike source coverage, both
 behavioral counters intentionally survive transcript compaction; only a
 successful built-in mutation or `before_run` resets them. A successful mutation
 also clears any armed read warning before the model boundary, so an earlier
 sibling read cannot describe state that the later edit reset. The thresholds
-remain constructor arguments in Core, while Code Squid enables the Hook by
+remain constructor arguments in Code Squid, which enables the Hook by
 default. Application settings expose the small
 `runtime.built_in_hook_settings` mapping, whose stable IDs are
-`repeated_read`, `too_many_reads`, `post_verification`, and
-`repeated_failure`. `too_many_reads` and `post_verification` default to enabled;
-`repeated_read` and `repeated_failure` default to disabled.
+`too_many_reads`, `post_verification`, and `repeated_failure`. The first two
+default to enabled;
+`repeated_failure` defaults to disabled.
 `code_squid.agent_setup` consults those IDs while assembling a run and omits
-each disabled built-in from the `HookRunner`; the generic Core Hook
+each disabled built-in from the `HookRunner`; the application Hook
 implementations do not know about application enablement. Caller-supplied,
 Mod, and loaded user Hooks remain separate inputs and are not filtered by this
 mapping. An explicitly supplied `HookRunner` likewise retains its Hooks before
@@ -735,8 +773,8 @@ configuration seam for a future Mod or user override without making Hook
 classes own product policy.
 
 Sibling reads in one assistant batch pass through this pipeline synchronously.
-Each final transformed result updates read counts, returned-line volume, and
-visible coverage before the next sibling executes. The read result retains its
+Each final transformed result updates read counts and returned-line volume
+before the next sibling executes. The read result retains its
 own exact `content_returned_chars` metadata; the behavioral volume thresholds
 remain line-based, so no separate cumulative character threshold or counter is
 introduced by batching.
@@ -776,98 +814,16 @@ completion. The first successful verification after a mutation, successful
 structured mutation, failed explicit verification, and the start of a run reset
 the counter. The latter three also clear the current receipt as applicable. A
 later successful mutation in the same batch invalidates verification and clears
-all verification guidance before it can be shown. Because
-`RepeatedReadNudge` runs first, a read it
-masks as already covered still advances the post-verification count but does not
-emit stacked post-verification guidance on that result. This policy deliberately
+all verification guidance before it can be shown. A host-transformed result
+marked `already_covered` still advances the count without arming stacked
+post-verification guidance on that result. This policy deliberately
 recognizes only the built-in `write_file` and `apply_patch` mutation Tools; it
 does not infer workspace changes from command text or filesystem observation.
 
-`RepeatedReadNudge` keeps bounded, run-local line-range coverage from
-successful `read_file` source results under normalized absolute path keys,
-preferring the separate exact `returned_line_ranges` when a full-file read is
-truncated. Each file's coverage is associated with a cheap filesystem version
-made from its nanosecond modification time and size. Before using coverage, the
-Hook compares that version with current metadata and invalidates all state for
-the file when they differ, so edits through `run_command`, another process, or
-a user cannot leave stale source classified as already covered. Structured
-`write_file` and `apply_patch` invalidation remains immediate; a range-aware
-patch associates its preserved coverage with the post-patch version. Coverage
-is request-visible rather than merely historical:
-request-only tool-result rendering maps retained head and tail characters back
-to complete source lines and dispatches `read_result_trimmed` with those
-ranges. The Hook keeps bounded per-tool-call provenance so it can retract only
-the trimmed result while preserving overlapping source visible from another
-result. Metadata and omission summaries do not preserve coverage, while
-canonical session messages remain unchanged. A successful `write_file`
-invalidates all coverage for its target. A
-successful `apply_patch` instead uses its before/after line bounds to discard
-the changed span while preserving coverage before it and shifting coverage
-after it by the line-count delta; per-result original-to-current mappings keep
-later trim notifications aligned across that shift. The Hook separately
-remembers patch-stale spans so the first successful read returning changed
-lines is never masked merely because its wider verification window also
-contains known surrounding content. For every successful read, the Hook
-subtracts visible unchanged coverage from the actual returned ranges. A fully
-new result passes through unchanged. A partially redundant result is shaped
-from the already-returned payload so it contains only novel source fragments,
-with `start_line`, `end_line`, `returned_line_ranges`, returned-character
-metadata, and an omission summary updated to describe those fragments. The
-Hook handles each declared head/tail range independently and falls back to the
-original result when the payload's line count cannot be mapped safely to its
-metadata; it never rereads the filesystem to reconstruct source. A fully
-covered result becomes the existing small successful `already_covered` result
-with no file contents; targeted requests retain their requested regions as
-`requested_line_ranges`. Partial and full redundancy advance the existing
-persistent per-file strike system only when covered returned source overlaps
-the model's explicitly requested ranges. Overlap introduced solely by automatic
-context expansion is filtered without a strike or behavioral nudge. Full-file
-reads and requests without usable range metadata retain returned-range judgment.
-This uses current action arguments, adds no state, and never discards useful source.
-At the configured threshold the Hook also returns action-oriented one-turn
-guidance through `HookResponse.additional_context`, directing the model to reuse
-the current context and make a focused edit when the intended change is clear.
-The repeated-read Hook does not know about verification; post-verification
-finalization policy belongs exclusively to `PostVerificationNudge`. The next
-qualifying reread for that file remains masked and uses a stronger correction.
-That escalated strike persists while the supporting coverage remains current;
-useful reads can add coverage without forgiving earlier redundant reads. The
-threshold remains configurable and controls when first-reread masking and
-guidance begin. Failed mutations do not alter coverage, and `before_run` clears
-all state. Successful transcript
-compaction also clears all files' coverage, per-result provenance,
-mutation-stale ranges, and per-file redundant-read counters through the
-`compaction_applied` Hook seam. Earlier
-compaction lifecycle events and failed or otherwise unapplied attempts leave
-state intact because the original transcript remains active. The Hook never
-blocks or transforms an action; `AgentLoop` only bridges the generic trimming
-notification into the Hook seam.
-
-There is no separate "small reread" size or overlap-ratio limit in
-`RepeatedReadNudge`: any covered portion is omitted from a partially redundant
-result, including an effective range expanded by `read_file`. A
-successful read is tracked only when `ok` is exactly `true`, its path can be
-resolved from result or action metadata, and it reports a string source payload
-plus a valid inclusive `start_line`/`end_line` range or valid
-`returned_line_ranges`. Coverage is the
-merged union of prior returned ranges for that normalized path, bounded to 100
-files and 64 ranges per file. Per-result provenance records the source the Hook
-actually left visible, so later `read_result_trimmed` notifications retract only
-those ranges. The default threshold is one redundant read, so an original
-useful read followed by one requested overlap emits guidance while filtering or masking
-that read; the following redundant read receives
-the stronger masked correction. Strikes are per file rather than globally
-adjacent: non-redundant reads add coverage without resetting them, and unrelated
-Tool calls or reads of other files do not affect them. They reset when their
-supporting evidence is invalidated, including a successful mutation, relevant
-result trimming, compaction, or a new run. `write_file` invalidates the target's
-whole coverage and any patch-stale markers, while `apply_patch` preserves
-unaffected coverage only when trustworthy before/after line bounds are present
-and otherwise invalidates the whole target. Failed reads and failed mutations
-neither add nor invalidate coverage or advance the streak. File inspection
-performed inside `run_command`,
-including shell searches, does not participate because it does not produce
-`read_file` range metadata.
+Core retains `read_result_trimmed` as a generic notification of source ranges
+left visible by request-only trimming. It also retains `compaction_applied` for
+host hooks that track model-visible context. Neither notification installs a
+source-coverage or repeated-read policy.
 
 ### before_accept_final
 
@@ -908,10 +864,11 @@ model request
 `squid_core/hooks/` owns the hook context and decision dataclasses, `HookRunner`,
 and Hook metadata/loading. `squid_core/agent_loop/loop.py` owns where hook calls
 happen in the loop.
-`code_squid/agent_setup.py` wires the application-owned no-progress guidance
-Hook plus optional `hooks`, optionally loads standalone hooks from the supplied
-application home's `hooks/`, or composes an explicit `hook_runner` with the
-required application Hook.
+`code_squid/hooks/` owns behavioral hooks and their default thresholds/text.
+`code_squid/agent_setup.py` supplies failure-recovery text and wires enabled
+application hooks plus optional `hooks`, optionally loads standalone hooks from
+the supplied application home's `hooks/`, or appends enabled built-ins to an
+explicit `hook_runner`.
 Selected Mod Hooks arrive through `ResolvedMod`. `squid_core/events.py`
 remains observer-only.
 
@@ -981,13 +938,13 @@ supplied `ModelAdapter` is used directly, taking precedence over a supplied
 provider and bypassing adapter construction; a supplied provider requires an
 explicit `model_name` and can receive explicit `provider_name` and
 `tool_call_content_mode` inputs (`None` and `"empty"` by default). These inputs
-are independent of the temporarily retained `RuntimeSettings.provider`. Missing
+are independent of runtime settings, which carry no provider configuration. Missing
 both provider and adapter raises a clear construction `ValueError`. A supplied
 `ToolExecutor` bypasses its default construction and the otherwise implicit undo-store creation. A
 supplied approval policy or action preflight is used directly. Presentation
 and approval prompting are separate inputs, so a GUI need not imitate a
-terminal display. `code_squid.provider_setup.build_provider` constructs the
-configured OpenAI-compatible or Ollama transport from effective provider
+terminal display. `squid_providers.catalog.build_provider` constructs the
+configured transport from effective provider
 settings. `code_squid.agent_setup` calls it only when neither provider nor
 adapter was supplied, then injects the provider and exact model/label/replay
 inputs into Core. Custom providers bypass application default construction;
@@ -1032,8 +989,8 @@ Mod names, paths, discovery, or selection policy.
 The CLI follow-up path reuses `build_coding_task_run(...)` with the existing
 `Session` and `SessionStore`. Code Squid therefore resolves a selected Mod into
 its Skill, Tools, Hooks, Agent, and AgentLoop through the same application seam
-used for a new run. Provider-specific construction remains delegated to
-`squid_core.providers`.
+used for a new run. Provider selection persistence stays in `code_squid.provider_setup`; construction
+and backend policy belong to `squid_providers.catalog`.
 
 `squid_core.storage.session_index` owns generic inspection, registration, and
 cross-location discovery for explicit index and session-root paths. Session
@@ -1367,9 +1324,10 @@ Settings have two explicit ownership layers. `code_squid/settings.py` owns the
 human-facing Code Squid shape, application-wide persistence, product defaults,
 saved selection, and optional environment overrides. `code_squid.app_paths`
 owns the location policy. The application translates those values into
-`squid_core.settings.RuntimeSettings`; Core owns only the effective provider
-values and runtime validation semantics used by the spawner, loop, approval
-policy, and compactor.
+`squid_core.settings.RuntimeSettings`; Core owns only generic execution
+validation used by the spawner, loop, approval policy, and compactor. Provider
+selection/connection/model/reasoning values instead become provider-owned
+`squid_providers.settings.ProviderSettings` through `to_provider_settings()`.
 
 Code Squid reads settings from its application home:
 
@@ -1384,7 +1342,9 @@ in place. An existing application-wide file is always authoritative; settings
 from multiple workspaces are never merged. All subsequent writes target only
 the application-wide file.
 
-Missing settings are allowed. Defaults keep the CLI usable with LM Studio:
+Missing settings are allowed. The provider catalog currently defaults to LM
+Studio. URL/key defaults belong to Providers; the initial model choice and
+generic preferences belong to Code Squid:
 
 - model base URL: `http://127.0.0.1:1234/v1`
 - API key: `lm-studio`
@@ -1426,10 +1386,10 @@ Supported settings sections and fields:
 - `compaction.compact_fraction`
 - `compaction.min_recent_chunks`
 
-The `providers` mapping is sparse: it contains only connection values a user
+The `providers` mapping is sparse: it contains only supported config values a user
 explicitly saved. Switching `model.provider` changes which provider-scoped
 connection is resolved and never removes another provider's entry. Missing
-providers and missing fields inherit the corresponding application-owned
+providers and missing fields inherit the corresponding provider-owned
 `ProviderProfile` defaults without writing those defaults to disk. Existing
 flat `model.base_url`, `model.api_key`, and `model.api_key_env` fields remain a
 supported input shape: they are interpreted as belonging to the saved
@@ -1438,14 +1398,17 @@ provider selection or connection mutation. A scoped field wins if both shapes
 are present during a partial migration. Model selection remains one exact,
 provider-independent `model.name`.
 
-Supported provider values are `squid_models`, `lm_studio`, `ollama`,
-`openrouter`, and `openai_compatible`. Their shared Code Squid application
-profiles live in `code_squid/provider_setup.py`; that module owns friendly
-identity, product defaults, readiness/discovery orchestration, and the shared
-provider/model mutation operations, concrete transport construction, and backend
-replay policy. CLI presentation remains under
-`code_squid/console/`, and provider HTTP details remain in
-`squid_core/providers/`.
+The current catalog contains `squid_models`, `lm_studio`, `ollama`, `openrouter`,
+and `openai_compatible`. Definitions and backend policy live in
+`../squid-providers/squid_providers/catalog.py`. Code Squid consumes definitions
+and persists supported arbitrary scoped overrides without concrete ID branches.
+`providers.ollama.request_timeout` is validated and consumed by Providers. The
+provisional flat timeout is interpreted only by Providers' legacy helper and
+removed by writers after scoped migration. Shared sampling/reasoning controls
+remain model preferences; validation and transport translation belong to
+Providers. Adding a first-party provider requires changes in Providers, without
+Core changes or new application branches. No plugin registry or dynamic entry
+points exist. CLI presentation and mutation orchestration remain application-owned.
 Supported approval modes are `never`, `guarded`, and `always`.
 `runtime.max_tool_steps` is either `null` or a positive integer.
 `runtime.stream_assistant_text` is a boolean. When enabled with a streaming
@@ -1472,7 +1435,7 @@ means the provider request receives no persistent reasoning-specific setting,
 preserving its existing model/provider default.
 `model.reasoning_token_budget` is `null` or a non-negative integer. It is a
 reasoning/thinking-only limit and must never be translated into a total response
-token cap. Zero is preserved in generic settings; each provider must explicitly
+token cap. Zero is preserved in application provider settings; each provider must explicitly
 support zero before transmitting it.
 
 Environment overrides are optional development, headless, and automation
@@ -1667,8 +1630,9 @@ completion or execution signal. Successful responses contain no error fields;
 provider failures remain exceptions with existing wrapping, cancellation,
 classification, redaction, and retry behavior. Native stream terminal checks,
 callbacks, chunk assembly, and raw transport tracing remain provider-owned.
-Concrete files, SDK dependencies, and provider settings remain under Core pending
-physical extraction; application construction ownership is unchanged.
+Concrete transport files and SDK dependencies belong to `squid-providers`;
+provider configuration belongs to Code Squid. Core has no concrete transport
+imports, and application construction injects the ready provider or adapter.
 
 The OpenAI-compatible provider also supports optional assistant text and
 reasoning streaming. Streaming forwards the first populated reasoning alias
@@ -1691,7 +1655,7 @@ same reference to Ollama's `images` field. Provider trace payloads redact those
 materialized values, while provider failures leave the durable session asset
 available for replay.
 
-The native Ollama provider exists and is experimental. `squid_core/providers/ollama.py`
+The native Ollama provider exists and is experimental. `squid_providers/ollama.py`
 uses Ollama `/api/chat`, converts replayed messages into Ollama's expected
 shape, omits `parallel_tool_calls`, and translates completed responses into
 Core-owned `ModelResponse`. Provider-supplied Tool-call IDs
@@ -1700,7 +1664,7 @@ response-unique fallback prefix plus the response-local call index so distinct
 historical calls cannot collide during transcript replay or result trimming.
 Both normal and streaming chat opens use the provider-owned request timeout,
 which defaults to 300 seconds and can be overridden with
-`model.ollama_request_timeout`. The application passes the optional effective
+`providers.ollama.request_timeout`. The application passes the optional effective
 value through `ProviderSettings`; timeout enforcement remains inside the native
 Ollama transport. Timeout exceptions follow the ordinary `ModelRequestError`
 boundary and therefore retain the existing generic transient-failure policy.
@@ -2172,8 +2136,8 @@ the results without changing the boundary. Once a later assistant message is
 in canonical history, those results age by the ordinary count-based policy.
 The guarantee does not expand Tool-level output bounds, duplicate result
 payloads, or mutate canonical history. Read trim notifications therefore fire
-only when source is actually reduced in a later model request, keeping
-`RepeatedReadNudge` provenance aligned with request-visible source.
+only when source is actually reduced in a later model request, allowing host
+Hooks to track request-visible source.
 
 Every provider reply is captured before agent validation as a diagnostic-only
 `model_reply` entry:
@@ -2423,8 +2387,8 @@ root-level properties.
   multi-range requests fail instead of being partially returned
 - renders multi-range content in source order with an explicit omitted-line
   marker between every disjoint pair, while still reporting each effective
-  region through `returned_line_ranges`; RepeatedReadNudge and request-only
-  result trimming preserve those separators and per-region provenance
+  region through `returned_line_ranges`; request-only result trimming preserves
+  those separators and per-region provenance
 - reports the effective expanded `start_line` and `end_line`, so runtime Hooks
   track the content actually returned rather than only the requested interval
 - preserves the existing content, character-count, truncation, ranged-read,
@@ -2587,7 +2551,7 @@ multiple runs or provides an event bus, daemon, or server.
 
 `squid_core/model_adapter.py` owns generic reply validation, action construction,
 and replay message shaping. Provider-specific response translation and HTTP/API
-calls stay in `squid_core/providers/`.
+calls stay in `squid_providers/`.
 `squid_core/image_content.py` owns the small provider-neutral image validation,
 descriptor, marker, and internal-reference contract. It does not own session
 paths or provider wire formats.

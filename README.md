@@ -56,14 +56,32 @@ order and stops the batch at the first unsuccessful action.
 
 ## Install
 
-Clone the repository, create a virtual environment, and install the Python
-requirements:
+Keep the three unpublished repositories next to each other:
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
+```text
+code_projects/
+    code-squid/
+    squid-core/
+    squid-providers/
 ```
+
+From `code-squid`, install all three local packages into one environment:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt pytest
+.venv\Scripts\python -m pytest tests
+.venv\Scripts\python -m pytest ../squid-core/tests
+.venv\Scripts\python -m pytest ../squid-providers/tests
+```
+
+`requirements.txt` supplies all three editable paths together; no unpublished
+package is fetched from PyPI. Each repository builds an independent wheel from
+its own `pyproject.toml`. Core needs no transport dependencies; Providers adds
+OpenAI/httpx; Code Squid adds terminal dependencies. Run
+`.venv\Scripts\python main.py` or `.venv\Scripts\code-squid`. Run test suites
+separately because repositories
+may use the same test module names.
 
 ## Quick start with LM Studio
 
@@ -230,19 +248,19 @@ Set `provider` to `ollama` to use the native Ollama provider:
 {
   "model": {
     "provider": "ollama",
-    "name": "your-tool-capable-model",
-    "ollama_request_timeout": 300
+    "name": "your-tool-capable-model"
   },
   "providers": {
     "ollama": {
-      "base_url": "http://127.0.0.1:11434"
+      "base_url": "http://127.0.0.1:11434",
+      "request_timeout": 300
     }
   }
 }
 ```
 
 The native Ollama provider is experimental and works best with tool-capable
-models. `model.ollama_request_timeout` is an optional positive number of
+models. `providers.ollama.request_timeout` is an optional positive number of
 seconds; native Ollama inference defaults to 300 seconds when it is omitted.
 
 ## Commands

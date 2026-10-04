@@ -561,7 +561,7 @@ def test_model_menu_shows_public_openrouter_models_without_key(
     monkeypatch.setenv("CODE_SQUID_PROVIDER", "openrouter")
     monkeypatch.delenv("CODE_SQUID_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    monkeypatch.setattr("squid_core.providers.openai_compatible.request.urlopen", urlopen)
+    monkeypatch.setattr("squid_providers.openai_compatible.request.urlopen", urlopen)
     menu = StartupMenu(tmp_path, load_settings(tmp_path))
     menu.focus_from_composer()
     menu.selected_index = MAIN_ROWS.index("Model")

@@ -30,11 +30,12 @@ from code_squid.app_paths import (
 )
 from squid_core.hooks import (
     HookRunner,
+    load_user_hooks,
+)
+from code_squid.hooks import (
     RepeatedFailureNudge,
-    RepeatedReadNudge,
     PostVerificationNudge,
     TooManyReadsNudge,
-    load_user_hooks,
 )
 from squid_core.mods import ResolvedMod, resolve_mod
 from squid_core.platform_context import PlatformContext, detect_platform_context
@@ -205,6 +206,7 @@ def build_coding_task_run(
     app_home = code_squid_home(app_home)
     settings = load_settings(repo_root) if settings is None else settings
     runtime_settings = settings.to_runtime_settings()
+    provider_settings = settings.to_provider_settings()
     selected_mod: ResolvedMod | None = None
 
     if session_store is not None and session_store_factory is not None:
@@ -294,7 +296,7 @@ def build_coding_task_run(
     # A ready adapter wins over even a supplied provider, and custom providers
     # must never trigger default transport construction.
     if model_adapter is None and provider is None:
-        provider = provider_setup.build_provider(runtime_settings.provider)
+        provider = provider_setup.build_provider(provider_settings)
     loop = build_core_agent_loop(
         repo_root=repo_root,
         session=session,
@@ -310,10 +312,10 @@ def build_coding_task_run(
         platform_context=platform_context,
         provider=provider,
         model_adapter=model_adapter,
-        model_name=runtime_settings.provider.model_name,
-        provider_name=runtime_settings.provider.provider,
+        model_name=provider_settings.model_name,
+        provider_name=provider_settings.provider,
         tool_call_content_mode=provider_setup.tool_call_content_mode(
-            runtime_settings.provider
+            provider_settings
         ),
         compactor=compactor,
         compaction_context_provider=CodeSquidCompactionContextProvider(
@@ -347,7 +349,6 @@ def build_hook_runner(
 
     # Keep this table local and explicit: it is Code Squid's composition policy,
     # not a general Hook registry or behavior owned by the Hook classes.
-    repeated_read_hook = RepeatedReadNudge(source="Code Squid")
     too_many_reads_hook = TooManyReadsNudge(source="Code Squid")
     post_verification_hook = PostVerificationNudge(
         source="Code Squid",
@@ -359,7 +360,6 @@ def build_hook_runner(
         source="Code Squid",
     )
     configured_built_in_hooks = (
-        ("repeated_read", repeated_read_hook),
         ("too_many_reads", too_many_reads_hook),
         ("post_verification", post_verification_hook),
         ("repeated_failure", no_progress_hook),

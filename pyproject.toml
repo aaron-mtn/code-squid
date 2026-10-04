@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "code-squid"
+version = "0.1.0"
+description = "Standalone coding agent application"
+requires-python = ">=3.11"
+dependencies = ["squid-core==0.1.0", "squid-providers==0.1.0", "prompt_toolkit", "wcwidth"]
+
+[project.scripts]
+code-squid = "main:main"
+
+[tool.setuptools]
+include-package-data = false
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+namespaces = false
+include = ["code_squid", "code_squid.*"]

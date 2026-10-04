@@ -1,10 +1,4 @@
-openai
-epub-utils==0.1.0a1
-httpx
-odfpy
-openpyxl
-python-docx
-Pillow
-PyMuPDF
-prompt_toolkit
-wcwidth
+# These unpublished distributions are installed from sibling checkouts.
+-e ../squid-core
+-e ../squid-providers
+-e .

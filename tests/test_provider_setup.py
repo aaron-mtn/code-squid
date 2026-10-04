@@ -20,8 +20,10 @@ from code_squid.provider_setup import (
 from code_squid.settings import load_settings
 from squid_core.model_adapter import ModelAdapter
 from code_squid.provider_setup import build_provider
-from squid_core.providers.ollama import OllamaProvider
-from squid_core.providers.openai_compatible import OpenAICompatibleProvider
+from squid_providers.settings import ProviderSettings
+from code_squid.provider_setup import build_provider, tool_call_content_mode
+from squid_providers.ollama import DEFAULT_OLLAMA_REQUEST_TIMEOUT, OllamaProvider
+from squid_providers.openai_compatible import OpenAICompatibleProvider
 
 
 class JsonResponse:
@@ -40,41 +42,6 @@ class JsonResponse:
         return json.dumps(self.payload).encode("utf-8")
 
 
-def test_friendly_profiles_map_to_existing_transports() -> None:
-    profiles = {profile.friendly_name: profile for profile in PROVIDER_PROFILES}
-    assert list(profiles) == [
-        "Squid Models",
-        "LM Studio",
-        "Ollama",
-        "OpenRouter",
-        "OpenAI Compatible",
-    ]
-    for friendly_name in ("Squid Models", "LM Studio", "OpenRouter", "OpenAI Compatible"):
-        profile = profiles[friendly_name]
-        provider = build_provider(
-            SimpleNamespace(
-                provider=profile.provider_id,
-                model_name="selected-model",
-                base_url=profile.base_url,
-                api_key=profile.api_key or "test-key",
-                temperature=None,
-                reasoning_mode=None,
-            )
-        )
-        assert isinstance(provider, OpenAICompatibleProvider)
-        assert provider.provider_name == profile.provider_id
-    ollama = profiles["Ollama"]
-    provider = build_provider(
-        SimpleNamespace(
-            provider=ollama.provider_id,
-            model_name="selected-model",
-            base_url=ollama.base_url,
-            api_key=None,
-            temperature=None,
-            reasoning_mode=None,
-        )
-    )
-    assert isinstance(provider, OllamaProvider)
 
 
 def test_lm_studio_and_generic_defaults_are_distinct(tmp_path) -> None:
@@ -84,61 +51,10 @@ def test_lm_studio_and_generic_defaults_are_distinct(tmp_path) -> None:
     assert load_settings(tmp_path).model.provider == "lm_studio"
 
 
-def test_lm_studio_native_discovery_and_loaded_readiness(monkeypatch) -> None:
-    requests = []
-
-    def urlopen(http_request, timeout):
-        requests.append((http_request, timeout))
-        return JsonResponse({
-            "models": [
-                {"type": "embedding", "key": "ignore"},
-                {"type": "llm", "key": "model-a", "loaded_instances": [{}]},
-                {"type": "llm", "key": "model-b", "loaded_instances": []},
-            ]
-        })
-
-    monkeypatch.setattr("squid_core.providers.openai_compatible.request.urlopen", urlopen)
-    provider = OpenAICompatibleProvider(
-        "http://127.0.0.1:1234/v1", "lm-studio", provider_name="lm_studio"
-    )
-    assert provider.is_ready() is True
-    assert provider.list_models() == ["model-a", "model-b"]
-    assert all(item[0].full_url.endswith("/api/v1/models") for item in requests)
 
 
-def test_squid_models_health_and_real_model_discovery(monkeypatch) -> None:
-    requests = []
-
-    def urlopen(http_request, timeout):
-        requests.append(http_request)
-        if http_request.full_url.endswith("/health"):
-            return JsonResponse({"status": "ok"})
-        return JsonResponse({"data": [{"id": "squid-a"}, {"id": "squid-b"}]})
-
-    monkeypatch.setattr("squid_core.providers.openai_compatible.request.urlopen", urlopen)
-    provider = OpenAICompatibleProvider(
-        "http://127.0.0.1:8080/v1", "local", provider_name="squid_models"
-    )
-    assert provider.is_ready() is True
-    assert provider.list_models() == ["squid-a", "squid-b"]
-    assert [item.full_url for item in requests] == [
-        "http://127.0.0.1:8080/health",
-        "http://127.0.0.1:8080/v1/models",
-    ]
 
 
-def test_ollama_native_discovery(monkeypatch) -> None:
-    requests = []
-
-    def urlopen(http_request, timeout):
-        requests.append(http_request)
-        return JsonResponse({"models": [{"name": "qwen:latest"}, {"model": "gemma:2b"}]})
-
-    monkeypatch.setattr("squid_core.providers.ollama.request.urlopen", urlopen)
-    provider = OllamaProvider()
-    assert provider.is_ready() is True
-    assert provider.list_models() == ["qwen:latest", "gemma:2b"]
-    assert all(item.full_url.endswith("/api/tags") for item in requests)
 
 
 def test_openrouter_public_discovery_omits_auth_and_env_key_reaches_inference(
@@ -155,9 +71,9 @@ def test_openrouter_public_discovery_omits_auth_and_env_key_reaches_inference(
     monkeypatch.setenv("CODE_SQUID_REASONING_MODE", "medium")
     monkeypatch.setenv("CODE_SQUID_REASONING_TOKEN_BUDGET", "4000")
     monkeypatch.setenv("OPENROUTER_API_KEY", "environment-secret")
-    monkeypatch.setattr("squid_core.providers.openai_compatible.request.urlopen", urlopen)
+    monkeypatch.setattr("squid_providers.openai_compatible.request.urlopen", urlopen)
     settings = load_settings(tmp_path)
-    provider = build_provider(settings.to_runtime_settings().provider)
+    provider = build_provider(settings.to_provider_settings())
     assert provider._api_key == "environment-secret"
     assert provider.reasoning_mode == "medium"
     assert provider.reasoning_token_budget == 4_000
@@ -175,7 +91,7 @@ def test_openrouter_public_discovery_without_key_is_not_inference_ready(
         requests.append(http_request)
         return JsonResponse({"data": [{"id": "vendor/public-model"}]})
 
-    monkeypatch.setattr("squid_core.providers.openai_compatible.request.urlopen", urlopen)
+    monkeypatch.setattr("squid_providers.openai_compatible.request.urlopen", urlopen)
     monkeypatch.setenv("CODE_SQUID_PROVIDER", "openrouter")
     monkeypatch.delenv("CODE_SQUID_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
@@ -193,18 +109,6 @@ def test_openrouter_public_discovery_without_key_is_not_inference_ready(
         provider.create_response(model="vendor/public-model", messages=[], tools=[])
 
 
-def test_openrouter_inference_construction_still_requires_key() -> None:
-    settings = SimpleNamespace(
-        provider="openrouter",
-        model_name="vendor/model",
-        base_url="https://openrouter.ai/api/v1",
-        api_key=None,
-        temperature=None,
-        reasoning_mode=None,
-    )
-
-    with pytest.raises(ValueError, match="api_key is required"):
-        build_provider(settings)
 
 
 def test_openrouter_saved_key_is_used_when_default_env_is_absent(tmp_path) -> None:
@@ -214,7 +118,7 @@ def test_openrouter_saved_key_is_used_when_default_env_is_absent(tmp_path) -> No
         json.dumps({"model": {"provider": "openrouter", "api_key": "saved-secret"}}),
         encoding="utf-8",
     )
-    provider = build_provider(load_settings(tmp_path).to_runtime_settings().provider)
+    provider = build_provider(load_settings(tmp_path).to_provider_settings())
     assert provider._api_key == "saved-secret"
 
 
@@ -232,7 +136,7 @@ class RecordingProvider:
 @pytest.mark.parametrize("model_id", ["squid-model-a", "squid-model-b"])
 def test_exact_squid_model_selection_reaches_inference(tmp_path, model_id) -> None:
     settings = select_model(tmp_path, model_id)
-    runtime = settings.to_runtime_settings().provider
+    runtime = settings.to_provider_settings()
     provider = RecordingProvider()
     adapter = ModelAdapter(provider, runtime.model_name, provider_name="squid_models")
     adapter.respond([{"role": "user", "content": "hello"}], [])
@@ -267,7 +171,7 @@ def test_disconnected_openrouter_selection_does_not_weaken_inference_checks(
     assert settings.model.provider == "openrouter"
     assert explanation == "OpenRouter is not connected."
     with pytest.raises(ValueError, match="api_key is required"):
-        build_provider(settings.to_runtime_settings().provider)
+        build_provider(settings.to_provider_settings())
 
 
 def test_discovery_uses_shared_provider_seam(monkeypatch, tmp_path) -> None:
