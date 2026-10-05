@@ -2926,3 +2926,27 @@
   in both repositories passed. No live inference was run. Existing working-tree
   changes and historical devlog entries were preserved. No implementation
   follow-ups deferred; settings/provider migrations and metadata are out of scope.
+
+
+- 2026-10-05: Applied the application side of the confirmed Providers pre-v0.1
+  cleanup. DEFAULT_PROVIDER now lives in Code Squid settings; provider profiles
+  still own connection defaults. Removed all flat connection/timeout migration
+  reads and writers without aliases or dual writes. Programmatic configuration
+  now comes only from model.provider_config; effective connection fields are
+  presentation snapshots. Updated settings, setup and runner fixtures to scoped
+  config, and added regressions proving old fields are not read or migrated.
+  Adjusted the architecture guard to permit exactly the application default
+  declaration while continuing to prohibit concrete transports/backend policy.
+  Updated current architecture documentation for the scoped settings and
+  provider contracts, including best-effort streamed usage. Sibling Providers
+  fixes cover tool-call ordering, LM Studio authentication/readiness, Ollama
+  HTTP status/envelope/timeout handling, current-object construction and unique
+  fallback IDs; Core retry/tool policy and cancellation identity are unchanged.
+  Verification: affected settings/setup/runner/menu/CLI/boundary tests 229 passed;
+  full Code Squid 779 passed. Focused Providers 155 passed; full Providers 185
+  passed. Core adapter tests 63 passed; full Core 809 passed, 1 skipped.
+  Compilation/import/provider construction checks and git diff --check in all
+  three repositories passed. No live inference or release builds were run;
+  no Core files were changed by this patch. Existing unrelated work was preserved.
+  Broader vision, wrapper deduplication, test relocation, HTTP consolidation and
+  package/version/license/release changes remain intentionally out of scope.

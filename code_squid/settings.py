@@ -12,8 +12,7 @@ from typing import Any
 from code_squid.app_paths import settings_path as app_settings_path
 from code_squid.app_paths import workspace_state_dir
 from squid_providers.catalog import (
-    DEFAULT_PROVIDER_ID, VALID_PROVIDERS, CONNECTION_FIELDS,
-    resolve_config, validate_config, legacy_model_config, remove_legacy_model_config,
+    VALID_PROVIDERS, CONNECTION_FIELDS, resolve_config, validate_config,
 )
 from squid_providers.settings import (
     ProviderSettings, validate_temperature, validate_reasoning_mode,
@@ -26,9 +25,9 @@ from squid_core.settings import (
 from squid_core.storage.atomic_json import atomic_write_json
 
 
-# Backend defaults are resolved by the provider package, never by app settings.
+# Code Squid chooses its initial backend/model; Providers owns connection defaults.
 DEFAULT_MODEL_NAME = "qwen3.5-9b"
-DEFAULT_PROVIDER = DEFAULT_PROVIDER_ID
+DEFAULT_PROVIDER = "lm_studio"
 DEFAULT_DEBUG = False
 DEFAULT_SHOW_REASONING = False
 DEFAULT_TEMPERATURE = None
@@ -64,6 +63,8 @@ DEFAULT_COMPACTION_MIN_RECENT_CHUNKS = 2
 class ModelSettings:
     """Selected model, shared preferences and effective provider-owned config."""
 
+    # Effective connection snapshots for presentation; overrides belong only
+    # in provider_config (or the persisted providers mapping), never these fields.
     base_url: str | None = None
     api_key: str | None = None
     api_key_env: str | None = None
@@ -122,10 +123,6 @@ class Settings:
         config = dict(self.model.provider_config)
         # Directly constructed settings still inherit provider defaults. Loaded
         # settings carry resolved config, including explicitly null credentials.
-        for name in ("base_url", "api_key", "api_key_env"):
-            value = getattr(self.model, name)
-            if value is not None:
-                config[name] = value
         if not all(name in config for name in CONNECTION_FIELDS):
             config = resolve_config(self.model.provider, config)
         return ProviderSettings(
@@ -483,10 +480,9 @@ _CONNECTION_FIELDS = CONNECTION_FIELDS
 
 def _provider_connections(
     raw_settings: dict[str, Any],
-    model_settings: dict[str, Any],
     settings_path: Path,
 ) -> dict[str, dict[str, Any]]:
-    """Read scoped connections and interpret legacy flat fields in memory."""
+    """Read only current provider-scoped configuration overrides."""
     raw_providers = _section(raw_settings, "providers", settings_path)
     providers: dict[str, dict[str, Any]] = {}
     for provider_id, value in raw_providers.items():
@@ -503,14 +499,6 @@ def _provider_connections(
             )
         providers[provider_id] = validate_config(provider_id, value)
 
-    saved_provider = model_settings.get("provider", DEFAULT_PROVIDER)
-    if saved_provider in VALID_PROVIDERS:
-        legacy = legacy_model_config(saved_provider, model_settings)
-        if legacy:
-            # Loading interprets the old format; writers migrate it on disk.
-            providers[saved_provider] = validate_config(
-                saved_provider, legacy | providers.get(saved_provider, {})
-            )
     return providers
 
 
@@ -522,7 +510,7 @@ def load_settings(workspace_root: Path) -> Settings:
     compaction_settings = _section(raw_settings, "compaction", settings_path)
 
     provider = _provider(model_settings, settings_path)
-    providers = _provider_connections(raw_settings, model_settings, settings_path)
+    providers = _provider_connections(raw_settings, settings_path)
     connection_settings = dict(providers.get(provider, {}))
     # Product-wide overrides outrank provider credential variables and saved keys.
     if os.getenv("CODE_SQUID_BASE_URL") is not None:
@@ -659,7 +647,6 @@ def write_provider(workspace_root: Path, provider: str) -> None:
 
     settings_path, raw_settings = _read_application_settings(workspace_root)
     model_settings = _section(raw_settings, "model", settings_path)
-    _migrate_flat_provider_connection(raw_settings, model_settings, settings_path)
     model_settings["provider"] = provider
     raw_settings["model"] = model_settings
     settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -684,11 +671,7 @@ def write_model_value(workspace_root: Path, name: str, value: Any) -> None:
         valid_providers = ", ".join(sorted(VALID_PROVIDERS))
         raise ValueError(f"provider must be one of {valid_providers}")
 
-    providers = _migrate_flat_provider_connection(
-        raw_settings,
-        model_settings,
-        settings_path,
-    )
+    providers = _provider_connections(raw_settings, settings_path)
     connection = providers.setdefault(provider, {})
     connection = validate_config(provider, connection | {name: value})
     providers[provider] = connection
@@ -697,30 +680,6 @@ def write_model_value(workspace_root: Path, name: str, value: Any) -> None:
 
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_json(settings_path, raw_settings)
-
-
-def _migrate_flat_provider_connection(
-    raw_settings: dict[str, Any],
-    model_settings: dict[str, Any],
-    settings_path: Path,
-) -> dict[str, Any]:
-    """Move legacy flat connection fields under their saved provider."""
-    providers = _section(raw_settings, "providers", settings_path)
-    provider = model_settings.get("provider", DEFAULT_PROVIDER)
-    legacy = legacy_model_config(provider, model_settings)
-    remove_legacy_model_config(model_settings)
-    if legacy and provider in VALID_PROVIDERS:
-        existing = providers.get(provider, {})
-        if not isinstance(existing, dict):
-            raise ValueError(
-                f"Invalid settings JSON in {settings_path}: providers.{provider} "
-                "must be an object"
-            )
-        # A scoped field is authoritative in a partially migrated settings file.
-        providers[provider] = legacy | existing
-    if providers:
-        raw_settings["providers"] = providers
-    return providers
 
 
 def _write_model_value(workspace_root: Path, name: str, value: Any) -> None:

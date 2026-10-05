@@ -480,9 +480,9 @@ install all three unpublished checkouts editably; see README for commands.
     caller; the bounded watcher only polls the host predicate and aborts the
     active provider-owned client, including blocked headers/body reads.
   - `catalog.py` owns IDs, friendly names, profiles, URL/key defaults, credential
-    variable names, supported config and legacy interpretation, construction,
+    variable names, supported scoped config, construction,
     readiness/discovery, and replay policy. Public seams: `PROVIDER_PROFILES`,
-    `PROFILES_BY_ID`, `VALID_PROVIDERS`, `DEFAULT_PROVIDER_ID`,
+    `PROFILES_BY_ID`, `VALID_PROVIDERS`,
     `friendly_provider_name`, `resolve_provider_name`, `validate_config`,
     `resolve_config`, `build_provider`, `provider_ready`, `discover_models`, and
     `tool_call_content_mode`. `settings.py` owns effective `ProviderSettings`
@@ -1362,9 +1362,10 @@ in place. An existing application-wide file is always authoritative; settings
 from multiple workspaces are never merged. All subsequent writes target only
 the application-wide file.
 
-Missing settings are allowed. The provider catalog currently defaults to LM
-Studio. URL/key defaults belong to Providers; the initial model choice and
-generic preferences belong to Code Squid:
+Missing settings are allowed. Code Squid chooses LM Studio as its initial
+backend via `code_squid.settings.DEFAULT_PROVIDER`. URL/key defaults belong to
+Providers; the initial provider/model choices and generic preferences belong
+to Code Squid:
 
 - model base URL: `http://127.0.0.1:1234/v1`
 - API key: `lm-studio`
@@ -1410,21 +1411,20 @@ The `providers` mapping is sparse: it contains only supported config values a us
 explicitly saved. Switching `model.provider` changes which provider-scoped
 connection is resolved and never removes another provider's entry. Missing
 providers and missing fields inherit the corresponding provider-owned
-`ProviderProfile` defaults without writing those defaults to disk. Existing
-flat `model.base_url`, `model.api_key`, and `model.api_key_env` fields remain a
-supported input shape: they are interpreted as belonging to the saved
-`model.provider`, then moved into that provider's scoped entry on the next
-provider selection or connection mutation. A scoped field wins if both shapes
-are present during a partial migration. Model selection remains one exact,
+`ProviderProfile` defaults without writing those defaults to disk. Only scoped
+connection configuration is read and written; old flat model connection fields
+are not interpreted or migrated. Writers preserve unrelated JSON without dual
+writes. Programmatic settings supply overrides through `model.provider_config`;
+`ModelSettings.base_url`, `api_key`, and `api_key_env` are effective presentation
+snapshots, not another configuration source. Model selection remains one exact,
 provider-independent `model.name`.
 
 The current catalog contains `squid_models`, `lm_studio`, `ollama`, `openrouter`,
 and `openai_compatible`. Definitions and backend policy live in
 `../squid-providers/squid_providers/catalog.py`. Code Squid consumes definitions
 and persists supported arbitrary scoped overrides without concrete ID branches.
-`providers.ollama.request_timeout` is validated and consumed by Providers. The
-provisional flat timeout is interpreted only by Providers' legacy helper and
-removed by writers after scoped migration. Shared sampling/reasoning controls
+`providers.ollama.request_timeout` is validated and consumed by Providers;
+flat timeout fields have no compatibility path. Shared sampling/reasoning controls
 remain model preferences; validation and transport translation belong to
 Providers. Adding a first-party provider requires changes in Providers, without
 Core changes or new application branches. No plugin registry or dynamic entry
@@ -2678,3 +2678,19 @@ narration is encouraged by prompts.
 - Prefer accurate boring descriptions over aspirational architecture.
 
 Small, inspectable, stupid simple.
+
+
+### Provider transport contracts for v0.1
+
+Providers requires current `ProviderSettings` and normally initialized provider
+instances. LM Studio native metadata uses configured bearer credentials, and
+readiness requires a loaded LLM. Ollama appends complete streamed calls in
+arrival order, validates native response/message envelopes, and retains HTTP
+status information for Core's existing request-error classification. Positive
+finite timeout validation applies to direct transport construction as well as
+scoped settings. Missing OpenAI-compatible tool-call IDs are generated with a
+response-specific prefix; native IDs remain unchanged. Tool argument validation
+and execution remain Core-owned. Streamed usage is best-effort: supplied counts
+are retained, missing counts remain unknown, and no universal `stream_options`
+or usage compatibility retries are added. Ollama `/v1` normalization,
+cancellation identity/design, and conservative vision behavior remain unchanged.

@@ -115,12 +115,23 @@ def test_code_squid_application_package_has_expected_layout() -> None:
     ]
 
 
-def test_application_has_no_concrete_provider_names_or_classes():
+def test_application_owns_only_default_selection_not_backend_policy():
     import code_squid
+    from code_squid.settings import DEFAULT_PROVIDER
+    from squid_providers import catalog
     from squid_providers.catalog import VALID_PROVIDERS
+    assert DEFAULT_PROVIDER in VALID_PROVIDERS
+    assert not hasattr(catalog, "DEFAULT_PROVIDER_ID")
+    app_root = Path(code_squid.__file__).parent
     forbidden = tuple(VALID_PROVIDERS) + ("OpenAICompatibleProvider", "OllamaProvider")
-    for path in Path(code_squid.__file__).parent.rglob("*.py"):
+    for path in app_root.rglob("*.py"):
         source = path.read_text(encoding="utf-8")
+        if path == app_root / "settings.py":
+            # Selecting the application's initial backend belongs here. No
+            # transport implementation or backend-specific branches do.
+            declaration = f'DEFAULT_PROVIDER = "{DEFAULT_PROVIDER}"'
+            assert source.count(declaration) == 1
+            source = source.replace(declaration, "")
         assert not any(name in source for name in forbidden), path
 
 

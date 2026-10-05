@@ -299,58 +299,18 @@ def test_provider_environment_override_uses_that_providers_saved_connection(
     assert settings_path.read_text(encoding="utf-8") == before
 
 
-def test_legacy_flat_connection_loads_and_migrates_on_provider_switch(
-    tmp_path: Path,
-) -> None:
-    write_settings(
-        tmp_path,
-        {
-            "model": {
-                "provider": "lm_studio",
-                "name": "exact-model-id",
-                "base_url": "http://legacy-lan:1234/v1",
-                "api_key": "legacy-key",
-                "api_key_env": None,
-            },
-        },
-    )
-
-    legacy = load_settings(tmp_path)
-    assert legacy.model.base_url == "http://legacy-lan:1234/v1"
-    assert legacy.model.api_key == "legacy-key"
-    assert legacy.model.name == "exact-model-id"
-
-    write_provider(tmp_path, "ollama")
-    persisted = json.loads(settings_path().read_text(encoding="utf-8"))
-    assert persisted == {
-        "model": {"provider": "ollama", "name": "exact-model-id"},
-        "providers": {
-            "lm_studio": {
-                "base_url": "http://legacy-lan:1234/v1",
-                "api_key": "legacy-key",
-                "api_key_env": None,
-            },
-        },
-    }
-
-    write_provider(tmp_path, "lm_studio")
-    restored = load_settings(tmp_path)
-    assert restored.model.base_url == "http://legacy-lan:1234/v1"
-    assert restored.model.api_key == "legacy-key"
-    assert restored.model.name == "exact-model-id"
-
-
 def test_settings_file_overrides_defaults(tmp_path: Path) -> None:
     write_settings(
         tmp_path,
         {
             "model": {
-                "base_url": "http://localhost:9999/v1",
-                "api_key": "local-key",
                 "name": "local-model",
                 "provider": "ollama",
                 "temperature": 0.2,
             },
+            "providers": {"ollama": {
+                "base_url": "http://localhost:9999/v1", "api_key": "local-key",
+            }},
             "display": {
                 "debug": True,
             },
@@ -483,11 +443,10 @@ def test_env_vars_override_settings_file(tmp_path: Path, monkeypatch: pytest.Mon
     write_settings(
         tmp_path,
         {
-            "model": {
-                "base_url": "http://localhost:9999/v1",
-                "api_key": "local-key",
-                "name": "local-model",
-            },
+            "model": {"name": "local-model"},
+            "providers": {"lm_studio": {
+                "base_url": "http://localhost:9999/v1", "api_key": "local-key",
+            }},
         },
     )
     monkeypatch.setenv("CODE_SQUID_BASE_URL", "http://env-host:1234/v1")
@@ -761,10 +720,9 @@ def test_api_key_env_reads_named_environment_variable(
     write_settings(
         tmp_path,
         {
-            "model": {
-                "api_key": "local-key",
-                "api_key_env": "MY_CODE_SQUID_KEY",
-            },
+            "providers": {"lm_studio": {
+                "api_key": "local-key", "api_key_env": "MY_CODE_SQUID_KEY",
+            }},
         },
     )
     monkeypatch.setenv("MY_CODE_SQUID_KEY", "env-file-key")
@@ -782,10 +740,9 @@ def test_code_squid_api_key_overrides_api_key_env(
     write_settings(
         tmp_path,
         {
-            "model": {
-                "api_key": "local-key",
-                "api_key_env": "MY_CODE_SQUID_KEY",
-            },
+            "providers": {"lm_studio": {
+                "api_key": "local-key", "api_key_env": "MY_CODE_SQUID_KEY",
+            }},
         },
     )
     monkeypatch.setenv("MY_CODE_SQUID_KEY", "env-file-key")
@@ -798,7 +755,7 @@ def test_code_squid_api_key_overrides_api_key_env(
 
 
 def test_missing_api_key_env_variable_raises_clearly(tmp_path: Path) -> None:
-    write_settings(tmp_path, {"model": {"api_key_env": "MISSING_CODE_SQUID_KEY"}})
+    write_settings(tmp_path, {"providers": {"lm_studio": {"api_key_env": "MISSING_CODE_SQUID_KEY"}}})
 
     with pytest.raises(ValueError, match="MISSING_CODE_SQUID_KEY"):
         load_settings(tmp_path)
@@ -850,15 +807,16 @@ def test_invalid_trusted_commands_raise(tmp_path: Path, value: object) -> None:
 
 def test_provider_owned_option_round_trips_without_application_field_knowledge(tmp_path, monkeypatch):
     from dataclasses import replace
-    from squid_providers.catalog import DEFAULT_PROVIDER_ID, PROFILES_BY_ID
+    from squid_providers.catalog import PROFILES_BY_ID
+    from code_squid.settings import DEFAULT_PROVIDER
     from code_squid.settings import write_model_value
 
-    profile = PROFILES_BY_ID[DEFAULT_PROVIDER_ID]
-    monkeypatch.setitem(PROFILES_BY_ID, DEFAULT_PROVIDER_ID,
+    profile = PROFILES_BY_ID[DEFAULT_PROVIDER]
+    monkeypatch.setitem(PROFILES_BY_ID, DEFAULT_PROVIDER,
                         replace(profile, config_fields=("future_option",)))
     write_model_value(tmp_path, "future_option", {"nested": True})
     settings = load_settings(tmp_path)
-    assert settings.providers[DEFAULT_PROVIDER_ID]["future_option"] == {"nested": True}
+    assert settings.providers[DEFAULT_PROVIDER]["future_option"] == {"nested": True}
     assert settings.to_provider_settings().config["future_option"] == {"nested": True}
 
 
@@ -872,3 +830,37 @@ def test_programmatic_settings_resolve_defaults_and_partial_scoped_config():
     effective = settings.to_provider_settings()
     assert effective.base_url == profile.base_url
     assert effective.config[profile.config_fields[0]] == 45
+
+
+def test_flat_connection_fields_are_not_read_or_migrated(tmp_path):
+    from code_squid.settings import write_model_value
+    old_model = {
+        "provider": "lm_studio", "name": "exact-model",
+        "base_url": "http://obsolete/v1", "api_key": "obsolete-key",
+        "api_key_env": "MISSING_OLD_KEY", "ollama_request_timeout": 45,
+    }
+    write_settings(tmp_path, {"model": old_model})
+    effective = load_settings(tmp_path)
+    assert effective.providers == {}
+    assert effective.model.base_url == "http://127.0.0.1:1234/v1"
+    assert effective.model.api_key == "lm-studio"
+    write_model_value(tmp_path, "base_url", "http://current/v1")
+    persisted = json.loads(settings_path().read_text(encoding="utf-8"))
+    # Writers preserve unrelated JSON, but never transfer or update the old fields.
+    assert persisted["model"] == old_model
+    assert persisted["providers"] == {"lm_studio": {"base_url": "http://current/v1"}}
+    write_provider(tmp_path, "ollama")
+    switched = load_settings(tmp_path)
+    assert switched.to_provider_settings().config.get("request_timeout") is None
+    assert switched.providers == persisted["providers"]
+
+
+def test_programmatic_connection_uses_scoped_config_only():
+    from code_squid.settings import Settings, ModelSettings, DisplaySettings, RuntimeSettings
+    settings = Settings(
+        model=ModelSettings(provider_config={"base_url": "http://scoped/v1", "api_key": "scoped-key"}),
+        display=DisplaySettings(), runtime=RuntimeSettings(),
+    )
+    effective = settings.to_provider_settings()
+    assert effective.base_url == "http://scoped/v1"
+    assert effective.api_key == "scoped-key"

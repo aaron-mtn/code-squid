@@ -115,7 +115,7 @@ def test_openrouter_saved_key_is_used_when_default_env_is_absent(tmp_path) -> No
     settings_dir = tmp_path / ".code-squid"
     settings_dir.mkdir()
     (settings_dir / "settings.json").write_text(
-        json.dumps({"model": {"provider": "openrouter", "api_key": "saved-secret"}}),
+        json.dumps({"model": {"provider": "openrouter"}, "providers": {"openrouter": {"api_key": "saved-secret"}}}),
         encoding="utf-8",
     )
     provider = build_provider(load_settings(tmp_path).to_provider_settings())

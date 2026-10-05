@@ -39,12 +39,10 @@ def _provider_settings(provider: str) -> Settings:
         model=ModelSettings(
             provider=provider,
             name="test-model",
-            base_url=(
-                "http://127.0.0.1:11434"
-                if is_ollama
-                else "http://127.0.0.1:1234/v1"
-            ),
-            api_key=None if is_ollama else "test-key",
+            provider_config={
+                "base_url": "http://127.0.0.1:11434" if is_ollama else "http://127.0.0.1:1234/v1",
+                "api_key": None if is_ollama else "test-key",
+            },
         ),
         display=DisplaySettings(),
         runtime=RuntimeSettings(),

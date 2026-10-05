@@ -41,12 +41,8 @@ def settings_for_provider(settings, provider_id: str):
     """Build a candidate configuration while preserving the exact model ID."""
     connection = dict(settings.providers.get(provider_id, {}))
     if provider_id == settings.model.provider and provider_id not in settings.providers:
-        # Programmatically supplied connection values override catalog defaults.
-        connection.update({name: value for name, value in {
-            "base_url": settings.model.base_url,
-            "api_key": settings.model.api_key,
-            "api_key_env": settings.model.api_key_env,
-        }.items() if value is not None})
+        # Current programmatic settings carry scoped config, just like loaded settings.
+        connection.update(settings.model.provider_config)
     if os.getenv("CODE_SQUID_BASE_URL") is not None:
         connection["base_url"] = os.environ["CODE_SQUID_BASE_URL"]
     config = resolve_config(
