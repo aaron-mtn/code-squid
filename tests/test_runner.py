@@ -460,3 +460,62 @@ def test_custom_model_collaborators_bypass_application_provider_construction(
         assert run.loop.model_adapter.provider is provider
         assert run.loop.model_adapter.model_name == "test-model"
         assert run.loop.model_adapter.tool_call_content_mode == "null"
+
+
+@pytest.mark.parametrize("stage", ["provider", "runtime", "context", "undo"])
+def test_construction_failure_preserves_error_and_never_leaves_active_session(
+    monkeypatch, tmp_path: Path, stage: str,
+) -> None:
+    import json
+    from code_squid.app_paths import workspace_sessions_dir
+
+    original = RuntimeError(f"{stage} construction failed")
+
+    def fail(*args, **kwargs):
+        raise original
+
+    target = {
+        "provider": "code_squid.provider_setup.build_provider",
+        "runtime": "code_squid.agent_setup.build_core_agent_loop",
+        "context": "code_squid.agent_setup.append_run_context",
+        "undo": "code_squid.agent_setup.UndoStore.create",
+    }[stage]
+    monkeypatch.setattr(target, fail)
+    with pytest.raises(RuntimeError) as caught:
+        build_coding_task_run(tmp_path, "fail assembly", settings=_provider_settings("lm_studio"))
+    assert caught.value is original
+    metadata = list(workspace_sessions_dir(tmp_path).glob("*/metadata.json"))
+    if stage == "provider":
+        assert metadata == []
+    else:
+        assert len(metadata) == 1
+        assert json.loads(metadata[0].read_text(encoding="utf-8"))["status"] == "failed"
+
+
+def test_construction_status_failure_does_not_replace_original(monkeypatch, tmp_path: Path) -> None:
+    from squid_core.storage import SessionStore
+
+    store = SessionStore.create(tmp_path / "sessions", "original")
+    original = RuntimeError("runtime assembly failed")
+
+    def fail_runtime(**kwargs):
+        raise original
+
+    def fail_status(status):
+        raise OSError("metadata unavailable")
+
+    monkeypatch.setattr("code_squid.agent_setup.build_core_agent_loop", fail_runtime)
+    monkeypatch.setattr(store, "update_status", fail_status)
+    with pytest.raises(RuntimeError) as caught:
+        build_coding_task_run(tmp_path, "fail", session_store=store, model_adapter=object())
+    assert caught.value is original
+
+
+def test_successful_construction_keeps_active_session_and_context(tmp_path: Path) -> None:
+    import json
+
+    run = build_coding_task_run(tmp_path, "ready", model_adapter=object())
+    metadata = json.loads((run.session_store.session_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["status"] == "active"
+    entries = [json.loads(line) for line in run.session_store.jsonl_path.read_text(encoding="utf-8").splitlines()]
+    assert len([entry for entry in entries if entry["type"] == "run_context"]) == 1

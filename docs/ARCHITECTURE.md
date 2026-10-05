@@ -2271,17 +2271,37 @@ buffer unavailable rather than following its absolute paths back to the old
 workspace. Snapshot paths are likewise required to remain under the buffer's
 `files` directory. There is intentionally no automatic undo-record migration.
 
-Ctrl+C marks the current session `interrupted` and prints the normal final
-session display. Model request failures mark the session `failed` and write a
-diagnostic log to `.code-squid/logs/latest.log`. The diagnostic log is narrow:
-it stores traceback details, not prompts, payloads, tool outputs, file contents,
-headers, or API keys. An unexpected exception escaping an active agent run uses
-that same traceback log and returns status 1. The normal CLI shows a concise
-run-stopped message, the preserved session and log paths, and an explicit note
-that prior repository changes were not rolled back; it does not print the raw
-traceback. A failing status write is best-effort in this path so it cannot hide
-the original persistence/runtime failure. `KeyboardInterrupt` retains its
-separate interrupted-session behavior.
+Code Squid owns run assembly and session lifecycle coordination. The application
+builder constructs the selected provider before durable session creation, so
+missing credentials do not create an active session. Later assembly failures
+(including runtime construction, undo setup, and run-context persistence) mark
+an available session `failed` and re-raise the original exception. This applies
+to supplied/resumed stores too; session history is retained for discovery and
+resumption. Core storage and runtime contracts remain strict and unchanged.
+
+The CLI routes new-run construction, follow-up preparation, and exceptions from
+`loop.run()` through the same application failure reporter. New runs capture
+the durable store through the existing storage-factory seam; failures before
+creation report no session path/ID. Unexpected failures return status 1.
+Handled model request failures return 0 to keep the interactive prompt alive.
+
+Status updates and diagnostic writes are best effort only while handling an
+existing failure: secondary persistence errors cannot replace its cause or
+prevent user-facing reporting. When writable, the traceback log remains at
+`.code-squid/logs/latest.log`, with existing relative-path presentation and
+specialized model-failure output. The log stores traceback details, not prompts,
+payloads, tool outputs, file contents, headers, or API keys. If a diagnostic write
+fails, the normal run-failure surface renders the original error without a
+saved-log claim. Its log/session paths are optional, and generic errors show
+their message even when no log exists. The display retains its concise permission
+error explanation and note that prior repository changes were not rolled back.
+If storage is unavailable, a failed status update cannot guarantee corrected
+durable metadata; the original failure still reaches the user. No storage
+helper silently suppresses errors.
+
+`KeyboardInterrupt` retains its separate interrupted-session behavior: Ctrl+C
+marks the current session `interrupted` and prints the normal final session
+display. Construction cancellation and failure-display errors are not swallowed.
 
 There is no permanent undo history, branching UI, tree navigation, or advanced
 session workflow in the current MVP.

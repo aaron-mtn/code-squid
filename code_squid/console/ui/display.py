@@ -440,8 +440,8 @@ class TerminalDisplay:
     def run_failed(
         self,
         error: Exception,
-        log_path: Path,
-        session_path: Path,
+        log_path: Path | None,
+        session_path: Path | None,
     ) -> None:
         """Render one unrecoverable run failure without exposing a traceback."""
         self._finish_startup_before_output()
@@ -461,10 +461,13 @@ class TerminalDisplay:
             )
         else:
             print("Code Squid encountered an unrecoverable run error.")
+            print(str(error))
         print()
         print("Repository changes made before the failure were not rolled back.")
-        print(f"Session: {session_path.as_posix()}")
-        print(f"Details saved to: {log_path.as_posix()}")
+        if session_path is not None:
+            print(f"Session: {session_path.as_posix()}")
+        if log_path is not None:
+            print(f"Details saved to: {log_path.as_posix()}")
         self._has_run_output = True
 
     def loop_finished(self, session, run_result=None) -> None:

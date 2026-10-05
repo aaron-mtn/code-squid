@@ -117,34 +117,49 @@ def _run_loop(
         display.interrupted()
         display.loop_finished(session, run_result)
         return 0
-    except ModelRequestError as error:
-        session_store.update_status("failed")
-        log_path = write_error_log(workspace_error_log_path(workspace_root), error)
-        display.model_request_failed(_display_path(workspace_root, log_path))
-        # The run failed, as recorded above, but the application boundary has
-        # handled that failure. Returning success here keeps the persistent
-        # prompt alive without weakening handling for any other exception.
-        return 0
     except Exception as error:
-        # This is the outer boundary for one active run. Unexpected runtime and
-        # persistence failures are still non-successful and fully logged, but
-        # they should not tear through the terminal with Python internals.
-        try:
-            session_store.update_status("failed")
-        except Exception:
-            # A storage failure may make even the best-effort status update
-            # impossible. Preserve the original exception as the useful cause.
-            pass
-        log_path = write_error_log(workspace_error_log_path(workspace_root), error)
-        display.run_failed(
-            error,
-            _display_path(workspace_root, log_path),
-            _display_path(workspace_root, session_store.session_dir),
-        )
-        return 1
+        return _report_run_failure(workspace_root, display, error, session_store)
 
     display.loop_finished(session, run_result)
     return 1 if run_result.status == "failed" else 0
+
+
+def _report_run_failure(
+    workspace_root: Path,
+    display: TerminalDisplay,
+    error: Exception,
+    session_store: SessionStore | None,
+) -> int:
+    """Contain one construction/runtime failure without losing its original cause."""
+    if session_store is not None:
+        try:
+            session_store.update_status("failed")
+        except Exception:
+            # Storage remains strict elsewhere. A secondary status error must
+            # not prevent presentation of the problem that stopped this run.
+            pass
+    try:
+        log_path = write_error_log(workspace_error_log_path(workspace_root), error)
+    except Exception:
+        # Never claim a diagnostic exists when its write failed. Unexpected
+        # diagnostic errors are contained only inside this already-failing path.
+        log_path = None
+    displayed_log = (
+        _display_path(workspace_root, log_path) if log_path is not None else None
+    )
+    if isinstance(error, ModelRequestError) and displayed_log is not None:
+        display.model_request_failed(displayed_log)
+    else:
+        display.run_failed(
+            error,
+            displayed_log,
+            _display_path(workspace_root, session_store.session_dir)
+            if session_store is not None
+            else None,
+        )
+    # A handled model failure keeps the interactive prompt alive, even without
+    # diagnostics. Unexpected errors keep the existing non-success exit policy.
+    return 0 if isinstance(error, ModelRequestError) else 1
 
 
 def _display_path(workspace_root: Path, path: Path) -> Path:
@@ -166,16 +181,32 @@ def _run_new_session_task(
     display.run_started()
     cancellation = RunCancellationController()
 
-    run = build_coding_task_run(
-        workspace_root=workspace_root,
-        task=task,
-        settings=settings,
-        display=display,
-        on_event=getattr(display, "handle_event", None),
-        should_cancel=cancellation.should_cancel,
-        skill_name=skill_name,
-        mod_name=mod_name,
-    )
+    session_store = None
+
+    def create_session_store(root: Path, initial_task: str) -> SessionStore:
+        # Capture the durable identity through the existing factory seam so
+        # failed assembly can still report and return a discoverable session.
+        nonlocal session_store
+        session_store = SessionStore.create(
+            workspace_sessions_dir(root), initial_task, workspace_root=root
+        )
+        return session_store
+
+    try:
+        run = build_coding_task_run(
+            workspace_root=workspace_root,
+            task=task,
+            settings=settings,
+            display=display,
+            on_event=getattr(display, "handle_event", None),
+            should_cancel=cancellation.should_cancel,
+            skill_name=skill_name,
+            mod_name=mod_name,
+            session_store_factory=create_session_store,
+        )
+    except Exception as error:
+        status = _report_run_failure(workspace_root, display, error, session_store)
+        return status, session_store.session_id if session_store is not None else None
 
     status = _run_loop(
         workspace_root,
@@ -201,30 +232,35 @@ def _run_follow_up_task(
     if session_dir is None:
         return 0, None
 
-    session_store = SessionStore.open(session_dir)
-    session = Session(workspace_root=workspace_root)
-    session.add_messages(*session_store.load_messages())
+    session_store = None
+    try:
+        session_store = SessionStore.open(session_dir)
+        session = Session(workspace_root=workspace_root)
+        session.add_messages(*session_store.load_messages())
 
-    display.run_started()
-    cancellation = RunCancellationController()
-    # Follow-ups use the application-owned path used by new runs, so a Mod
-    # cannot lose its Skill, restricted Tools, or Hooks when a session resumes.
-    run = build_coding_task_run(
-        workspace_root=workspace_root,
-        task=follow_up_task,
-        settings=settings,
-        display=display,
-        on_event=getattr(display, "handle_event", None),
-        should_cancel=cancellation.should_cancel,
-        skill_name=skill_name,
-        mod_name=mod_name,
-        session=session,
-        session_store=session_store,
-    )
-    follow_up_message = run.loop.agent.follow_up_message(follow_up_task)
-    session.add_message(follow_up_message)
-    session_store.append_message(follow_up_message)
-    session_store.update_status("active")
+        display.run_started()
+        cancellation = RunCancellationController()
+        # Follow-ups use the application-owned path used by new runs, so a Mod
+        # cannot lose its Skill, restricted Tools, or Hooks when a session resumes.
+        run = build_coding_task_run(
+            workspace_root=workspace_root,
+            task=follow_up_task,
+            settings=settings,
+            display=display,
+            on_event=getattr(display, "handle_event", None),
+            should_cancel=cancellation.should_cancel,
+            skill_name=skill_name,
+            mod_name=mod_name,
+            session=session,
+            session_store=session_store,
+        )
+        follow_up_message = run.loop.agent.follow_up_message(follow_up_task)
+        session.add_message(follow_up_message)
+        session_store.append_message(follow_up_message)
+        session_store.update_status("active")
+    except Exception as error:
+        status = _report_run_failure(workspace_root, display, error, session_store)
+        return status, session_store.session_id if session_store is not None else session_id
 
     status = _run_loop(
         workspace_root,

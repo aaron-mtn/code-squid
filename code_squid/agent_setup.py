@@ -188,6 +188,10 @@ def build_coding_task_run(
 ) -> CodingTaskRun:
     """Construct a new coding-task run without starting it.
 
+    Provider prerequisites are checked before creating a session. If later
+    assembly fails, any available session is marked failed (best effort), and
+    the original exception is re-raised for the frontend to present.
+
     CLI code uses this when it needs direct access to the session and
     ``SessionStore`` for interactive follow-ups after the first run. Frontends
     supply their own display; omitted presentation uses Squid Core's default.
@@ -197,142 +201,153 @@ def build_coding_task_run(
     Skill. These namespaces never fall back to each other.
     """
 
-    if (resolved_skill is None) != (resolved_tools is None):
-        raise ValueError("resolved_skill and resolved_tools must be supplied together")
-    if mod_name is not None and resolved_skill is not None:
-        raise ValueError("mod_name cannot be combined with resolved components")
+    try:
+        if (resolved_skill is None) != (resolved_tools is None):
+            raise ValueError("resolved_skill and resolved_tools must be supplied together")
+        if mod_name is not None and resolved_skill is not None:
+            raise ValueError("mod_name cannot be combined with resolved components")
 
-    workspace_root = Path(workspace_root).resolve()
-    app_home = code_squid_home(app_home)
-    settings = load_settings(workspace_root) if settings is None else settings
-    runtime_settings = settings.to_runtime_settings()
-    provider_settings = settings.to_provider_settings()
-    selected_mod: ResolvedMod | None = None
+        workspace_root = Path(workspace_root).resolve()
+        app_home = code_squid_home(app_home)
+        settings = load_settings(workspace_root) if settings is None else settings
+        runtime_settings = settings.to_runtime_settings()
+        provider_settings = settings.to_provider_settings()
+        selected_mod: ResolvedMod | None = None
 
-    if session_store is not None and session_store_factory is not None:
-        raise ValueError("session_store and session_store_factory are mutually exclusive")
-    if undo_store is not None and undo_store_factory is not None:
-        raise ValueError("undo_store and undo_store_factory are mutually exclusive")
+        if session_store is not None and session_store_factory is not None:
+            raise ValueError("session_store and session_store_factory are mutually exclusive")
+        if undo_store is not None and undo_store_factory is not None:
+            raise ValueError("undo_store and undo_store_factory are mutually exclusive")
 
-    session = session if session is not None else Session(workspace_root=workspace_root)
-    sessions_dir = workspace_sessions_dir(workspace_root)
-    undo_dir = workspace_undo_dir(workspace_root)
-    if session_store is None:
-        session_store = (
-            SessionStore.create(sessions_dir, task, workspace_root=workspace_root)
-            if session_store_factory is None
-            else session_store_factory(workspace_root, task)
-        )
-        try:
-            # Cross-workspace discovery is supplementary application policy;
-            # failure must not invalidate the newly created local session.
-            register_session_root(session_indexes_path(), sessions_dir)
-        except Exception:
-            pass
-    if undo_store is None and tool_executor is None:
-        undo_store = (
-            UndoStore.create(
-                undo_dir,
-                session_store.session_id,
-                workspace_root=workspace_root,
+        # Validate transport prerequisites before creating durable session state.
+        # Application settings choose the transport; Core only receives collaborators.
+        # A ready adapter wins over even a supplied provider, and custom providers
+        # must never trigger default transport construction.
+        if model_adapter is None and provider is None:
+            provider = provider_setup.build_provider(provider_settings)
+        session = session if session is not None else Session(workspace_root=workspace_root)
+        sessions_dir = workspace_sessions_dir(workspace_root)
+        undo_dir = workspace_undo_dir(workspace_root)
+        if session_store is None:
+            session_store = (
+                SessionStore.create(sessions_dir, task, workspace_root=workspace_root)
+                if session_store_factory is None
+                else session_store_factory(workspace_root, task)
             )
-            if undo_store_factory is None
-            else undo_store_factory(workspace_root, session_store.session_id)
+            try:
+                # Cross-workspace discovery is supplementary application policy;
+                # failure must not invalidate the newly created local session.
+                register_session_root(session_indexes_path(), sessions_dir)
+            except Exception:
+                pass
+        if undo_store is None and tool_executor is None:
+            undo_store = (
+                UndoStore.create(
+                    undo_dir,
+                    session_store.session_id,
+                    workspace_root=workspace_root,
+                )
+                if undo_store_factory is None
+                else undo_store_factory(workspace_root, session_store.session_id)
+            )
+        elif undo_store is None and undo_store_factory is not None:
+            undo_store = undo_store_factory(workspace_root, session_store.session_id)
+        if mod_name is not None:
+            selected_mod = resolve_mod(
+                mod_name,
+                app_home,
+                workspace_root=workspace_root,
+                session_id=session_store.session_id,
+                selected_skill=skill_name,
+            )
+            skill, active_tools = selected_mod.skill, selected_mod.tools
+        elif resolved_skill is not None and resolved_tools is not None:
+            skill, active_tools = resolved_skill, resolved_tools
+        else:
+            skill, active_tools = resolve_skill_tools(
+                skill_name,
+                workspace_root=workspace_root,
+                session_id=session_store.session_id,
+                app_home=app_home,
+            )
+        selected_mod_id = selected_mod.metadata.name if selected_mod is not None else mod_id
+        append_run_context(session_store, skill, active_tools, mod_id=selected_mod_id)
+        platform_context = (
+            detect_platform_context()
+            if agent is None or tool_executor is None
+            else None
         )
-    elif undo_store is None and undo_store_factory is not None:
-        undo_store = undo_store_factory(workspace_root, session_store.session_id)
-    if mod_name is not None:
-        selected_mod = resolve_mod(
-            mod_name,
-            app_home,
-            workspace_root=workspace_root,
-            session_id=session_store.session_id,
-            selected_skill=skill_name,
-        )
-        skill, active_tools = selected_mod.skill, selected_mod.tools
-    elif resolved_skill is not None and resolved_tools is not None:
-        skill, active_tools = resolved_skill, resolved_tools
-    else:
-        skill, active_tools = resolve_skill_tools(
-            skill_name,
-            workspace_root=workspace_root,
-            session_id=session_store.session_id,
+        if agent is None:
+            agent = Agent(
+                task=task,
+                skill=skill,
+                tools=active_tools,
+                platform_context=platform_context,
+                workspace=str(workspace_root),
+                prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS,
+            )
+        selected_hooks = list(hooks or [])
+        if selected_mod is not None:
+            selected_hooks.extend(selected_mod.hooks)
+        hook_runner = build_hook_runner(
+            hooks=selected_hooks,
+            hook_runner=hook_runner,
+            include_user_hooks=include_user_hooks,
             app_home=app_home,
+            built_in_hook_settings=settings.runtime.built_in_hook_settings,
         )
-    selected_mod_id = selected_mod.metadata.name if selected_mod is not None else mod_id
-    append_run_context(session_store, skill, active_tools, mod_id=selected_mod_id)
-    platform_context = (
-        detect_platform_context()
-        if agent is None or tool_executor is None
-        else None
-    )
-    if agent is None:
-        agent = Agent(
-            task=task,
-            skill=skill,
+        if approval_policy is None:
+            approval_policy = ApprovalPolicy(
+                mode=settings.runtime.approval_mode,
+                prompter=display if approval_prompter is None else approval_prompter,
+                trusted_commands=settings.runtime.trusted_commands,
+                persist_trusted_command=lambda command: trust_command(workspace_root, command),
+            )
+        loop = build_core_agent_loop(
+            workspace_root=workspace_root,
+            session=session,
+            session_store=session_store,
+            agent=agent,
+            undo_store=undo_store,
+            settings=runtime_settings,
+            display=display,
             tools=active_tools,
+            on_event=on_event,
+            should_cancel=should_cancel,
+            hook_runner=hook_runner,
             platform_context=platform_context,
-            workspace=str(workspace_root),
-            prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS,
+            provider=provider,
+            model_adapter=model_adapter,
+            model_name=provider_settings.model_name,
+            provider_name=provider_settings.provider,
+            tool_call_content_mode=provider_setup.tool_call_content_mode(
+                provider_settings
+            ),
+            compactor=compactor,
+            compaction_context_provider=CodeSquidCompactionContextProvider(
+                session_store.load_canonical_messages
+            ),
+            tool_executor=tool_executor,
+            tool_results=tool_results,
+            approval_policy=approval_policy,
+            action_preflight=action_preflight,
+            approval_prompter=display if approval_prompter is None else approval_prompter,
         )
-    selected_hooks = list(hooks or [])
-    if selected_mod is not None:
-        selected_hooks.extend(selected_mod.hooks)
-    hook_runner = build_hook_runner(
-        hooks=selected_hooks,
-        hook_runner=hook_runner,
-        include_user_hooks=include_user_hooks,
-        app_home=app_home,
-        built_in_hook_settings=settings.runtime.built_in_hook_settings,
-    )
-    if approval_policy is None:
-        approval_policy = ApprovalPolicy(
-            mode=settings.runtime.approval_mode,
-            prompter=display if approval_prompter is None else approval_prompter,
-            trusted_commands=settings.runtime.trusted_commands,
-            persist_trusted_command=lambda command: trust_command(workspace_root, command),
-        )
-    # Application settings choose the transport; Core only receives collaborators.
-    # A ready adapter wins over even a supplied provider, and custom providers
-    # must never trigger default transport construction.
-    if model_adapter is None and provider is None:
-        provider = provider_setup.build_provider(provider_settings)
-    loop = build_core_agent_loop(
-        workspace_root=workspace_root,
-        session=session,
-        session_store=session_store,
-        agent=agent,
-        undo_store=undo_store,
-        settings=runtime_settings,
-        display=display,
-        tools=active_tools,
-        on_event=on_event,
-        should_cancel=should_cancel,
-        hook_runner=hook_runner,
-        platform_context=platform_context,
-        provider=provider,
-        model_adapter=model_adapter,
-        model_name=provider_settings.model_name,
-        provider_name=provider_settings.provider,
-        tool_call_content_mode=provider_setup.tool_call_content_mode(
-            provider_settings
-        ),
-        compactor=compactor,
-        compaction_context_provider=CodeSquidCompactionContextProvider(
-            session_store.load_canonical_messages
-        ),
-        tool_executor=tool_executor,
-        tool_results=tool_results,
-        approval_policy=approval_policy,
-        action_preflight=action_preflight,
-        approval_prompter=display if approval_prompter is None else approval_prompter,
-    )
 
-    return CodingTaskRun(
-        session=session,
-        session_store=session_store,
-        loop=loop,
-    )
+        return CodingTaskRun(
+            session=session,
+            session_store=session_store,
+            loop=loop,
+        )
+    except Exception:
+        # Assembly owns the lifecycle even for non-CLI callers. Re-raise the
+        # original error; only writes made while already failing are best effort.
+        if session_store is not None:
+            try:
+                session_store.update_status("failed")
+            except Exception:
+                pass
+        raise
 
 
 def build_hook_runner(

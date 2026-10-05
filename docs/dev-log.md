@@ -2978,3 +2978,43 @@
   no Core files were changed by this patch. Existing unrelated work was preserved.
   Broader vision, wrapper deduplication, test relocation, HTTP consolidation and
   package/version/license/release changes remain intentionally out of scope.
+
+
+- 2026-10-05: Applied pre-release cleanup Patch 2, scoped to F3/F5 in Code
+  Squid. Run construction previously created an active session and persisted
+  run context before provider/runtime construction, outside the CLI run-loop
+  exception boundary. The builder now constructs the provider before creating
+  durable state and marks any available session failed if later assembly raises,
+  then re-raises the original error. New-run CLI assembly captures the store via
+  the existing factory seam, preserving its identity for reporting/discovery.
+  Follow-up preparation and loop exceptions use the same failure reporter;
+  durable history is retained and failed sessions can resume.
+  Failure-time status and diagnostic writes are best effort at the application
+  boundary only. Secondary write errors cannot suppress reporting or replace
+  the original exception. Successful logs retain their paths and specialized
+  model-error presentation; unavailable diagnostics fall back to run_failed
+  with the original error and no saved-log claim. The display accepts absent
+  log/session paths and shows generic error messages while retaining concise
+  permission-error output. Handled model failures still return 0 for the
+  persistent prompt; unexpected/construction failures return 1. No Core or
+  Providers production code changed, and strict storage helpers remain intact.
+  Regressions cover provider/runtime/context/undo construction, failed metadata,
+  original exception identity, failed follow-up resumption, successful active
+  construction/context, OSError from logs and status writes (including combined
+  failures), successful model diagnostics with failed status persistence, and
+  failure rendering without invented paths. Existing success, diagnostics,
+  session-index, and cancellation tests remain passing.
+  Verification: focused runner/main/CLI cancellation/session-index tests 124
+  passed; full Code Squid suite 817 passed. Touched source/test compilation and
+  fresh-process imports passed. Standalone probes passed for real missing
+  OpenRouter credentials (no session created), runtime construction failure
+  (failed durable metadata), and simultaneous log/status OSError (original
+  failure reported without a diagnostic path). git diff --check passed. No
+  live model inference was run. No session display, settings/provider cleanup,
+  packaging, Desktop, Core, or Providers changes were included.
+  Remaining limits: unavailable metadata storage can prevent failed-status
+  persistence; creation that fails before returning a store may leave partial
+  files without an application-held identity. KeyboardInterrupt retains its
+  separate existing path, and failures in presentation itself are not swallowed.
+  These limits are recorded rather than broadening this patch into storage or
+  cancellation redesign. No unrelated existing work was changed.

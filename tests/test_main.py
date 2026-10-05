@@ -1,3 +1,5 @@
+"""Tests for CLI orchestration, session lifecycle, and failure presentation."""
+
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -1714,3 +1716,127 @@ def test_resume_session_passes_trace_to_terminal_display(
             ),
         }
     ]
+
+
+@pytest.mark.parametrize("model_error", [False, True])
+@pytest.mark.parametrize("broken_status", [False, True])
+def test_failure_reporting_survives_unavailable_diagnostics(
+    monkeypatch, tmp_path, model_error, broken_status,
+) -> None:
+    original = ModelRequestError("original model failure") if model_error else RuntimeError("original run failure")
+
+    class FailingLoop:
+        def run(self):
+            raise original
+
+    def fail_log(*args):
+        raise OSError("log unavailable")
+
+    def fail_status(status):
+        raise OSError("status unavailable")
+
+    store = FakeSessionStore()
+    display = FakeDisplay()
+    monkeypatch.setattr("code_squid.console.cli.session_runner.write_error_log", fail_log)
+    if broken_status:
+        monkeypatch.setattr(store, "update_status", fail_status)
+    status = _run_loop(tmp_path, FailingLoop(), display, object(), store)
+    assert status == (0 if model_error else 1)
+    assert display.run_failure == (original, None, Path("session-dir"))
+    assert display.failure_path is None
+    if not broken_status:
+        assert store.statuses == ["failed"]
+
+
+def test_model_failure_survives_status_error_with_successful_diagnostic(monkeypatch, tmp_path) -> None:
+    store = FakeSessionStore()
+    display = FakeDisplay()
+
+    def fail_status(status):
+        raise OSError("status unavailable")
+
+    monkeypatch.setattr(store, "update_status", fail_status)
+    assert _run_loop(tmp_path, ModelFailingLoop(), display, object(), store) == 0
+    assert display.failure_path == Path(".code-squid/logs/latest.log")
+    log = (tmp_path / display.failure_path).read_text(encoding="utf-8")
+    assert "Model request failed" in log
+    assert "provider unavailable" in log
+    assert "status unavailable" not in log
+
+
+@pytest.mark.parametrize("stage", ["provider", "runtime"])
+@pytest.mark.parametrize("broken_log", [False, True])
+def test_new_session_construction_uses_normal_failure_boundary(
+    monkeypatch, tmp_path, stage, broken_log,
+) -> None:
+    from code_squid.console.cli.session_runner import _run_new_session_task
+    from code_squid.app_paths import workspace_sessions_dir
+    from squid_core.storage.session_index import latest_session_id
+
+    original = ValueError("missing credential") if stage == "provider" else RuntimeError("runtime assembly failed")
+
+    def fail(*args, **kwargs):
+        raise original
+
+    def fail_log(*args):
+        raise OSError("diagnostic unavailable")
+
+    target = "code_squid.provider_setup.build_provider" if stage == "provider" else "code_squid.agent_setup.build_core_agent_loop"
+    monkeypatch.setattr(target, fail)
+    if broken_log:
+        monkeypatch.setattr("code_squid.console.cli.session_runner.write_error_log", fail_log)
+    display = FakeDisplay()
+    status, session_id = _run_new_session_task(tmp_path, "construction failure", load_settings(tmp_path), display)
+    assert status == 1
+    assert display.run_failure[0] is original
+    assert display.run_failure[1] == (None if broken_log else Path(".code-squid/logs/latest.log"))
+    sessions = workspace_sessions_dir(tmp_path)
+    if stage == "provider":
+        assert session_id is None
+        assert display.run_failure[2] is None
+        assert not sessions.exists()
+    else:
+        assert latest_session_id(sessions) == session_id
+        store = SessionStore.open(sessions / session_id)
+        metadata = json.loads((store.session_dir / "metadata.json").read_text(encoding="utf-8"))
+        assert metadata["status"] == "failed"
+        assert metadata["task"] == "construction failure"
+        assert store.load_messages() == []
+        assert display.run_failure[2] == store.session_dir.relative_to(tmp_path)
+
+
+def test_follow_up_construction_failure_is_failed_and_can_resume(monkeypatch, tmp_path) -> None:
+    from code_squid.app_paths import workspace_sessions_dir
+
+    store = SessionStore.create(workspace_sessions_dir(tmp_path), "original", workspace_root=tmp_path)
+    message = {"role": "user", "content": "original task"}
+    store.append_message(message)
+    store.update_status("complete")
+    original = RuntimeError("broken runtime construction")
+
+    def fail_runtime(**kwargs):
+        raise original
+
+    display = FakeDisplay()
+    with monkeypatch.context() as patch:
+        patch.setattr("code_squid.agent_setup.build_core_agent_loop", fail_runtime)
+        status, session_id = _run_follow_up_task(tmp_path, store.session_id, "continue", load_settings(tmp_path), display)
+    assert status == 1
+    assert session_id == store.session_id
+    assert display.run_failure[0] is original
+    assert json.loads((store.session_dir / "metadata.json").read_text(encoding="utf-8"))["status"] == "failed"
+    assert store.load_messages() == [message]
+    monkeypatch.setattr("code_squid.console.cli.session_runner._run_loop", lambda *args: 0)
+    assert _run_follow_up_task(tmp_path, session_id, "retry", load_settings(tmp_path), display) == (0, session_id)
+    assert store.load_messages() == [message, {"role": "user", "content": "retry"}]
+    assert json.loads((store.session_dir / "metadata.json").read_text(encoding="utf-8"))["status"] == "active"
+
+
+def test_failure_rendering_without_diagnostics_shows_original_only(capsys) -> None:
+    TerminalDisplay().run_failed(ValueError("missing provider credential"), None, None)
+    output = capsys.readouterr().out
+    assert "missing provider credential" in output
+    assert "Run stopped" in output
+    assert "Details saved to:" not in output
+    assert "Session:" not in output
+    assert "Traceback" not in output
