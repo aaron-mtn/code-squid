@@ -6,6 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("isolated_terminal_output")
+
 from code_squid.app_paths import (
     recent_workspaces_path,
     settings_path,
@@ -25,7 +27,6 @@ from code_squid.console.cli.runtime_commands import handle_runtime_command
 from code_squid.console.cli.session_runner import _run_display
 from code_squid.console.startup_menu import MAIN_ROWS, StartupMenu
 from code_squid.console.ui.startup_application import (
-    STARTUP_SESSION_SELECTED,
     STARTUP_WORKSPACE_SELECTED,
 )
 from code_squid.settings import load_settings
@@ -844,7 +845,7 @@ def test_startup_session_selection_notices_once_and_uses_existing_follow_up_runn
     display = QuietDisplay()
     selected_menu = None
     follow_ups = []
-    prompts = iter([STARTUP_SESSION_SELECTED, "continue it", "continue again", "/exit"])
+    prompts = iter(["continue it", "continue again", "/exit"])
     prompt_animators = []
     startup_released = False
     forced_handoffs = 0
@@ -857,18 +858,14 @@ def test_startup_session_selection_notices_once_and_uses_existing_follow_up_runn
     def prompt(_label, animator=None):
         prompt_animators.append(animator)
         task = next(prompts)
-        if task is STARTUP_SESSION_SELECTED:
+        if task == "continue it":
             selected_menu.focus_from_composer()
             selected_menu.selected_index = MAIN_ROWS.index("Session")
             selected_menu.activate()
             selected_menu.selected_index = 1
             assert selected_menu.activate() is True
-        elif task == "continue it":
-            # The notice must already be visible when the ordinary composer is
-            # available, rather than after this task has been submitted.
-            assert display.loaded_sessions
-            assert startup_released is True
-            assert forced_handoffs == 0
+            assert not display.loaded_sessions
+            assert startup_released is False
         return task
 
     def wait_for_startup_fade():
@@ -915,7 +912,7 @@ def test_startup_session_selection_notices_once_and_uses_existing_follow_up_runn
     assert display.loaded_sessions[0][2] is None
     assert display.loaded_session_scene_states == [False]
     assert prompt_animators[0] is display.header
-    assert prompt_animators[1:] == [None, None, None]
+    assert prompt_animators[1:] == [None, None]
     assert forced_handoffs == 1
 
 

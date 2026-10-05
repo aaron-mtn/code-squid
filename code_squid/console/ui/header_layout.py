@@ -7,15 +7,14 @@ import os
 
 
 TITLE = "c o d e   s q u i d"
-TITLE_ROW = 2
+TITLE_ROW = 7
 TITLE_PANEL_GAP = 2
 PANEL_TOP = TITLE_ROW + TITLE_PANEL_GAP + 1
 PANEL_MAX_WIDTH = 40
 PANEL_MIN_WIDTH = len(TITLE) + 4
-# This is the last region the startup renderer owns before the ordinary
-# composer begins. Five rows bring the rain close to that boundary without
-# ever writing into prompt_toolkit's identity or input rows.
-RAIN_ROWS_BELOW_PANEL = 5
+# Equal outer margins center the title/menu block without enlarging the panel.
+# Short viewports reduce these margins before clipping central content.
+RAIN_ROWS_BELOW_PANEL = TITLE_ROW
 BASE_PANEL_HEIGHT = 13
 SKILL_PANEL_HEIGHT = 15
 STARTUP_SEPARATOR_ROWS = 1
@@ -92,14 +91,23 @@ def startup_scene_layout(
     terminal_columns: int,
     *,
     show_skill: bool = False,
+    max_height: int | None = None,
 ) -> StartupSceneLayout:
-    """Build the compact centered startup geometry for a terminal width."""
+    """Build centered geometry, reducing decorative margins on short viewports."""
     width = max(terminal_columns - 1, 0)
     panel_width = min(PANEL_MAX_WIDTH, width)
     panel_left = max((width - panel_width) // 2, 0)
     panel_height = SKILL_PANEL_HEIGHT if show_skill else BASE_PANEL_HEIGHT
-    panel = Rectangle(PANEL_TOP, panel_left, panel_width, panel_height)
-    rain_bottom_row = panel.bottom + RAIN_ROWS_BELOW_PANEL
+    block_height = 1 + TITLE_PANEL_GAP + panel_height
+    height = block_height + TITLE_ROW + RAIN_ROWS_BELOW_PANEL
+    if max_height is not None:
+        height = min(height, max(max_height, 0))
+    margin_rows = max(height - block_height, 0)
+    title_row = margin_rows // 2
+    panel = Rectangle(
+        title_row + TITLE_PANEL_GAP + 1, panel_left, panel_width, panel_height,
+    )
+    rain_bottom_row = height - 1
     if width < len(TITLE):
         title_column = -((len(TITLE) - width) // 2)
     else:
@@ -107,7 +115,7 @@ def startup_scene_layout(
     return StartupSceneLayout(
         width=width,
         height=rain_bottom_row + 1,
-        title_row=TITLE_ROW,
+        title_row=title_row,
         title_column=title_column,
         panel=panel,
         rain_bottom_row=rain_bottom_row,

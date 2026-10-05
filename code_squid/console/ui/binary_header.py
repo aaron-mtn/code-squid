@@ -28,6 +28,8 @@ HEADER_HEIGHT = startup_scene_layout(80).height
 RAIN_SPEED = 0.7
 FRAME_INTERVAL = 0.05
 DROP_DENSITY = 0.24
+# Entry staggering is animation timing, independent of title/margin geometry.
+DROP_ENTRY_ROWS = 2
 # Eight fade frames (the first is invalidated immediately, followed by seven
 # refresh ticks) retain the submitted scene for a nominal 350 ms. Another
 # terminal writer may force the state directly to the final frame sooner.
@@ -90,11 +92,11 @@ class Drop:
         """Give a drop a new position, sparse trail, and varied speed."""
         if initial_scene_height is None:
             # Later generations enter naturally from above the scene.
-            self.head = rng.randint(-TITLE_ROW, 0)
+            self.head = rng.randint(-DROP_ENTRY_ROWS, 0)
         else:
             # Only initial construction is spread vertically so the first
             # frame already identifies this as a full-height rain field.
-            self.head = rng.randint(-TITLE_ROW, max(initial_scene_height - 1, 0))
+            self.head = rng.randint(-DROP_ENTRY_ROWS, max(initial_scene_height - 1, 0))
         self.speed = rng.uniform(0.3, 1.2) * RAIN_SPEED
         trail_length = rng.randint(2, 5)
         self.bits = [rng.choice("01") for _ in range(trail_length + 1)]
@@ -176,6 +178,8 @@ def overlay_title(
     layout: StartupSceneLayout,
 ) -> None:
     """Center and clip the fixed title over the rain grid."""
+    if layout.title_row >= layout.height:
+        return
     for offset, character in enumerate(TITLE):
         column = layout.title_column + offset
         if 0 <= column < layout.width:
@@ -192,6 +196,8 @@ def overlay_panel(
     """Place panel-owned text into its reserved rectangle."""
     for row_offset, line in enumerate(panel_lines[: layout.panel.height]):
         row = layout.panel.top + row_offset
+        if row >= layout.height:
+            break
         for column_offset, character in enumerate(line[: layout.panel.width]):
             column = layout.panel.left + column_offset
             cells[row][column] = PANEL_TEXT
@@ -328,9 +334,11 @@ class BinaryRainHeader:
         for drop in self._drops:
             drop.advance(self.rng, scene_height=layout.height)
 
-    def formatted_frame(self, terminal_columns: int) -> StyleAndTextTuples:
+    def formatted_frame(
+        self, terminal_columns: int, *, max_height: int | None = None,
+    ) -> StyleAndTextTuples:
         """Return the current scene as prompt_toolkit-owned styled fragments."""
-        layout = self.layout_for(terminal_columns)
+        layout = self.layout_for(terminal_columns, max_height=max_height)
         if not self._fade_started and (
             layout.width != self._width or not self._drops
         ):
@@ -378,7 +386,9 @@ class BinaryRainHeader:
         cells, bits = compose_cells(layout, self._drops, self._panel_lines(layout))
         return render_cells(cells, bits, ansi=False)
 
-    def layout_for(self, terminal_columns: int) -> StartupSceneLayout:
+    def layout_for(
+        self, terminal_columns: int, *, max_height: int | None = None,
+    ) -> StartupSceneLayout:
         """Return geometry matching the current optional Skill row."""
         show_skill = (
             self.startup_menu is None
@@ -386,7 +396,9 @@ class BinaryRainHeader:
             and self.startup_info.skill_name is not None
             and self.startup_info.mod_name is None
         )
-        return startup_scene_layout(terminal_columns, show_skill=show_skill)
+        return startup_scene_layout(
+            terminal_columns, show_skill=show_skill, max_height=max_height,
+        )
 
     def _panel_lines(self, layout: StartupSceneLayout) -> list[str]:
         """Return panel text without giving the rain layer content ownership."""

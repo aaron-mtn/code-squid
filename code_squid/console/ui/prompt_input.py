@@ -151,16 +151,8 @@ def multiline_key_bindings(
         # Model discovery is intentionally entered from a key action, never a
         # frame render. The Application refresh timer can keep invalidating the
         # rain while blocking provider discovery runs outside its event loop.
-        saved_session_activated = await asyncio.to_thread(menu.activate)
-        if saved_session_activated:
-            release_startup = getattr(
-                event.app,
-                "code_squid_session_selected",
-                None,
-            )
-            if release_startup is not None:
-                release_startup()
-        elif menu.workspace_handoff_pending:
+        await asyncio.to_thread(menu.activate)
+        if menu.workspace_handoff_pending:
             release_startup = getattr(
                 event.app,
                 "code_squid_workspace_selected",

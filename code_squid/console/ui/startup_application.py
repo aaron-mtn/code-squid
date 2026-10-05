@@ -5,9 +5,10 @@ from __future__ import annotations
 import contextvars
 import threading
 
-from prompt_toolkit.application import Application
+from prompt_toolkit import print_formatted_text
+from prompt_toolkit.application import Application, get_app_session
 from prompt_toolkit.buffer import Buffer
-from prompt_toolkit.formatted_text import AnyFormattedText, to_formatted_text
+from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText, to_formatted_text
 from prompt_toolkit.formatted_text.utils import split_lines
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.input.base import Input
@@ -20,7 +21,6 @@ from prompt_toolkit.layout.containers import (
 )
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.processors import BeforeInput
-from prompt_toolkit.output.defaults import create_output
 from prompt_toolkit.output.base import Output
 from prompt_toolkit.styles import Style
 
@@ -32,15 +32,14 @@ from code_squid.console.ui.composer_layout import (
 )
 from code_squid.console.ui.formatting import RUN_PANEL_WIDTH
 from code_squid.console.ui.header_layout import STARTUP_SEPARATOR_ROWS
+from code_squid.console.ui.terminal_session import StartupOutput, startup_terminal
 
 
 COMPOSER_RIGHT_PADDING = 1
 
 
-# Menu handoffs end the startup scene without pretending the user submitted an
-# empty task. The caller can print status, ask for a folder, or rebuild the
-# scene only after this Application has released the terminal.
-STARTUP_SESSION_SELECTED = object()
+# Workspace reconstruction releases the renderer without committing a startup
+# snapshot. The replacement Application continues the same transient cycle.
 STARTUP_WORKSPACE_SELECTED = object()
 
 
@@ -49,7 +48,7 @@ _active_startups_lock = threading.Lock()
 
 
 def finish_startup_application(rain: BinaryRainHeader) -> None:
-    """Synchronously retain a clean startup frame before another writer runs."""
+    """Join startup before another writer; retain only a submitted scene."""
     with _active_startups_lock:
         startup = _active_startups.get(id(rain))
     if startup is not None:
@@ -73,12 +72,12 @@ def startup_application_active(rain: BinaryRainHeader) -> bool:
 class StartupApplication:
     """Own rain, panel, menu presentation, and composer until handoff.
 
-    This Application is intentionally temporary and non-full-screen. Task
-    submission or menu handoff releases the caller while this same renderer
-    briefly fades its rain. Ordinary run output can force and join that
-    renderer when needed; menu handoffs instead join the natural fade. Keeping
-    that boundary strict avoids recreating a persistent transcript/composer
-    UI.
+    This scene owns the temporary alternate buffer; the CLI transcript stays
+    on primary. Task submission or workspace reconstruction releases the caller
+    while this same renderer briefly fades its rain. Ordinary run output can
+    force and join it; workspace rebuilds join without retaining a snapshot.
+    Only submission commits a clean scene to primary. This boundary avoids
+    recreating a persistent transcript/composer UI.
     """
 
     def __init__(
@@ -95,12 +94,14 @@ class StartupApplication:
         self._submitted = threading.Event()
         self._result: str | object = ""
         self._menu_handoff = False
+        self._retain_on_exit = False
+        self._frame_retained = False
         self._failure: BaseException | None = None
         self._thread: threading.Thread | None = None
         self.final_screen = None
         # Keep the real Output as the sole source of terminal geometry. In
-        # particular, CPR and resize reconciliation must describe this viewport.
-        self.output = output or create_output()
+        # particular, resize reconciliation must describe this viewport.
+        self.output = output or get_app_session().output
         # Read-only state takes effect in the same key event that publishes the
         # task, so no input can mutate the retained composer during the fade.
         self.buffer = Buffer(
@@ -146,20 +147,21 @@ class StartupApplication:
             layout=Layout(root, focused_element=self.buffer_control),
             key_bindings=key_bindings,
             style=Style.from_dict({"frame.border": "dim"}),
-            full_screen=False,
-            erase_when_done=False,
+            # The scene boundary owns buffer entry/exit around all renderer
+            # cleanup. This delegate only prepares the fullscreen canvas.
+            full_screen=True,
+            # Do not perform the inline "done" redraw: its final newline can
+            # scroll a full-height alternate canvas during screen restoration.
+            erase_when_done=True,
             refresh_interval=FRAME_INTERVAL,
             before_render=self._advance_rain,
             after_render=self._exit_after_clean_frame,
             input=input,
-            output=self.output,
+            output=StartupOutput(self.output),
         )
         # The shared key bindings use this narrow product callback only for the
         # startup Application; ordinary PromptSession submission is unchanged.
         self.application.code_squid_submit = self.submit  # type: ignore[attr-defined]
-        self.application.code_squid_session_selected = (  # type: ignore[attr-defined]
-            self.select_saved_session
-        )
         self.application.code_squid_workspace_selected = (  # type: ignore[attr-defined]
             self.select_workspace
         )
@@ -177,8 +179,18 @@ class StartupApplication:
         )
         with _active_startups_lock:
             _active_startups[id(self.rain)] = self
-        self._thread.start()
-        self._submitted.wait()
+        try:
+            self._thread.start()
+            self._submitted.wait()
+        except BaseException:
+            # A process SIGINT can interrupt the caller's wait rather than the
+            # input Application. Join its renderer before cancellation prints.
+            if self._thread.ident is not None:
+                self.finish_fade()
+            else:
+                with _active_startups_lock:
+                    _active_startups.pop(id(self.rain), None)
+            raise
         self._raise_failure()
         return self._result
 
@@ -187,18 +199,9 @@ class StartupApplication:
         if self._submitted.is_set():
             return
         self._result = task
-        self.rain.begin_fade()
-        self._submitted.set()
-        self.application.invalidate()
-
-    def select_saved_session(self) -> None:
-        """Release startup with a result distinct from task submission."""
-        if self._submitted.is_set():
-            return
-        self._result = STARTUP_SESSION_SELECTED
-        # This buffer was never submitted, so retaining its empty frame would
-        # leave a misleading composer in scrollback after the handoff.
-        self._menu_handoff = True
+        # Only composer submission leaves startup for normal CLI interaction.
+        # Rebuilds and forced cleanup must not commit intermediate menu state.
+        self._retain_on_exit = True
         self.rain.begin_fade()
         self._submitted.set()
         self.application.invalidate()
@@ -223,7 +226,7 @@ class StartupApplication:
         self._raise_failure()
 
     def finish_fade(self) -> None:
-        """Force, render, and retain the clean frame before returning."""
+        """Force and join the clean frame, committing only after submission."""
         if self.application.is_running and self.application.loop is not None:
             # Mutate render state on its owning event loop. This prevents a
             # force request from landing between composition and after_render.
@@ -243,7 +246,9 @@ class StartupApplication:
 
     def _run_application(self) -> None:
         try:
-            self.application.run()
+            with startup_terminal(self.output):
+                self.application.run()
+            self._retain_clean_frame()
         except BaseException as error:
             self._failure = error
         finally:
@@ -251,6 +256,44 @@ class StartupApplication:
             with _active_startups_lock:
                 if _active_startups.get(id(self.rain)) is self:
                     del _active_startups[id(self.rain)]
+
+    def _retain_clean_frame(self) -> None:
+        """Append the clean scene to primary after restoring the startup buffer."""
+        if (
+            not self._retain_on_exit
+            or self._frame_retained
+            or self.final_screen is None
+            or not self.rain.fade_complete
+        ):
+            return
+        # Both separator and projection belong to the final handoff. Even blank
+        # newlines would mutate primary history during an internal rebuild.
+        self._frame_retained = True
+        # Primary restoration preserves its append cursor. Advance off any
+        # unfinished transcript line, then leave one blank line; ordinary
+        # sequential printing scrolls naturally without erasing prior output.
+        # Keep separation fixed so /new never adds a viewport-sized void.
+        self.output.write_raw("\r\n\r\n")
+        self.output.flush()
+        fragments = []
+        size = self._output_size()
+        for row in range(min(self.final_screen.height, size.rows)):
+            cells = self.final_screen.data_buffer[row]
+            # Screen contains continuation cells for wide glyphs. Print only
+            # their leading cell, and omit padding beyond the visible content.
+            last_column = max(
+                (column for column, cell in cells.items() if cell.char != " "),
+                default=-1,
+            )
+            for column in range(min(last_column + 1, size.columns)):
+                cell = cells[column]
+                if cell.width:
+                    fragments.append((cell.style, cell.char))
+            fragments.append(("", "\n"))
+        print_formatted_text(
+            FormattedText(fragments), output=self.output,
+            style=self.application.style, end="",
+        )
 
     def _raise_failure(self) -> None:
         if self._failure is not None:
@@ -266,16 +309,17 @@ class StartupApplication:
 
     def _scene_height(self) -> Dimension:
         size = self._output_size()
-        full_height = self.rain.layout_for(size.columns).height
-        # On a short physical viewport, retain enough space for the normal
-        # minimum composer and clip only the bottom of the decorative scene.
+        # Reserve the composer first. Geometry contracts both rain margins
+        # before an exceptionally short viewport clips the central block.
         available = max(
             size.rows - COMPOSER_FRAME_ROWS - COMPOSER_MIN_CONTENT_ROWS,
             0,
         )
         if available <= STARTUP_SEPARATOR_ROWS:
             return Dimension.exact(0)
-        return Dimension.exact(min(full_height, available - STARTUP_SEPARATOR_ROWS))
+        return Dimension.exact(self.rain.layout_for(
+            size.columns, max_height=available - STARTUP_SEPARATOR_ROWS,
+        ).height)
 
     def _separator_height(self) -> Dimension:
         return Dimension.exact(
@@ -293,7 +337,9 @@ class StartupApplication:
         )
 
     def _scene_fragments(self):
-        return self.rain.formatted_frame(self._output_size().columns)
+        return self.rain.formatted_frame(
+            self._output_size().columns, max_height=self._scene_height().preferred,
+        )
 
     def _prompt_lines(self):
         return list(split_lines(to_formatted_text(self.prompt)))

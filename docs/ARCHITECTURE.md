@@ -139,8 +139,8 @@ install all three unpublished checkouts editably; see README for commands.
   - `console/ui/` owns terminal presentation and input. `display.py` keeps
     `TerminalDisplay` as the lifecycle coordinator used by the Agent loop.
     `header_layout.py` owns the explicit startup-scene geometry: safe draw
-    width, fixed title position, two-row title/panel gap, centered compact panel
-    rectangle, and rain rows beneath the panel. `banner.py` owns the panel's
+    width, height-aware centered title position, two-row title/panel gap,
+    centered compact panel rectangle, and balanced outer rain margins. `banner.py` owns the panel's
     Provider, Model, Safety, Mod, Session, optional standalone Skill, and
     concise Workspace content. The Session row retains the fixed panel
     rectangle by keeping blank rows between fields rather than around the
@@ -160,20 +160,24 @@ install all three unpublished checkouts editably; see README for commands.
 
     `startup_application.py` owns the complete live startup surface: rain,
     title, menu panel, and boxed multiline `BufferControl`. It creates one
-    temporary, nonfullscreen prompt_toolkit `Application`; that Application's
-    refresh timer advances rain and invalidates the same renderer. Submission
+    temporary, fullscreen prompt_toolkit `Application` on the alternate screen;
+    that Application's refresh timer advances rain and invalidates the same renderer. Submission
     makes the Buffer read-only, publishes its task immediately, and starts an
     eight-frame global rain-fade state in `BinaryRainHeader`. The blocking
     Application event loop lives on one narrowly owned renderer thread so the
     caller can begin model work during the nominal 350 ms fade; this is not a
     second renderer or an independent rain worker. Production startup code
-    reads no completed-screen or cursor geometry. The composer follows the shared
+    uses the last clean rendered Screen only to append a static handoff frame
+    after Application cleanup and primary-buffer restoration. It does not
+    use cursor reports or custom ANSI repainting. The composer follows the shared
     product policy of 2 through 14 visible content rows, capped again by the
     rows physically available below the startup scene, separator, and frame.
-    On constrained terminals the decorative scene clips from the bottom to
-    preserve the normal composer minimum; the real Output remains the sole
-    source of viewport, CPR, and cursor geometry. Once either the product or
-    physical cap is reached, the BufferControl scrolls internally while
+    The title/menu block has seven rain rows above and below it in the full
+    30-row scene (32 with the optional Skill row). The panel itself remains
+    13 rows (15 with Skill). A height budget reserves the composer minimum,
+    then contracts both outer margins evenly; only viewports too short for the
+    central block clip its bottom. The real Output remains the sole source of
+    viewport geometry. Once either the product or physical cap is reached, the BufferControl scrolls internally while
     retaining the complete Buffer. Constrained terminals also contract
     composer width instead of inventing a larger render surface.
 
@@ -185,7 +189,11 @@ install all three unpublished checkouts editably; see README for commands.
     progressively dims the complete visible rain field. Drops that leave are
     not reset or replaced, and none are selectively removed. The eighth step
     clears every remaining rain cell simultaneously and exits only after that
-    clean frame renders, retaining the scene in ordinary scrollback. If
+    clean frame renders. Once the startup canvas is released, one static
+    copy of that clean scene is appended to the primary buffer, preserving
+    wide glyphs and the submitted composer. Animation never paints the primary
+    buffer: cursor-relative inline redraws could strand obsolete rain in
+    scrollback after a shrink or redraw and cannot repaint those offscreen rows. If
     narration, Tool or
     debug output, approval, failure, interruption, cleanup, or another direct
     CLI writer needs the terminal first, `TerminalDisplay` forces the same
@@ -193,13 +201,39 @@ install all three unpublished checkouts editably; see README for commands.
     writer proceeds. Ctrl+C also exits and joins the startup lifecycle safely.
     Ordinary later prompts remain composer-only
     `PromptSession` instances; `/new` creates a fresh temporary Application and
-    resets rain at the current terminal position. This strict boundary is not
-    the rejected PinnedComposer design: there is no stdout interception,
-    managed transcript, persistent composer, alternate-screen transcript, or
-    live renderer during normal run output. There is no stdout interception,
-    alternate screen, or custom startup ANSI repaint geometry. The completed
-    startup remains in ordinary terminal history and print-based output
-    continues below it.
+    resets rain on a fresh temporary alternate canvas. StartupApplication's
+    renderer thread owns the buffer boundary in `ui/terminal_session.py`:
+    `startup_terminal(output)` enters before Application.run and restores primary
+    after all fullscreen renderer cleanup, even on exceptions. `StartupOutput`
+    delegates the renderer interface but makes renderer entry prepare only the
+    selected alternate canvas and renderer exit a no-op; actual switching happens
+    exactly once at the scene boundary. No session-wide AppSession override or
+    Python stdout/stderr redirection is installed. Native Windows handle changes
+    are flushed before and after restoration.
+    Only composer submission arms clean-frame retention. Workspace selection
+    returns STARTUP_WORKSPACE_SELECTED for CLI reconstruction; its completed
+    fade restores primary without writing a spacer or snapshot. Provider,
+    model, safety, Mod, and session selections update the existing alternate
+    canvas. Replacement workspace Applications continue this transient cycle,
+    preserving selected specialization and resetting workspace-owned session
+    state when the root changes. Each completed cycle retains one final frame,
+    guarded against repeat projection; cleanup without submission retains none.
+    On final submission the owning thread writes two CRLFs at the restored
+    primary append cursor before printing the retained clean scene. This finishes
+    any partial transcript line and leaves one blank line (two if the cursor
+    already follows a newline), independent of viewport height. Sequential frame
+    printing scrolls naturally without clearing history or overwriting prior
+    output; repeated `/new` cycles use the same compact separation.
+    Failure/cancellation restores primary without retaining animated content.
+    The fade/join seam releases ordinary writers only after restoration and the
+    static projection. Caller-side KeyboardInterrupt also joins the renderer
+    before cancellation prints. `/help`, runs, errors, follow-ups, approvals,
+    and session output use the original primary Output and Python streams.
+    `/new` temporarily repeats the startup boundary, then appends to the same
+    primary transcript; it never discards history. The interpreter's `finally`
+    still joins any remaining startup renderer. Normal exit leaves primary
+    selected. No primary-screen or scrollback erase is issued by this boundary.
+    Noninteractive commands do not enter the alternate screen.
     The composer and startup menu share prompt-toolkit key bindings rather than
     a raw input reader: Up from an empty buffer always focuses the bottom main
     row, arrows navigate, Enter replaces the same panel with a submenu or
@@ -226,16 +260,15 @@ install all three unpublished checkouts editably; see README for commands.
     heading `Sessions for this workspace`. The backing list is capped at 20;
     arrow movement scrolls it,
     Enter commits an ID through the same resolver as `/resume`, and Esc
-    discards the submenu highlight. A saved-session activation returns a
-    distinct result from that same startup Application and hides the unused
-    empty startup composer in subsequent retained frames. The CLI joins the
-    renderer without force-completing the already-running fade, then prints and
-    opens an ordinary composer only after terminal ownership is released; no
-    nested Application or extra startup renderer is created. Other direct CLI
-    writers retain the synchronous force-and-join handoff. The CLI then
-    immediately consumes the selected metadata into one dim, neutral,
-    detail-indented status line. `New session`, launch-time resume state, and
-    subsequent follow-ups remain silent. The notice never opens the transcript
+    discards the submenu highlight. A saved-session activation selects the ID
+    and returns focus to the same startup composer without ending its Application
+    or starting a fade. Subsequent selections remain transient, and the last
+    saved-session metadata replaces any pending notice. After final composer
+    submission the CLI joins the fade and consumes that metadata into one dim,
+    neutral, detail-indented status line on primary before dispatching the
+    submitted input. No extra ordinary prompt is opened for session selection.
+    New session, launch-time resume state, and subsequent follow-ups remain
+    silent. The notice never opens the transcript
     for presentation; its locally truncated title and compact age use the
     picker's shared normalized data, and a message count appears only if that
     count already exists in metadata. Ages use `now`, whole minutes, whole
@@ -332,7 +365,7 @@ install all three unpublished checkouts editably; see README for commands.
     left padding and one right gutter. The normal PromptSession input container
     retains up to 58 cells inside the borders and uses the same product and
     physical viewport caps as startup. The frame disappears from active
-    control on submission and remains only as normal terminal scrollback.
+    control on submission and remains as static output in the session buffer.
     PageUp/PageDown move by pages, Ctrl+Up/Ctrl+Down move by
     half pages, and Ctrl+Home/Ctrl+End retain their standard buffer-boundary
     behavior. A one-row scroll offset keeps the cursor away from the top and
@@ -340,18 +373,18 @@ install all three unpublished checkouts editably; see README for commands.
     to use the shared unboxed input helper. Shift+Enter and Alt+Enter normalize
     to the multiline Ctrl+J action, while ordinary Enter submits. Its marker is
     hidden without changing input alignment while the startup menu owns focus.
-    Normal run output uses ordinary scrollback and 65-column panels. Their
+    Normal run output uses sequential output in the primary buffer and 65-column panels. Their
     Markdown content retains the original 56-cell wrapping width, with the
     additional physical width rendered only as right-side padding. While
     streaming is enabled, one provisional narration panel grows in place and
-    becomes ordinary scrollback when the validated assistant callback settles
+    becomes static terminal output when the validated assistant callback settles
     it; non-streamed narration remains a static print. The final report and an
     optional Changed files section share one completion panel. `final_message`
     discards any provisional narration and retains only the current report text
     until `loop_finished` supplies the session's written paths. The section
     lists only files written by the run and is omitted when that set is empty.
-    This does not introduce a managed transcript, alternate screen, or
-    persistent terminal region.
+    Panel rendering does not own buffer switching or introduce a managed
+    transcript or persistent terminal region.
     Tool results, approvals, warnings, and non-success status remain outside
     these panels, and standalone run/report/file dividers are not emitted.
     Every composer and run-panel border uses the same dim terminal-default

@@ -30,7 +30,6 @@ from code_squid.console.ui.prompt_input import (
     prompt_multiline_input,
 )
 from code_squid.console.ui.startup_application import (
-    STARTUP_SESSION_SELECTED,
     STARTUP_WORKSPACE_SELECTED,
     StartupApplication,
 )
@@ -61,7 +60,9 @@ class MenuAnimator(BinaryRainHeader):
         self.startup_menu = menu
 
 
-def _run_prompt(monkeypatch, menu: StartupMenu, terminal_input: str) -> str:
+def _run_prompt(
+    monkeypatch, menu: StartupMenu, terminal_input: str | tuple[str, str],
+) -> str:
     result: list[str] = []
     errors: list[BaseException] = []
     startups: list[StartupApplication] = []
@@ -92,7 +93,26 @@ def _run_prompt(monkeypatch, menu: StartupMenu, terminal_input: str) -> str:
 
         thread = threading.Thread(target=prompt)
         thread.start()
-        pipe_input.send_text(terminal_input)
+        if isinstance(terminal_input, tuple):
+            # Let async activation finish before typing into the composer;
+            # keys queued during menu ownership are intentionally discarded.
+            selected = threading.Event()
+            activate = menu.activate
+
+            def activate_and_signal():
+                result = activate()
+                if result:
+                    selected.set()
+                return result
+
+            monkeypatch.setattr(menu, "activate", activate_and_signal)
+            pipe_input.send_text(terminal_input[0])
+            assert selected.wait(timeout=2)
+            assert thread.is_alive()
+            assert not animator.fade_active
+            pipe_input.send_text(terminal_input[1])
+        else:
+            pipe_input.send_text(terminal_input)
         thread.join(timeout=5)
         assert not thread.is_alive()
         assert len(startups) == 1
@@ -1031,7 +1051,7 @@ def test_saved_session_selection_exposes_one_normalized_notice_from_index(
     assert menu.take_selected_session_notice() is None
 
 
-def test_saved_session_activation_releases_startup_before_task_submission(
+def test_saved_session_activation_keeps_startup_until_task_submission(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -1049,10 +1069,10 @@ def test_saved_session_activation_releases_startup_before_task_submission(
     result = _run_prompt(
         monkeypatch,
         menu,
-        "\x1b[B\r",
+        ("\x1b[B\r", "continue task\r"),
     )
 
-    assert result is STARTUP_SESSION_SELECTED
+    assert result == "continue task"
     assert menu.session_id == "saved-session"
     assert menu.focused is False
     assert menu.take_selected_session_notice() is not None

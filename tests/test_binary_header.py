@@ -9,6 +9,7 @@ from code_squid.console.ui.banner import StartupInfo, startup_panel_lines
 from code_squid.console.ui.binary_header import (
     BRIGHT_STYLE,
     DIM_STYLE,
+    DROP_ENTRY_ROWS,
     EMPTY,
     FADE_FRAME_COUNT,
     HEAD_BIT,
@@ -270,7 +271,7 @@ def test_normal_rain_still_resets_a_completed_drop() -> None:
 
     drop.advance(random.Random(9), scene_height=scene_height)
 
-    assert -TITLE_ROW <= drop.head <= 0
+    assert -DROP_ENTRY_ROWS <= drop.head <= 0
     assert 0.3 * RAIN_SPEED <= drop.speed <= 1.2 * RAIN_SPEED
     assert 3 <= len(drop.bits) <= 6
 
@@ -286,3 +287,33 @@ def test_forced_fade_completion_never_repopulates_rain() -> None:
 
     assert rain.fade_complete is True
     assert rain._drops == []
+
+
+@pytest.mark.parametrize("show_skill", [False, True])
+@pytest.mark.parametrize("height", [0, 4, 12, 19, 24, 27, 30, 50])
+def test_height_budget_centers_block_and_reduces_margins_before_clipping(
+    height: int, show_skill: bool,
+) -> None:
+    layout = startup_scene_layout(80, show_skill=show_skill, max_height=height)
+    assert layout.height <= height
+    assert layout.panel.height == (15 if show_skill else 13)
+    block_height = 1 + TITLE_PANEL_GAP + layout.panel.height
+    if height >= block_height:
+        top_margin = layout.title_row
+        bottom_margin = layout.height - layout.panel.bottom - 1
+        assert 0 <= bottom_margin - top_margin <= 1
+    else:
+        assert layout.title_row == 0
+    info = _startup_info()
+    if show_skill:
+        from dataclasses import replace
+        info = replace(info, skill_name="test-skill")
+    cells, bits = compose_cells(layout, [], startup_panel_lines(info, layout))
+    assert len(cells) == len(bits) == layout.height
+
+
+def test_default_rain_has_seven_rows_above_and_below_central_block() -> None:
+    layout = startup_scene_layout(80)
+    assert layout.title_row == 7
+    assert layout.height - layout.panel.bottom - 1 == 7
+    assert layout.panel.height == 13

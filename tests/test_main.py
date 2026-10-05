@@ -6,6 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("isolated_terminal_output")
+
 from code_squid.app_paths import settings_path
 from code_squid.console.cli.cli_options import _resolve_workspace_root
 from code_squid.console.cli.cli_commands import SHELL_HELP, _safety, run_cli

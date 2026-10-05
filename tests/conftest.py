@@ -83,6 +83,18 @@ def isolated_application_home(monkeypatch, tmp_path_factory) -> Path:
 
 
 @pytest.fixture
+def isolated_terminal_output():
+    """Give mocked CLI orchestration a terminal without probing the host console."""
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.output import DummyOutput
+
+    # CLI tests mock input/display, but the outer session now owns a real
+    # prompt-toolkit Output. Keep that boundary explicit even on headless Windows.
+    with create_app_session(output=DummyOutput()):
+        yield
+
+
+@pytest.fixture
 def isolated_session_indexes(isolated_application_home: Path) -> Path:
     """Expose the autouse fixture's isolated session-index path to tests."""
     return isolated_application_home.parent / "session-indexes.jsonl"

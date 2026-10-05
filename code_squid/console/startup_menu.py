@@ -289,8 +289,8 @@ class StartupMenu:
                 )
                 saved_session_activated = resolved_id is not None
                 if saved_session_activated:
-                    # The startup renderer exits at this boundary; keep menu
-                    # focus from leaking into a later fresh startup scene.
+                    # Return to the same composer; selecting a session changes
+                    # transient startup state without releasing the renderer.
                     self.focused = False
         self.mode = "main"
         self.selected_index = self._main_selected_index

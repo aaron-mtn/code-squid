@@ -105,6 +105,7 @@ def test_code_squid_application_package_has_expected_layout() -> None:
         "console/ui/spinner.py",
         "console/ui/startup_application.py",
         "console/ui/streaming_narration.py",
+        "console/ui/terminal_session.py",
         "console/ui/tool_display.py",
         "hooks/__init__.py",
         "hooks/no_progress.py",

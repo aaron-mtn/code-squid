@@ -32,9 +32,7 @@ from code_squid.console.ui.prompt_input import (
     prompt_multiline_input,
 )
 from code_squid.console.ui.startup_application import (
-    STARTUP_SESSION_SELECTED,
     StartupApplication,
-    wait_for_startup_application,
 )
 from code_squid.settings import load_settings
 
@@ -49,7 +47,7 @@ class SizedOutput(DummyOutput):
         return self.size
 
 
-def _startup(*, columns: int = 80, rows: int = 32, menu=None, input=None):
+def _startup(*, columns: int = 80, rows: int = 32, menu=None, input=None, output=None):
     rain = BinaryRainHeader(
         rng=random.Random(7),
         startup_info=StartupInfo(
@@ -66,7 +64,7 @@ def _startup(*, columns: int = 80, rows: int = 32, menu=None, input=None):
         rain,
         multiline_key_bindings(rain),
         input=input or DummyInput(),
-        output=SizedOutput(columns, rows),
+        output=output or SizedOutput(columns, rows),
     )
     return startup
 
@@ -153,7 +151,7 @@ def test_ten_slowly_typed_characters_are_all_visible() -> None:
 
 
 def test_wrapping_grows_then_deletion_shrinks_without_duplicate_border() -> None:
-    startup = _startup()
+    startup = _startup(rows=50)
     tall = _composer_rows(_render_startup(startup, "many rows " * 40))
     short = _composer_rows(_render_startup(startup, "short"))
 
@@ -170,13 +168,13 @@ def test_startup_composer_stays_inside_physical_viewport_then_scrolls_internally
     position = maximum.visible_windows_to_write_positions[startup.input_window]
     cursor = maximum.get_cursor_position(startup.input_window)
 
-    assert startup.application.output is startup.output
+    assert startup.application.output._output is startup.output
     assert startup.application.output.get_size() == Size(rows=30, columns=80)
     assert medium.height <= startup.application.output.get_size().rows
     assert TITLE in "\n".join(_screen_rows(medium))
-    # The 23-row scene, separator, and frame leave four physical content rows.
-    assert len(_composer_rows(maximum)) == 6
-    assert position.height == 3
+    # More rain uses the spare rows; input still retains its minimum viewport.
+    assert len(_composer_rows(maximum)) == 4
+    assert position.height == 1
     assert position.ypos <= cursor.y < position.ypos + position.height
     assert startup.buffer.text == "wrapped input " * 800
 
@@ -264,7 +262,7 @@ def test_resize_degrades_without_fallback_and_recovers(columns: int, rows: int) 
     first = _screen_rows(_render_startup(startup, "resizable input"), columns)
     assert "Window too small" not in "\n".join(first)
 
-    startup.application.output.size = Size(rows=32, columns=80)
+    startup.output.size = Size(rows=32, columns=80)
     recovered = _screen_rows(_render_startup(startup, startup.buffer.text))
     assert TITLE in "\n".join(recovered)
     assert "resizable input" in "\n".join(recovered)
@@ -281,7 +279,7 @@ def test_long_composer_tracks_shrink_and_enlarge_without_losing_buffer() -> None
     small_position = small.visible_windows_to_write_positions[startup.input_window]
     small_cursor = small.get_cursor_position(startup.input_window)
     assert small.height <= 30
-    assert len(_composer_rows(small)) == 6
+    assert len(_composer_rows(small)) == 4
     assert small_position.ypos <= small_cursor.y < small_position.ypos + small_position.height
 
     startup.output.size = Size(rows=50, columns=80)
@@ -441,45 +439,6 @@ def test_startup_submit_returns_before_fade_and_retains_clean_composer() -> None
     assert startup.application.is_running is False
 
 
-def test_saved_session_handoff_hides_composer_and_waits_for_natural_fade(
-    monkeypatch,
-) -> None:
-    with create_pipe_input() as pipe_input:
-        startup = _startup(input=pipe_input)
-        result: list[object] = []
-        caller = threading.Thread(target=lambda: result.append(startup.run()))
-        caller.start()
-        _wait_for(lambda: startup.application.is_running)
-
-        forced_fades = 0
-        complete_fade = startup.rain.complete_fade
-
-        def track_forced_fade() -> None:
-            nonlocal forced_fades
-            forced_fades += 1
-            complete_fade()
-
-        monkeypatch.setattr(startup.rain, "complete_fade", track_forced_fade)
-        startup.select_saved_session()
-        caller.join(timeout=0.2)
-
-        assert result == [STARTUP_SESSION_SELECTED]
-        assert startup.rain.fade_active is True
-        assert startup.composer.filter() is False
-        assert startup.application.is_running is True
-
-        wait_for_startup_application(startup.rain)
-
-    assert forced_fades == 0
-    assert startup.rain.fade_complete is True
-    assert startup.application.is_running is False
-    assert startup._thread is not None and not startup._thread.is_alive()
-    assert startup.final_screen is not None
-    final_rows = "\n".join(_screen_rows(startup.final_screen))
-    assert "@code-squid" not in final_rows
-    assert TITLE in final_rows
-
-
 def test_early_narration_forces_and_joins_startup_fade() -> None:
     from code_squid.console.ui.display import TerminalDisplay
 
@@ -530,3 +489,115 @@ def test_followup_boxed_prompt_keeps_existing_prompt_session_path(monkeypatch) -
     monkeypatch.setattr("code_squid.console.ui.prompt_input.PromptSession", FakePromptSession)
     assert prompt_multiline_input("› ") == "follow-up"
     assert calls[0][1]["multiline"] is True
+
+
+class ScreenTrackingOutput(SizedOutput):
+    """Track terminal-buffer ownership independently of the renderer's Screen."""
+
+    def __init__(self, prior_content: str) -> None:
+        super().__init__()
+        self.primary = prior_content
+        self.alternate = ""
+        self.in_alternate = False
+        self.events = []
+
+    def enter_alternate_screen(self) -> None:
+        self.events.append("enter")
+        self.in_alternate = True
+
+    def quit_alternate_screen(self) -> None:
+        self.events.append("leave")
+        self.in_alternate = False
+
+    def write(self, data: str) -> None:
+        if self.in_alternate:
+            self.alternate += data
+        else:
+            self.events.append("primary-write")
+            self.primary += data
+
+    def erase_down(self) -> None:
+        # Animation must never clear any portion of the user's primary buffer.
+        assert self.in_alternate
+
+
+@pytest.mark.parametrize("prior_content", ["", "earlier output\n" * 80])
+def test_live_startup_isolates_frames_and_retains_one_clean_handoff(
+    tmp_path, prior_content: str,
+) -> None:
+    output = ScreenTrackingOutput(prior_content)
+    menu = StartupMenu(tmp_path, load_settings(tmp_path))
+    startup = _startup(menu=menu, output=output)
+    assert startup.application.full_screen
+    from code_squid.console.ui.terminal_session import startup_terminal
+
+    with startup_terminal(output):
+        _render_startup(startup)
+        menu.focus_from_composer()
+        menu.move(-1)
+        _render_startup(startup)
+        menu.activate()  # Session submenu uses the same screen and renderer.
+        _render_startup(startup)
+        menu.back()
+        menu.back()
+        for columns, rows in [(60, 24), (80, 12), (80, 40), (80, 32)]:
+            output.size = Size(rows=rows, columns=columns)
+            _render_startup(startup)
+            assert output.primary == prior_content
+        startup.rain.complete_fade()
+        screen = _render_startup(startup, "submitted \u6f22\U0001f642 task")
+        startup.submit(startup.buffer.text)
+        startup.final_screen = screen
+        startup.application.renderer.reset()  # Same restoration used by Application.run.
+    startup._retain_clean_frame()
+    assert output.events.count("enter") == output.events.count("leave") == 1
+    assert output.events.index("leave") < output.events.index("primary-write")
+    retained = output.primary[len(prior_content):]
+    assert retained.count(TITLE) == 1
+    assert retained.count("submitted \u6f22\U0001f642 task") == 1
+    assert retained.count("\u256d") == retained.count("\u2570") == 2
+    assert not any(character in "01" for character in retained)
+    output.write("normal chat output\n")
+    assert output.primary.startswith(prior_content)
+    assert output.primary.endswith("normal chat output\n")
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_real_startup_lifecycle_restores_primary_before_releasing_writer(cancel: bool) -> None:
+    output = ScreenTrackingOutput("existing history\n")
+    with create_pipe_input() as pipe_input:
+        startup = _startup(input=pipe_input, output=output)
+        results = []
+        errors = []
+
+        def run() -> None:
+            try:
+                results.append(startup.run())
+            except BaseException as error:
+                errors.append(error)
+
+        caller = threading.Thread(target=run)
+        caller.start()
+        try:
+            _wait_for(lambda: output.in_alternate)
+            assert output.primary == "existing history\n"
+            pipe_input.send_text("\x03" if cancel else "task for chat\r")
+            caller.join(timeout=5)
+            assert not caller.is_alive()
+            if cancel:
+                with pytest.raises(KeyboardInterrupt):
+                    startup.wait_for_exit()
+            else:
+                startup.wait_for_exit()
+            assert not output.in_alternate
+            if cancel:
+                assert len(errors) == 1 and isinstance(errors[0], KeyboardInterrupt)
+                assert output.primary == "existing history\n"
+            else:
+                assert not errors and results == ["task for chat"]
+                assert output.primary.count(TITLE) == 1
+                assert output.primary.count("task for chat") == 1
+        finally:
+            if startup.application.is_running:
+                startup.finish_fade()
+            caller.join(timeout=5)

@@ -30,7 +30,6 @@ from code_squid.console.ui.approval import (
 from code_squid.console.ui.display import INPUT_IDENTITY_LINE, TerminalDisplay
 from code_squid.console.ui.binary_header import BinaryRainHeader
 from code_squid.console.ui.startup_application import (
-    STARTUP_SESSION_SELECTED,
     STARTUP_WORKSPACE_SELECTED,
 )
 from code_squid.console.startup_menu import StartupMenu
@@ -172,21 +171,18 @@ def _prompt_task_or_cancel(
             animator = display.header if display.session_scene_active else None
             task = _prompt_task(label, animator)
             display.retire_session_scene()
-            if task is STARTUP_SESSION_SELECTED:
-                # The result is published before the fade finishes. Join the
-                # sole startup renderer before ordinary output takes ownership.
-                _wait_for_startup_fade(display)
-                if menu is not None:
-                    _print_selected_session_notice(display, menu)
-                task = _prompt_task(label)
-                assert isinstance(task, str)
-                return task
             if task is STARTUP_WORKSPACE_SELECTED:
                 # Workspace reconstruction must begin only after the sole
                 # startup renderer has relinquished the terminal.
                 _wait_for_startup_fade(display)
                 return task
             assert isinstance(task, str)
+            if menu is not None and menu.session_id is not None:
+                # Session choices remain transient until composer submission.
+                # Join before printing the one pending notice on primary.
+                if animator is not None:
+                    _wait_for_startup_fade(display)
+                _print_selected_session_notice(display, menu)
             return task
         task = _prompt_task(label)
         assert isinstance(task, str)
@@ -244,13 +240,21 @@ def _run_new_session(workspace_root: Path, skill_name: str | None = None) -> int
         display.set_startup_menu(menu)
     try:
         display.start()
-        task = _prompt_task_or_cancel("Task", display, menu)
-        if task is STARTUP_WORKSPACE_SELECTED:
+        while True:
+            task = _prompt_task_or_cancel("Task", display, menu)
+            if task is not STARTUP_WORKSPACE_SELECTED:
+                break
             selected_root = _selected_workspace(menu) or workspace_root
-            # Stop this root's display before recursively constructing the
-            # replacement; there is never more than one startup Application.
-            display.stop_header()
-            return _run_new_session(selected_root, skill_name)
+            # A workspace rebuild continues startup, including its current
+            # specialization, rather than recursively starting another cycle.
+            workspace_root, settings, display, menu, _ = _rebuild_workspace_runtime(
+                selected_root,
+                workspace_root,
+                display,
+                mod_name=menu.mod_name,
+                skill_name=menu.skill_name,
+                active_session_id=menu.session_id,
+            )
         settings = menu.settings
         selected_session_id = menu.session_id
         if task is None:
@@ -311,6 +315,7 @@ def _run_interactive(
     *,
     active_session_id: str | None = None,
 ) -> int:
+    """Interpret on primary and join temporary startup rendering on cleanup."""
     settings = load_settings(workspace_root)
     display = _run_display(workspace_root, settings, skill_name)
     mod_name: str | None = None
@@ -340,9 +345,9 @@ def _run_interactive(
                     selected_root,
                     workspace_root,
                     display,
-                    mod_name=mod_name,
-                    skill_name=skill_name,
-                    active_session_id=active_session_id,
+                    mod_name=menu.mod_name,
+                    skill_name=menu.skill_name,
+                    active_session_id=menu.session_id,
                 )
                 continue
             settings = menu.settings

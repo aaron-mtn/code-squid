@@ -1,3 +1,33 @@
+- 2026-10-05: Moved interactive alternate-screen ownership from startup view
+  cleanup to `prompt_loop._run_interactive`, using the new application-owned
+  `console/ui/terminal_session.py` context. One AppSession Output delegates
+  terminal operations while translating fullscreen view entry into a cleared,
+  homed alternate canvas and suppressing view-level buffer exit. Startup now
+  inherits this Output, including on its existing copied-context renderer
+  thread. Runs, follow-up composers, approvals, menus, workspace reconstruction,
+  and `/new` remain inside the same alternate buffer; the existing rain/menu
+  renderer and fade/clean-frame handoff remain intact. The interpreter joins
+  startup writers before the outer `finally` drains output, leaves the buffer,
+  and flushes restoration even when cleanup or output flushing raises.
+  Native Windows Win32Output uses a separate console handle, so that backend
+  alone routes Python stdout/stderr synchronously through its Output during
+  the session and restores both streams on exit. VT streams stay unchanged.
+  No erase is issued against the normal shell buffer; noninteractive commands
+  retain their existing output behavior. Added real startup/follow-up input
+  regression coverage for run handoff, `/new` reset, normal exit, Ctrl+C at
+  initial startup/follow-up/restarted startup, KeyboardInterrupt, handled
+  startup/run-construction failures, exception/SystemExit unwinding, native
+  stream routing, and single buffer entry/exit. Mocked orchestration tests now
+  supply an explicit DummyOutput instead of probing a headless Windows console;
+  updated the package-layout assertion for the new module.
+  Verification: focused console/UI/CLI and package-boundary tests: 424 passed;
+  full Code Squid suite (`python -m pytest -q`): 850 passed. Compilation of
+  touched Python modules/tests, production imports, and a session-scoped
+  StartupApplication construction smoke check passed. `git diff --check`
+  passed. No live inference or manual terminal verification was performed.
+  Preserved existing uncommitted startup-geometry and related documentation
+  changes. No follow-ups intentionally deferred.
+
 - 2026-10-05: Completed the first confirmed pre-release provider/settings
   integration cleanup (F1, F2, F4, F6, F7, F8). Provider key/URL commands pass
   the effective provider explicitly through setup into the scoped settings
@@ -3018,3 +3048,124 @@
   separate existing path, and failures in presentation itself are not swallowed.
   These limits are recorded rather than broadening this patch into storage or
   cancellation redesign. No unrelated existing work was changed.
+
+
+- 2026-10-05: Fixed startup rain terminal-buffer ownership and expanded its
+  vertical geometry. The live scene previously used a nonfullscreen primary
+  buffer Application with cursor-relative screen diffs. Terminal scrolling or
+  shrinking can move rows out of that viewport into history, where later rain
+  diffs cannot erase them; repainting cannot recover that lost canvas origin.
+  Startup now uses one temporary alternate-screen Application. After the
+  existing fade reaches a clean frame and Application cleanup restores the
+  primary buffer, the owning thread appends exactly one static rendered frame
+  before releasing terminal ownership. Wide-character continuation cells are
+  skipped in this static projection. Cancellation restores the terminal without
+  committing an animated frame. Erase-on-exit avoids a final inline-style
+  newline scrolling the full-height alternate canvas. Normal chat/composer
+  PromptSessions and print-based run output remain on the primary buffer.
+  The title/menu block now has seven outer rain rows above and below when space
+  permits, with the same 13-row menu panel, title gap, density, speed, entry
+  staggering, and eight-frame fade. Height-aware geometry reserves the composer
+  minimum and reduces both rain margins evenly before clipping central content
+  on exceptionally short terminals. The optional Skill panel remains 15 rows.
+  Regressions cover clean and populated primary buffers, live animation buffer
+  isolation, main/submenu navigation, repeated shrink/enlarge renders, centered
+  bounded geometry, wide-glyph retention, and actual threaded submit/cancel
+  lifecycles. Existing tests continue covering natural/forced fades, menu
+  handoffs, and composer navigation/scrolling.
+  Verification: focused prompt-input/binary-header/startup-menu/terminal/UI
+  session tests 290 passed; full Code Squid suite 838 passed. UI and touched test
+  compilation, fresh-process UI imports, and git diff --check passed. These are
+  automated layout/output and lifecycle checks; no native-terminal visual
+  inspection or live model inference was performed. No Core/Providers files,
+  menu feature changes, persistent transcript renderer, or new dependencies
+  were introduced. Live scrollback access while startup is active is delegated
+  to terminal alternate-screen behavior; existing history returns on handoff.
+
+
+## 2026-10-05 - Limit alternate-buffer ownership to startup
+
+- Removed the interactive interpreter's session-wide alternate-screen boundary.
+  StartupApplication's renderer thread now owns `startup_terminal(output)` only
+  around Application.run. StartupOutput preserves fullscreen canvas preparation
+  while suppressing renderer-owned buffer switches, so each scene has one real
+  enter/leave pair. The original primary Output and Python streams remain in
+  place for commands, help, runs, errors, approvals, and follow-up composers.
+- Handoff finishes renderer cleanup and restores primary before appending the
+  retained clean scene. A viewport of newlines moves earlier visible contents
+  into native scrollback without clearing history or overwriting old shell rows.
+  `/new` repeats this temporary scene boundary and returns to the same primary
+  transcript. Existing rain geometry, layout, and natural/forced fade behavior
+  are preserved; no persistent transcript renderer was introduced.
+- Nested finally blocks attempt restoration even if entry or flush fails.
+  Input Ctrl+C and renderer failures propagate after restoration. An interrupt
+  in the caller's submission wait forces/joins the renderer before cancellation
+  output, and a failed thread start releases the active-startup registration.
+  Existing interpreter/display cleanup still joins any remaining startup fade.
+- Updated current architecture documentation and buffer regression tests. Tests
+  cover real startup input applications, primary help/run output, `/new` history
+  retention, normal exit, Ctrl+C, caller KeyboardInterrupt, renderer failures,
+  thread-start failure, entry/flush failures, and balanced buffer switches.
+- Verification: focused console/UI/CLI tests: 426 passed; full Code Squid suite:
+  857 passed. `python -m compileall -q code_squid/console
+  tests/test_terminal_session.py tests/test_prompt_input.py`, fresh-process UI
+  and CLI imports, and `git diff --check` passed. No live model inference or
+  native-terminal visual inspection was performed. No deferred follow-ups.
+
+
+## 2026-10-05 - Retain only the final startup snapshot
+
+- StartupApplication previously appended its viewport spacer and clean frame
+  after every successful Application exit, including internal workspace rebuilds.
+  Retention now requires explicit composer submission and is guarded against
+  repeat projection. Workspace handoffs restore primary without any transcript
+  write, including blank spacer rows; renderer cleanup without submission also
+  retains nothing. Normal final submission still appends the existing spacer
+  and one clean frame after alternate-buffer restoration.
+- Provider/model/safety/Mod changes keep their existing in-place menu redraws.
+  Saved-session selection now updates the same startup composer instead of
+  ending the scene and opening an ordinary primary prompt. Its pending notice
+  prints once after final submission and the joined fade, before CLI dispatch.
+  Removed the obsolete saved-session handoff sentinel and Application callback.
+- Both interactive and one-task workspace startup rebuilds use the existing
+  reconstruction helper and preserve the menu's current Mod/Skill choices.
+  One-task startup uses a loop rather than recursive startup cycles. A changed
+  workspace still clears its session ID; no Core ownership or dependency
+  direction changes were introduced.
+- Native primary run/help/error output, existing history, temporary alternate
+  ownership, and restoration ordering remain unchanged. No scrollback clear
+  or session-wide alternate screen was added. Each completed startup cycle,
+  including /new, commits one snapshot; intermediate rebuilds commit zero.
+- Regressions exercise zero/one/multiple workspace rebuilds, repeated cycles,
+  provider/model/safety/Mod/session selections, idempotent final projection,
+  real CLI workspace reconstruction in both entry paths, /new, preservation
+  of specialization and primary history, balanced buffer switches, and
+  existing renderer/input/caller failure and interrupt restoration paths.
+- Verification: focused startup/UI/CLI tests: 433 passed; full Code Squid suite:
+  864 passed. After final test refinements, terminal lifecycle tests: 27 passed.
+  Console and touched-test compilation, fresh-process UI/menu/CLI imports, and
+  git diff --check passed. No live model inference or native-terminal visual
+  inspection was performed. No deferred follow-ups.
+
+
+## 2026-10-05 - Compact startup handoff spacing
+
+- Replaced the viewport-height primary newline spacer with exactly two CRLFs
+  before the retained clean startup frame. The restored primary append cursor
+  advances past any partial transcript line and leaves one blank line, or two
+  when preceding output already ended with a newline. Frame printing then
+  scrolls naturally; no history clear or primary cursor reposition is needed.
+- Kept startup-only alternate-buffer ownership, rain/menu/fade behavior,
+  submission-only retention, and the one-frame-per-cycle guard. Workspace
+  rebuilds still emit no primary separator or snapshot. Repeated `/new` cycles
+  use the same fixed separation regardless of viewport height.
+- Added a cursor-aware transcript regression covering partial and completed
+  prior lines, 12/40/80-row terminals, three repeated handoffs, intact history,
+  and idempotent retention. Existing real startup and CLI `/new` lifecycle tests
+  now assert exactly two primary CRLFs per retained frame, preventing a return
+  to viewport-sized spacers. Existing interrupt/failure restoration checks pass.
+- Verification: initial startup/input tests: 61 passed; focused console/UI/CLI
+  tests: 483 passed; full Code Squid suite: 870 passed. Console and touched-test
+  compilation, fresh-process startup/terminal/CLI imports, and `git diff --check`
+  passed. No live model inference or native-terminal visual inspection was
+  performed. No deferred follow-ups.
