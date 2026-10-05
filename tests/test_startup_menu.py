@@ -232,8 +232,8 @@ def test_provider_options_are_canonical_and_selection_updates_persisted_panel(
         lambda _settings: True,
     )
     monkeypatch.setattr(
-        "code_squid.provider_setup.build_provider",
-        lambda _settings: SimpleNamespace(
+        "squid_providers.catalog.build_provider",
+        lambda _settings, **_kwargs: SimpleNamespace(
             is_ready=lambda: True,
             list_models=lambda: ["qwen3.5-9b"],
         ),
@@ -262,8 +262,8 @@ def test_startup_selection_accepts_a_disconnected_provider(
         lambda _settings: False,
     )
     monkeypatch.setattr(
-        "code_squid.provider_setup.build_provider",
-        lambda _settings: SimpleNamespace(is_ready=lambda: False),
+        "squid_providers.catalog.build_provider",
+        lambda _settings, **_kwargs: SimpleNamespace(is_ready=lambda: False),
     )
     menu = StartupMenu(tmp_path, load_settings(tmp_path))
     menu.focus_from_composer()
@@ -304,8 +304,8 @@ def test_startup_provider_selection_restores_provider_scoped_connection(
         lambda _settings: False,
     )
     monkeypatch.setattr(
-        "code_squid.provider_setup.build_provider",
-        lambda _settings: SimpleNamespace(is_ready=lambda: False),
+        "squid_providers.catalog.build_provider",
+        lambda _settings, **_kwargs: SimpleNamespace(is_ready=lambda: False),
     )
     menu = StartupMenu(tmp_path, load_settings(tmp_path))
 
@@ -543,7 +543,7 @@ def test_provider_model_discovery_uses_optional_adapter_capability(
         )
 
     monkeypatch.setattr(
-        "code_squid.provider_setup.build_provider",
+        "squid_providers.catalog.build_provider",
         lambda settings, *, for_inference: build(settings),
     )
     assert discover_provider_models(settings) == ["a", "z"]
@@ -1163,3 +1163,57 @@ def test_session_panel_stays_fixed_height_with_multiline_metadata(tmp_path) -> N
     assert menu.session_title == "First line Second line with details"
     assert "Session" in rendered
     assert "First line Second line" in "\n".join(menu.panel_lines(layout))
+
+
+@pytest.mark.parametrize("error_type", [OSError, RuntimeError, ValueError])
+def test_provider_candidate_operational_failure_stays_local(monkeypatch, tmp_path, error_type):
+    from code_squid.provider_setup import settings_for_provider
+
+    def candidate(settings, provider_id):
+        if provider_id == "openrouter":
+            raise error_type("candidate unavailable")
+        return settings_for_provider(settings, provider_id)
+
+    monkeypatch.setattr("code_squid.console.startup_menu.settings_for_provider", candidate)
+    monkeypatch.setattr("squid_providers.catalog.provider_ready", lambda _settings: True)
+    menu = StartupMenu(tmp_path, load_settings(tmp_path))
+    menu.selected_index = MAIN_ROWS.index("Provider")
+    menu.activate()
+    assert menu.mode == "provider"
+    assert menu._provider_statuses["openrouter"] is False
+    assert menu._provider_statuses["lm_studio"] is True
+
+
+def test_missing_inactive_credential_does_not_block_provider_picker(monkeypatch, tmp_path):
+    path = settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "model": {"provider": "lm_studio"},
+        "providers": {"openrouter": {"api_key_env": "MISSING_PICKER_CREDENTIAL"}},
+    }), encoding="utf-8")
+    monkeypatch.delenv("MISSING_PICKER_CREDENTIAL", raising=False)
+    monkeypatch.delenv("CODE_SQUID_API_KEY", raising=False)
+    monkeypatch.setattr("squid_providers.catalog.provider_ready", lambda _settings: True)
+    monkeypatch.setattr("squid_providers.catalog.discover_models", lambda _settings: ["qwen3.5-9b"])
+    menu = StartupMenu(tmp_path, load_settings(tmp_path))
+    menu.selected_index = MAIN_ROWS.index("Provider")
+    menu.activate()
+    assert menu._provider_statuses["openrouter"] is False
+    assert menu._provider_statuses["ollama"] is True
+    rendered = "\n".join(menu.panel_lines(startup_scene_layout(100)))
+    assert "OpenRouter" in rendered and "not connected" in rendered
+    menu.selected_index = menu._options.index("ollama")
+    menu.activate()
+    assert menu.mode == "main"
+    assert menu.settings.model.provider == "ollama"
+
+
+def test_provider_picker_does_not_suppress_programming_errors(monkeypatch, tmp_path):
+    def broken_candidate(*_args):
+        raise TypeError("programming error")
+
+    monkeypatch.setattr("code_squid.console.startup_menu.settings_for_provider", broken_candidate)
+    menu = StartupMenu(tmp_path, load_settings(tmp_path))
+    menu.selected_index = MAIN_ROWS.index("Provider")
+    with pytest.raises(TypeError, match="programming error"):
+        menu.activate()

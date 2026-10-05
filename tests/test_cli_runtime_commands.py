@@ -146,8 +146,8 @@ def test_provider_selection_persists_and_preserves_unrelated_settings(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "code_squid.provider_setup.build_provider",
-        lambda _settings: SimpleNamespace(
+        "squid_providers.catalog.build_provider",
+        lambda _settings, **_kwargs: SimpleNamespace(
             is_ready=lambda: True,
             list_models=lambda: ["existing-model"],
         ),
@@ -232,8 +232,8 @@ def test_disconnected_lm_studio_can_be_selected_then_configured(
 ) -> None:
     _write_settings(tmp_path, {"model": {"provider": "ollama"}})
     monkeypatch.setattr(
-        "code_squid.provider_setup.build_provider",
-        lambda _settings: SimpleNamespace(is_ready=lambda: False),
+        "squid_providers.catalog.build_provider",
+        lambda _settings, **_kwargs: SimpleNamespace(is_ready=lambda: False),
     )
 
     _, selected = handle_runtime_command(
@@ -286,8 +286,8 @@ def test_provider_key_is_persisted_but_never_echoed(tmp_path, capsys) -> None:
 
 def test_runtime_commands_write_only_application_settings(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "code_squid.provider_setup.build_provider",
-        lambda _settings: SimpleNamespace(is_ready=lambda: False),
+        "squid_providers.catalog.build_provider",
+        lambda _settings, **_kwargs: SimpleNamespace(is_ready=lambda: False),
     )
 
     commands = (
@@ -424,8 +424,8 @@ def test_provider_connections_survive_switching_and_mutate_only_the_active_provi
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
-        "code_squid.provider_setup.build_provider",
-        lambda _settings: SimpleNamespace(is_ready=lambda: False),
+        "squid_providers.catalog.build_provider",
+        lambda _settings, **_kwargs: SimpleNamespace(is_ready=lambda: False),
     )
 
     handle_runtime_command(
@@ -652,8 +652,8 @@ def test_runtime_changes_are_used_by_subsequent_runs_without_restart(
 ) -> None:
     run_settings = []
     monkeypatch.setattr(
-        "code_squid.provider_setup.build_provider",
-        lambda _settings: SimpleNamespace(
+        "squid_providers.catalog.build_provider",
+        lambda _settings, **_kwargs: SimpleNamespace(
             is_ready=lambda: True,
             list_models=lambda: ["qwen3.5-9b"],
         ),
@@ -1061,3 +1061,35 @@ def test_workspace_command_rebuilds_state_and_routes_subsequent_runs_to_new_root
         ("new", new_root.resolve(), "first", "new-workspace-model"),
         ("follow-up", new_root.resolve(), "second", "new-workspace-model"),
     ]
+
+
+@pytest.mark.parametrize("action,value,field,expected", [
+    ("key", "new-secret", "api_key", "new-secret"),
+    ("url", "http://effective/v1/", "base_url", "http://effective/v1"),
+])
+def test_provider_config_commands_write_only_effective_provider(
+    monkeypatch, tmp_path, capsys, action, value, field, expected
+):
+    original = {
+        "model": {"provider": "lm_studio", "name": "exact-model"},
+        "providers": {
+            "lm_studio": {"api_key": "saved-secret", "base_url": "http://saved/v1"},
+            "ollama": {"api_key_env": None, "request_timeout": 45},
+        },
+        "display": {"show_reasoning": True},
+    }
+    path = _write_settings(tmp_path, original)
+    monkeypatch.setenv("CODE_SQUID_PROVIDER", "ollama")
+    settings = load_settings(tmp_path)
+    handled, effective = handle_runtime_command(tmp_path, f"/provider {action} {value}", settings)
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    assert handled
+    assert effective.model.provider == "ollama"
+    assert persisted["model"] == original["model"]
+    assert persisted["providers"]["lm_studio"] == original["providers"]["lm_studio"]
+    assert persisted["display"] == original["display"]
+    assert persisted["providers"]["ollama"][field] == expected
+    assert persisted["providers"]["ollama"]["request_timeout"] == 45
+    if action == "key":
+        assert persisted["providers"]["ollama"]["api_key_env"] is None
+        assert value not in capsys.readouterr().out

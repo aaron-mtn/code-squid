@@ -1409,8 +1409,12 @@ Supported settings sections and fields:
 
 The `providers` mapping is sparse: it contains only supported config values a user
 explicitly saved. Switching `model.provider` changes which provider-scoped
-connection is resolved and never removes another provider's entry. Missing
-providers and missing fields inherit the corresponding provider-owned
+connection is resolved and never removes another provider's entry. Configuration
+commands pass the effective provider explicitly to the scoped settings writer,
+so `/provider key` and `/provider url` update that provider even when
+`CODE_SQUID_PROVIDER` differs from the saved selector. The saved selector and
+other providers' entries are preserved; no flat fields or dual writes are added.
+Missing providers and missing fields inherit the corresponding provider-owned
 `ProviderProfile` defaults without writing those defaults to disk. Only scoped
 connection configuration is read and written; old flat model connection fields
 are not interpreted or migrated. Writers preserve unrelated JSON without dual
@@ -1506,7 +1510,9 @@ mistaken for ordinary persistence failures.
 Invalid settings JSON, invalid section shapes, invalid provider names, unknown
 approval modes, missing configured API-key environment variables, invalid
 temperatures, invalid compaction settings, and invalid step limits fail during
-settings loading.
+settings loading. Persisted provider selectors and approval modes are validated
+as strings before membership checks; model names must be non-empty strings on
+both load and write. Exact valid model IDs are preserved without normalization.
 
 ## CLI Commands
 
@@ -1592,20 +1598,22 @@ same `ProviderSettings.model_name` explicitly to Core's spawner, which uses it
 in `ModelAdapter` and then provider inference. Provider switching preserves the configured ID and reports when the
 new connected provider does not expose it.
 
-Model discovery calls each provider's `list_models()` directly instead of
-requiring `is_ready()` first. This preserves local discovery behaviorâ€”a stopped
-local service fails its own catalog requestâ€”while allowing public catalogs to
-remain visible independently of inference credentials. Application provider
-construction defaults to the inference boundary and therefore still rejects a
-keyless OpenRouter configuration; the application discovery seam explicitly
-requests discovery-only construction.
+Code Squid's readiness and discovery adapters convert application `Settings`
+into `ProviderSettings` and delegate to `squid_providers.catalog.provider_ready`
+and `discover_models`. Provider selection uses these same adapters. Providers
+owns inference readiness and discovery-only construction, so public catalogs
+remain available independently of inference credentials. Code Squid contains
+expected configuration/operational failures for each startup provider candidate,
+including failures during credential resolution, and renders that option as
+`not connected` without blocking other candidates. Unexpected programming errors
+still escape the menu boundary.
 
 OpenRouter is supported through the OpenAI-compatible provider path by setting
-`model.provider` or `CODE_SQUID_PROVIDER` to `openrouter`. It still uses
-`OpenAICompatibleProvider`, while Code Squid provider setup selects assistant
-tool-call replay with `content: null` for assistant messages that have
-`tool_calls` and no content. This provider-specific behavior is handled before
-messages are sent to the provider.
+`model.provider` or `CODE_SQUID_PROVIDER` to `openrouter`. Squid Providers owns
+its replay/content policy: assistant messages with `tool_calls` and no content
+use `content: null`. Application construction obtains that policy from the
+Providers catalog and passes it into Core; Code Squid does not select an
+OpenRouter-specific replay policy itself.
 
 Reasoning configuration consists of optional normalized
 `ProviderSettings.reasoning_mode` and `reasoning_token_budget` values. Both
@@ -1651,8 +1659,11 @@ provider failures remain exceptions with existing wrapping, cancellation,
 classification, redaction, and retry behavior. Native stream terminal checks,
 callbacks, chunk assembly, and raw transport tracing remain provider-owned.
 Concrete transport files and SDK dependencies belong to `squid-providers`;
-provider configuration belongs to Code Squid. Core has no concrete transport
-imports, and application construction injects the ready provider or adapter.
+provider configuration validation/resolution, provider-specific defaults, and
+replay/content policy belong to Squid Providers. Code Squid owns persisted
+application choices, environment override policy, and provider/model selection
+UX. Core has no concrete transport imports, and application construction injects
+the ready provider or adapter.
 
 The OpenAI-compatible provider also supports optional assistant text and
 reasoning streaming. Streaming forwards the first populated reasoning alias

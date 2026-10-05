@@ -10,8 +10,9 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
+from squid_providers import catalog
 from squid_providers.catalog import (
-    PROVIDER_PROFILES, PROFILES_BY_ID, VALID_PROVIDERS,
+    PROVIDER_PROFILES,
     build_provider, tool_call_content_mode, friendly_provider_name,
     resolve_provider_name, resolve_config,
 )
@@ -19,22 +20,17 @@ from squid_providers.catalog import (
 
 def provider_ready(settings) -> bool:
     """Return a UI-neutral readiness observation for effective settings."""
+    # Conversion may resolve incomplete programmatic config; the application
+    # contains those expected errors before handing readiness to Providers.
     try:
-        provider = build_provider(settings.to_provider_settings())
-        return provider.is_ready()
+        return catalog.provider_ready(settings.to_provider_settings())
     except (OSError, RuntimeError, ValueError):
         return False
 
 
 def discover_models(settings) -> list[str]:
     """Return model IDs whenever the provider's discovery API is available."""
-    # Some providers expose discovery before inference is ready. Construction
-    # delegates that distinction to the provider package.
-    provider = build_provider(
-        settings.to_provider_settings(),
-        for_inference=False,
-    )
-    return sorted(set(provider.list_models()))
+    return catalog.discover_models(settings.to_provider_settings())
 
 
 def settings_for_provider(settings, provider_id: str):
@@ -78,15 +74,11 @@ def select_provider(workspace_root: Path, provider_id: str):
     # Selection is the bootstrap seam for provider-specific configuration.
     # Readiness is therefore reported only after persistence and must never
     # roll back a provider that still needs its URL or credential configured.
-    try:
-        provider = build_provider(effective.to_provider_settings())
-        if not provider.is_ready():
-            return effective, f"{friendly_provider_name(provider_id)} is not connected."
-    except (OSError, RuntimeError, ValueError):
+    if not provider_ready(effective):
         return effective, f"{friendly_provider_name(provider_id)} is not connected."
 
     try:
-        unavailable_model = current.model.name not in provider.list_models()
+        unavailable_model = current.model.name not in discover_models(effective)
     except (OSError, RuntimeError, ValueError):
         # Model discovery is advisory during selection. Its own command/menu
         # paths retain their existing failure semantics.
@@ -108,20 +100,20 @@ def select_model(workspace_root: Path, model_id: str):
     return load_settings(workspace_root)
 
 
-def set_provider_key(workspace_root: Path, api_key: str):
-    """Persist the current provider key without returning or printing it."""
+def set_provider_key(workspace_root: Path, api_key: str, *, provider: str):
+    """Persist a key for the effective provider supplied by the command boundary."""
     from code_squid.settings import load_settings, write_model_value
 
-    write_model_value(workspace_root, "api_key", api_key)
-    write_model_value(workspace_root, "api_key_env", None)
+    write_model_value(workspace_root, "api_key", api_key, provider=provider)
+    write_model_value(workspace_root, "api_key_env", None, provider=provider)
     return load_settings(workspace_root)
 
 
-def set_provider_url(workspace_root: Path, base_url: str):
-    """Persist the current provider URL and return effective settings."""
+def set_provider_url(workspace_root: Path, base_url: str, *, provider: str):
+    """Persist a URL for the effective provider supplied by the command boundary."""
     from code_squid.settings import load_settings, write_model_value
 
-    write_model_value(workspace_root, "base_url", base_url.rstrip("/"))
+    write_model_value(workspace_root, "base_url", base_url.rstrip("/"), provider=provider)
     return load_settings(workspace_root)
 
 

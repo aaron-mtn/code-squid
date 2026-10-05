@@ -1,3 +1,31 @@
+- 2026-10-05: Completed the first confirmed pre-release provider/settings
+  integration cleanup (F1, F2, F4, F6, F7, F8). Provider key/URL commands pass
+  the effective provider explicitly through setup into the scoped settings
+  writer; saved selection and other providers' configuration remain unchanged
+  under CODE_SQUID_PROVIDER. Providers continues to validate scoped overrides.
+  Startup picker resolution/readiness failures are contained per candidate as
+  not connected using the existing OSError/RuntimeError/ValueError boundary;
+  unexpected programming errors still escape. Settings validates provider and
+  approval selectors before membership checks and requires non-empty string
+  model IDs on load/write, preserving valid IDs verbatim.
+  Readiness/discovery adapters and provider selection delegate to the Providers
+  public catalog APIs, preserving discovery availability independent of inference
+  readiness. Removed the caller-free apply_provider compatibility helper and
+  unused imports. Corrected current architecture ownership of provider config
+  validation/resolution/defaults and replay/content policy; historical entries
+  below remain unchanged. The command boundary supplies its effective settings
+  provider rather than re-resolving credentials merely to choose a write target.
+  Verification: focused settings/provider setup/startup menu/CLI runtime/boundary
+  suite: 231 passed; full Code Squid suite: 800 passed. Compilation of touched
+  Python modules/tests, production-module imports, and a settings-to-Providers
+  construction smoke check passed. Repository searches confirmed no remaining
+  apply_provider definition/caller and public API delegation without application
+  is_ready/list_models calls. git diff --check passed. No live inference or
+  live provider connection verification was performed. Core/Providers production
+  code, packaging, catalog contents, workspace adoption, diagnostics, and session/
+  run construction were unchanged. F3/F5 run/session failure containment remains
+  intentionally deferred to its separate patch.
+
 - 2026-10-04: Completed the pre-release workspace-root metadata rename.
   Session/undo metadata writes workspace_root; undo restore and the Code Squid
   session viewer read that key. Updated current fixtures, schema assertions,

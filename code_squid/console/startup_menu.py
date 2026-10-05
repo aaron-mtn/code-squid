@@ -310,8 +310,13 @@ class StartupMenu:
             self._options = tuple(profile.provider_id for profile in PROVIDER_PROFILES)
             self._provider_statuses = {}
             for provider_id in self._options:
-                candidate = settings_for_provider(self.settings, provider_id)
-                self._provider_statuses[provider_id] = provider_ready(candidate)
+                try:
+                    candidate = settings_for_provider(self.settings, provider_id)
+                    self._provider_statuses[provider_id] = provider_ready(candidate)
+                except (OSError, RuntimeError, ValueError):
+                    # Resolution can fail before readiness (for example, a missing
+                    # credential variable). Keep that failure local to this option.
+                    self._provider_statuses[provider_id] = False
             self._select_current(self.settings.model.provider)
         elif next_mode == "model":
             try:

@@ -22,7 +22,6 @@ from code_squid.settings import (
     load_settings,
     write_approval_mode,
     write_compaction_trigger_input_tokens,
-    write_provider,
     write_show_reasoning,
 )
 from squid_core.compaction.compaction_status import format_token_count
@@ -33,12 +32,6 @@ SAFETY_MODES = {
     "balanced": "guarded",
     "yolo": "never",
 }
-
-
-def apply_provider(workspace_root: Path, provider: str) -> Settings:
-    """Persist a provider directly for compatibility with non-UI callers."""
-    write_provider(workspace_root, provider)
-    return load_settings(workspace_root)
 
 
 def apply_model(workspace_root: Path, model_name: str) -> Settings:
@@ -71,7 +64,7 @@ def handle_runtime_command(
 
     try:
         if parts[0] == "/provider":
-            _handle_provider(workspace_root, parts[1:])
+            _handle_provider(workspace_root, parts[1:], settings)
         elif parts[0] == "/model":
             _handle_model(workspace_root, parts[1:])
         elif parts[0] == "/safety":
@@ -148,7 +141,7 @@ def _parse_token_count(value: str) -> int | None:
         return None
 
 
-def _handle_provider(workspace_root: Path, args: list[str]) -> None:
+def _handle_provider(workspace_root: Path, args: list[str], settings: Settings) -> None:
     if not args:
         settings = load_settings(workspace_root)
         status = "ready" if provider_ready(settings) else "not connected"
@@ -165,11 +158,11 @@ def _handle_provider(workspace_root: Path, args: list[str]) -> None:
         _print_provider_status(load_settings(workspace_root))
         return
     if action == "key" and len(args) == 2 and args[1]:
-        set_provider_key(workspace_root, args[1])
+        set_provider_key(workspace_root, args[1], provider=settings.model.provider)
         print("Provider API key saved.")
         return
     if action == "url" and len(args) == 2 and args[1]:
-        settings = set_provider_url(workspace_root, args[1])
+        settings = set_provider_url(workspace_root, args[1], provider=settings.model.provider)
         print(f"Provider URL set to: {settings.model.base_url}")
         return
     if action == "use" and len(args) >= 2:

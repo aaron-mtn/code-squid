@@ -204,7 +204,7 @@ def _section(settings: dict[str, Any], name: str, settings_path: Path) -> dict[s
 
 def _approval_mode(runtime_settings: dict[str, Any], settings_path: Path) -> str:
     approval_mode = runtime_settings.get("approval_mode", DEFAULT_APPROVAL_MODE)
-    if approval_mode not in VALID_APPROVAL_MODES:
+    if not isinstance(approval_mode, str) or approval_mode not in VALID_APPROVAL_MODES:
         valid_modes = ", ".join(sorted(VALID_APPROVAL_MODES))
         raise ValueError(
             f"Invalid settings JSON in {settings_path}: runtime.approval_mode must be one of {valid_modes}"
@@ -465,8 +465,13 @@ def _reasoning_token_budget(
 
 
 def _provider(model_settings: dict[str, Any], settings_path: Path) -> str:
-    provider = os.getenv("CODE_SQUID_PROVIDER", model_settings.get("provider", DEFAULT_PROVIDER))
-    if provider not in VALID_PROVIDERS:
+    provider = model_settings.get("provider", DEFAULT_PROVIDER)
+    if not isinstance(provider, str) or provider not in VALID_PROVIDERS:
+        raise ValueError(
+            f"Invalid settings JSON in {settings_path}: model.provider must be a supported provider string"
+        )
+    provider = os.getenv("CODE_SQUID_PROVIDER", provider)
+    if not isinstance(provider, str) or provider not in VALID_PROVIDERS:
         valid_providers = ", ".join(sorted(VALID_PROVIDERS))
         raise ValueError(
             f"Invalid settings JSON in {settings_path}: model.provider must be one of {valid_providers}"
@@ -520,7 +525,11 @@ def load_settings(workspace_root: Path) -> Settings:
         api_key_override=os.getenv("CODE_SQUID_API_KEY"),
     )
     base_url, api_key, api_key_env = (config[name] for name in _CONNECTION_FIELDS)
-    model_name = os.getenv("CODE_SQUID_MODEL", model_settings.get("name", DEFAULT_MODEL_NAME))
+    model_name = _model_name(
+        model_settings.get("name", DEFAULT_MODEL_NAME),
+        f"settings JSON in {settings_path}",
+    )
+    model_name = _model_name(os.getenv("CODE_SQUID_MODEL", model_name), "CODE_SQUID_MODEL")
     temperature = _temperature(model_settings, settings_path)
     reasoning_mode = _reasoning_mode(model_settings, settings_path)
     reasoning_token_budget = _reasoning_token_budget(model_settings, settings_path)
@@ -579,7 +588,7 @@ def load_settings(workspace_root: Path) -> Settings:
 
 
 def write_approval_mode(workspace_root: Path, approval_mode: str) -> None:
-    if approval_mode not in VALID_APPROVAL_MODES:
+    if not isinstance(approval_mode, str) or approval_mode not in VALID_APPROVAL_MODES:
         valid_modes = ", ".join(sorted(VALID_APPROVAL_MODES))
         raise ValueError(f"approval_mode must be one of {valid_modes}")
 
@@ -641,7 +650,7 @@ def write_compaction_trigger_input_tokens(workspace_root: Path, tokens: int) -> 
 def write_provider(workspace_root: Path, provider: str) -> None:
     """Persist one supported provider without replacing unrelated settings."""
 
-    if provider not in VALID_PROVIDERS:
+    if not isinstance(provider, str) or provider not in VALID_PROVIDERS:
         valid_providers = ", ".join(sorted(VALID_PROVIDERS))
         raise ValueError(f"provider must be one of {valid_providers}")
 
@@ -656,18 +665,27 @@ def write_provider(workspace_root: Path, provider: str) -> None:
 def write_model_name(workspace_root: Path, model_name: str) -> None:
     """Persist a non-empty model name without replacing unrelated settings."""
 
-    if not model_name:
-        raise ValueError("model name must not be empty")
+    model_name = _model_name(model_name, "model settings write")
 
     _write_model_value(workspace_root, "name", model_name)
 
 
-def write_model_value(workspace_root: Path, name: str, value: Any) -> None:
+def _model_name(value: Any, source: str) -> str:
+    """Validate an exact model ID without normalizing provider-owned names."""
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"Invalid {source}: model.name must be a non-empty string")
+    return value
+
+
+def write_model_value(
+    workspace_root: Path, name: str, value: Any, *, provider: str
+) -> None:
     """Persist one provider-validated config override without exposing secrets."""
     settings_path, raw_settings = _read_application_settings(workspace_root)
     model_settings = _section(raw_settings, "model", settings_path)
-    provider = model_settings.get("provider", DEFAULT_PROVIDER)
-    if provider not in VALID_PROVIDERS:
+    # The caller owns effective selection. Re-reading the saved selector here
+    # would put credentials under the wrong provider when an override is active.
+    if not isinstance(provider, str) or provider not in VALID_PROVIDERS:
         valid_providers = ", ".join(sorted(VALID_PROVIDERS))
         raise ValueError(f"provider must be one of {valid_providers}")
 

@@ -19,10 +19,7 @@ from code_squid.provider_setup import (
 )
 from code_squid.settings import load_settings
 from squid_core.model_adapter import ModelAdapter
-from code_squid.provider_setup import build_provider
-from squid_providers.settings import ProviderSettings
-from code_squid.provider_setup import build_provider, tool_call_content_mode
-from squid_providers.ollama import DEFAULT_OLLAMA_REQUEST_TIMEOUT, OllamaProvider
+from squid_providers.catalog import build_provider
 from squid_providers.openai_compatible import OpenAICompatibleProvider
 
 
@@ -148,8 +145,8 @@ def test_disconnected_provider_selection_persists_for_configuration(
     tmp_path,
 ) -> None:
     monkeypatch.setattr(
-        "code_squid.provider_setup.build_provider",
-        lambda _settings: SimpleNamespace(is_ready=lambda: False),
+        "squid_providers.catalog.build_provider",
+        lambda _settings, **_kwargs: SimpleNamespace(is_ready=lambda: False),
     )
     settings, explanation = select_provider(tmp_path, "ollama")
 
@@ -174,14 +171,24 @@ def test_disconnected_openrouter_selection_does_not_weaken_inference_checks(
         build_provider(settings.to_provider_settings())
 
 
-def test_discovery_uses_shared_provider_seam(monkeypatch, tmp_path) -> None:
-    fake = SimpleNamespace(
-        is_ready=lambda: pytest.fail("discovery must not probe inference readiness"),
-        list_models=lambda: ["z", "a", "a"],
-    )
-    monkeypatch.setattr(
-        "code_squid.provider_setup.build_provider",
-        lambda _settings, *, for_inference: fake,
-    )
-    assert discover_models(load_settings(tmp_path)) == ["a", "z"]
+def test_readiness_and_discovery_delegate_to_public_provider_apis(monkeypatch, tmp_path) -> None:
+    settings = load_settings(tmp_path)
+    expected = settings.to_provider_settings()
+    calls = []
+
+    def ready(provider_settings):
+        assert provider_settings == expected
+        calls.append("ready")
+        return False
+
+    def discover(provider_settings):
+        assert provider_settings == expected
+        calls.append("discover")
+        return ["a", "z"]
+
+    monkeypatch.setattr("squid_providers.catalog.provider_ready", ready)
+    monkeypatch.setattr("squid_providers.catalog.discover_models", discover)
+    assert provider_ready(settings) is False
+    assert discover_models(settings) == ["a", "z"]
+    assert calls == ["ready", "discover"]
     assert friendly_provider_name("lm_studio") == "LM Studio"

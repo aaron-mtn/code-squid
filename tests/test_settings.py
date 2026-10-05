@@ -814,7 +814,7 @@ def test_provider_owned_option_round_trips_without_application_field_knowledge(t
     profile = PROFILES_BY_ID[DEFAULT_PROVIDER]
     monkeypatch.setitem(PROFILES_BY_ID, DEFAULT_PROVIDER,
                         replace(profile, config_fields=("future_option",)))
-    write_model_value(tmp_path, "future_option", {"nested": True})
+    write_model_value(tmp_path, "future_option", {"nested": True}, provider=DEFAULT_PROVIDER)
     settings = load_settings(tmp_path)
     assert settings.providers[DEFAULT_PROVIDER]["future_option"] == {"nested": True}
     assert settings.to_provider_settings().config["future_option"] == {"nested": True}
@@ -844,7 +844,7 @@ def test_flat_connection_fields_are_not_read_or_migrated(tmp_path):
     assert effective.providers == {}
     assert effective.model.base_url == "http://127.0.0.1:1234/v1"
     assert effective.model.api_key == "lm-studio"
-    write_model_value(tmp_path, "base_url", "http://current/v1")
+    write_model_value(tmp_path, "base_url", "http://current/v1", provider="lm_studio")
     persisted = json.loads(settings_path().read_text(encoding="utf-8"))
     # Writers preserve unrelated JSON, but never transfer or update the old fields.
     assert persisted["model"] == old_model
@@ -864,3 +864,45 @@ def test_programmatic_connection_uses_scoped_config_only():
     effective = settings.to_provider_settings()
     assert effective.base_url == "http://scoped/v1"
     assert effective.api_key == "scoped-key"
+
+
+@pytest.mark.parametrize("section,field,value", [
+    ("model", "provider", []),
+    ("model", "provider", 7),
+    ("runtime", "approval_mode", []),
+    ("runtime", "approval_mode", 7),
+    ("runtime", "approval_mode", None),
+    ("model", "name", 7),
+    ("model", "name", ""),
+])
+def test_malformed_selectors_raise_field_specific_value_errors(tmp_path, section, field, value):
+    write_settings(tmp_path, {section: {field: value}})
+    with pytest.raises(ValueError, match=rf"{section}\.{field}"):
+        load_settings(tmp_path)
+
+
+@pytest.mark.parametrize("value", [7, "", [], None])
+def test_model_name_writes_enforce_load_contract(tmp_path, value):
+    from code_squid.settings import write_model_name
+
+    with pytest.raises(ValueError, match=r"model\.name.*non-empty string"):
+        write_model_name(tmp_path, value)
+    assert not settings_path().exists()
+
+
+def test_valid_selectors_and_exact_model_name_round_trip(tmp_path):
+    from code_squid.settings import write_model_name
+
+    write_provider(tmp_path, "ollama")
+    write_approval_mode(tmp_path, "guarded")
+    write_model_name(tmp_path, "vendor/Exact Model:tag")
+    settings = load_settings(tmp_path)
+    assert settings.model.provider == "ollama"
+    assert settings.runtime.approval_mode == "guarded"
+    assert settings.model.name == "vendor/Exact Model:tag"
+
+
+@pytest.mark.parametrize("writer,value", [(write_provider, []), (write_approval_mode, [])])
+def test_selector_writes_reject_unhashable_values(tmp_path, writer, value):
+    with pytest.raises(ValueError):
+        writer(tmp_path, value)
