@@ -69,13 +69,13 @@ def settings_for_provider(settings, provider_id: str):
     )
 
 
-def select_provider(repo_root: Path, provider_id: str):
+def select_provider(workspace_root: Path, provider_id: str):
     """Select a provider, returning settings and an optional status explanation."""
     from code_squid.settings import load_settings, write_provider
 
-    current = load_settings(repo_root)
-    write_provider(repo_root, provider_id)
-    effective = load_settings(repo_root)
+    current = load_settings(workspace_root)
+    write_provider(workspace_root, provider_id)
+    effective = load_settings(workspace_root)
     if os.getenv("CODE_SQUID_PROVIDER") is not None:
         return effective, "Saved; CODE_SQUID_PROVIDER remains the effective override."
 
@@ -104,29 +104,29 @@ def select_provider(repo_root: Path, provider_id: str):
     return effective, None
 
 
-def select_model(repo_root: Path, model_id: str):
+def select_model(workspace_root: Path, model_id: str):
     """Persist an exact model ID and return the effective same-process settings."""
     from code_squid.settings import load_settings, write_model_name
 
-    write_model_name(repo_root, model_id)
-    return load_settings(repo_root)
+    write_model_name(workspace_root, model_id)
+    return load_settings(workspace_root)
 
 
-def set_provider_key(repo_root: Path, api_key: str):
+def set_provider_key(workspace_root: Path, api_key: str):
     """Persist the current provider key without returning or printing it."""
     from code_squid.settings import load_settings, write_model_value
 
-    write_model_value(repo_root, "api_key", api_key)
-    write_model_value(repo_root, "api_key_env", None)
-    return load_settings(repo_root)
+    write_model_value(workspace_root, "api_key", api_key)
+    write_model_value(workspace_root, "api_key_env", None)
+    return load_settings(workspace_root)
 
 
-def set_provider_url(repo_root: Path, base_url: str):
+def set_provider_url(workspace_root: Path, base_url: str):
     """Persist the current provider URL and return effective settings."""
     from code_squid.settings import load_settings, write_model_value
 
-    write_model_value(repo_root, "base_url", base_url.rstrip("/"))
-    return load_settings(repo_root)
+    write_model_value(workspace_root, "base_url", base_url.rstrip("/"))
+    return load_settings(workspace_root)
 
 
 def active_environment_overrides() -> tuple[str, ...]:

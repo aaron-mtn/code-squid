@@ -1,3 +1,66 @@
+- 2026-10-04: Completed the pre-release workspace-root metadata rename.
+  Session/undo metadata writes workspace_root; undo restore and the Code Squid
+  session viewer read that key. Updated current fixtures, schema assertions,
+  viewer output, README wording, and architecture docs. The undo index has no
+  root field and keeps its existing file/snapshot schema. No aliases, old-key
+  fallback, dual writes, migrations, or warnings were added. Earlier development
+  metadata may be incompatible; paths, containment, replay, and undo lifecycle
+  behavior are unchanged. Historical entries remain as written.
+  Verification: Core storage/index focused suite: 62 passed; Code Squid session
+  index/viewer/CLI focused suite: 62 passed. Full Core: 781 passed, 1 skipped
+  (POSIX process-group regression on Windows); full Code Squid: 779 passed.
+  Compilation and serialization/reopening/index/restore smoke checks passed,
+  including rejection of legacy-only undo root metadata. git diff --check passed
+  in both repositories. Production/API/context/storage and current docs/tests
+  contain no old root identifier; remaining occurrences are historical dev-log
+  prose only. No live inference was run; no follow-up migration is planned.
+
+- 2026-10-04: Updated application construction, CLI callers, tests, and current
+  documentation for Core's pre-release workspace_root API/context rename. No
+  compatibility aliases were added; session/undo metadata keeps the persisted
+  repo_root key and existing layout. Core now enforces standalone Skill tool
+  permissions in Agent/default executor construction and uses the host registry
+  consistently for Mod discovery/loading/resolution. Already permitted registries
+  preserve identity; updated an incomplete Skill test double for the contract.
+  Verification: focused application integration: 105 passed; full Code Squid:
+  779 passed. Core focused checks: 272 passed; full Core: 781 passed, 1 Windows
+  platform skip. Compilation and import/signature/context smoke checks passed;
+  git diff --check passed in both repositories. No live inference was run.
+  Application policy, prompts, resource precedence, readers, tool safety,
+  providers, Hook architecture, accent metadata, and packaging were left alone.
+
+- 2026-10-04: Made Core prompt/runtime defaults generic while retaining Code
+  Squid behavior in the sibling application. `tools=None` now selects built-ins
+  consistently in Agent, ToolExecutor, and both spawner helpers; empty mappings
+  select no tools and explicit mappings remain the same object without merging.
+  Renamed the pre-release identity section to AGENT_IDENTITY and the defaults
+  field to agent_identity; updated current code, tests, and contract docs without
+  an alias. The three fixed sections remain AGENT_IDENTITY, TOOL_USAGE_GUIDANCE,
+  and FINAL_SUMMARY_REQUIREMENTS with literal append/replace semantics.
+  Moved narration, coding examples, and source/shell-discovery preferences into
+  Code Squid's non-replaceable baseline policy. Its existing reading/editing
+  guidance and concise final-report policy remain application-owned and retain
+  their Skill override behavior. Core protects only response protocol,
+  batching/result-dependent sequencing, completion, verification honesty,
+  task-neutral examples, and malformed/empty-response correction. Environment
+  guidance receives the resolved registry and mentions built-in capabilities
+  only when active. Read/trim markers and their recognition use SQUID CORE.
+  Compatibility impact: identity consumers must adopt the new names; callers
+  relying on the spawner's old no-tools default must pass tools={}; historical
+  branded omission markers are not recognized as the current internal format.
+  Persisted history is not rewritten. No released compatibility need was found.
+  Verification: Core focused prompt/spawner/Skill/Mod/environment/trimming/tool
+  tests: 196 passed, 1 skipped; minimal-provider fixture checks: 6 passed.
+  Core full suite: 768 passed, 1 skipped. Code Squid focused coding prompt,
+  Core integration, Mod and Skill runner checks: 60 passed. Code Squid full
+  suite after the final policy move: 779 passed. The Core skip is the POSIX
+  process-group regression on Windows. Compilation and
+  import/construction smoke checks passed for both packages; git diff --check
+  passed in both repositories. No live model inference was run.
+  Provider contracts/structure, hooks, optional reader dependencies, Mod accent
+  validation, packaging, and please_stop_contemplating_the_void were untouched;
+  Mod color ownership remains deferred to the broader Mods/Skills design pass.
+
 - 2026-09-28: Corrected persistent command identity extraction for PowerShell's
   leading `&` call operator. Straightforward quoted and bare literal invocations
   now trust the invoked program rather than the generic operator; dynamic or
@@ -2841,3 +2904,25 @@
   relocated imports. File-tree generation and git diff --check passed.
   No live inference; no implementation follow-ups deferred. Existing staged
   and unrelated working-tree changes were preserved; no commits or release.
+
+- 2026-10-04: Removed the unused CodingAgent = Agent compatibility alias and
+  code_squid/agent/coding.py. No current production caller referenced it;
+  application setup already imports Core Agent directly. Deleted the alias-only
+  assertion, updated behavioral/prompt/runner tests to use Core Agent, and updated
+  the package-layout expectation, package docstring, current architecture, and
+  generated file tree. Retained application prompt-policy coverage; no empty
+  specialization point, replacement alias, or compatibility fallback was added.
+  Squid Core concurrently removed old streaming reasoning-callback and compaction
+  cancellation signature tolerance plus persisted reasoning_content/thinking
+  fallback reads. Provider-native normalization and optional request observation
+  remain unchanged. Obsolete pre-release signatures/imports are intentionally
+  unsupported; no migration was added.
+  Verification: focused Agent/prompt/runner/import-boundary tests 77 passed;
+  full Code Squid 778 passed. Core focused adapter/compaction/transcript/spawner/
+  generation tests 159 passed; full Core 791 passed, 1 skipped. Source/test/main
+  compileall and fresh-process application imports/Agent construction passed;
+  confirmed agent_setup.Agent is Core Agent. Core compilation/import/construction,
+  generated file-tree update, production-reference search, and git diff --check
+  in both repositories passed. No live inference was run. Existing working-tree
+  changes and historical devlog entries were preserved. No implementation
+  follow-ups deferred; settings/provider migrations and metadata are out of scope.

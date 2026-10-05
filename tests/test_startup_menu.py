@@ -607,7 +607,7 @@ def test_mod_selection_and_none_preserve_specialization_rules(monkeypatch, tmp_p
 
 def test_workspace_view_selects_current_path_without_mutating_root(tmp_path) -> None:
     menu = StartupMenu(tmp_path, load_settings(tmp_path))
-    original_root = menu.repo_root
+    original_root = menu.workspace_root
     menu.focus_from_composer()
     menu.selected_index = MAIN_ROWS.index("Workspace")
     menu.activate()
@@ -616,7 +616,7 @@ def test_workspace_view_selects_current_path_without_mutating_root(tmp_path) -> 
     visible_content = "\n".join(lines)
     assert f"> {original_root.name}" in visible_content
     menu.activate()
-    assert menu.repo_root == original_root
+    assert menu.workspace_root == original_root
     assert menu.take_workspace_handoff() == original_root
 
 
@@ -966,7 +966,7 @@ def test_session_escape_does_not_change_selection_and_enter_uses_resume_seam(
     recent = _recent_sessions(2, now)
     resolved: list[str] = []
 
-    def resolve(_repo_root, session_id):
+    def resolve(_workspace_root, session_id):
         resolved.append(session_id)
         return session_id
 

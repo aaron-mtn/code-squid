@@ -1,3 +1,5 @@
+"""Session viewer regressions for persisted metadata and transcript display."""
+
 from pathlib import Path
 
 from code_squid.app_paths import workspace_sessions_dir
@@ -26,6 +28,7 @@ def test_print_session_shows_run_context_events(
 
     output = capsys.readouterr().out
     assert output.startswith(f"{SQUID_GLYPH} Session:")
+    assert f"workspace: {tmp_path.resolve()}" in output
     assert "[run context]" in output
     assert "skill: user-review" in output
     assert "tools: read_file, run_command" in output

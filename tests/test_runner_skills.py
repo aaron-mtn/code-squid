@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from code_squid.agent.coding import CodingAgent
+from squid_core.agent import Agent
 from code_squid.app_paths import CODE_SQUID_HOME_ENV
 from code_squid.agent_setup import build_coding_task_run, resolve_skill_tools
 from squid_core.skills import Skill
@@ -64,7 +64,7 @@ def test_selecting_skill_filters_tool_definitions(monkeypatch, tmp_path: Path) -
     monkeypatch.setattr("code_squid.agent_setup.discover_skills", lambda **_kwargs: {"read-only": skill})
 
     selected_skill, tools = resolve_skill_tools("read-only")
-    agent = CodingAgent("review this", skill=selected_skill, tools=tools)
+    agent = Agent("review this", skill=selected_skill, tools=tools)
     names = [definition["function"]["name"] for definition in agent.tool_definitions()]
 
     assert selected_skill is skill
@@ -105,7 +105,7 @@ def test_skill_with_explicit_empty_tools_resolves_to_no_tools(monkeypatch, tmp_p
     monkeypatch.setattr("code_squid.agent_setup.discover_skills", lambda **_kwargs: {"chat-only": skill})
 
     selected_skill, tools = resolve_skill_tools("chat-only")
-    agent = CodingAgent("plan this", skill=selected_skill, tools=tools)
+    agent = Agent("plan this", skill=selected_skill, tools=tools)
 
     assert selected_skill is skill
     assert tools == {}
@@ -136,7 +136,7 @@ def test_no_selected_skill_preserves_full_tool_behavior(monkeypatch, tmp_path: P
     write_user_tool(home, "custom_tool")
 
     skill, tools = resolve_skill_tools(None)
-    agent = CodingAgent("do this", skill=skill, tools=tools)
+    agent = Agent("do this", skill=skill, tools=tools)
     names = [definition["function"]["name"] for definition in agent.tool_definitions()]
 
     assert skill is None
@@ -162,7 +162,7 @@ def test_skill_listing_user_tool_activates_it(monkeypatch, tmp_path: Path) -> No
     monkeypatch.setattr("code_squid.agent_setup.discover_skills", lambda **_kwargs: {"custom": skill})
 
     selected_skill, tools = resolve_skill_tools("custom")
-    agent = CodingAgent("use it", skill=selected_skill, tools=tools)
+    agent = Agent("use it", skill=selected_skill, tools=tools)
     names = [definition["function"]["name"] for definition in agent.tool_definitions()]
 
     assert selected_skill is skill
@@ -241,7 +241,7 @@ def test_build_coding_task_run_passes_filtered_tools_to_executor(
     monkeypatch.setattr("squid_core.spawner.AgentLoop", FakeAgentLoop)
 
     build_coding_task_run(
-        repo_root=tmp_path,
+        workspace_root=tmp_path,
         task="review this",
         display=type("FakeDisplay", (), {"debug": False})(),
         skill_name="review",
@@ -280,7 +280,7 @@ def test_build_coding_task_run_uses_explicit_resolved_components(
     monkeypatch.setattr("squid_core.spawner.AgentLoop", FakeAgentLoop)
 
     run = build_coding_task_run(
-        repo_root=tmp_path,
+        workspace_root=tmp_path,
         task="review this",
         display=type("FakeDisplay", (), {"debug": False})(),
         resolved_skill=skill,
@@ -314,7 +314,7 @@ def test_build_coding_task_run_rejects_partial_explicit_components(
         ValueError,
         match="resolved_skill and resolved_tools must be supplied together",
     ):
-        build_coding_task_run(repo_root=tmp_path, task="review this", **kwargs)
+        build_coding_task_run(workspace_root=tmp_path, task="review this", **kwargs)
 
 
 def test_build_coding_task_run_records_architecture_review_run_context(
@@ -332,7 +332,7 @@ def test_build_coding_task_run_records_architecture_review_run_context(
     monkeypatch.setattr("squid_core.spawner.AgentLoop", FakeAgentLoop)
 
     run = build_coding_task_run(
-        repo_root=tmp_path,
+        workspace_root=tmp_path,
         task="review this",
         display=type("FakeDisplay", (), {"debug": False})(),
         skill_name="user-review",
@@ -363,7 +363,7 @@ def test_build_coding_task_run_records_default_run_context(
     monkeypatch.setattr("squid_core.spawner.AgentLoop", FakeAgentLoop)
 
     run = build_coding_task_run(
-        repo_root=tmp_path,
+        workspace_root=tmp_path,
         task="fix this",
         display=type("FakeDisplay", (), {"debug": False})(),
     )

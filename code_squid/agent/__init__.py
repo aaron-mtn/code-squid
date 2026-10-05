@@ -1,1 +1,1 @@
-"""Code Squid agent specialization and prompt policy."""
+"""Code Squid application prompt policy."""

@@ -38,7 +38,7 @@ def clean_runtime_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CODE_SQUID_MODEL", raising=False)
 
 
-def _write_settings(repo_root: Path, settings: dict) -> Path:
+def _write_settings(workspace_root: Path, settings: dict) -> Path:
     path = settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(settings), encoding="utf-8")
@@ -212,8 +212,8 @@ def test_provider_use_accepts_friendly_name_and_uses_shared_selection(
 ) -> None:
     selected = []
 
-    def select(repo_root, provider):
-        selected.append((repo_root, provider))
+    def select(workspace_root, provider):
+        selected.append((workspace_root, provider))
         return load_settings(tmp_path), "OpenRouter is not connected."
 
     monkeypatch.setattr(
@@ -659,7 +659,7 @@ def test_runtime_changes_are_used_by_subsequent_runs_without_restart(
         ),
     )
 
-    def fake_new(repo_root, task, settings, display, skill_name=None, mod_name=None):
+    def fake_new(workspace_root, task, settings, display, skill_name=None, mod_name=None):
         run_settings.append(
             (settings.model.provider, settings.model.name, settings.runtime.approval_mode)
         )
@@ -684,11 +684,11 @@ def test_runtime_changes_are_used_by_subsequent_runs_without_restart(
     assert run_settings == [("ollama", "qwen-new", "always")]
 
 
-def _saved_session(repo_root: Path, task: str) -> SessionStore:
+def _saved_session(workspace_root: Path, task: str) -> SessionStore:
     store = SessionStore.create(
-        workspace_sessions_dir(repo_root),
+        workspace_sessions_dir(workspace_root),
         task,
-        workspace_root=repo_root,
+        workspace_root=workspace_root,
     )
     store.append_message({"role": "user", "content": task})
     return store
@@ -750,7 +750,7 @@ def test_undo_delegates_and_cwd_is_report_only(tmp_path, monkeypatch, capsys) ->
     undo_calls = []
     monkeypatch.setattr(
         "code_squid.console.cli.control_commands.undo_latest_run",
-        lambda repo_root: undo_calls.append(repo_root),
+        lambda workspace_root: undo_calls.append(workspace_root),
     )
 
     _, active_after_undo = handle_control_command(tmp_path, "/undo", "session-one")
@@ -777,7 +777,7 @@ def test_interactive_resume_keeps_normal_commands_and_multiple_follow_ups(
     follow_ups = []
 
     def fake_follow_up(
-        repo_root,
+        workspace_root,
         session_id,
         task,
         settings,
@@ -811,7 +811,7 @@ def test_shell_resume_enters_the_same_multi_turn_interactive_loop(
     follow_ups = []
 
     def fake_follow_up(
-        repo_root,
+        workspace_root,
         session_id,
         task,
         settings,
@@ -883,7 +883,7 @@ def test_startup_session_selection_notices_once_and_uses_existing_follow_up_runn
     display.finish_startup_fade = finish_startup_fade
 
     def follow_up(
-        repo_root,
+        workspace_root,
         session_id,
         task,
         settings,
@@ -942,9 +942,9 @@ def test_workspace_handoff_preserves_app_settings_and_clears_session(
     menus = []
     prompts = iter([STARTUP_WORKSPACE_SELECTED, "/exit"])
 
-    def build_display(repo_root, settings, skill_name=None):
+    def build_display(workspace_root, settings, skill_name=None):
         display = QuietDisplay()
-        display.repo_root = repo_root
+        display.workspace_root = workspace_root
         display.settings = settings
 
         def set_startup_menu(menu):
@@ -974,7 +974,7 @@ def test_workspace_handoff_preserves_app_settings_and_clears_session(
     monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", prompt)
 
     assert _run_interactive(old_root, active_session_id="old-session") == 0
-    assert [display.repo_root for display in displays] == [old_root, new_root.resolve()]
+    assert [display.workspace_root for display in displays] == [old_root, new_root.resolve()]
     rebuilt = displays[1].settings
     assert rebuilt.model.provider == "lm_studio"
     assert rebuilt.model.name == "app-model"
@@ -984,7 +984,7 @@ def test_workspace_handoff_preserves_app_settings_and_clears_session(
         "api_key_env": None,
     }
     assert rebuilt.runtime.approval_mode == "guarded"
-    assert menus[1].repo_root == new_root.resolve()
+    assert menus[1].workspace_root == new_root.resolve()
     assert menus[1].session_id is None
     assert menus[1].session_title is None
 
@@ -1004,20 +1004,20 @@ def test_workspace_command_rebuilds_state_and_routes_subsequent_runs_to_new_root
     runs = []
     rebuilt_session_ids = []
 
-    def build_display(repo_root, settings, skill_name=None):
+    def build_display(workspace_root, settings, skill_name=None):
         display = QuietDisplay()
-        display.repo_root = repo_root
+        display.workspace_root = workspace_root
         display.settings = settings
         display.set_startup_menu = menus.append
         displays.append(display)
         return display
 
-    def run_new(repo_root, task, settings, display, skill_name=None, mod_name=None):
-        runs.append(("new", repo_root, task, settings.model.name))
+    def run_new(workspace_root, task, settings, display, skill_name=None, mod_name=None):
+        runs.append(("new", workspace_root, task, settings.model.name))
         return 0, "new-session"
 
     def run_follow_up(
-        repo_root,
+        workspace_root,
         session_id,
         task,
         settings,
@@ -1025,7 +1025,7 @@ def test_workspace_command_rebuilds_state_and_routes_subsequent_runs_to_new_root
         skill_name=None,
         mod_name=None,
     ):
-        runs.append(("follow-up", repo_root, task, settings.model.name))
+        runs.append(("follow-up", workspace_root, task, settings.model.name))
         return 0, session_id
 
     responses = iter([f'/workspace "{new_root}"', "first", "second", "/exit"])
@@ -1035,9 +1035,9 @@ def test_workspace_command_rebuilds_state_and_routes_subsequent_runs_to_new_root
         if response == "first":
             # The replacement menu's discovery callback must be rooted in the
             # reconstructed workspace before any subsequent task is run.
-            assert menus[-1].repo_root == new_root.resolve()
+            assert menus[-1].workspace_root == new_root.resolve()
             rebuilt_session_ids.append(menus[-1].session_id)
-            assert menus[-1].session_discovery(menus[-1].repo_root)[0][
+            assert menus[-1].session_discovery(menus[-1].workspace_root)[0][
                 "session_id"
             ] == saved.session_id
         return response
@@ -1054,7 +1054,7 @@ def test_workspace_command_rebuilds_state_and_routes_subsequent_runs_to_new_root
     )
 
     assert _run_interactive(old_root, active_session_id="old-session") == 0
-    assert [display.repo_root for display in displays] == [old_root, new_root.resolve()]
+    assert [display.workspace_root for display in displays] == [old_root, new_root.resolve()]
     assert displays[1].settings.model.name == "new-workspace-model"
     assert rebuilt_session_ids == [None]
     assert runs == [

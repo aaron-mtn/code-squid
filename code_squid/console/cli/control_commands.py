@@ -49,7 +49,7 @@ def request_workspace_switch(raw_path: Path | str) -> Path | None:
 
 
 def handle_workspace_command(
-    repo_root: Path,
+    workspace_root: Path,
     command: str,
 ) -> tuple[bool, Path | None]:
     """Handle ``/workspace`` and return a validated switch target to the CLI."""
@@ -58,23 +58,23 @@ def handle_workspace_command(
     if not parts or parts[0] != "/workspace":
         return False, None
     if len(parts) == 1:
-        print(f"Workspace: {repo_root}")
+        print(f"Workspace: {workspace_root}")
         return True, None
 
     return True, request_workspace_switch(parts[1])
 
 
-def discover_recent_sessions(repo_root: Path) -> list[dict]:
+def discover_recent_sessions(workspace_root: Path) -> list[dict]:
     """Return the newest workspace session metadata for CLI selection surfaces."""
-    return list_sessions(workspace_sessions_dir(repo_root))[:RECENT_SESSION_LIMIT]
+    return list_sessions(workspace_sessions_dir(workspace_root))[:RECENT_SESSION_LIMIT]
 
 
-def undo_latest_run(repo_root: Path) -> bool:
+def undo_latest_run(workspace_root: Path) -> bool:
     """Restore the latest-run undo buffer and report whether it was usable."""
 
     try:
-        results = UndoStore.open(workspace_undo_dir(repo_root)).restore(
-            workspace_root=repo_root
+        results = UndoStore.open(workspace_undo_dir(workspace_root)).restore(
+            workspace_root=workspace_root
         )
     except (OSError, ValueError) as error:
         print(error)
@@ -91,7 +91,7 @@ def undo_latest_run(repo_root: Path) -> bool:
 
 
 def handle_control_command(
-    repo_root: Path,
+    workspace_root: Path,
     command: str,
     active_session_id: str | None,
 ) -> tuple[bool, str | None]:
@@ -106,28 +106,28 @@ def handle_control_command(
         if args:
             print("Usage: /sessions")
         else:
-            print_sessions(repo_root)
+            print_sessions(workspace_root)
     elif name == "/show":
-        _show_session(repo_root, args, active_session_id)
+        _show_session(workspace_root, args, active_session_id)
     elif name == "/resume":
-        active_session_id = _resume(repo_root, args, active_session_id)
+        active_session_id = _resume(workspace_root, args, active_session_id)
     elif name == "/undo":
         if args:
             print("Usage: /undo")
         else:
-            undo_latest_run(repo_root)
+            undo_latest_run(workspace_root)
     elif args:
         print("Usage: /cwd")
     else:
-        print(f"Current workspace: {repo_root}")
+        print(f"Current workspace: {workspace_root}")
 
     return True, active_session_id
 
 
-def resolve_session_id(repo_root: Path, requested_id: str) -> str | None:
+def resolve_session_id(workspace_root: Path, requested_id: str) -> str | None:
     """Resolve and validate an explicit or latest workspace session ID."""
 
-    sessions_dir = workspace_sessions_dir(repo_root)
+    sessions_dir = workspace_sessions_dir(workspace_root)
     session_id = requested_id
     if requested_id == "latest":
         session_id = latest_session_id(sessions_dir)
@@ -139,7 +139,7 @@ def resolve_session_id(repo_root: Path, requested_id: str) -> str | None:
     return session_id
 
 
-def _show_session(repo_root: Path, args: list[str], active_session_id: str | None) -> None:
+def _show_session(workspace_root: Path, args: list[str], active_session_id: str | None) -> None:
     if len(args) > 1:
         print("Usage: /show [current|latest|<session_id>]")
         return
@@ -152,13 +152,13 @@ def _show_session(repo_root: Path, args: list[str], active_session_id: str | Non
         requested_id = active_session_id
 
     try:
-        print_session(repo_root, requested_id)
+        print_session(workspace_root, requested_id)
     except (FileNotFoundError, ValueError) as error:
         print(error)
 
 
 def _resume(
-    repo_root: Path,
+    workspace_root: Path,
     args: list[str],
     active_session_id: str | None,
 ) -> str | None:
@@ -167,7 +167,7 @@ def _resume(
         return active_session_id
 
     try:
-        session_id = resolve_session_id(repo_root, args[0])
+        session_id = resolve_session_id(workspace_root, args[0])
     except (FileNotFoundError, ValueError) as error:
         print(error)
         return active_session_id

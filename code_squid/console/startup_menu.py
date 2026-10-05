@@ -67,7 +67,7 @@ def discover_provider_models(settings: Settings) -> list[str] | None:
 class StartupMenu:
     """Hold the deliberately small focus, view, and selection state."""
 
-    repo_root: Path
+    workspace_root: Path
     settings: Settings
     mod_name: str | None = None
     skill_name: str | None = None
@@ -83,7 +83,7 @@ class StartupMenu:
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
 
     def __post_init__(self) -> None:
-        self.repo_root = self.repo_root.resolve()
+        self.workspace_root = self.workspace_root.resolve()
         self._main_selected_index = self.selected_index
         self._options: tuple[str, ...] = ()
         self._model_message: tuple[str, ...] = ()
@@ -102,7 +102,7 @@ class StartupMenu:
     def startup_info(self) -> StartupInfo:
         """Return current effective values for the next animated frame."""
         return StartupInfo(
-            directory=self.repo_root,
+            directory=self.workspace_root,
             provider=friendly_provider_name(self.settings.model.provider),
             model=self.settings.model.name,
             approval_mode=FRIENDLY_APPROVAL_MODES[
@@ -142,7 +142,7 @@ class StartupMenu:
         metadata = next(
             (
                 item
-                for item in self.session_discovery(self.repo_root)
+                for item in self.session_discovery(self.workspace_root)
                 if item.get("session_id") == session_id
             ),
             None,
@@ -245,15 +245,15 @@ class StartupMenu:
         saved_session_activated = False
         try:
             if self.mode == "provider":
-                self.settings, _ = select_provider(self.repo_root, selected)
+                self.settings, _ = select_provider(self.workspace_root, selected)
                 # The prompt-toolkit Application still owns stdout here.
                 # Provider explanations are informational, so leave them to
                 # the slash-command path instead of writing through the live
                 # renderer.
             elif self.mode == "model":
-                self.settings = apply_model(self.repo_root, selected)
+                self.settings = apply_model(self.workspace_root, selected)
             elif self.mode == "safety":
-                self.settings = apply_safety(self.repo_root, selected)
+                self.settings = apply_safety(self.workspace_root, selected)
         except (OSError, ValueError) as error:
             # Menu callbacks run inside prompt-toolkit's renderer thread. Keep
             # expected persistence failures on its existing panel surface;
@@ -277,7 +277,7 @@ class StartupMenu:
             else:
                 metadata = self._session_metadata[self.selected_index - 1]
                 requested_id = str(metadata.get("session_id", ""))
-                resolved_id = self.session_resolver(self.repo_root, requested_id)
+                resolved_id = self.session_resolver(self.workspace_root, requested_id)
                 self.set_active_session(
                     resolved_id,
                     title=_session_title(metadata),
@@ -333,7 +333,7 @@ class StartupMenu:
             )
             self._select_current(self.mod_name or "none")
         elif next_mode == "session":
-            self._session_metadata = tuple(self.session_discovery(self.repo_root))
+            self._session_metadata = tuple(self.session_discovery(self.workspace_root))
             self._options = ("",) + tuple(
                 str(metadata.get("session_id", ""))
                 for metadata in self._session_metadata
@@ -342,10 +342,10 @@ class StartupMenu:
                 self.selected_index = self._options.index(self.session_id)
         elif next_mode == "workspace":
             self._workspace_paths = ()
-            self._workspace_paths = tuple(self.workspace_discovery(self.repo_root))
+            self._workspace_paths = tuple(self.workspace_discovery(self.workspace_root))
             self._options = tuple(str(path) for path in self._workspace_paths)
-            if self.repo_root in self._workspace_paths:
-                self.selected_index = self._workspace_paths.index(self.repo_root)
+            if self.workspace_root in self._workspace_paths:
+                self.selected_index = self._workspace_paths.index(self.workspace_root)
         self.mode = next_mode
 
     def _select_current(self, value: str) -> None:

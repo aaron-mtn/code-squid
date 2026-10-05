@@ -137,7 +137,7 @@ def test_repeated_failure_nudge_reaches_model_without_blocking_tool_calls() -> N
             },
         ]
     )
-    session = Session(repo_root=None)
+    session = Session(workspace_root=None)
     executor = FailingExecutor()
     loop = AgentLoop(
         session=session,
@@ -200,7 +200,7 @@ def test_command_failure_nudge_is_transient_and_next_command_still_runs() -> Non
             },
         ]
     )
-    session = Session(repo_root=None)
+    session = Session(workspace_root=None)
     executor = FailingCommandExecutor()
     loop = AgentLoop(
         session=session,

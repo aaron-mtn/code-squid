@@ -52,24 +52,24 @@ def settings_path(app_home: Path | str | None = None) -> Path:
     return code_squid_home(app_home) / "settings.json"
 
 
-def workspace_state_dir(repo_root: Path | str) -> Path:
+def workspace_state_dir(workspace_root: Path | str) -> Path:
     """Return Code Squid's repository-local state directory."""
-    return Path(repo_root).resolve() / ".code-squid"
+    return Path(workspace_root).resolve() / ".code-squid"
 
 
-def workspace_sessions_dir(repo_root: Path | str) -> Path:
+def workspace_sessions_dir(workspace_root: Path | str) -> Path:
     """Return the application-owned location for workspace sessions."""
-    return workspace_state_dir(repo_root) / "sessions"
+    return workspace_state_dir(workspace_root) / "sessions"
 
 
-def workspace_undo_dir(repo_root: Path | str) -> Path:
+def workspace_undo_dir(workspace_root: Path | str) -> Path:
     """Return the application-owned location for the latest undo buffer."""
-    return workspace_state_dir(repo_root) / "undo"
+    return workspace_state_dir(workspace_root) / "undo"
 
 
-def workspace_error_log_path(repo_root: Path | str) -> Path:
+def workspace_error_log_path(workspace_root: Path | str) -> Path:
     """Return Code Squid's latest diagnostic error-log location."""
-    return workspace_state_dir(repo_root) / "logs" / "latest.log"
+    return workspace_state_dir(workspace_root) / "logs" / "latest.log"
 
 
 def session_indexes_path() -> Path:

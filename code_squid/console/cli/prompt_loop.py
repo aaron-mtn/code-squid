@@ -236,17 +236,17 @@ def _rebuild_workspace_runtime(
     return selected_root, settings, replacement, menu, active_session_id
 
 
-def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
-    settings = load_settings(repo_root)
-    display = _run_display(repo_root, settings, skill_name)
-    menu = StartupMenu(repo_root, settings, skill_name=skill_name)
+def _run_new_session(workspace_root: Path, skill_name: str | None = None) -> int:
+    settings = load_settings(workspace_root)
+    display = _run_display(workspace_root, settings, skill_name)
+    menu = StartupMenu(workspace_root, settings, skill_name=skill_name)
     if hasattr(display, "set_startup_menu"):
         display.set_startup_menu(menu)
     try:
         display.start()
         task = _prompt_task_or_cancel("Task", display, menu)
         if task is STARTUP_WORKSPACE_SELECTED:
-            selected_root = _selected_workspace(menu) or repo_root
+            selected_root = _selected_workspace(menu) or workspace_root
             # Stop this root's display before recursively constructing the
             # replacement; there is never more than one startup Application.
             display.stop_header()
@@ -266,7 +266,7 @@ def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
 
         if selected_session_id is not None:
             status, _ = _run_follow_up_task(
-                repo_root,
+                workspace_root,
                 selected_session_id,
                 task,
                 settings,
@@ -276,7 +276,7 @@ def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
             )
         elif menu.mod_name is None:
             status, _ = _run_new_session_task(
-                repo_root,
+                workspace_root,
                 task,
                 settings,
                 display,
@@ -284,7 +284,7 @@ def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
             )
         else:
             status, _ = _run_new_session_task(
-                repo_root,
+                workspace_root,
                 task,
                 settings,
                 display,
@@ -296,26 +296,26 @@ def _run_new_session(repo_root: Path, skill_name: str | None = None) -> int:
         display.stop_header()
 
 
-def _resume_session(repo_root: Path, session_id: str, skill_name: str | None = None) -> int:
+def _resume_session(workspace_root: Path, session_id: str, skill_name: str | None = None) -> int:
     # Validate once before entering the shared interpreter. The path helper is
     # also the established seam that resolves ``latest`` to its concrete ID.
-    session_dir = session_runner._session_dir_for_resume(repo_root, session_id)
+    session_dir = session_runner._session_dir_for_resume(workspace_root, session_id)
     if session_dir is None:
         return 1
-    return _run_interactive(repo_root, skill_name, active_session_id=session_dir.name)
+    return _run_interactive(workspace_root, skill_name, active_session_id=session_dir.name)
 
 
 def _run_interactive(
-    repo_root: Path,
+    workspace_root: Path,
     skill_name: str | None = None,
     *,
     active_session_id: str | None = None,
 ) -> int:
-    settings = load_settings(repo_root)
-    display = _run_display(repo_root, settings, skill_name)
+    settings = load_settings(workspace_root)
+    display = _run_display(workspace_root, settings, skill_name)
     mod_name: str | None = None
     menu = StartupMenu(
-        repo_root,
+        workspace_root,
         settings,
         mod_name=mod_name,
         skill_name=skill_name,
@@ -329,16 +329,16 @@ def _run_interactive(
         while True:
             task = _prompt_task_or_cancel("Task", display, menu)
             if task is STARTUP_WORKSPACE_SELECTED:
-                selected_root = _selected_workspace(menu) or repo_root
+                selected_root = _selected_workspace(menu) or workspace_root
                 (
-                    repo_root,
+                    workspace_root,
                     settings,
                     display,
                     menu,
                     active_session_id,
                 ) = _rebuild_workspace_runtime(
                     selected_root,
-                    repo_root,
+                    workspace_root,
                     display,
                     mod_name=mod_name,
                     skill_name=skill_name,
@@ -376,25 +376,25 @@ def _run_interactive(
             )
             if is_direct_command:
                 _finish_startup_fade(display)
-            handled, settings = handle_runtime_command(repo_root, task, settings)
+            handled, settings = handle_runtime_command(workspace_root, task, settings)
             if handled:
                 # Runtime display preferences take effect in this persistent
                 # prompt without rebuilding the session or model runtime.
                 display.show_reasoning = settings.display.show_reasoning
                 menu.sync(settings, mod_name=mod_name, skill_name=skill_name)
                 continue
-            handled, selected_root = handle_workspace_command(repo_root, task)
+            handled, selected_root = handle_workspace_command(workspace_root, task)
             if handled:
                 if selected_root is not None:
                     (
-                        repo_root,
+                        workspace_root,
                         settings,
                         display,
                         menu,
                         active_session_id,
                     ) = _rebuild_workspace_runtime(
                         selected_root,
-                        repo_root,
+                        workspace_root,
                         display,
                         mod_name=mod_name,
                         skill_name=skill_name,
@@ -402,7 +402,7 @@ def _run_interactive(
                     )
                 continue
             handled, active_session_id = handle_control_command(
-                repo_root,
+                workspace_root,
                 task,
                 active_session_id,
             )
@@ -427,21 +427,21 @@ def _run_interactive(
             if started_new_session:
                 if mod_name is None:
                     status, session_id = _run_new_session_task(
-                        repo_root, task, settings, display, skill_name
+                        workspace_root, task, settings, display, skill_name
                     )
                 else:
                     status, session_id = _run_new_session_task(
-                        repo_root, task, settings, display, mod_name=mod_name,
+                        workspace_root, task, settings, display, mod_name=mod_name,
                         skill_name=skill_name,
                     )
             else:
                 if mod_name is None:
                     status, session_id = _run_follow_up_task(
-                        repo_root, active_session_id, task, settings, display, skill_name
+                        workspace_root, active_session_id, task, settings, display, skill_name
                     )
                 else:
                     status, session_id = _run_follow_up_task(
-                        repo_root,
+                        workspace_root,
                         active_session_id,
                         task,
                         settings,

@@ -31,7 +31,7 @@ def test_image_read_without_source_ranges_emits_no_guidance(tmp_path) -> None:
     }
     context = ToolResultContext(
         session_id="session",
-        repo_root=str(tmp_path),
+        workspace_root=str(tmp_path),
         action={"tool": "read_file", "args": {"path": result["path"]}},
         result=result,
     )

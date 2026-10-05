@@ -17,8 +17,8 @@ from squid_core.storage.session_index import (
 )
 
 
-def write_session(repo_root: Path, session_id: str, metadata: dict) -> Path:
-    session_dir = workspace_sessions_dir(repo_root) / session_id
+def write_session(workspace_root: Path, session_id: str, metadata: dict) -> Path:
+    session_dir = workspace_sessions_dir(workspace_root) / session_id
     session_dir.mkdir(parents=True)
     (session_dir / "metadata.json").write_text(
         json.dumps(metadata),
@@ -108,7 +108,7 @@ def test_list_all_sessions_returns_registered_workspaces_newest_first(
         "older",
         {
             "session_id": "older",
-            "repo_root": str(older_workspace),
+            "workspace_root": str(older_workspace),
             "updated_at": "2026-05-14T15:00:00+00:00",
         },
     )
@@ -117,7 +117,7 @@ def test_list_all_sessions_returns_registered_workspaces_newest_first(
         "newer",
         {
             "session_id": "newer",
-            "repo_root": str(newer_workspace),
+            "workspace_root": str(newer_workspace),
             "updated_at": "2026-05-14T16:00:00+00:00",
         },
     )
@@ -143,7 +143,7 @@ def test_list_all_sessions_skips_bad_registered_workspace(
         "valid",
         {
             "session_id": "valid",
-            "repo_root": str(valid_workspace),
+            "workspace_root": str(valid_workspace),
             "updated_at": "2026-05-14T16:00:00+00:00",
         },
     )

@@ -82,7 +82,7 @@ class CodingTaskRun:
 
 
 def run_coding_task(
-    repo_root: Path | str,
+    workspace_root: Path | str,
     task: str,
     *,
     on_event: EventCallback | None = None,
@@ -120,7 +120,7 @@ def run_coding_task(
     """
 
     run = build_coding_task_run(
-        repo_root=repo_root,
+        workspace_root=workspace_root,
         task=task,
         on_event=on_event,
         should_cancel=should_cancel,
@@ -155,7 +155,7 @@ def run_coding_task(
 
 
 def build_coding_task_run(
-    repo_root: Path | str,
+    workspace_root: Path | str,
     task: str,
     *,
     on_event: EventCallback | None = None,
@@ -202,9 +202,9 @@ def build_coding_task_run(
     if mod_name is not None and resolved_skill is not None:
         raise ValueError("mod_name cannot be combined with resolved components")
 
-    repo_root = Path(repo_root).resolve()
+    workspace_root = Path(workspace_root).resolve()
     app_home = code_squid_home(app_home)
-    settings = load_settings(repo_root) if settings is None else settings
+    settings = load_settings(workspace_root) if settings is None else settings
     runtime_settings = settings.to_runtime_settings()
     provider_settings = settings.to_provider_settings()
     selected_mod: ResolvedMod | None = None
@@ -214,14 +214,14 @@ def build_coding_task_run(
     if undo_store is not None and undo_store_factory is not None:
         raise ValueError("undo_store and undo_store_factory are mutually exclusive")
 
-    session = session if session is not None else Session(repo_root=repo_root)
-    sessions_dir = workspace_sessions_dir(repo_root)
-    undo_dir = workspace_undo_dir(repo_root)
+    session = session if session is not None else Session(workspace_root=workspace_root)
+    sessions_dir = workspace_sessions_dir(workspace_root)
+    undo_dir = workspace_undo_dir(workspace_root)
     if session_store is None:
         session_store = (
-            SessionStore.create(sessions_dir, task, workspace_root=repo_root)
+            SessionStore.create(sessions_dir, task, workspace_root=workspace_root)
             if session_store_factory is None
-            else session_store_factory(repo_root, task)
+            else session_store_factory(workspace_root, task)
         )
         try:
             # Cross-workspace discovery is supplementary application policy;
@@ -234,18 +234,18 @@ def build_coding_task_run(
             UndoStore.create(
                 undo_dir,
                 session_store.session_id,
-                workspace_root=repo_root,
+                workspace_root=workspace_root,
             )
             if undo_store_factory is None
-            else undo_store_factory(repo_root, session_store.session_id)
+            else undo_store_factory(workspace_root, session_store.session_id)
         )
     elif undo_store is None and undo_store_factory is not None:
-        undo_store = undo_store_factory(repo_root, session_store.session_id)
+        undo_store = undo_store_factory(workspace_root, session_store.session_id)
     if mod_name is not None:
         selected_mod = resolve_mod(
             mod_name,
             app_home,
-            repo_root=repo_root,
+            workspace_root=workspace_root,
             session_id=session_store.session_id,
             selected_skill=skill_name,
         )
@@ -255,7 +255,7 @@ def build_coding_task_run(
     else:
         skill, active_tools = resolve_skill_tools(
             skill_name,
-            repo_root=repo_root,
+            workspace_root=workspace_root,
             session_id=session_store.session_id,
             app_home=app_home,
         )
@@ -272,7 +272,7 @@ def build_coding_task_run(
             skill=skill,
             tools=active_tools,
             platform_context=platform_context,
-            workspace=str(repo_root),
+            workspace=str(workspace_root),
             prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS,
         )
     selected_hooks = list(hooks or [])
@@ -290,7 +290,7 @@ def build_coding_task_run(
             mode=settings.runtime.approval_mode,
             prompter=display if approval_prompter is None else approval_prompter,
             trusted_commands=settings.runtime.trusted_commands,
-            persist_trusted_command=lambda command: trust_command(repo_root, command),
+            persist_trusted_command=lambda command: trust_command(workspace_root, command),
         )
     # Application settings choose the transport; Core only receives collaborators.
     # A ready adapter wins over even a supplied provider, and custom providers
@@ -298,7 +298,7 @@ def build_coding_task_run(
     if model_adapter is None and provider is None:
         provider = provider_setup.build_provider(provider_settings)
     loop = build_core_agent_loop(
-        repo_root=repo_root,
+        workspace_root=workspace_root,
         session=session,
         session_store=session_store,
         agent=agent,
@@ -390,7 +390,7 @@ def build_hook_runner(
 def resolve_skill_tools(
     skill_name: str | None,
     *,
-    repo_root: Path | str | None = None,
+    workspace_root: Path | str | None = None,
     session_id: str | None = None,
     app_home: Path | str | None = None,
 ) -> tuple[Skill | None, dict]:
@@ -412,7 +412,7 @@ def resolve_skill_tools(
 
     user_tools = build_user_tool_registry(
         app_home=app_home,
-        repo_root=repo_root,
+        workspace_root=workspace_root,
         session_id=session_id,
     )
     available_tools = {**user_tools, **TOOLS}

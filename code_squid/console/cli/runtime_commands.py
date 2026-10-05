@@ -35,25 +35,25 @@ SAFETY_MODES = {
 }
 
 
-def apply_provider(repo_root: Path, provider: str) -> Settings:
+def apply_provider(workspace_root: Path, provider: str) -> Settings:
     """Persist a provider directly for compatibility with non-UI callers."""
-    write_provider(repo_root, provider)
-    return load_settings(repo_root)
+    write_provider(workspace_root, provider)
+    return load_settings(workspace_root)
 
 
-def apply_model(repo_root: Path, model_name: str) -> Settings:
+def apply_model(workspace_root: Path, model_name: str) -> Settings:
     """Persist a model and return the effective same-process settings."""
-    return select_model(repo_root, model_name)
+    return select_model(workspace_root, model_name)
 
 
-def apply_safety(repo_root: Path, friendly_mode: str) -> Settings:
+def apply_safety(workspace_root: Path, friendly_mode: str) -> Settings:
     """Persist a friendly safety mode through the canonical approval mapping."""
-    write_approval_mode(repo_root, SAFETY_MODES[friendly_mode])
-    return load_settings(repo_root)
+    write_approval_mode(workspace_root, SAFETY_MODES[friendly_mode])
+    return load_settings(workspace_root)
 
 
 def handle_runtime_command(
-    repo_root: Path,
+    workspace_root: Path,
     command: str,
     settings: Settings,
 ) -> tuple[bool, Settings]:
@@ -71,19 +71,19 @@ def handle_runtime_command(
 
     try:
         if parts[0] == "/provider":
-            _handle_provider(repo_root, parts[1:])
+            _handle_provider(workspace_root, parts[1:])
         elif parts[0] == "/model":
-            _handle_model(repo_root, parts[1:])
+            _handle_model(workspace_root, parts[1:])
         elif parts[0] == "/safety":
-            _handle_safety(repo_root, parts[1:])
+            _handle_safety(workspace_root, parts[1:])
         elif parts[0] == "/compact-at":
-            _handle_compact_at(repo_root, parts[1:])
+            _handle_compact_at(workspace_root, parts[1:])
         else:
-            _handle_reasoning(repo_root, parts[1:])
+            _handle_reasoning(workspace_root, parts[1:])
 
         # Reloading keeps later runs current without adding mutable settings
         # state or a settings-manager lifecycle to this deliberately small CLI.
-        return True, load_settings(repo_root)
+        return True, load_settings(workspace_root)
     except (OSError, ValueError) as error:
         # Settings helpers deliberately expose operational and validation
         # failures. This command boundary owns turning them into ordinary CLI
@@ -92,12 +92,12 @@ def handle_runtime_command(
         return True, settings
 
 
-def _handle_reasoning(repo_root: Path, args: list[str]) -> None:
+def _handle_reasoning(workspace_root: Path, args: list[str]) -> None:
     """Report or persist only whether exposed reasoning is presented."""
 
     if not args:
         state = (
-            "shown" if load_settings(repo_root).display.show_reasoning else "hidden"
+            "shown" if load_settings(workspace_root).display.show_reasoning else "hidden"
         )
         print(f"Reasoning display: {state}")
         return
@@ -107,11 +107,11 @@ def _handle_reasoning(repo_root: Path, args: list[str]) -> None:
         return
 
     shown = args[0] == "show"
-    write_show_reasoning(repo_root, shown)
+    write_show_reasoning(workspace_root, shown)
     print(f"Reasoning display: {'shown' if shown else 'hidden'}")
 
 
-def _handle_compact_at(repo_root: Path, args: list[str]) -> None:
+def _handle_compact_at(workspace_root: Path, args: list[str]) -> None:
     """Parse and persist the input-token threshold for automatic compaction."""
 
     if len(args) != 1:
@@ -126,7 +126,7 @@ def _handle_compact_at(repo_root: Path, args: list[str]) -> None:
         )
         return
 
-    write_compaction_trigger_input_tokens(repo_root, tokens)
+    write_compaction_trigger_input_tokens(workspace_root, tokens)
     print(f"Compaction trigger set to {format_token_count(tokens)} tokens.")
 
 
@@ -148,9 +148,9 @@ def _parse_token_count(value: str) -> int | None:
         return None
 
 
-def _handle_provider(repo_root: Path, args: list[str]) -> None:
+def _handle_provider(workspace_root: Path, args: list[str]) -> None:
     if not args:
-        settings = load_settings(repo_root)
+        settings = load_settings(workspace_root)
         status = "ready" if provider_ready(settings) else "not connected"
         print(f"Provider: {friendly_provider_name(settings.model.provider)} ({status})")
         print(
@@ -162,14 +162,14 @@ def _handle_provider(repo_root: Path, args: list[str]) -> None:
 
     action = args[0].lower()
     if action == "status" and len(args) == 1:
-        _print_provider_status(load_settings(repo_root))
+        _print_provider_status(load_settings(workspace_root))
         return
     if action == "key" and len(args) == 2 and args[1]:
-        set_provider_key(repo_root, args[1])
+        set_provider_key(workspace_root, args[1])
         print("Provider API key saved.")
         return
     if action == "url" and len(args) == 2 and args[1]:
-        settings = set_provider_url(repo_root, args[1])
+        settings = set_provider_url(workspace_root, args[1])
         print(f"Provider URL set to: {settings.model.base_url}")
         return
     if action == "use" and len(args) >= 2:
@@ -187,16 +187,16 @@ def _handle_provider(repo_root: Path, args: list[str]) -> None:
             profile.friendly_name for profile in PROVIDER_PROFILES
         ))
         return
-    settings, explanation = select_provider(repo_root, provider)
+    settings, explanation = select_provider(workspace_root, provider)
     if explanation:
         print(explanation)
     if settings.model.provider == provider:
         print(f"Provider set to: {friendly_provider_name(provider)}")
 
 
-def _handle_model(repo_root: Path, args: list[str]) -> None:
+def _handle_model(workspace_root: Path, args: list[str]) -> None:
     if not args:
-        settings = load_settings(repo_root)
+        settings = load_settings(workspace_root)
         print(f"Current model: {settings.model.name}")
         _print_environment_override("CODE_SQUID_MODEL", settings.model.name)
         return
@@ -206,7 +206,7 @@ def _handle_model(repo_root: Path, args: list[str]) -> None:
         return
 
     model_name = args[0]
-    effective_model = apply_model(repo_root, model_name).model.name
+    effective_model = apply_model(workspace_root, model_name).model.name
     if os.getenv("CODE_SQUID_MODEL") is not None:
         print(f"Saved model: {model_name}")
         print(
@@ -233,9 +233,9 @@ def _print_provider_status(settings: Settings) -> None:
     print(f"Environment overrides: {', '.join(overrides) if overrides else 'none'}")
 
 
-def _handle_safety(repo_root: Path, args: list[str]) -> None:
+def _handle_safety(workspace_root: Path, args: list[str]) -> None:
     if not args:
-        approval_mode = load_settings(repo_root).runtime.approval_mode
+        approval_mode = load_settings(workspace_root).runtime.approval_mode
         print(f"Current safety mode: {FRIENDLY_APPROVAL_MODES[approval_mode]}")
         return
 
@@ -244,7 +244,7 @@ def _handle_safety(repo_root: Path, args: list[str]) -> None:
         return
 
     friendly_mode = args[0]
-    settings = apply_safety(repo_root, friendly_mode)
+    settings = apply_safety(workspace_root, friendly_mode)
     approval_mode = settings.runtime.approval_mode
     print(f"Safety mode set to: {friendly_mode} (approval_mode={approval_mode})")
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class ParsedCliArgs:
-    repo_root: Path
+    workspace_root: Path
     skill_name: str | None
     remaining_args: list[str]
 
@@ -52,10 +52,10 @@ def _resolve_workspace_root(cwd_arg: str | None) -> Path:
 def parse_cli_args(args: list[str]) -> ParsedCliArgs:
     cwd_arg, remaining_args = _extract_cwd_arg(args)
     skill_name, remaining_args = _extract_skill_arg(remaining_args)
-    repo_root = _resolve_workspace_root(cwd_arg)
+    workspace_root = _resolve_workspace_root(cwd_arg)
 
     return ParsedCliArgs(
-        repo_root=repo_root,
+        workspace_root=workspace_root,
         skill_name=skill_name,
         remaining_args=remaining_args,
     )

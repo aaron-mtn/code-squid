@@ -113,8 +113,8 @@ class FakeModelAdapter:
 
 
 class FakeToolExecutor:
-    def __init__(self, repo_root=None, events: list[str] | None = None) -> None:
-        self.repo_root = repo_root
+    def __init__(self, workspace_root=None, events: list[str] | None = None) -> None:
+        self.workspace_root = workspace_root
         self.actions = []
         self.events = events
 
@@ -259,7 +259,7 @@ def multi_tool_call_reply_with_args(*calls: tuple[str, str, dict]) -> dict:
 
 def _run_read_batch(tmp_path, actions, hooks):
     """Exercise sibling reads through the production executor and Hook pipeline."""
-    session = Session(repo_root=tmp_path)
+    session = Session(workspace_root=tmp_path)
     adapter = FakeModelAdapter(
         [multi_tool_call_reply_with_args(*actions), reply("TASK COMPLETE")]
     )
@@ -352,7 +352,7 @@ def test_successful_verification_reaches_immediately_following_model_request() -
         ]
     )
     loop = AgentLoop(
-        session=Session(repo_root=None),
+        session=Session(workspace_root=None),
         model_adapter=adapter,
         tool_executor=_VerificationExecutor(),
         tool_results=ToolResults(),
@@ -378,7 +378,7 @@ def test_omitting_post_verification_hook_omits_current_state_guidance() -> None:
         ]
     )
     loop = AgentLoop(
-        session=Session(repo_root=None),
+        session=Session(workspace_root=None),
         model_adapter=adapter,
         tool_executor=_VerificationExecutor(),
         tool_results=ToolResults(),
@@ -404,7 +404,7 @@ def test_verification_in_multi_tool_batch_uses_final_current_state() -> None:
         ]
     )
     loop = AgentLoop(
-        session=Session(repo_root=None),
+        session=Session(workspace_root=None),
         model_adapter=adapter,
         tool_executor=_VerificationExecutor(),
         tool_results=ToolResults(),
@@ -434,7 +434,7 @@ def test_post_verification_guidance_invalidated_by_later_batch_edit() -> None:
         ]
     )
     loop = AgentLoop(
-        session=Session(repo_root=None),
+        session=Session(workspace_root=None),
         model_adapter=adapter,
         tool_executor=_VerificationExecutor(),
         tool_results=ToolResults(),
@@ -466,7 +466,7 @@ def test_post_verification_guidance_uses_final_valid_batch_state() -> None:
         ]
     )
     loop = AgentLoop(
-        session=Session(repo_root=None),
+        session=Session(workspace_root=None),
         model_adapter=adapter,
         tool_executor=_VerificationExecutor(),
         tool_results=ToolResults(),
@@ -500,7 +500,7 @@ def test_read_guidance_invalidated_by_later_batch_edit() -> None:
         ]
     )
     loop = AgentLoop(
-        session=Session(repo_root=None),
+        session=Session(workspace_root=None),
         model_adapter=adapter,
         tool_executor=FakeToolExecutor(),
         tool_results=ToolResults(),
@@ -524,7 +524,7 @@ def test_single_read_guidance_renders_once_at_next_model_boundary() -> None:
         [tool_call_reply("read"), reply("TASK COMPLETE")]
     )
     loop = AgentLoop(
-        session=Session(repo_root=None),
+        session=Session(workspace_root=None),
         model_adapter=adapter,
         tool_executor=FakeToolExecutor(),
         tool_results=ToolResults(),

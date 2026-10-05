@@ -2,6 +2,18 @@
 
 ## Purpose
 
+Core integration uses `workspace_root` for runtime parameters, Session and
+ToolExecutor attributes, Hook contexts, and saved-tool execution context keys.
+The application construction and CLI callers use the same terminology. This
+pre-release rename has no compatibility aliases. Session/undo metadata and the
+session viewer use the same `workspace_root` key, with no legacy fallback or
+migration. Older development metadata may be incompatible; filesystem layout
+and session/undo lifecycle behavior are unchanged. Core Agent and default executor
+construction now enforce standalone Skill tool permissions: omitted lists keep
+defaults, explicit empty lists disable tools, and explicit lists restrict the
+available registry. Mod discovery/loading and resolution can receive the same
+application tool registry; Code Squid continues using Core built-ins by default.
+
 Code Squid is a minimal standalone coding agent for repository work.
 
 It runs interactive coding tasks from the command line, sends a replayable
@@ -65,8 +77,7 @@ install all three unpublished checkouts editably; see README for commands.
   - Code Squid-specific product and application package. It owns coding-agent
     prompt/behavior policy, application setup, paths/settings, and console
     behavior and presentation.
-  - `agent/coding.py` exports `CodingAgent` as a product-owned alias of
-    `squid_core.agent.Agent`; it adds no behavior.
+  - Application wiring uses `squid_core.agent.Agent` directly.
     `agent/prompts.py` owns Code Squid identity, its non-replaceable baseline
     coding policy and intentionally replaceable tool/final-report defaults.
   - `agent_setup.py` owns Code Squid run preparation and wiring: settings,
@@ -365,9 +376,10 @@ install all three unpublished checkouts editably; see README for commands.
     platform/workspace context, raw initial and follow-up message construction,
     tool definitions, reply validation, completion detection, reason-specific
     corrections, and repeated-invalid-reply failure construction.
-  - `prompts.py` owns the protected tool-batch/final-response protocol, strong but
-    non-enforced narration guidance, generic response examples, active-Skill
-    insertion, execution-environment insertion, and prompt assembly.
+  - `prompts.py` owns the protected tool-batch/final-response protocol, generic
+    verification honesty, task-neutral response examples, active-Skill insertion,
+    tool-aware execution-environment insertion, and prompt assembly. Narration
+    style and coding examples live in Code Squid application defaults.
   - Core consumes application defaults through `PromptDefaults` and does not
     import `code_squid.agent.prompts`.
 
@@ -904,7 +916,7 @@ generic construction never calls back into Code Squid prompt, terminal, or
 discovery policy.
 
 `code_squid.agent_setup.run_coding_task(...)` is the Code Squid application
-entry point for starting a new coding task. `repo_root` and `task` are required;
+entry point for starting a new coding task. `workspace_root` and `task` are required;
 optional inputs select Skills or Mods and replace runtime collaborators. It
 returns `RunResult`.
 
@@ -968,7 +980,7 @@ construction. Direct `AgentLoop(...)` construction remains unchanged.
 This seam lets a host persist outside the workspace without teaching Core its
 storage layout, indexes, or adapter types. Code Squid's application setup uses
 `code_squid.app_paths` to supply `<repo>/.code-squid/sessions` and
-`<repo>/.code-squid/undo`, while `repo_root` separately continues to define tool
+`<repo>/.code-squid/undo`, while `workspace_root` separately continues to define tool
 execution. Embedding hosts are not special Core concerns.
 
 Hosts that already resolved a Skill and its executable tool registry may pass
@@ -1138,41 +1150,49 @@ The parser accepts these override modes:
 
 Supported override sections are:
 
-- `SYSTEM_PROMPT_INTRO`
+- `AGENT_IDENTITY`
 - `TOOL_USAGE_GUIDANCE`
 - `FINAL_SUMMARY_REQUIREMENTS`
 
-Some prompt sections are intentionally not overrideable because they define the
-runtime contract:
+The following section names remain unsupported for fixed overrides (narration
+is application baseline policy, not a Core runtime requirement):
 
 - `VISIBLE_NARRATION_REQUIREMENTS`
 - `REQUIRED_RESPONSE_FORMAT`
 - `CORRECTION_MESSAGES`
 - `COMPACTION_PROMPT`
 
-`replace` and `append` have their literal meanings for `SYSTEM_PROMPT_INTRO`,
+`replace` and `append` have their literal meanings for `AGENT_IDENTITY`,
 `FINAL_SUMMARY_REQUIREMENTS`, and `TOOL_USAGE_GUIDANCE`. Active Skills retain
 application tool guidance when they omit that section; `append` adds to it and
-only explicit `replace` substitutes custom guidance. Protected patch-recovery
-examples prefer selectable diagnostic candidates, with rereading as a fallback
-when candidate context is insufficient. Windows environment guidance preserves
-`read_file` as the default for known source and mentions `Get-Content` only for
-appropriate shell inspection.
+only explicit `replace` substitutes custom guidance.
 
-Skills can change specialization instructions, inspection style, optional Tool
-guidance, and final-summary shape. They cannot override the Core sequential
-tool-batch contract, final-response/no-tool mechanics, narration guidance, response
-examples, active-Skill/environment insertion, or correction mechanics. They
-also cannot remove Code Squid's baseline coding discipline, because that policy
-is outside the replaceable sections. That baseline directs agents to use exact
-corrective Tool diagnostics before further discovery and to change approaches
-when repeated actions fail for the same reason. Default Tool guidance treats
-`apply_patch` match locations, contexts, and closest current matches as
-informational exact-text recovery aids; it recommends re-reading only when those
-diagnostics are insufficient and forbids shell editing as a workaround for a
-dedicated editing-Tool failure unless the task genuinely requires shell
-behavior. Those prompt-level policies do not change Tool mutation semantics;
-the separate runtime nudge described under Hooks only adds transient guidance.
+Skills cannot replace Core's tool-call/final-response protocol, batching and
+result-dependent sequencing, completion rule, verification honesty, task-neutral
+protocol examples, or malformed-response corrections. Core retains OS, shell,
+path-separator and workspace facts, but describes shell execution only with an
+active `run_command` and file capabilities only with the corresponding active
+file tools. The resolved Agent registry is passed to prompt assembly.
+
+`code_squid/agent/prompts.py` owns visible narration style, dedicated source
+reading and editing preferences, Windows shell-discovery preferences, final
+report style, and coding-specific response examples. Narration and coding
+examples and moved source/shell-discovery preferences are included in the
+non-replaceable application baseline policy, so
+replacing any fixed section preserves them. Tool guidance and final report style
+retain their existing append/replace behavior. Exact patch diagnostics and
+selectable candidates remain preferred before rereading, and shell edits remain
+an inappropriate workaround for a failed dedicated editing tool.
+
+`PromptDefaults.agent_identity` replaces the pre-release `system_prompt_intro`
+field; `AGENT_IDENTITY` replaces the old identity section directly, with no
+compatibility alias. Current consumers and resources use the new names.
+Core's `tools=None` selects built-ins, `tools={}` intentionally selects no tools,
+and explicit registries are preserved exactly without merging or copying;
+Code Squid continues to resolve its application registries before injecting them.
+Core source/content omission markers now use `SQUID CORE`, including trimming
+recognition. Old branded omission markers in persisted results are not recognized
+as current internal markers; stored history is not rewritten.
 
 New sessions persist one assembled system message followed by the raw authored
 task as `role=user`; resumed runs append the raw authored follow-up in the same
@@ -1519,7 +1539,7 @@ the slash-prefixed `/exit` exits the interactive prompt. Bare `exit` and `quit`
 remain ordinary task text. Interactive
 specialization, runtime, and control commands are listed above.
 
-`--cwd` selects the workspace/repo root. It defaults to the current directory
+`--cwd` selects the workspace root. It defaults to the current directory
 and must point at an existing directory.
 
 Shell `resume` selects the saved session and enters the same persistent
@@ -1999,7 +2019,7 @@ Each session folder contains:
 - `model-transcript.txt`
 - an `assets/` directory after the first successful image or PDF read
 
-`metadata.json` stores run-level metadata: session id, timestamps, repo root,
+`metadata.json` stores run-level metadata: session id, timestamps, workspace root,
 task, status, and active leaf id. `session.jsonl` stores append-only entries for
 messages, compaction events, run-context events, and model reply diagnostics.
 Message entries include `id`, `parent_id`, `type`, `timestamp`, `message`, and
@@ -2458,7 +2478,7 @@ editing.
 - on Windows, invokes the detected PowerShell executable with `-NoProfile` and
   `-Command`, without `shell=True`
 - on other platforms, executes through the system shell with `shell=True`
-- uses `repo_root` as the working directory
+- uses `workspace_root` as the working directory
 - merges stderr into stdout
 - decodes the merged process stream as UTF-8 with replacement for malformed
   bytes, independent of the host platform's locale
@@ -2526,8 +2546,10 @@ when the loop should stop, and what correction/failure path is used. It does
 not own Code Squid identity or coding workflow policy.
 
 `code_squid/agent/prompts.py` owns Code Squid's explicit application prompt
-defaults and baseline coding discipline. `code_squid/agent/coding.py` exports
-the product-owned `CodingAgent` name as an alias of the generic Core Agent.
+defaults, baseline coding discipline, narration style, coding examples, source
+reading/editing preferences, and final report style. Application wiring imports
+`squid_core.agent.Agent` directly; there is no application Agent alias or empty
+specialization module.
 
 `code_squid/settings.py` owns application-wide settings parsing, persistence,
 Code Squid defaults and selection, legacy workspace adoption, and optional

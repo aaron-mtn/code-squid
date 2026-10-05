@@ -61,8 +61,8 @@ class RunCancellationController:
             signal.signal(signal.SIGINT, previous)
 
 
-def _session_dir_for_resume(repo_root: Path, session_id: str) -> Path | None:
-    sessions_dir = workspace_sessions_dir(repo_root)
+def _session_dir_for_resume(workspace_root: Path, session_id: str) -> Path | None:
+    sessions_dir = workspace_sessions_dir(workspace_root)
     if session_id == "latest":
         resolved_id = latest_session_id(sessions_dir)
         if resolved_id is None:
@@ -75,7 +75,7 @@ def _session_dir_for_resume(repo_root: Path, session_id: str) -> Path | None:
 
 
 def _run_display(
-    repo_root: Path,
+    workspace_root: Path,
     settings: Settings,
     skill_name: str | None = None,
 ) -> TerminalDisplay:
@@ -85,7 +85,7 @@ def _run_display(
         debug=debug,
         show_transcript=trace,
         startup_info=StartupInfo(
-            directory=repo_root,
+            directory=workspace_root,
             provider=friendly_provider_name(settings.model.provider),
             model=settings.model.name,
             approval_mode=FRIENDLY_APPROVAL_MODES[settings.runtime.approval_mode],
@@ -99,7 +99,7 @@ def _run_display(
 
 
 def _run_loop(
-    repo_root: Path,
+    workspace_root: Path,
     loop: AgentLoop,
     display: TerminalDisplay,
     session: Session,
@@ -119,8 +119,8 @@ def _run_loop(
         return 0
     except ModelRequestError as error:
         session_store.update_status("failed")
-        log_path = write_error_log(workspace_error_log_path(repo_root), error)
-        display.model_request_failed(_display_path(repo_root, log_path))
+        log_path = write_error_log(workspace_error_log_path(workspace_root), error)
+        display.model_request_failed(_display_path(workspace_root, log_path))
         # The run failed, as recorded above, but the application boundary has
         # handled that failure. Returning success here keeps the persistent
         # prompt alive without weakening handling for any other exception.
@@ -135,11 +135,11 @@ def _run_loop(
             # A storage failure may make even the best-effort status update
             # impossible. Preserve the original exception as the useful cause.
             pass
-        log_path = write_error_log(workspace_error_log_path(repo_root), error)
+        log_path = write_error_log(workspace_error_log_path(workspace_root), error)
         display.run_failed(
             error,
-            _display_path(repo_root, log_path),
-            _display_path(repo_root, session_store.session_dir),
+            _display_path(workspace_root, log_path),
+            _display_path(workspace_root, session_store.session_dir),
         )
         return 1
 
@@ -147,16 +147,16 @@ def _run_loop(
     return 1 if run_result.status == "failed" else 0
 
 
-def _display_path(repo_root: Path, path: Path) -> Path:
+def _display_path(workspace_root: Path, path: Path) -> Path:
     """Prefer a concise workspace-relative path for terminal output."""
     try:
-        return path.resolve().relative_to(repo_root.resolve())
+        return path.resolve().relative_to(workspace_root.resolve())
     except ValueError:
         return path
 
 
 def _run_new_session_task(
-    repo_root: Path,
+    workspace_root: Path,
     task: str,
     settings: Settings,
     display: TerminalDisplay,
@@ -167,7 +167,7 @@ def _run_new_session_task(
     cancellation = RunCancellationController()
 
     run = build_coding_task_run(
-        repo_root=repo_root,
+        workspace_root=workspace_root,
         task=task,
         settings=settings,
         display=display,
@@ -178,7 +178,7 @@ def _run_new_session_task(
     )
 
     status = _run_loop(
-        repo_root,
+        workspace_root,
         run.loop,
         display,
         run.session,
@@ -189,7 +189,7 @@ def _run_new_session_task(
 
 
 def _run_follow_up_task(
-    repo_root: Path,
+    workspace_root: Path,
     session_id: str,
     follow_up_task: str,
     settings: Settings,
@@ -197,12 +197,12 @@ def _run_follow_up_task(
     skill_name: str | None = None,
     mod_name: str | None = None,
 ) -> tuple[int, str | None]:
-    session_dir = _session_dir_for_resume(repo_root, session_id)
+    session_dir = _session_dir_for_resume(workspace_root, session_id)
     if session_dir is None:
         return 0, None
 
     session_store = SessionStore.open(session_dir)
-    session = Session(repo_root=repo_root)
+    session = Session(workspace_root=workspace_root)
     session.add_messages(*session_store.load_messages())
 
     display.run_started()
@@ -210,7 +210,7 @@ def _run_follow_up_task(
     # Follow-ups use the application-owned path used by new runs, so a Mod
     # cannot lose its Skill, restricted Tools, or Hooks when a session resumes.
     run = build_coding_task_run(
-        repo_root=repo_root,
+        workspace_root=workspace_root,
         task=follow_up_task,
         settings=settings,
         display=display,
@@ -227,7 +227,7 @@ def _run_follow_up_task(
     session_store.update_status("active")
 
     status = _run_loop(
-        repo_root,
+        workspace_root,
         run.loop,
         display,
         session,

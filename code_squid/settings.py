@@ -174,17 +174,17 @@ def _read_settings_file(settings_path: Path) -> dict[str, Any]:
     return settings
 
 
-def _read_application_settings(repo_root: Path) -> tuple[Path, dict[str, Any]]:
+def _read_application_settings(workspace_root: Path) -> tuple[Path, dict[str, Any]]:
     """Read global settings, adopting this workspace's legacy file once.
 
-    ``repo_root`` remains an input only so an existing installation can seed the
+    ``workspace_root`` remains an input only so an existing installation can seed the
     application-wide file. Once that file exists, workspace data is ignored.
     """
     settings_path = app_settings_path()
     if settings_path.exists():
         return settings_path, _read_settings_file(settings_path)
 
-    legacy_path = workspace_state_dir(repo_root) / "settings.json"
+    legacy_path = workspace_state_dir(workspace_root) / "settings.json"
     raw_settings = _read_settings_file(legacy_path)
     if legacy_path.exists():
         try:
@@ -514,8 +514,8 @@ def _provider_connections(
     return providers
 
 
-def load_settings(repo_root: Path) -> Settings:
-    settings_path, raw_settings = _read_application_settings(repo_root)
+def load_settings(workspace_root: Path) -> Settings:
+    settings_path, raw_settings = _read_application_settings(workspace_root)
     model_settings = _section(raw_settings, "model", settings_path)
     display_settings = _section(raw_settings, "display", settings_path)
     runtime_settings = _section(raw_settings, "runtime", settings_path)
@@ -590,12 +590,12 @@ def load_settings(repo_root: Path) -> Settings:
     )
 
 
-def write_approval_mode(repo_root: Path, approval_mode: str) -> None:
+def write_approval_mode(workspace_root: Path, approval_mode: str) -> None:
     if approval_mode not in VALID_APPROVAL_MODES:
         valid_modes = ", ".join(sorted(VALID_APPROVAL_MODES))
         raise ValueError(f"approval_mode must be one of {valid_modes}")
 
-    settings_path, raw_settings = _read_application_settings(repo_root)
+    settings_path, raw_settings = _read_application_settings(workspace_root)
     runtime_settings = _section(raw_settings, "runtime", settings_path)
     runtime_settings["approval_mode"] = approval_mode
     raw_settings["runtime"] = runtime_settings
@@ -604,14 +604,14 @@ def write_approval_mode(repo_root: Path, approval_mode: str) -> None:
     atomic_write_json(settings_path, raw_settings)
 
 
-def trust_command(repo_root: Path, command: str) -> None:
+def trust_command(workspace_root: Path, command: str) -> None:
     """Persist one normalized guarded-mode command identity."""
 
     identity = command.casefold().strip()
     if not identity:
         raise ValueError("command identity must be non-empty")
 
-    settings_path, raw_settings = _read_application_settings(repo_root)
+    settings_path, raw_settings = _read_application_settings(workspace_root)
     runtime_settings = _section(raw_settings, "runtime", settings_path)
     trusted_commands = list(_trusted_commands(runtime_settings, settings_path))
     if identity not in trusted_commands:
@@ -622,13 +622,13 @@ def trust_command(repo_root: Path, command: str) -> None:
         atomic_write_json(settings_path, raw_settings)
 
 
-def write_show_reasoning(repo_root: Path, show_reasoning: bool) -> None:
+def write_show_reasoning(workspace_root: Path, show_reasoning: bool) -> None:
     """Persist the reasoning presentation preference without changing the model."""
 
     if not isinstance(show_reasoning, bool):
         raise ValueError("show_reasoning must be a boolean")
 
-    settings_path, raw_settings = _read_application_settings(repo_root)
+    settings_path, raw_settings = _read_application_settings(workspace_root)
     display_settings = _section(raw_settings, "display", settings_path)
     display_settings["show_reasoning"] = show_reasoning
     raw_settings["display"] = display_settings
@@ -637,10 +637,10 @@ def write_show_reasoning(repo_root: Path, show_reasoning: bool) -> None:
     atomic_write_json(settings_path, raw_settings)
 
 
-def write_compaction_trigger_input_tokens(repo_root: Path, tokens: int) -> None:
+def write_compaction_trigger_input_tokens(workspace_root: Path, tokens: int) -> None:
     """Persist the automatic compaction trigger without replacing its peers."""
 
-    settings_path, raw_settings = _read_application_settings(repo_root)
+    settings_path, raw_settings = _read_application_settings(workspace_root)
     tokens = _positive_int(tokens, "compaction.trigger_input_tokens", settings_path)
     compaction_settings = _section(raw_settings, "compaction", settings_path)
     compaction_settings["trigger_input_tokens"] = tokens
@@ -650,14 +650,14 @@ def write_compaction_trigger_input_tokens(repo_root: Path, tokens: int) -> None:
     atomic_write_json(settings_path, raw_settings)
 
 
-def write_provider(repo_root: Path, provider: str) -> None:
+def write_provider(workspace_root: Path, provider: str) -> None:
     """Persist one supported provider without replacing unrelated settings."""
 
     if provider not in VALID_PROVIDERS:
         valid_providers = ", ".join(sorted(VALID_PROVIDERS))
         raise ValueError(f"provider must be one of {valid_providers}")
 
-    settings_path, raw_settings = _read_application_settings(repo_root)
+    settings_path, raw_settings = _read_application_settings(workspace_root)
     model_settings = _section(raw_settings, "model", settings_path)
     _migrate_flat_provider_connection(raw_settings, model_settings, settings_path)
     model_settings["provider"] = provider
@@ -666,18 +666,18 @@ def write_provider(repo_root: Path, provider: str) -> None:
     atomic_write_json(settings_path, raw_settings)
 
 
-def write_model_name(repo_root: Path, model_name: str) -> None:
+def write_model_name(workspace_root: Path, model_name: str) -> None:
     """Persist a non-empty model name without replacing unrelated settings."""
 
     if not model_name:
         raise ValueError("model name must not be empty")
 
-    _write_model_value(repo_root, "name", model_name)
+    _write_model_value(workspace_root, "name", model_name)
 
 
-def write_model_value(repo_root: Path, name: str, value: Any) -> None:
+def write_model_value(workspace_root: Path, name: str, value: Any) -> None:
     """Persist one provider-validated config override without exposing secrets."""
-    settings_path, raw_settings = _read_application_settings(repo_root)
+    settings_path, raw_settings = _read_application_settings(workspace_root)
     model_settings = _section(raw_settings, "model", settings_path)
     provider = model_settings.get("provider", DEFAULT_PROVIDER)
     if provider not in VALID_PROVIDERS:
@@ -723,10 +723,10 @@ def _migrate_flat_provider_connection(
     return providers
 
 
-def _write_model_value(repo_root: Path, name: str, value: Any) -> None:
+def _write_model_value(workspace_root: Path, name: str, value: Any) -> None:
     """Update one model field while preserving the user's complete settings file."""
 
-    settings_path, raw_settings = _read_application_settings(repo_root)
+    settings_path, raw_settings = _read_application_settings(workspace_root)
     model_settings = _section(raw_settings, "model", settings_path)
     model_settings[name] = value
     raw_settings["model"] = model_settings

@@ -14,12 +14,12 @@ from squid_core.storage.session_index import (
 )
 
 
-def print_sessions(repo_root: Path) -> None:
+def print_sessions(workspace_root: Path) -> None:
     """Print a compact index of saved sessions."""
     print(f"{SQUID_GLYPH} Code Squid Sessions")
     print()
 
-    sessions = list_sessions(workspace_sessions_dir(repo_root))
+    sessions = list_sessions(workspace_sessions_dir(workspace_root))
     if not sessions:
         print("No saved sessions.")
         return
@@ -33,9 +33,9 @@ def print_sessions(repo_root: Path) -> None:
 
 
 # Print metadata and message transcript for one saved session.
-def print_session(repo_root: Path, session_id: str) -> bool:
+def print_session(workspace_root: Path, session_id: str) -> bool:
     """Print one session and return whether the requested session exists."""
-    sessions_dir = workspace_sessions_dir(repo_root)
+    sessions_dir = workspace_sessions_dir(workspace_root)
     if session_id == "latest":
         session_id = latest_session_id(sessions_dir)
         if session_id is None:
@@ -52,7 +52,7 @@ def print_session(repo_root: Path, session_id: str) -> bool:
     print(f"status: {metadata_dict.get('status', '')}")
     print(f"updated: {metadata_dict.get('updated_at', '')}")
     print(f"task: {metadata_dict.get('task', '')}")
-    print(f"repo: {metadata_dict.get('repo_root', '')}")
+    print(f"workspace: {metadata_dict.get('workspace_root', '')}")
 
     for entry in entries:
         if entry.get("type") == "run_context":
@@ -89,14 +89,14 @@ def print_session(repo_root: Path, session_id: str) -> bool:
 
 
 # Handle tiny saved-session viewer subcommands and leave runs untouched.
-def handle_session_viewer(repo_root: Path, args: list[str]) -> int | None:
+def handle_session_viewer(workspace_root: Path, args: list[str]) -> int | None:
     """Handle shell session-view commands, or return ``None`` if unrelated."""
 
     if not args or args[0] not in {"sessions", "show"}:
         return None
 
     if args == ["sessions"]:
-        print_sessions(repo_root)
+        print_sessions(workspace_root)
         return 0
 
     if args[0] == "sessions":
@@ -105,7 +105,7 @@ def handle_session_viewer(repo_root: Path, args: list[str]) -> int | None:
 
     if len(args) == 2 and args[0] == "show":
         try:
-            return 0 if print_session(repo_root, args[1]) else 1
+            return 0 if print_session(workspace_root, args[1]) else 1
         except (FileNotFoundError, ValueError) as error:
             print(error)
             return 1

@@ -189,7 +189,7 @@ def test_run_coding_task_passes_callbacks_to_agent_loop(monkeypatch, tmp_path) -
     monkeypatch.setattr("squid_core.spawner.AgentLoop", FakeAgentLoop)
 
     run_coding_task(
-        repo_root=tmp_path,
+        workspace_root=tmp_path,
         task="Do the thing",
         on_event=on_event,
         should_cancel=should_cancel,
@@ -214,7 +214,7 @@ def test_run_coding_task_returns_loop_run_result(monkeypatch, tmp_path: Path) ->
     monkeypatch.setattr("squid_core.spawner.AgentLoop", FakeAgentLoop)
 
     result = run_coding_task(
-        repo_root=tmp_path,
+        workspace_root=tmp_path,
         task="Do the thing",
         display=display,
     )
@@ -232,7 +232,7 @@ def test_run_construction_supplies_detected_platform_and_resolved_workspace(
     captured_agent = {}
     captured_executor = {}
 
-    class FakeCodingAgent:
+    class FakeAgent:
         def __init__(self, **kwargs) -> None:
             captured_agent.update(kwargs)
 
@@ -241,7 +241,7 @@ def test_run_construction_supplies_detected_platform_and_resolved_workspace(
             captured_executor.update(kwargs)
 
     monkeypatch.setattr("code_squid.agent_setup.detect_platform_context", lambda: context)
-    monkeypatch.setattr("code_squid.agent_setup.Agent", FakeCodingAgent)
+    monkeypatch.setattr("code_squid.agent_setup.Agent", FakeAgent)
     monkeypatch.setattr("squid_core.spawner.ToolExecutor", FakeToolExecutor)
     monkeypatch.setattr("code_squid.provider_setup.build_provider", lambda *args, **kwargs: object())
 
@@ -337,19 +337,20 @@ def test_run_construction_uses_explicit_storage_factories(monkeypatch, tmp_path:
     skill = type(
         "FakeSkill",
         (),
-        {"name": "custom", "prompt_sections": {}},
+        {"name": "custom", "prompt_sections": {}, "allowed_tools": (),
+         "allowed_tools_explicit": False},
     )()
 
     class FakeToolExecutor:
         def __init__(self, **kwargs) -> None:
             captured_executor.update(kwargs)
 
-    def session_factory(repo_root, task):
-        calls.append(("session", repo_root, task))
+    def session_factory(workspace_root, task):
+        calls.append(("session", workspace_root, task))
         return custom_session
 
-    def undo_factory(repo_root, session_id):
-        calls.append(("undo", repo_root, session_id))
+    def undo_factory(workspace_root, session_id):
+        calls.append(("undo", workspace_root, session_id))
         return custom_undo
 
     monkeypatch.setattr("squid_core.spawner.ToolExecutor", FakeToolExecutor)
@@ -394,13 +395,13 @@ def test_storage_factories_can_be_overridden_independently(monkeypatch, tmp_path
         tmp_path,
         "Override session only",
         display=FakeDisplay(),
-        session_store_factory=lambda repo_root, task: custom_session,
+        session_store_factory=lambda workspace_root, task: custom_session,
     )
     undo_run = build_coding_task_run(
         tmp_path,
         "Override undo only",
         display=FakeDisplay(),
-        undo_store_factory=lambda repo_root, session_id: custom_undo,
+        undo_store_factory=lambda workspace_root, session_id: custom_undo,
     )
 
     assert session_run.session_store is custom_session
@@ -427,8 +428,8 @@ def test_run_coding_task_forwards_storage_factories(monkeypatch, tmp_path: Path)
         captured.update(kwargs)
         return type("FakeRun", (), {"loop": FakeLoop()})()
 
-    session_factory = lambda repo_root, task: None
-    undo_factory = lambda repo_root, session_id: None
+    session_factory = lambda workspace_root, task: None
+    undo_factory = lambda workspace_root, session_id: None
     monkeypatch.setattr("code_squid.agent_setup.build_coding_task_run", fake_build)
 
     run_coding_task(

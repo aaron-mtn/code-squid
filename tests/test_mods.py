@@ -269,7 +269,7 @@ def test_session_switches_packaged_skills_and_mods(tmp_path: Path, reopen: bool)
         path = mod_dir / "skills" / skill_name / "SKILL.md"
         _write_skill(path, skill_name, (tool,), "Selected profile")
         with path.open("a", encoding="utf-8") as stream:
-            stream.write(f"\n## SYSTEM_PROMPT_INTRO replace\n\nProfile {mod_name}/{skill_name}.\n")
+            stream.write(f"\n## AGENT_IDENTITY replace\n\nProfile {mod_name}/{skill_name}.\n")
 
     current = None
     for index, (mod_name, skill_name, tool, hook) in enumerate(selections):
@@ -277,7 +277,7 @@ def test_session_switches_packaged_skills_and_mods(tmp_path: Path, reopen: bool)
         store = current.session_store if current else None
         if current and reopen:
             store = SessionStore.open(store.session_dir)
-            session = Session(repo_root=tmp_path)
+            session = Session(workspace_root=tmp_path)
             session.add_messages(*store.load_messages())
         prior = [message for message in session.messages if message["role"] != "system"] if session else []
         adapter = _CompletingAdapter()
@@ -314,7 +314,7 @@ def test_session_switches_packaged_skills_and_mods(tmp_path: Path, reopen: bool)
         (mod, skill) for mod, skill, _, _ in selections
     ]
     assert [entry["allowed_tools"] for entry in contexts] == [[tool] for _, _, tool, _ in selections]
-    assert all(entry["prompt_overrides"] == ["SYSTEM_PROMPT_INTRO"] for entry in contexts)
+    assert all(entry["prompt_overrides"] == ["AGENT_IDENTITY"] for entry in contexts)
 
 
 def test_application_skill_namespaces_do_not_fall_back(tmp_path: Path) -> None:

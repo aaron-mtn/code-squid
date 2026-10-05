@@ -96,7 +96,7 @@ class FakeSessionStore:
         self.statuses.append(status)
 
 
-def _write_settings(repo_root: Path, settings: dict) -> Path:
+def _write_settings(workspace_root: Path, settings: dict) -> Path:
     path = settings_path()
     path.write_text(json.dumps(settings), encoding="utf-8")
     return path
@@ -181,8 +181,8 @@ def test_main_passes_selected_cwd_to_existing_commands(
 ) -> None:
     calls = []
 
-    def fake_safety(repo_root: Path, args: list[str]) -> int:
-        calls.append((repo_root, args))
+    def fake_safety(workspace_root: Path, args: list[str]) -> int:
+        calls.append((workspace_root, args))
         return 0
 
     monkeypatch.setattr("code_squid.console.cli.cli_commands._safety", fake_safety)
@@ -197,8 +197,8 @@ def test_shell_safety_forms_dispatch_all_supported_levels(
 ) -> None:
     calls = []
 
-    def fake_safety(repo_root: Path, args: list[str]) -> int:
-        calls.append((repo_root, args))
+    def fake_safety(workspace_root: Path, args: list[str]) -> int:
+        calls.append((workspace_root, args))
         return 0
 
     monkeypatch.chdir(tmp_path)
@@ -222,8 +222,8 @@ def test_main_passes_selected_skill_to_interactive(
 ) -> None:
     calls = []
 
-    def fake_interactive(repo_root: Path, skill_name: str | None = None) -> int:
-        calls.append((repo_root, skill_name))
+    def fake_interactive(workspace_root: Path, skill_name: str | None = None) -> int:
+        calls.append((workspace_root, skill_name))
         return 0
 
     monkeypatch.setattr("code_squid.console.cli.cli_commands._run_interactive", fake_interactive)
@@ -706,9 +706,9 @@ def test_run_loop_returns_nonzero_for_failed_result(tmp_path) -> None:
     assert display.run_result == RunResult(status="failed", reason="task failed")
 
 
-def _expected_startup_output(repo_root: Path) -> str:
+def _expected_startup_output(workspace_root: Path) -> str:
     startup_info = StartupInfo(
-        directory=repo_root,
+        directory=workspace_root,
         provider="LM Studio",
         model="qwen3.5-9b",
         approval_mode="yolo",
@@ -930,7 +930,7 @@ def test_resume_session_prints_banner_before_follow_up_input(
     monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", fake_display)
     monkeypatch.setattr(
         "code_squid.console.cli.session_runner._session_dir_for_resume",
-        lambda repo_root, session_id: session_store.session_dir,
+        lambda workspace_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr(
         "code_squid.console.cli.prompt_loop._prompt_task",
@@ -964,7 +964,7 @@ def test_follow_up_records_current_skill_run_context(
 
     monkeypatch.setattr(
         "code_squid.console.cli.session_runner._session_dir_for_resume",
-        lambda repo_root, session_id: session_store.session_dir,
+        lambda workspace_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr("code_squid.console.cli.session_runner._run_loop", lambda *args: 0)
 
@@ -1014,7 +1014,7 @@ def test_follow_up_delegates_mod_resolution_to_application_builder(
 
     monkeypatch.setattr(
         "code_squid.console.cli.session_runner._session_dir_for_resume",
-        lambda repo_root, session_id: session_store.session_dir,
+        lambda workspace_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr(
         "code_squid.console.cli.session_runner.build_coding_task_run",
@@ -1078,7 +1078,7 @@ def test_follow_up_loads_durable_compacted_history_before_appending_user(
 
     monkeypatch.setattr(
         "code_squid.console.cli.session_runner._session_dir_for_resume",
-        lambda repo_root, session_id: session_store.session_dir,
+        lambda workspace_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr(
         "code_squid.console.cli.session_runner.build_coding_task_run",
@@ -1119,7 +1119,7 @@ def test_resume_session_empty_task_exits_without_run(monkeypatch, tmp_path, caps
     monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", fake_display)
     monkeypatch.setattr(
         "code_squid.console.cli.session_runner._session_dir_for_resume",
-        lambda repo_root, session_id: session_store.session_dir,
+        lambda workspace_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr(
         "code_squid.console.cli.prompt_loop._prompt_task",
@@ -1193,7 +1193,7 @@ def test_resume_session_help_exits_without_follow_up_or_run(monkeypatch, tmp_pat
     monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", fake_display)
     monkeypatch.setattr(
         "code_squid.console.cli.session_runner._session_dir_for_resume",
-        lambda repo_root, session_id: session_store.session_dir,
+        lambda workspace_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr(
         "code_squid.console.cli.prompt_loop._prompt_task",
@@ -1222,7 +1222,7 @@ def test_resume_session_cancelled_task_exits_without_run(monkeypatch, tmp_path, 
     monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", fake_display)
     monkeypatch.setattr(
         "code_squid.console.cli.session_runner._session_dir_for_resume",
-        lambda repo_root, session_id: session_store.session_dir,
+        lambda workspace_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _cancel_prompt_task)
 
@@ -1307,11 +1307,11 @@ def test_interactive_new_command_clears_active_session(monkeypatch, tmp_path) ->
     new_tasks = []
     follow_up_tasks = []
 
-    def fake_new(repo_root, task, settings, display, skill_name=None):
+    def fake_new(workspace_root, task, settings, display, skill_name=None):
         new_tasks.append(task)
         return 0, f"session-{len(new_tasks)}"
 
-    def fake_follow_up(repo_root, session_id, task, settings, display, skill_name=None):
+    def fake_follow_up(workspace_root, session_id, task, settings, display, skill_name=None):
         follow_up_tasks.append((session_id, task))
         return 0, session_id
 
@@ -1361,11 +1361,11 @@ def test_interactive_second_input_uses_follow_up_path(monkeypatch, tmp_path) -> 
     new_tasks = []
     follow_up_tasks = []
 
-    def fake_new(repo_root, task, settings, display, skill_name=None):
+    def fake_new(workspace_root, task, settings, display, skill_name=None):
         new_tasks.append(task)
         return 0, "active-session"
 
-    def fake_follow_up(repo_root, session_id, task, settings, display, skill_name=None):
+    def fake_follow_up(workspace_root, session_id, task, settings, display, skill_name=None):
         follow_up_tasks.append((session_id, task))
         return 0, session_id
 
@@ -1391,9 +1391,9 @@ def test_interactive_model_failure_keeps_session_active_and_accepts_follow_up(
     session_store = FakeSessionStore()
     follow_up_tasks = []
 
-    def failing_new(repo_root, task, settings, run_display, skill_name=None):
+    def failing_new(workspace_root, task, settings, run_display, skill_name=None):
         status = _run_loop(
-            repo_root,
+            workspace_root,
             ModelFailingLoop(),
             run_display,
             session=object(),
@@ -1402,7 +1402,7 @@ def test_interactive_model_failure_keeps_session_active_and_accepts_follow_up(
         return status, "preserved-session"
 
     def successful_follow_up(
-        repo_root,
+        workspace_root,
         session_id,
         task,
         settings,
@@ -1465,11 +1465,11 @@ def test_interactive_skill_command_sets_active_skill_for_new_and_follow_up(
     new_runs = []
     follow_up_runs = []
 
-    def fake_new(repo_root, task, settings, display, skill_name=None):
+    def fake_new(workspace_root, task, settings, display, skill_name=None):
         new_runs.append((task, skill_name))
         return 0, "active-session"
 
-    def fake_follow_up(repo_root, session_id, task, settings, display, skill_name=None):
+    def fake_follow_up(workspace_root, session_id, task, settings, display, skill_name=None):
         follow_up_runs.append((session_id, task, skill_name))
         return 0, session_id
 
@@ -1496,11 +1496,11 @@ def test_interactive_skill_none_clears_active_skill(monkeypatch, tmp_path, capsy
     new_runs = []
     follow_up_runs = []
 
-    def fake_new(repo_root, task, settings, display, skill_name=None):
+    def fake_new(workspace_root, task, settings, display, skill_name=None):
         new_runs.append((task, skill_name))
         return 0, "active-session"
 
-    def fake_follow_up(repo_root, session_id, task, settings, display, skill_name=None):
+    def fake_follow_up(workspace_root, session_id, task, settings, display, skill_name=None):
         follow_up_runs.append((session_id, task, skill_name))
         return 0, session_id
 
@@ -1526,7 +1526,7 @@ def test_interactive_unknown_skill_does_not_change_active_skill(
 ) -> None:
     new_runs = []
 
-    def fake_new(repo_root, task, settings, display, skill_name=None):
+    def fake_new(workspace_root, task, settings, display, skill_name=None):
         new_runs.append((task, skill_name))
         return 0, "active-session"
 
@@ -1563,7 +1563,7 @@ def test_interactive_mod_selection_is_used_for_new_and_follow_up_runs(
     follow_up_runs = []
 
     def fake_new(
-        repo_root,
+        workspace_root,
         task,
         settings,
         display,
@@ -1574,7 +1574,7 @@ def test_interactive_mod_selection_is_used_for_new_and_follow_up_runs(
         return 0, "active-session"
 
     def fake_follow_up(
-        repo_root,
+        workspace_root,
         session_id,
         task,
         settings,
@@ -1615,12 +1615,12 @@ def test_bare_exit_and_quit_are_forwarded_as_task_text(monkeypatch, tmp_path) ->
     new_tasks = []
     follow_up_tasks = []
 
-    def fake_new(repo_root, task, settings, display, skill_name=None):
+    def fake_new(workspace_root, task, settings, display, skill_name=None):
         new_tasks.append(task)
         return 0, "active-session"
 
     def fake_follow_up(
-        repo_root,
+        workspace_root,
         session_id,
         task,
         settings,
@@ -1692,7 +1692,7 @@ def test_resume_session_passes_trace_to_terminal_display(
     monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", fake_display)
     monkeypatch.setattr(
         "code_squid.console.cli.session_runner._session_dir_for_resume",
-        lambda repo_root, session_id: session_store.session_dir,
+        lambda workspace_root, session_id: session_store.session_dir,
     )
     monkeypatch.setattr(
         "code_squid.console.cli.prompt_loop._prompt_task",

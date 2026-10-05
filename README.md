@@ -382,7 +382,7 @@ those PNG paths later uses the normal image path above. PDFs are limited to 64
 MiB, rendered pages to 40 million pixels, and unchanged rendered pages are
 reused. OCR and eager whole-document rendering are not performed.
 
-`run_command` runs a shell command from the current/configured repo root by
+`run_command` runs a shell command from the current/configured workspace root by
 default. It uses the local shell, has a timeout, and can mutate files or perform
 other local side effects. The required boolean `verification` records the
 command's purpose in the current run. The model sets it to `true` when the

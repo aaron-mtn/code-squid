@@ -130,11 +130,11 @@ class RuntimeAgent:
 class ReadFileExecutor:
     """Execute only the built-in read operation needed by this regression."""
 
-    def __init__(self, repo_root: Path) -> None:
-        self.repo_root = repo_root
+    def __init__(self, workspace_root: Path) -> None:
+        self.workspace_root = workspace_root
 
     def execute(self, action: dict) -> dict:
-        return execute_read_file(self.repo_root, **action["args"])
+        return execute_read_file(self.workspace_root, **action["args"])
 
 
 def _reply(content: str, action: dict | None = None) -> dict:
@@ -231,7 +231,7 @@ def create_hook(config=None):
 
 def _run_and_collect_model_messages(tmp_path: Path, **kwargs) -> list[dict]:
     run = build_coding_task_run(
-        repo_root=tmp_path,
+        workspace_root=tmp_path,
         task="Do the thing",
         display=FakeDisplay(),
         settings=_settings(),
@@ -355,7 +355,7 @@ def test_coding_task_settings_select_built_in_hooks(
     )
 
     run = build_coding_task_run(
-        repo_root=tmp_path,
+        workspace_root=tmp_path,
         task="Do the thing",
         display=FakeDisplay(),
         settings=settings,

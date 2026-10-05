@@ -36,7 +36,7 @@ def test_application_setup_has_no_agent_loop_compatibility_wrapper() -> None:
 
 
 def test_application_setup_import_does_not_load_console_or_prompt_toolkit() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    workspace_root = Path(__file__).resolve().parents[1]
     script = """
 import sys
 
@@ -62,7 +62,7 @@ assert not any(
 
     subprocess.run(
         [sys.executable, "-c", script],
-        cwd=repo_root,
+        cwd=workspace_root,
         check=True,
     )
 
@@ -77,7 +77,6 @@ def test_code_squid_application_package_has_expected_layout() -> None:
     assert relative_modules == [
         "__init__.py",
         "agent/__init__.py",
-        "agent/coding.py",
         "agent/prompts.py",
         "agent_setup.py",
         "app_paths.py",

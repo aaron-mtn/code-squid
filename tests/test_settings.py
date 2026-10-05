@@ -34,8 +34,8 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
-def write_settings(repo_root: Path, settings: dict) -> None:
-    settings_dir = repo_root / ".code-squid"
+def write_settings(workspace_root: Path, settings: dict) -> None:
+    settings_dir = workspace_root / ".code-squid"
     settings_dir.mkdir()
     (settings_dir / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
 

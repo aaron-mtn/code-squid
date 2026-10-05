@@ -39,14 +39,14 @@ Usage:
 """
 
 
-def _undo(repo_root: Path) -> int:
-    return 0 if undo_latest_run(repo_root) else 1
+def _undo(workspace_root: Path) -> int:
+    return 0 if undo_latest_run(workspace_root) else 1
 
 
-def _safety(repo_root: Path, args: list[str]) -> int:
+def _safety(workspace_root: Path, args: list[str]) -> int:
     if not args:
         try:
-            settings = load_settings(repo_root)
+            settings = load_settings(workspace_root)
         except (OSError, ValueError) as error:
             print(f"Safety settings could not be loaded: {error}")
             return 1
@@ -65,7 +65,7 @@ def _safety(repo_root: Path, args: list[str]) -> int:
     friendly_mode = args[0]
     approval_mode = APPROVAL_MODES[friendly_mode]
     try:
-        write_approval_mode(repo_root, approval_mode)
+        write_approval_mode(workspace_root, approval_mode)
     except (OSError, ValueError) as error:
         print(f"Safety mode was not saved: {error}")
         return 1
@@ -92,7 +92,7 @@ def _safety(repo_root: Path, args: list[str]) -> int:
 def run_cli(args: list[str]) -> int:
     try:
         parsed_args = parse_cli_args(args)
-        repo_root = parsed_args.repo_root
+        workspace_root = parsed_args.workspace_root
         skill_name = parsed_args.skill_name
         args = parsed_args.remaining_args
     except ValueError as error:
@@ -107,16 +107,16 @@ def run_cli(args: list[str]) -> int:
         return handle_skill_listing()
 
     if args == ["undo"]:
-        return _undo(repo_root)
+        return _undo(workspace_root)
 
     if args and args[0] == "undo":
         print("Usage: python main.py undo")
         return 1
 
     if args and args[0] == "safety":
-        return _safety(repo_root, args[1:])
+        return _safety(workspace_root, args[1:])
 
-    session_status = handle_session_viewer(repo_root, args)
+    session_status = handle_session_viewer(workspace_root, args)
     if session_status is not None:
         return session_status
 
@@ -128,7 +128,7 @@ def run_cli(args: list[str]) -> int:
             )
             return 1
         try:
-            return _resume_session(repo_root, args[1], skill_name)
+            return _resume_session(workspace_root, args[1], skill_name)
         except ValueError as error:
             print(error)
             return 1
@@ -144,7 +144,7 @@ def run_cli(args: list[str]) -> int:
         return 1
 
     try:
-        return _run_interactive(repo_root, skill_name)
+        return _run_interactive(workspace_root, skill_name)
     except ValueError as error:
         print(error)
         return 1

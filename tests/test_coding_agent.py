@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from code_squid.agent.coding import CodingAgent
+from squid_core.agent import Agent
 from squid_core.platform_context import PlatformContext
 from code_squid.agent.prompts import (
     BASELINE_CODING_POLICY,
@@ -16,7 +16,7 @@ from squid_core.skills import PromptSectionOverride, Skill
 
 
 def test_validate_reply_accepts_no_tool_normal_answer_as_final() -> None:
-    agent = CodingAgent("demo task")
+    agent = Agent("demo task")
     reply = {
         "message": {
             "content": "The answer is already available from the transcript.",
@@ -33,7 +33,7 @@ def test_validate_reply_accepts_no_tool_normal_answer_as_final() -> None:
 
 
 def test_validate_reply_accepts_coding_summary_without_task_complete_as_final() -> None:
-    agent = CodingAgent("demo task")
+    agent = Agent("demo task")
     reply = {
         "message": {
             "content": (
@@ -62,7 +62,7 @@ def test_validate_reply_accepts_coding_summary_without_task_complete_as_final() 
 
 
 def test_validate_reply_rejects_empty_no_tool_reply() -> None:
-    agent = CodingAgent("demo task")
+    agent = Agent("demo task")
     reply = {
         "message": {
             "content": "   \n",
@@ -79,7 +79,7 @@ def test_validate_reply_rejects_empty_no_tool_reply() -> None:
 
 
 def test_validate_reply_accepts_exactly_one_tool_call_as_tool_turn() -> None:
-    agent = CodingAgent("demo task")
+    agent = Agent("demo task")
     reply = {
         "message": {
             "content": "I need to inspect a.py before editing.",
@@ -102,7 +102,7 @@ def test_validate_reply_accepts_exactly_one_tool_call_as_tool_turn() -> None:
 
 
 def test_validate_reply_accepts_one_tool_call_with_blank_content() -> None:
-    agent = CodingAgent("demo task")
+    agent = Agent("demo task")
     reply = {
         "message": {
             "content": "   \n",
@@ -125,7 +125,7 @@ def test_validate_reply_accepts_one_tool_call_with_blank_content() -> None:
 
 
 def test_validate_reply_accepts_more_than_one_tool_call() -> None:
-    agent = CodingAgent("demo task")
+    agent = Agent("demo task")
     reply = {
         "message": {
             "content": "I need to inspect both files.",
@@ -150,7 +150,7 @@ def test_validate_reply_accepts_more_than_one_tool_call() -> None:
 
 
 def test_validate_reply_rejects_malformed_tool_call() -> None:
-    agent = CodingAgent("demo task")
+    agent = Agent("demo task")
     reply = {
         "message": {
             "content": "I need to inspect a.py.",
@@ -168,8 +168,8 @@ def test_validate_reply_rejects_malformed_tool_call() -> None:
 
 
 def test_should_stop_returns_true_for_latest_assistant_no_tool_non_empty_message() -> None:
-    agent = CodingAgent("demo task")
-    session = Session(repo_root=None)
+    agent = Agent("demo task")
+    session = Session(workspace_root=None)
     session.messages = [
         {
             "role": "assistant",
@@ -181,8 +181,8 @@ def test_should_stop_returns_true_for_latest_assistant_no_tool_non_empty_message
 
 
 def test_should_stop_returns_false_if_latest_assistant_has_tool_calls() -> None:
-    agent = CodingAgent("demo task")
-    session = Session(repo_root=None)
+    agent = Agent("demo task")
+    session = Session(workspace_root=None)
     session.messages = [
         {
             "role": "assistant",
@@ -201,8 +201,8 @@ def test_should_stop_returns_false_if_latest_assistant_has_tool_calls() -> None:
 
 
 def test_should_stop_returns_false_after_newer_user_message() -> None:
-    agent = CodingAgent("demo task")
-    session = Session(repo_root=None)
+    agent = Agent("demo task")
+    session = Session(workspace_root=None)
     session.messages = [
         {
             "role": "assistant",
@@ -218,7 +218,7 @@ def test_should_stop_returns_false_after_newer_user_message() -> None:
 
 
 def test_failure_message_for_invalid_replies_includes_reason_and_explanation() -> None:
-    agent = CodingAgent("demo task", prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS)
+    agent = Agent("demo task", prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS)
 
     message = agent.failure_message_for_invalid_replies(
         "empty_final_reply",
@@ -236,7 +236,7 @@ def test_failure_message_for_invalid_replies_includes_reason_and_explanation() -
 
 
 def test_tool_definition_exposes_apply_patch_through_coding_agent() -> None:
-    agent = CodingAgent("demo task")
+    agent = Agent("demo task")
 
     names = [
         definition["function"]["name"]
@@ -247,7 +247,7 @@ def test_tool_definition_exposes_apply_patch_through_coding_agent() -> None:
 
 
 def test_empty_final_correction_mentions_final_content() -> None:
-    agent = CodingAgent("demo task")
+    agent = Agent("demo task")
 
     message = agent.correction_message_for("empty_final_reply")
 
@@ -256,7 +256,7 @@ def test_empty_final_correction_mentions_final_content() -> None:
 
 
 def test_invalid_reply_corrections_preserve_necessity_based_batching_rule() -> None:
-    agent = CodingAgent("demo task")
+    agent = Agent("demo task")
 
     for reason in ("empty_final_reply", "malformed_tool_call"):
         content = agent.correction_message_for(reason)["content"]
@@ -269,7 +269,7 @@ def test_invalid_reply_corrections_preserve_necessity_based_batching_rule() -> N
 
 
 def test_follow_up_message_returns_user_message() -> None:
-    agent = CodingAgent("show me what changed")
+    agent = Agent("show me what changed")
 
     message = agent.follow_up_message("show me what changed")
 
@@ -277,7 +277,7 @@ def test_follow_up_message_returns_user_message() -> None:
 
 
 def test_initial_prompts_encourage_compact_useful_narration() -> None:
-    messages = CodingAgent(
+    messages = Agent(
         task="Update the UI", prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS
     ).initial_messages()
     combined_prompt = "\n".join(message["content"] for message in messages)
@@ -292,7 +292,7 @@ def test_initial_prompts_encourage_compact_useful_narration() -> None:
 
 
 def test_initial_prompts_keep_markdown_final_summary_guidance() -> None:
-    messages = CodingAgent(
+    messages = Agent(
         task="Update the UI", prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS
     ).initial_messages()
     combined_prompt = "\n".join(message["content"] for message in messages)
@@ -313,7 +313,7 @@ def test_initial_prompt_includes_selected_skill_instructions() -> None:
         path=Path("SKILL.md"),
     )
 
-    messages = CodingAgent(task="Fix it", skill=skill).initial_messages()
+    messages = Agent(task="Fix it", skill=skill).initial_messages()
 
     assert "## Active Skill: bug-fix" in messages[0]["content"]
     assert "Fix bugs with small targeted edits." in messages[0]["content"]
@@ -390,7 +390,7 @@ def test_non_windows_environment_prompt_omits_powershell_guidance() -> None:
 
     assert "Use commands and separators compatible with bash." in prompt
     assert "run_command already executes in PowerShell" not in prompt
-    assert "Get-ChildItem" not in prompt
+    assert "Use PowerShell syntax, paths, and commands, not Bash-only syntax." not in prompt
 
 
 def test_skill_override_does_not_remove_environment_block() -> None:
@@ -401,8 +401,8 @@ def test_skill_override_does_not_remove_environment_block() -> None:
         allowed_tools=("read_file",),
         path=Path("SKILL.md"),
         prompt_sections={
-            "SYSTEM_PROMPT_INTRO": PromptSectionOverride(
-                section="SYSTEM_PROMPT_INTRO",
+            "AGENT_IDENTITY": PromptSectionOverride(
+                section="AGENT_IDENTITY",
                 mode="replace",
                 content="Custom intro.",
             ),
@@ -454,7 +454,7 @@ def test_selected_skill_can_override_prompt_sections() -> None:
         },
     )
 
-    messages = CodingAgent(task="agent/", skill=skill, prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS).initial_messages()
+    messages = Agent(task="agent/", skill=skill, prompt_defaults=CODE_SQUID_PROMPT_DEFAULTS).initial_messages()
 
     assert messages[1]["content"] == "agent/"
     assert "Use inspection tools only." in messages[0]["content"]
@@ -515,5 +515,5 @@ def test_windows_guidance_keeps_dedicated_source_reading_default() -> None:
     context = PlatformContext("Windows", "PowerShell", "powershell", "\\", True)
     prompt = system_prompt(platform_context=context, workspace="C:/repo")
     assert "Prefer dedicated file tools for source reading and editing." in prompt
-    assert "For shell discovery, use native commands" in prompt
+    assert "For shell discovery on Windows, use native commands" in prompt
     assert "Get-ChildItem and Select-String" in prompt

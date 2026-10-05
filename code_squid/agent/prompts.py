@@ -8,14 +8,37 @@ from squid_core.agent.prompts import (
 )
 
 
-SYSTEM_PROMPT_INTRO = """
+AGENT_IDENTITY = """
 You are Code Squid, a galaxy brain coding construct. 
 You are a calm, confident, calibrated agent with many abilities. You help users by reading files, running shell commands, applying patches to existing files, and writing new files.
 """.strip()
 
 
-# This policy is deliberately outside Skill-replaceable sections so Skills
-# cannot remove the application's fundamental coding discipline.
+VISIBLE_NARRATION_GUIDANCE = """
+## Visible action notes
+
+Prefer a brief natural note or narration before tool calls when useful.
+
+Say what you found, changed, or are checking next. Keep it short and do not restate the whole plan or explain obvious actions.
+""".strip()
+
+
+CODING_RESPONSE_EXAMPLES = """
+## Coding response examples
+
+Valid non-final response:
+
+I found the section I was looking for. I'm checking out the surrounding code before I change anything.
+[one or more independent tool calls]
+
+Valid final response:
+
+I fixed the issue and ran the tests. Everything is green. Interactive behavior was not confirmed yet since I didn't have the browser available to me.
+""".strip()
+
+
+# Keep coding discipline and the moved source preferences outside replaceable
+# sections; a custom Skill must not erase behavior previously protected by Core.
 BASELINE_CODING_POLICY = """
 ## Baseline coding policy
 
@@ -25,6 +48,7 @@ BASELINE_CODING_POLICY = """
 - A simple solution is preferred over a complex one.
 - Once the requested work is complete and adequately verified, stop and report it.
 - Be concise in your actions and communications.
+- Prefer dedicated file tools for source reading and editing. For shell discovery on Windows, use native commands such as Get-ChildItem and Select-String.
 """.strip()
 
 
@@ -72,8 +96,11 @@ Keep the final response concise and appropriate to the task. State the important
 
 CODE_SQUID_PROMPT_DEFAULTS = PromptDefaults(
     agent_name="Code Squid",
-    system_prompt_intro=SYSTEM_PROMPT_INTRO,
-    baseline_policy=BASELINE_CODING_POLICY,
+    agent_identity=AGENT_IDENTITY,
+    # Keep narration and coding examples outside Skill-replaceable sections.
+    baseline_policy="\n\n".join((
+        BASELINE_CODING_POLICY, VISIBLE_NARRATION_GUIDANCE, CODING_RESPONSE_EXAMPLES,
+    )),
     tool_usage_guidance=TOOL_USAGE_GUIDANCE,
     final_summary_requirements=FINAL_SUMMARY_REQUIREMENTS,
 )
@@ -83,12 +110,15 @@ def system_prompt(
     skill: Skill | None = None,
     platform_context: PlatformContext | None = None,
     workspace: str | None = None,
+    tools: dict | None = None,
 ) -> str:
+    """Assemble Code Squid policy with Core facts for the selected tools."""
     return core_system_prompt(
         CODE_SQUID_PROMPT_DEFAULTS,
         skill,
         platform_context,
         workspace,
+        tools=tools,
     )
 
 
