@@ -1,3 +1,23 @@
+- 2026-10-05: Added active Mod and packaged Skill to the CLI composer identity.
+  `cli/prompt_loop.py::_composer_prompt` reads the live StartupMenu selection
+  on each render and shows `@code-squid ? <mod> / <skill>` whenever a Mod is
+  active. Ordinary prompts now receive that same menu independently of the
+  retired startup animator, so `/mod`, `/skill`, clearing the Mod, and `/new`
+  retain the correct identity without duplicating selection/default logic.
+  No single-Skill exception was added. Standalone Skill display remains plain
+  `@code-squid` and its requested future behavior is intentionally deferred.
+  Startup/follow-up layout, borders, width, transcript spacing, and native
+  scrollback lifecycle remain unchanged. Added live callback, command-loop,
+  and rendered startup/follow-up identity regression coverage; updated prompt
+  test doubles to accept and forward the existing selection state.
+  Verification: focused CLI/UI tests (test_main, test_cli_runtime_commands,
+  test_prompt_input, test_composer_transcript, test_terminal_session,
+  test_terminal, test_startup_menu): 438 passed. Full Code Squid suite
+  (`python -m pytest -q`): 902 passed. Compilation of touched Python files,
+  production import checks, and `git diff --check` passed. No live inference
+  or manual terminal verification was performed. Preserved pre-existing
+  uncommitted documentation and test_mods changes.
+
 - 2026-10-05: Moved interactive alternate-screen ownership from startup view
   cleanup to `prompt_loop._run_interactive`, using the new application-owned
   `console/ui/terminal_session.py` context. One AppSession Output delegates
@@ -3232,3 +3252,29 @@
   fresh-process startup/display/CLI imports, and `git diff --check` passed.
   No live model inference or native-terminal visual inspection was performed.
   No deferred follow-ups.
+
+
+- 2026-10-05: Aligned the sibling Desktop Mod Builder's defaults, editor,
+  authoring guide, fixtures, and documentation with the strict AGENT_IDENTITY
+  and manifest-without-tools contract. Updated its runtime workspace_root
+  consumers and Builder dynamic helpers, and the isolated package smoke for
+  separate Core/Providers repositories. Migrated only the installed story-maker
+  user package: permissions remain in its Skill, custom implementations remain
+  Mod-local, and the manifest retains both hooks. Added a resolved-registry
+  behavioral test in the package. Core validation and the other old user Mods
+  were not changed; no aliases or legacy parsing were added.
+  Verification: focused Core Mod/Skill 48 passed; Code Squid Mod/Skill 20 passed;
+  Desktop Mod/Builder/runtime/reconnection 177 passed, 1 skipped. Full Core
+  821 passed, 1 skipped; full Code Squid 895 passed; full Desktop 563 passed,
+  1 skipped, 3 unrelated session-metadata/title-settings/old-undo-format failures
+  (details in Desktop's dev-log). All eight Desktop JavaScript scripts passed;
+  story-maker 32 tests passed. Direct Mod resolution, Builder scaffold/validate,
+  custom Tool execution and Hook behavior, compilation/import/syntax checks,
+  and git diff --check passed. No live inference or executable rebuild.
+  Deferred the three non-Mod Desktop integration failures.
+
+  Packaging audit: ignored build/dist/release outputs still contain old bundled
+  code and guides. They were not hand-edited: their executable/parser and data
+  must be rebuilt together. Existing packaging scripts also assume an older
+  combined checkout layout; updating that release pipeline is deferred rather
+  than silently expanding this Mod consumer migration into a packaging refactor.

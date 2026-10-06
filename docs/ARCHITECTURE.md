@@ -204,6 +204,14 @@ install all three unpublished checkouts editably; see README for commands.
     CLI writer needs the terminal first, `TerminalDisplay` forces the same
     model to its clean state and synchronously joins the Application before the
     writer proceeds. Ctrl+C also exits and joins the startup lifecycle safely.
+    `cli/prompt_loop.py::_composer_prompt` builds the shared composer identity
+    from the live `StartupMenu.mod_name` and `skill_name` pair. An active Mod
+    always shows `@code-squid · <mod> / <skill>`; without a Mod the identity
+    remains `@code-squid`, including when a standalone Skill is selected.
+    Command handlers and menu actions retain selection ownership; the prompt
+    callback only formats their current state on each render. The interpreter
+    passes the same menu into ordinary prompts after startup retires, and
+    `/new` preserves that specialization pair while resetting session state.
     Ordinary later prompts remain composer-only
     `PromptSession` instances. Their product-owned root in `ui/prompt_input.py`
     bounds painting to the layout's current preferred height, including any
@@ -1099,6 +1107,12 @@ The canonical user package is:
 `mod.yaml` uses the fields `name`, `description`, required `default_skill`,
 optional `accent`, and `hooks`. Mod-level `tools` is unsupported and rejected;
 there is no legacy compatibility mode or duplicated tool-list equality rule.
+Code Squid does not bundle a Mod Builder package or other Mod/Skill resources;
+its CLI discovers installed packages only under the selected application home's
+`mods/` directory. Test packages are temporary fixtures constructed in
+`tests/test_mods.py`, using the same manifest and Skill contracts.
+Custom Mod Tools keep their implementation in `tools/<name>/`; the selected
+Skill's `allowed-tools` activates them, and `mod.yaml` selects Mod-wide Hooks.
 Core preserves accent metadata but does not interpret its presentation.
 
 A Mod must package at least one direct child `skills/<skill-id>/SKILL.md`.
@@ -1236,9 +1250,9 @@ retain their existing append/replace behavior. Exact patch diagnostics and
 selectable candidates remain preferred before rereading, and shell edits remain
 an inappropriate workaround for a failed dedicated editing tool.
 
-`PromptDefaults.agent_identity` replaces the pre-release `system_prompt_intro`
-field; `AGENT_IDENTITY` replaces the old identity section directly, with no
-compatibility alias. Current consumers and resources use the new names.
+`PromptDefaults.agent_identity` supplies the `AGENT_IDENTITY` override section.
+Current consumers and fixtures use that section directly. Only current section
+names are accepted; there is no compatibility alias.
 Core's `tools=None` selects built-ins, `tools={}` intentionally selects no tools,
 and explicit registries are preserved exactly without merging or copying;
 Code Squid continues to resolve its application registries before injecting them.

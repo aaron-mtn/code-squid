@@ -109,14 +109,23 @@ def _print_help() -> None:
     print(HELP_TEXT)
 
 
-def _composer_prompt(animator: BinaryRainHeader | None = None):
+def _composer_prompt(
+    animator: BinaryRainHeader | None = None,
+    *,
+    menu: StartupMenu | None = None,
+):
     """Return the padded identity/input rows with a focus-aware marker."""
     def fragments() -> FormattedText:
-        menu = getattr(animator, "startup_menu", None)
-        marker = "  " if menu is not None and menu.focused else PROMPT_PREFIX
+        active_menu = menu if menu is not None else getattr(animator, "startup_menu", None)
+        identity = INPUT_IDENTITY_LINE
+        # Selection belongs to the menu/command handlers. Read their live pair
+        # on every render; resolving a default here would hide /skill changes.
+        if active_menu is not None and getattr(active_menu, "mod_name", None) is not None:
+            identity += f" · {active_menu.mod_name} / {active_menu.skill_name}"
+        marker = "  " if active_menu is not None and active_menu.focused else PROMPT_PREFIX
         return FormattedText(
             [
-                ("", f"  {INPUT_IDENTITY_LINE}\n  "),
+                ("", f"  {identity}\n  "),
                 (PROMPT_STYLE, marker),
             ]
         )
@@ -124,8 +133,13 @@ def _composer_prompt(animator: BinaryRainHeader | None = None):
     return fragments
 
 
-def _prompt_task(label: str, animator: BinaryRainHeader | None = None) -> str | object:
-    prompt = _composer_prompt(animator)
+def _prompt_task(
+    label: str,
+    animator: BinaryRainHeader | None = None,
+    *,
+    menu: StartupMenu | None = None,
+) -> str | object:
+    prompt = _composer_prompt(animator, menu=menu)
     if label != "Task":
         # Non-task handoffs still use the ordinary boxed PromptSession, but
         # identify the value being requested instead of showing the agent ID.
@@ -169,7 +183,9 @@ def _prompt_task_or_cancel(
     try:
         if display is not None:
             animator = display.header if display.session_scene_active else None
-            task = _prompt_task(label, animator)
+            # The menu outlives startup and remains the specialization source
+            # for ordinary prompts and restarted /new scenes alike.
+            task = _prompt_task(label, animator, menu=menu)
             display.retire_session_scene()
             if task is STARTUP_WORKSPACE_SELECTED:
                 # Workspace reconstruction must begin only after the sole
@@ -184,7 +200,7 @@ def _prompt_task_or_cancel(
                     _wait_for_startup_fade(display)
                 _print_selected_session_notice(display, menu)
             return task
-        task = _prompt_task(label)
+        task = _prompt_task(label, menu=menu)
         assert isinstance(task, str)
         return task
     except KeyboardInterrupt:

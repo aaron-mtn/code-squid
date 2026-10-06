@@ -195,7 +195,7 @@ def test_interactive_buffer_lifetime(monkeypatch, tmp_path, capsys, ending):
     original_prompt = prompt_loop._prompt_task
     prompts = []
     with create_pipe_input() as pipe:
-        def prompt(label, animator=None):
+        def prompt(label, animator=None, *, menu=None):
             assert not output.active
             prompts.append(animator is not None)
             if len(prompts) == 3:
@@ -204,7 +204,7 @@ def test_interactive_buffer_lifetime(monkeypatch, tmp_path, capsys, ending):
             if ending == "keyboard_interrupt" and len(prompts) == 4:
                 raise KeyboardInterrupt
             pipe.send_text(next(responses) + "\r")
-            return original_prompt(label, animator)
+            return original_prompt(label, animator, menu=menu)
         monkeypatch.setattr(prompt_loop, "_prompt_task", prompt)
         with create_app_session(input=pipe, output=output):
             status = run_cli(["--cwd", str(tmp_path)])
@@ -477,7 +477,7 @@ def test_cli_workspace_rebuilds_and_new_preserve_one_frame_per_cycle(monkeypatch
     runs = []
 
     with create_pipe_input() as pipe:
-        def prompt(label, animator=None):
+        def prompt(label, animator=None, *, menu=None):
             response = next(responses)
             if animator is not None:
                 snapshots.append(output.primary)
@@ -493,7 +493,7 @@ def test_cli_workspace_rebuilds_and_new_preserve_one_frame_per_cycle(monkeypatch
                 pipe.send_text("\r")
             else:
                 pipe.send_text(response + "\r")
-            return original_prompt(label, animator)
+            return original_prompt(label, animator, menu=menu)
 
         def run_task(*args, **kwargs):
             display = args[3]

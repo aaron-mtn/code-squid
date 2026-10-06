@@ -770,7 +770,7 @@ class SessionSceneDisplay(FakeDisplay):
 
 
 def _fake_prompt_task(response: str):
-    def fake_prompt_task(label: str, animator=None) -> str:
+    def fake_prompt_task(label: str, animator=None, *, menu=None) -> str:
         print(INPUT_IDENTITY_LINE)
         print(PROMPT_PREFIX, end="")
         return response
@@ -781,7 +781,7 @@ def _fake_prompt_task(response: str):
 def _fake_prompt_tasks(responses: list[str]):
     pending = list(responses)
 
-    def fake_prompt_task(label: str, animator=None) -> str:
+    def fake_prompt_task(label: str, animator=None, *, menu=None) -> str:
         if not pending:
             raise AssertionError("No fake prompt responses left")
         print(INPUT_IDENTITY_LINE)
@@ -791,7 +791,7 @@ def _fake_prompt_tasks(responses: list[str]):
     return fake_prompt_task
 
 
-def _cancel_prompt_task(label: str, animator=None) -> str:
+def _cancel_prompt_task(label: str, animator=None, *, menu=None) -> str:
     print(INPUT_IDENTITY_LINE)
     print(PROMPT_PREFIX, end="")
     raise KeyboardInterrupt
@@ -833,6 +833,62 @@ def test_composer_marker_tracks_menu_and_submenu_focus() -> None:
     assert prompt() == [identity, ("", "  ")]
     menu.focused = False
     assert prompt() == [identity, ("", PROMPT_PREFIX)]
+
+
+def test_composer_identity_reads_live_mod_and_skill_state(tmp_path) -> None:
+    from code_squid.console.startup_menu import StartupMenu
+
+    settings = load_settings(tmp_path)
+    menu = StartupMenu(tmp_path, settings, skill_name="loose")
+    startup_prompt = _composer_prompt(SimpleNamespace(startup_menu=menu))
+    followup_prompt = _composer_prompt(menu=menu)
+
+    # Keep the same callbacks: startup redraws must see selections immediately,
+    # and ordinary prompts must not depend on an active startup renderer.
+    for mod, skill, identity in (
+        (None, "loose", "@code-squid"),
+        ("8mod", "8skill", "@code-squid · 8mod / 8skill"),
+        ("8mod", "8skill-v2", "@code-squid · 8mod / 8skill-v2"),
+        (None, None, "@code-squid"),
+    ):
+        menu.sync(settings, mod_name=mod, skill_name=skill)
+        assert startup_prompt() == followup_prompt()
+        assert followup_prompt()[0] == ("", f"  {identity}\n  ")
+
+
+def test_interactive_composer_identity_tracks_commands_and_new(monkeypatch, tmp_path) -> None:
+    mod = SimpleNamespace(name="8mod", valid=True, default_skill="8skill")
+    skills = {
+        name: SimpleNamespace(name=name, allowed_tools=())
+        for name in ("8skill", "8skill-v2")
+    }
+    monkeypatch.setattr(
+        "code_squid.console.cli.mod_commands.discover_mods", lambda _: {"8mod": mod},
+    )
+    monkeypatch.setattr(
+        "code_squid.console.cli.skill_commands.load_mod",
+        lambda *_: SimpleNamespace(skills=skills),
+    )
+    monkeypatch.setattr("code_squid.console.cli.session_runner.TerminalDisplay", BannerDisplay)
+    commands = iter(["/mod 8mod", "/skill 8skill-v2", "/new", "/mod none", "/exit"])
+    identities = []
+
+    def prompt(prompt, *, animator=None, boxed=False):
+        identities.append(prompt()[0][1].strip())
+        assert boxed
+        return next(commands)
+
+    # Exercise the real prompt construction and interpreter rather than a
+    # replacement _prompt_task that could accidentally hide stale state.
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop.prompt_multiline_input", prompt)
+    assert _run_interactive(tmp_path) == 0
+    assert identities == [
+        "@code-squid",
+        "@code-squid · 8mod / 8skill",
+        "@code-squid · 8mod / 8skill-v2",
+        "@code-squid · 8mod / 8skill-v2",
+        "@code-squid",
+    ]
 
 
 def test_new_session_prints_banner_before_task_input(monkeypatch, tmp_path, capsys) -> None:
@@ -1151,7 +1207,7 @@ def test_interactive_exit_stops_header(monkeypatch, tmp_path) -> None:
 
     display = ExitDisplay()
 
-    def exit_prompt(label, animator=None) -> str:
+    def exit_prompt(label, animator=None, *, menu=None) -> str:
         assert animator is display.header
         return "/exit"
 
@@ -1174,7 +1230,7 @@ def test_interactive_eof_stops_header(monkeypatch, tmp_path) -> None:
 
     display = EofDisplay()
 
-    def eof_prompt(label, animator=None) -> str:
+    def eof_prompt(label, animator=None, *, menu=None) -> str:
         raise EOFError
 
     monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_display", lambda *args: display)
@@ -1338,7 +1394,7 @@ def test_interactive_scene_is_initial_only_until_new_session(monkeypatch, tmp_pa
     prompt_animators = []
     responses = iter(["first task", "/help", "/new", "second task", "/exit"])
 
-    def prompt(label, animator=None):
+    def prompt(label, animator=None, *, menu=None):
         prompt_animators.append(animator)
         return next(responses)
 

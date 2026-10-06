@@ -49,7 +49,7 @@ def _write_settings(workspace_root: Path, settings: dict) -> Path:
 def _prompt_sequence(responses: list[str]):
     pending = list(responses)
 
-    def prompt(label: str, animator=None) -> str:
+    def prompt(label: str, animator=None, *, menu=None) -> str:
         if not pending:
             raise AssertionError("No fake prompt responses left")
         return pending.pop(0)
@@ -855,7 +855,7 @@ def test_startup_session_selection_notices_once_and_uses_existing_follow_up_runn
         selected_menu = menu
         display.header = object()
 
-    def prompt(_label, animator=None):
+    def prompt(_label, animator=None, *, menu=None):
         prompt_animators.append(animator)
         task = next(prompts)
         if task == "continue it":
@@ -951,7 +951,7 @@ def test_workspace_handoff_preserves_app_settings_and_clears_session(
         displays.append(display)
         return display
 
-    def prompt(_label, animator=None):
+    def prompt(_label, animator=None, *, menu=None):
         result = next(prompts)
         if result is STARTUP_WORKSPACE_SELECTED:
             menu = menus[-1]
@@ -1027,7 +1027,7 @@ def test_workspace_command_rebuilds_state_and_routes_subsequent_runs_to_new_root
 
     responses = iter([f'/workspace "{new_root}"', "first", "second", "/exit"])
 
-    def prompt(_label, animator=None):
+    def prompt(_label, animator=None, *, menu=None):
         response = next(responses)
         if response == "first":
             # The replacement menu's discovery callback must be rooted in the

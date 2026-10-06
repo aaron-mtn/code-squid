@@ -18,6 +18,7 @@ from prompt_toolkit.layout.controls import BufferControl
 from prompt_toolkit.output import DummyOutput
 
 from code_squid.console.startup_menu import StartupMenu
+from code_squid.console.cli.prompt_loop import _composer_prompt
 from code_squid.console.ui.banner import StartupInfo
 from code_squid.console.ui.binary_header import BinaryRainHeader, TITLE
 from code_squid.console.ui.composer_layout import (
@@ -58,7 +59,7 @@ def _startup(*, columns: int = 80, rows: int = 32, menu=None, input=None, output
         ),
     )
     rain.set_startup_menu(menu)
-    prompt = lambda: [("", "  @code-squid\n  "), ("", "  " if menu and menu.focused else "› ")]
+    prompt = _composer_prompt(rain, menu=menu)
     startup = StartupApplication(
         prompt,
         rain,
@@ -177,6 +178,38 @@ def test_startup_composer_stays_inside_physical_viewport_then_scrolls_internally
     assert position.height == 1
     assert position.ypos <= cursor.y < position.ypos + position.height
     assert startup.buffer.text == "wrapped input " * 800
+
+
+@pytest.mark.parametrize("mod, skill, identity", [
+    (None, None, "@code-squid"),
+    (None, "loose", "@code-squid"),
+    ("8mod", "8skill", "@code-squid · 8mod / 8skill"),
+    ("8mod", "8skill-v2", "@code-squid · 8mod / 8skill-v2"),
+])
+def test_startup_and_followup_render_same_identity(tmp_path, mod, skill, identity) -> None:
+    menu = StartupMenu(tmp_path, load_settings(tmp_path), mod_name=mod, skill_name=skill)
+    startup = _startup(menu=menu)
+    startup_rows = _composer_rows(_render_startup(startup))
+
+    session = PromptSession(input=DummyInput(), output=SizedOutput())
+    session.show_frame = True
+    session.style = COMPOSER_STYLE
+    session.reserve_space_for_menu = 0
+    _configure_composer_frame(session)
+    session.message = _composer_prompt(menu=menu)
+    session.multiline = True
+    session.wrap_lines = True
+
+    async def render():
+        with set_app(session.app):
+            session.app.renderer.render(session.app, session.layout)
+        return session.app.renderer._last_screen
+
+    followup_rows = _composer_rows(asyncio.run(render()))
+    assert identity in startup_rows[1]
+    assert startup_rows == followup_rows
+    assert len(followup_rows) == COMPOSER_MIN_CONTENT_ROWS + 2
+    assert all(len(row) == RUN_PANEL_WIDTH for row in followup_rows)
 
 
 def test_startup_and_followup_share_content_height_policy() -> None:

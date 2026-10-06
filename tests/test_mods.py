@@ -363,3 +363,28 @@ def test_cli_selects_skills_only_within_active_mod(monkeypatch, tmp_path: Path, 
     assert _handle_skill_input("/skill loose", None, None) == ("loose", None)
     assert _handle_skill_input("/skill skill-one", "loose", None) == ("loose", None)
     assert _handle_mod_input("/mod none", None, "loose") == (None, "loose")
+
+
+def test_cli_mod_selection_builds_current_identity_override(monkeypatch, tmp_path: Path) -> None:
+    """Keep CLI selection and application construction on the same strict contract."""
+    from code_squid.console.cli.mod_commands import apply_mod_selection, _format_mod_status
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("CODE_SQUID_HOME", str(home))
+    mod_dir = _write_mod(home, "authoring-pack", skill_name="author", tools=("read_file",))
+    path = mod_dir / "skills" / "author" / "SKILL.md"
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write("\n## AGENT_IDENTITY replace\n\nCreate valid Mod packages.\n")
+
+    # This fixture keeps permissions in its Skill. The CLI must select the
+    # packaged default without inventing another manifest permission list.
+    assert load_mod("authoring-pack", home).valid
+    assert "(invalid)" not in _format_mod_status(None)
+    mod_name, skill_name = apply_mod_selection("authoring-pack", None)
+    run = build_coding_task_run(
+        tmp_path, "Author a Mod", settings=_settings(), app_home=home,
+        mod_name=mod_name, skill_name=skill_name, model_adapter=object(),
+    )
+    assert run.loop.agent.skill.prompt_sections["AGENT_IDENTITY"].mode == "replace"
+    assert "Create valid Mod packages." in run.loop.agent.initial_messages()[0]["content"]
+    assert list(run.loop.tool_executor.tools) == ["read_file"]
