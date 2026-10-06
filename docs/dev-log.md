@@ -3169,3 +3169,66 @@
   compilation, fresh-process startup/terminal/CLI imports, and `git diff --check`
   passed. No live model inference or native-terminal visual inspection was
   performed. No deferred follow-ups.
+
+
+## 2026-10-05 - Bound ordinary composer transcript allocation
+
+- The ordinary boxed PromptSession already measured short input at four rows,
+  but its root HSplit painted unused renderer allocation through dummy filler
+  windows. That increased Screen.height and made the inline renderer reserve
+  blank primary rows beyond the visible box. The reservation could cover the
+  remaining viewport, rather than just the configured composer maximum. A
+  regression with the old root reaches relative row 39 for a four-row box in
+  a 40-row viewport, even though the final done redraw returns to row four.
+- Added a small product-owned HSplit subclass that bounds its paint position
+  to the current preferred layout height. The ordinary horizontal width sink
+  also refuses vertical extension. PromptSession still owns editing, focus,
+  toolbars, completion floats, final redraw, and the append cursor. The shared
+  cell-aware sizing policy and 2-to-14 content-row cap are unchanged; the box
+  retains two additional border rows and contracts to the physical viewport.
+- No custom teardown projection or terminal erasure was added. Native primary
+  history remains intact, with commands directly below the box and normal run
+  presentation adding its existing blank separator. Startup layout, alternate
+  buffer ownership, menu handoffs, fade, and clean-frame retention are unchanged.
+- Added real pipe-input transcript tests for short, multiline, maximum-height,
+  and wrapped submissions followed by actual help and agent narration output.
+  They check both the retained cursor and editing reservation, frame borders,
+  earlier history, and minimal output spacing. Render tests check wide glyphs,
+  narrow-width wrapping, viewport shrink/enlarge, deletion, and total painted
+  height. Existing startup tests continue to cover alternate-screen behavior.
+- Verification: focused console/UI/CLI tests: 474 passed; full Code Squid suite:
+  879 passed. Console and touched-test compilation, fresh-process prompt,
+  startup, and CLI imports, and git diff --check passed. The regression was
+  also confirmed to fail with the original HSplit root substituted in memory.
+  No live model inference or native-terminal visual inspection was performed.
+  No deferred follow-ups.
+
+
+## 2026-10-05 - Trim first-run startup projection below the composer
+
+- Compared the new-session and follow-up runners: both call `run_started()`
+  and use the same display/build/run path. Only the initial startup handoff
+  restores the alternate buffer and projects a fullscreen clean frame into
+  primary. That projection copied `Screen.height`, including unused blank
+  canvas rows below the submitted composer. The real terminal-output regression
+  reproduced six blank rows for the first short task versus one for its
+  follow-up in a 40-row viewport. Ordinary composer sizing was not involved.
+- Retention now stops at the last visible frame row. Internal startup/menu/
+  composer spacing and wide-cell handling remain intact; alternate-screen
+  ownership, fixed pre-scene CRLFs, submission-only retention, and idempotence
+  remain unchanged. The primary append cursor now lands directly after the
+  composer, leaving the existing run separator to supply one blank line.
+- Added a pipe-input, cursor-aware regression using real startup restoration,
+  new-session and follow-up runners, one shared TerminalDisplay, real spinner
+  erasure, and prompt-toolkit live reasoning/narration Applications. Only model
+  construction/output is substituted; session creation/loading remains real.
+  It checks the thinking cursor, initial live panel output, and settled output
+  against the submitted composer, requiring one blank row on both runs. Cases
+  cover reasoning enabled/disabled, natural/forced fades, short/multiline input,
+  and 40/80-row viewports, with preserved history and one startup buffer cycle.
+- Verification: focused console/UI/CLI/display tests: 559 passed; full Code
+  Squid suite: 895 passed. After strengthening initial-live-output assertions,
+  composer transcript tests: 25 passed. Console and touched-test compilation,
+  fresh-process startup/display/CLI imports, and `git diff --check` passed.
+  No live model inference or native-terminal visual inspection was performed.
+  No deferred follow-ups.

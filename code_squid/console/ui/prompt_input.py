@@ -17,6 +17,7 @@ from prompt_toolkit.filters import Condition
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import Dimension, HSplit, Window
 from prompt_toolkit.layout.containers import ScrollOffsets, VSplit
+from prompt_toolkit.layout.screen import WritePosition
 from prompt_toolkit.styles import Style
 
 from code_squid.console.ui.binary_header import BinaryRainHeader
@@ -30,6 +31,33 @@ from code_squid.console.ui.startup_application import StartupApplication
 
 COMPOSER_RIGHT_PADDING = 1
 COMPOSER_STYLE = Style.from_dict({"frame.border": "dim"})
+
+
+class _ComposerPromptLayout(HSplit):
+    """Paint only the ordinary prompt's measured rows in primary scrollback."""
+
+    def write_to_screen(
+        self, screen, mouse_handlers, write_position, parent_style, erase_bg, z_index,
+    ) -> None:
+        # The inline renderer can offer all rows below the cursor (or the last
+        # taller frame). HSplit paints unused allocation with a dummy Window,
+        # which makes those blank rows part of Screen.height and scrolls them
+        # into primary history. Bound painting, not just preferred sizing, so
+        # editing and the final done redraw agree on the actual footprint.
+        height = min(
+            write_position.height,
+            self.preferred_height(
+                write_position.width, write_position.height,
+            ).preferred,
+        )
+        super().write_to_screen(
+            screen, mouse_handlers,
+            WritePosition(
+                write_position.xpos, write_position.ypos,
+                write_position.width, height,
+            ),
+            parent_style, erase_bg, z_index,
+        )
 
 
 def _configure_composer_frame(session: PromptSession) -> Window:
@@ -103,9 +131,12 @@ def _configure_composer_frame(session: PromptSession) -> Window:
     # The root receives the terminal width. A sibling absorbs unused columns
     # so the composer stays at its product width whenever the viewport permits.
     framed_input.content = VSplit(
-        [composer, Window()],
+        [composer, Window(dont_extend_height=True)],
         padding=0,
     )
+    # Keep PromptSession's input, completion floats, focus, and toolbars. Only
+    # the ordinary root's paint budget changes; startup owns another layout.
+    session.layout.container = _ComposerPromptLayout(root.children)
     return bottom_left
 
 

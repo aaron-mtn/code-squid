@@ -277,7 +277,25 @@ class StartupApplication:
         self.output.flush()
         fragments = []
         size = self._output_size()
-        for row in range(min(self.final_screen.height, size.rows)):
+        # Fullscreen Screen.height includes the unused canvas below the box.
+        # Those rows belong to alternate-screen painting, not the transcript:
+        # copying them strands the primary append cursor far below the composer
+        # on the first run. Preserve internal scene spacing, but stop at the
+        # last visible row so run_started supplies the same separator as later
+        # ordinary PromptSession submissions.
+        retained_height = max(
+            (
+                row + 1
+                for row in range(min(self.final_screen.height, size.rows))
+                if any(
+                    cell.char.strip()
+                    for column, cell in self.final_screen.data_buffer[row].items()
+                    if column < size.columns and cell.width
+                )
+            ),
+            default=0,
+        )
+        for row in range(retained_height):
             cells = self.final_screen.data_buffer[row]
             # Screen contains continuation cells for wide glyphs. Print only
             # their leading cell, and omit padding beyond the visible content.

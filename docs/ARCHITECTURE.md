@@ -191,7 +191,12 @@ install all three unpublished checkouts editably; see README for commands.
     clears every remaining rain cell simultaneously and exits only after that
     clean frame renders. Once the startup canvas is released, one static
     copy of that clean scene is appended to the primary buffer, preserving
-    wide glyphs and the submitted composer. Animation never paints the primary
+    wide glyphs and the submitted composer. Projection stops at the last visible
+    row of the clean frame; fullscreen canvas padding below the composer never
+    enters primary scrollback. Internal scene/separator rows are preserved.
+    The append cursor lands immediately after the composer, so first-run thinking
+    and reasoning/narration use the same one-blank-line run separator as follow-ups.
+    Animation never paints the primary
     buffer: cursor-relative inline redraws could strand obsolete rain in
     scrollback after a shrink or redraw and cannot repaint those offscreen rows. If
     narration, Tool or
@@ -200,7 +205,21 @@ install all three unpublished checkouts editably; see README for commands.
     model to its clean state and synchronously joins the Application before the
     writer proceeds. Ctrl+C also exits and joins the startup lifecycle safely.
     Ordinary later prompts remain composer-only
-    `PromptSession` instances; `/new` creates a fresh temporary Application and
+    `PromptSession` instances. Their product-owned root in `ui/prompt_input.py`
+    bounds painting to the layout's current preferred height, including any
+    visible PromptSession toolbars. Preferred sizing alone is insufficient:
+    the inline renderer may offer the whole remaining viewport or a previous
+    taller allocation, and an ordinary HSplit paints its unused rows as blank
+    filler that increases Screen.height and reserves terminal space. The
+    bounded root keeps editing and the final done redraw at the measured
+    footprint. Prompt-toolkit measures cell-aware wrapping at the actual inner
+    width; shared content policy still caps it at 2 through 14 content rows,
+    plus two border rows, with the physical viewport as the final cap. The
+    ordinary width sink cannot claim vertical space. PromptSession owns final
+    redraw and cursor placement immediately below the retained box; downstream
+    command/run presentation supplies its existing minimal spacing. No custom
+    transcript projection, terminal-buffer switch, or scrollback erase is used
+    for ordinary prompts. `/new` creates a fresh temporary Application and
     resets rain on a fresh temporary alternate canvas. StartupApplication's
     renderer thread owns the buffer boundary in `ui/terminal_session.py`:
     `startup_terminal(output)` enters before Application.run and restores primary

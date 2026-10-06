@@ -205,6 +205,8 @@ def test_startup_and_followup_share_content_height_policy() -> None:
     assert short is not None and tall is not None
     assert len(_composer_rows(short)) == COMPOSER_MIN_CONTENT_ROWS + 2
     assert len(_composer_rows(tall)) == COMPOSER_MAX_CONTENT_ROWS + 2
+    assert short.height == len(_composer_rows(short))
+    assert tall.height == len(_composer_rows(tall))
 
     output.size = Size(rows=8, columns=80)
     physically_bounded = asyncio.run(render(session.default_buffer.text))
