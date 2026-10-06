@@ -323,7 +323,8 @@ class StartupMenu:
                 models = self.model_discovery(self.settings)
             except Exception:
                 models = None
-            self._options = tuple(sorted(models or ()))
+            # Providers owns deterministic inventory ordering; preserve it here.
+            self._options = tuple(models or ())
             if self._options:
                 self._select_current(self.settings.model.name)
             else:

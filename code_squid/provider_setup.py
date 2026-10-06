@@ -29,7 +29,7 @@ def provider_ready(settings) -> bool:
 
 
 def discover_models(settings) -> list[str]:
-    """Return model IDs whenever the provider's discovery API is available."""
+    """Return exact IDs in Providers catalog order when discovery is available."""
     return catalog.discover_models(settings.to_provider_settings())
 
 

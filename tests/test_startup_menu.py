@@ -529,7 +529,7 @@ def test_model_discovery_uses_effective_provider_and_is_not_used_by_render(tmp_p
 
     def discover(settings):
         seen.append(settings.model.provider)
-        return ["model-b", "model-a"]
+        return ["model-a", "model-b"]
 
     menu = StartupMenu(tmp_path, load_settings(tmp_path), model_discovery=discover)
     layout = startup_scene_layout(80)
@@ -548,26 +548,36 @@ def test_model_discovery_uses_effective_provider_and_is_not_used_by_render(tmp_p
     assert seen == ["lm_studio"]
 
 
-def test_provider_model_discovery_uses_optional_adapter_capability(
+def test_provider_model_discovery_consumes_catalog_order(
     monkeypatch,
     tmp_path,
 ) -> None:
     settings = load_settings(tmp_path)
     providers = []
 
-    def build(provider_settings):
+    def discover(provider_settings):
         providers.append(provider_settings.provider)
-        return SimpleNamespace(
-            is_ready=lambda: True,
-            list_models=lambda: ["z", "a", "a"],
-        )
+        return ["alpha", "Beta", "z"]
 
     monkeypatch.setattr(
-        "squid_providers.catalog.build_provider",
-        lambda settings, *, for_inference: build(settings),
+        "squid_providers.catalog.discover_models", discover,
     )
-    assert discover_provider_models(settings) == ["a", "z"]
+    assert discover_provider_models(settings) == ["alpha", "Beta", "z"]
     assert providers == ["lm_studio"]
+
+
+def test_model_menu_preserves_catalog_order_and_configured_selection(monkeypatch, tmp_path):
+    # Casefold ordering differs from Python's default sort. This catches a
+    # redundant UI sort while checking exact-case selection after reordering.
+    monkeypatch.setenv("CODE_SQUID_MODEL", "Beta")
+    model_ids = ["alpha", "Beta", "beta", "z"]
+    menu = StartupMenu(tmp_path, load_settings(tmp_path), model_discovery=lambda _: model_ids)
+    menu.focus_from_composer()
+    menu.selected_index = MAIN_ROWS.index("Model")
+    menu.activate()
+    assert menu._options == tuple(model_ids)
+    assert menu.selected_index == 1
+    assert menu.settings.model.name == "Beta"
 
 
 def test_model_menu_shows_public_openrouter_models_without_key(

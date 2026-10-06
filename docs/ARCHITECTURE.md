@@ -120,8 +120,8 @@ install all three unpublished checkouts editably; see README for commands.
     `skill_commands.py` handles Skill status, listing, and selection.
     `console/startup_menu.py` owns the startup panel's small keyboard focus,
     view, and selection state. It reuses the CLI's runtime-setting, Mod, and
-    session-selection operations; provider adapters remain the source of any
-    optional model enumeration, with `/model <name>` shown as the
+    session-selection operations; the Providers catalog owns normalized
+    model enumeration, with `/model <name>` shown as the
     non-destructive fallback while an adapter has no such capability. Session
     discovery stays in `control_commands.py`, which takes the newest 20
     metadata records from Core's presentation-neutral workspace
@@ -2791,3 +2791,12 @@ and execution remain Core-owned. Streamed usage is best-effort: supplied counts
 are retained, missing counts remain unknown, and no universal `stream_options`
 or usage compatibility retries are added. Ollama `/v1` normalization,
 cancellation identity/design, and conservative vision behavior remain unchanged.
+
+## Model inventory ordering
+
+`provider_setup.discover_models()` delegates to Squid Providers' normalized
+catalog. Providers deduplicates exact IDs and orders by `(ID.casefold(), ID)`.
+The startup model menu consumes that order directly, without sorting again,
+and locates the configured exact ID after enumeration. Discovery failures and
+empty lists retain the existing manual model-command fallback. No provider
+endpoints or model response parsing belong to this application.

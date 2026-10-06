@@ -3278,3 +3278,9 @@
   must be rebuilt together. Existing packaging scripts also assume an older
   combined checkout layout; updating that release pipeline is deferred rather
   than silently expanding this Mod consumer migration into a packaging refactor.
+
+## 2026-10-05 - Provider-owned model discovery and ordering
+
+- Removed startup_menu.py redundant model sort; provider_setup.py documents the catalog ordering contract. Selection, persistence and manual fallback stay app-owned.
+- Updated stale transport-mock tests to the public catalog seam and covered casefold order plus configured exact-ID selection.
+- Verification: full pytest suite 903 passed; compilation/import smoke checks and git diff --check passed. No live inference performed.
