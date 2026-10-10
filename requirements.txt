@@ -1,4 +1,5 @@
-# These unpublished distributions are installed from sibling checkouts.
+# Editable development setup after cloning all three repositories side by side.
+# For public GitHub installation without sibling checkouts, see README.md.
 -e ../squid-core
 -e ../squid-providers
 -e .

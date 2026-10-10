@@ -1,10 +1,17 @@
 # Virtual environment
 .venv/
+venv/
+env/
 
 # Python cache files
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 
 # Code Squid local runtime state
 .code-squid/
@@ -13,11 +20,19 @@ __pycache__/
 **/filetree.md
 **/FILETREE.md
 
+# Private development history (retain local copies; never release)
+/docs/dev-log.md
+/docs/provider-extraction.md
+
 # Environment files
 .env
+.env.*
 
 # OS/editor junk
 .DS_Store
+Thumbs.db
+.idea/
+.vscode/
 
 # Local Python package build metadata
 *.egg-info/

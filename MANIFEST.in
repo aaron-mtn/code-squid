@@ -1,0 +1,20 @@
+# Keep source distributions useful while excluding local documentation/state.
+include README.md LICENSE requirements.txt
+recursive-include tests *.py
+prune docs
+include docs/ARCHITECTURE.md docs/IMPLEMENTATION_NOTES.md
+prune .code-squid
+prune .venv
+prune venv
+prune env
+prune build
+prune dist
+prune .git
+prune .idea
+prune .vscode
+prune .pytest_cache
+prune .mypy_cache
+prune .ruff_cache
+prune htmlcov
+global-exclude __pycache__ *.py[cod] .env .env.* .coverage .coverage.*
+global-exclude filetree.md FILETREE.md dev-log.md provider-extraction.md

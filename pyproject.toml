@@ -1,11 +1,15 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "code-squid"
 version = "0.1.0"
-description = "Standalone coding agent application"
+description = "A small local-first command-line coding agent for repository work"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Aaron Slater"}]
 requires-python = ">=3.11"
 dependencies = ["squid-core==0.1.0", "squid-providers==0.1.0", "prompt_toolkit", "wcwidth"]
 
