@@ -1,0 +1,9 @@
+name: validate-mod-package
+description: Validate a Code Squid Mod with Core metadata rules and contained static authoring checks; never execute authored source.
+version: "1"
+entrypoint: tool.py
+function: run
+args:
+  package_path:
+    type: string
+    description: Workspace-relative package directory; defaults to the workspace root.

@@ -24,3 +24,14 @@ py-modules = ["main"]
 where = ["."]
 namespaces = false
 include = ["code_squid", "code_squid.*"]
+
+# Dynamic Mod tool source is data too: keep the complete canonical tree.
+[tool.setuptools.package-data]
+code_squid = [
+    "resources/mods/mod-builder/**/*.md",
+    "resources/mods/mod-builder/**/*.yaml",
+    "resources/mods/mod-builder/**/*.yml",
+    "resources/mods/mod-builder/**/*.py",
+    "resources/mods/mod-builder/**/*.json",
+    "resources/mods/mod-builder/**/*.txt",
+]

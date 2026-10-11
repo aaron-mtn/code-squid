@@ -1,0 +1,8 @@
+---
+name: portable-tool-hook
+description: Demonstrate a portable bundled Tool and Hook.
+default_skill: portable-tool-hook
+accent: cyan
+hooks:
+  - completion-note
+---

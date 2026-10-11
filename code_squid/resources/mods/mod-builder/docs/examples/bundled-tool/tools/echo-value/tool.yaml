@@ -1,0 +1,13 @@
+name: echo-value
+description: Echo a value with an optional prefix.
+version: "1"
+entrypoint: tool.py
+function: run
+args:
+  value:
+    type: string
+    description: Value to echo.
+    required: true
+  prefix:
+    type: string
+    description: Optional prefix.

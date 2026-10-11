@@ -1,0 +1,7 @@
+---
+name: bundled-tool
+description: Echo a value through a bundled Tool.
+default_skill: bundled-tool
+accent: cyan
+hooks: []
+---

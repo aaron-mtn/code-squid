@@ -1,0 +1,4 @@
+name: completion-note
+description: Add a note after a completed run.
+enabled: false
+version: 1

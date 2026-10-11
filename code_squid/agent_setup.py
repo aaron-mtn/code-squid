@@ -37,7 +37,8 @@ from code_squid.hooks import (
     PostVerificationNudge,
     TooManyReadsNudge,
 )
-from squid_core.mods import ResolvedMod, resolve_mod
+from squid_core.mods import ResolvedMod
+from code_squid.mods import resolve_mod
 from squid_core.platform_context import PlatformContext, detect_platform_context
 from squid_core.session import Session
 from squid_core.skills import Skill, discover_skills

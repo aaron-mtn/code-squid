@@ -648,7 +648,8 @@ Hosts that already resolved a Skill and its executable tool registry may pass
 them together as `resolved_skill` and `resolved_tools`. Core then skips Skill
 discovery while retaining ownership of run construction, metadata, and
 execution. The normal Code Squid builder also accepts `mod_name` and
-`app_home`; it asks `squid_core.mods.resolve_mod(...)` for the selected resources.
+`app_home`; the application adapter in `code_squid.mods` selects the package
+home and delegates to `squid_core.mods.resolve_mod(...)` for the resources.
 With `mod_name`, an optional `skill_name` is forwarded as `selected_skill` and
 names only a packaged Skill in that Mod; omission selects its `default_skill`.
 Without `mod_name`, `skill_name` still names only a standalone Skill. These
@@ -708,10 +709,32 @@ The canonical user package is:
 `mod.yaml` uses the fields `name`, `description`, required `default_skill`,
 optional `accent`, and `hooks`. Mod-level `tools` is unsupported and rejected;
 there is no legacy compatibility mode or duplicated tool-list equality rule.
-Code Squid does not bundle a Mod Builder package or other Mod/Skill resources;
-its CLI discovers installed packages only under the selected application home's
-`mods/` directory. Test packages are temporary fixtures constructed in
-`tests/test_mods.py`, using the same manifest and Skill contracts.
+Code Squid ships Mod Builder under `code_squid/resources/mods/mod-builder/`.
+`code_squid.mods` merges this built-in with user packages from the selected
+application home's `mods/` directory. The built-in name wins collisions;
+`/mod` labels the unchanged user package as shadowed. Missing bundled metadata
+remains invalid and never silently falls back to a colliding user package.
+User packages otherwise retain Core's existing discovery and resolution rules.
+
+`importlib.resources.files("code_squid")` locates the installed resource home.
+Source checkouts and pip installations provide physical files whose lifetime
+covers lazy Tool execution; zip-import execution is unsupported. Setuptools
+package-data and MANIFEST.in include the complete resource tree, including raw
+Tool/example Python, in wheels and source distributions. Nothing is copied into
+the user home. CLI Mod/Skill commands, startup selection, terminal labels, and
+agent_setup all use the same application adapter. Application settings, storage,
+and optional user Hooks continue using the real user home.
+
+`code_squid/mod_authoring.py` owns deterministic authoring scaffolds and static
+checks adapted from Desktop, with no Desktop dependency. Core's public loaders
+remain authoritative for persisted contracts. Validation stages workspace drafts
+into the Core app-home layout and never imports authored Python; actual Tool
+and Hook behavior requires separate tests. The five bundled helpers expose the
+complete guide/examples and scaffold/validate only within the execution
+workspace. The guide lives in structured `data.guide` so Core's top-level string
+bounds do not truncate the authoring contract. Readers report missing, invalid
+UTF-8, and incomplete canonical resources as unavailable. Test coverage lives
+in `tests/test_mod_builder.py` alongside existing Mod integration tests.
 Custom Mod Tools keep their implementation in `tools/<name>/`; the selected
 Skill's `allowed-tools` activates them, and `mod.yaml` selects Mod-wide Hooks.
 Core preserves accent metadata but does not interpret its presentation.

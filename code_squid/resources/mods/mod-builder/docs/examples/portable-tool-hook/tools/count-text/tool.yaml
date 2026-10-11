@@ -1,0 +1,9 @@
+name: count-text
+description: Count characters in text.
+entrypoint: tool.py
+function: run
+args:
+  text:
+    type: string
+    description: Text to count.
+    required: true

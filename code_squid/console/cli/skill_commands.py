@@ -1,7 +1,7 @@
 """Skill command and status helpers for the Code Squid CLI."""
 
 from code_squid.app_paths import code_squid_home
-from squid_core.mods import load_mod
+from code_squid.mods import load_mod
 from squid_core.skills import Skill, discover_skills
 
 

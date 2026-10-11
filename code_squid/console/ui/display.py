@@ -7,7 +7,7 @@ from typing import TextIO
 from prompt_toolkit.output.base import Output
 
 from squid_core.safety import ApprovalDecision, USER_DENIED_TOOL_ACTION
-from squid_core.mods import discover_mods
+from code_squid.mods import discover_mods
 
 from code_squid.app_paths import code_squid_home
 from code_squid.console.ui import formatting

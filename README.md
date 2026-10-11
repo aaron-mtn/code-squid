@@ -1,30 +1,30 @@
 # Code Squid
 
-A small local-first coding agent for repository work.
+Code Squid is a local-first coding agent that works directly with projects on
+your computer.
 
-READ • PATCH • TEST • REPEAT  
-SMALL AGENT. BIG TENTACLES.
+It can read and edit files, run commands and tests, and work with both local and
+cloud models. It is designed to stay small, understandable, and easy to
+customize.
 
-Code Squid is a command-line application that reads files, makes edits, and runs
-commands through model tool calls in a selected local workspace. It shows tool
-activity and assistant responses, saves sessions, and lets you continue work
-with follow-up tasks. The project aims to stay small and inspectable.
+Skills can change its instructions and available tools. Mods can bundle Skills,
+custom tools, and hooks together for different kinds of work.
 
-## Status and features
+Code Squid is built on Squid Core, with its model integrations provided by
+Squid Providers.
 
-v0.1.0 is the first public release: an experimental personal project, with a
-terminal interface and no stability guarantee yet. Model quality and tool-use
-support matter. LM Studio is the default local provider; native Ollama support
-is experimental. Outside contributions may not be reviewed promptly while the
-project's direction settles. Forks and feedback are welcome.
+## Features
 
-- Sequential execution of valid single- or multi-tool replies
-- File reads, exact text patches, whole-file writes, and shell commands
-- Saved transcripts, session listing/resume, and latest-run file undo
-- Approval modes, provider/model settings, and automatic transcript compaction
-- A keyboard startup menu and multiline task composer
-- User-installed Mods and Skills for task specialization
-- Optional document, spreadsheet, PDF, and vision-enabled image reads
+- Local and cloud model support
+- File reads, targeted patches, whole-file writes, and shell commands
+- Sequential single- and multi-tool execution
+- Saved sessions with resume and follow-up work
+- Latest-run file undo
+- Approval modes for tool actions
+- Automatic context compaction for longer sessions
+- Easy customization with custom Skills, Mods, hooks, and tools
+- Optional document, spreadsheet, PDF, and image reads
+- A keyboard-driven terminal interface
 
 ## Installation
 
@@ -35,15 +35,14 @@ contracts; Providers owns model transports, discovery, and connection defaults;
 Code Squid owns coding policy, settings, and the console interface.
 
 Install all three from their public GitHub repositories into one environment.
-Do not assume `squid-core` or `squid-providers` is available on PyPI. Replace
-`<owner>` below with each dependency repository's actual GitHub owner; those URLs
-have not yet been established in this checkout. The commands use the default
-branches; use matching release refs when all three v0.1.0 refs are available.
+Do not assume `squid-core` or `squid-providers` is available on PyPI. The commands
+use the default branches; use matching release refs when all three v0.1.0 refs
+are available.
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-python -m pip install "squid-core @ git+https://github.com/<owner>/squid-core.git" "squid-providers @ git+https://github.com/<owner>/squid-providers.git" "code-squid @ git+https://github.com/aarons360-stack/code-squid.git"
+python -m pip install "squid-core @ git+https://github.com/aaron-mtn/squid-core.git" "squid-providers @ git+https://github.com/aaron-mtn/squid-providers.git" "code-squid @ git+https://github.com/aaron-mtn/code-squid.git"
 ```
 
 On macOS/Linux, activate with `source .venv/bin/activate` instead. The same pip
@@ -52,177 +51,168 @@ command then applies. Passing all three sources together supplies the pinned
 runtime dependencies are installed normally by pip.
 
 For document and image readers, replace the Core requirement in that command
-with `"squid-core[documents] @ git+https://github.com/<owner>/squid-core.git"`.
+with `"squid-core[documents] @ git+https://github.com/aaron-mtn/squid-core.git"`.
 The extra installs the format libraries; it is not required for ordinary text
 reads, edits, or commands. Image input additionally requires a vision-capable
 model and a supported transport.
 
 ## Quick start
 
-Start LM Studio's local server and load a tool-capable model. Its default endpoint
-is `http://127.0.0.1:1234/v1`. Then select your workspace:
+Start a local model server such as LM Studio or Ollama with a model that supports tool calling.
 
-```bash
-code-squid --cwd /path/to/repository
+Open a terminal and start Code Squid:
+
+```powershell
+code-squid
 ```
 
-Choose the loaded model in the startup menu or enter `/model <exact-model-id>`.
-The configured default model name is `qwen3.5-9b`; it must match a model your
-server actually serves. Enter a task such as:
+Select your provider and model from the startup menu.
+
+To choose the folder Code Squid will work in, use `/workspace` followed by the path:
 
 ```text
-Read the failing test and relevant implementation. Fix the bug with the smallest correct change. Run verification before finalizing.
+/workspace C:\path\to\project
 ```
 
-`Enter` sends; `Alt+Enter` or `Ctrl+J` inserts a newline. `Shift+Enter` also works
-when the terminal sends a supported modified-Enter sequence. `Ctrl+C` cancels
-input or interrupts a run. Up from an empty startup composer focuses the menu;
-Up/Down moves, Enter selects, and Esc returns. Use `/help` for current controls.
+Once you've used a workspace, it will also appear in the recent workspaces list in the startup menu.
+
+Then enter a coding task, for example:
+
+```text
+Build a little JavaScript endless runner where I ride a skateboard, jump over obstacles, and try to get the highest score. Make it a web app and launch it in my browser when it's ready.
+```
+
+Use `/help` to see the available commands and keyboard controls.
 
 ## Providers and configuration
 
-| Provider ID | Connection |
+Code Squid supports local and cloud models through Squid Providers.
+
+| Provider | Default endpoint |
 | --- | --- |
-| `lm_studio` | Local OpenAI-compatible chat completions; default `http://127.0.0.1:1234/v1` |
-| `squid_models` | An already-running Squid Models service; default `http://127.0.0.1:8080/v1` |
-| `ollama` | Native Ollama chat; default `http://127.0.0.1:11434`; experimental |
-| `openrouter` | Cloud chat completions at `https://openrouter.ai/api/v1`; API key required |
-| `openai_compatible` | Other compatible servers; default `http://127.0.0.1:8000/v1` |
+| LM Studio | `http://127.0.0.1:1234/v1` |
+| Ollama | `http://127.0.0.1:11434` |
+| OpenRouter | `https://openrouter.ai/api/v1` |
+| OpenAI-compatible servers | `http://127.0.0.1:8000/v1` |
 
-Code Squid connects to services; it does not download models or manage server
-processes. Compatibility varies by server and model.
+You can select a provider and model from the startup menu or change them
+using `/provider` and `/model` inside Code Squid.
 
-Settings live at `~/.code-squid/settings.json`, or
-`<CODE_SQUID_HOME>/settings.json` when `CODE_SQUID_HOME` is set. Missing settings
-use defaults. A minimal configuration is:
+Code Squid connects to existing model servers and APIs. It does not download
+models or manage model servers.
 
-```json
-{
-  "model": {"provider": "lm_studio", "name": "your-loaded-model-id"},
-  "providers": {
-    "lm_studio": {"base_url": "http://127.0.0.1:1234/v1", "api_key": "lm-studio"},
-    "openrouter": {"api_key_env": "OPENROUTER_API_KEY"}
-  },
-  "runtime": {"approval_mode": "guarded", "max_tool_steps": null}
-}
-```
+Settings are saved in `~/.code-squid/settings.json`. You can configure providers
+through Code Squid's commands or edit the settings file directly.
 
-This example selects balanced safety. The actual default is `approval_mode=never`
-(yolo), with no tool-step limit. Provider entries store sparse connection
-overrides; missing fields inherit provider defaults. `api_key_env` names an
-environment variable containing a key. `CODE_SQUID_API_KEY` overrides both that
-variable and a saved key. A legacy workspace settings file is adopted on first
-use if no application-wide settings file exists.
+OpenRouter requires an API key. Local providers generally don't, unless your
+server requires authentication.
 
-Common environment overrides: `CODE_SQUID_PROVIDER`, `CODE_SQUID_MODEL`,
-`CODE_SQUID_BASE_URL`, `CODE_SQUID_API_KEY`, `CODE_SQUID_TEMPERATURE`, and
-`CODE_SQUID_DEBUG`. `CODE_SQUID_TRACE=1` enables debug output and an end-of-run
-transcript dump. `CODE_SQUID_STREAM_ASSISTANT_TEXT` controls live assistant text.
-Optional `model.reasoning_mode` (`off`, `low`, `medium`, `high`) and
-`model.reasoning_token_budget` are translated for OpenRouter; a positive budget
-takes precedence over the mode. They also have `CODE_SQUID_REASONING_MODE` and
-`CODE_SQUID_REASONING_TOKEN_BUDGET` overrides. `/reasoning show` controls display,
-not the model's reasoning budget.
+Support for tool calling, vision, reasoning, and other features depends on the
+model and provider.
+
+For additional configuration details, see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Commands
 
-The installed `code-squid` command and `python main.py` from a source checkout
-use the same entry point.
+After installation, start Code Squid with:
 
-```bash
-code-squid --help
-code-squid --cwd /path/to/repository
-code-squid --skill <name>
-code-squid safety balanced
-code-squid skill
-code-squid sessions
-code-squid show latest
-code-squid resume latest
-code-squid undo
+```powershell
+code-squid
 ```
 
-`show` and `resume` also accept a session ID. Workspace commands operate on the
-current directory unless `--cwd` selects another workspace.
+You can also run it directly from the source repository:
 
-At the interactive prompt:
+```powershell
+python main.py
+```
 
-| Command | Action |
+Some useful commands inside Code Squid:
+
+| Command | Purpose |
 | --- | --- |
-| `/help`, `/exit`, `/new` | Show help, exit, or start a new session boundary |
-| `/provider`, `/provider use <id>`, `/provider status` | Inspect/select a provider and inspect effective setup |
-| `/provider key <value>`, `/provider url <value>` | Save connection overrides for the selected provider |
-| `/model <exact-id>` | Select a model |
-| `/safety [strict\|balanced\|yolo]` | Inspect/change approval mode |
-| `/reasoning [show\|hide]` | Inspect/change reasoning display |
-| `/compact-at <tokens>` | Set automatic compaction threshold, e.g. `30k` |
-| `/mod [name\|none]`, `/skill [name\|none]` | Inspect/select specialization |
-| `/sessions`, `/show [current\|latest\|<id>]`, `/resume <id-or-latest>` | Inspect or continue saved work |
-| `/undo` | Restore the latest-run file snapshots |
-| `/workspace [path]`, `/cwd` | Inspect/switch workspace or show its root |
+| `/workspace <path>` | Switch to a different workspace |
+| `/provider` | View and select model providers |
+| `/model <name>` | Select a model |
+| `/mod` | View and select Mods |
+| `/skill` | View and select Skills |
+| `/safety` | View or change tool approval settings |
+| `/sessions` | List saved sessions |
+| `/resume latest` | Continue the most recent session |
+| `/undo` | Undo file changes from the latest run |
+| `/new` | Start a new session |
+
+Use `/help` inside Code Squid for the full command list and keyboard controls.
 
 ## Mods and Skills
 
-Mods are the primary interactive specialization path. Install a Mod package
-under `~/.code-squid/mods/<name>/` (or the configured application home), with a
-`mod.yaml` manifest and packaged `skills/<skill-id>/SKILL.md` files. A Mod
-combines identity, a default Skill, and optional custom Tools and Hooks. Its
-active Skill's `allowed-tools` determines tool access; the manifest does not
-grant tools. `/mod <name>` selects its default Skill, and `/skill <name>` switches
-within that Mod. `/skill none` resets the Mod default; `/mod none` clears it.
+Code Squid can be customized with Skills, Mods, custom tools, and hooks.
 
-Standalone Skills live under `~/.code-squid/skills/<name>/SKILL.md`. They supply
-instructions and can restrict or select tools. Use `/skill <name>` without an
-active Mod, or launch with `--skill <name>`. Code Squid ships no bundled Mods or
-Skills. Custom Tools and Hooks execute local Python code; install only resources
-you trust. See the architecture reference for the resource contracts.
+**Skills** change how Code Squid works for a particular kind of task. They can replace or extend specific sections of the system prompt and control which tools are available to the agent. By default, the agent uses Code Squid's normal tools. A Skill can specify an `allowed-tools` list to restrict which built-in and custom tools are available.
+
+**Mods** package Skills, custom tools, hooks, and metadata together. A Mod can contain multiple Skills, each with its own instructions and tool permissions. Mods can also define an accent color that changes the appearance of the terminal interface.
+
+### Mod Builder
+
+Code Squid includes **Mod Builder**, a built-in Mod that helps you create and edit Skills, custom tools, hooks, and complete Mod packages by describing what you want.
+
+For example:
+
+```text
+Create a Dungeon Master Mod that runs a text-based fantasy adventure,
+with a custom tool for dice rolls, combat, character stats, and saved games.
+```
+
+Mod Builder can generate the required files, create custom Python tools and hooks, and validate the completed package.
+
+### Using Mods and Skills
+
+Use `/mod` to see available Mods and `/mod <name>` to activate one. Use `/skill` to see available Skills and `/skill <name>` to select a Skill within the active Mod.
+
+To start Mod Builder:
+
+```text
+/mod mod-builder
+```
+
+User-installed Mods live in `~/.code-squid/mods/`, and standalone Skills live in `~/.code-squid/skills/`. Built-in Mod Builder ships with Code Squid.
+
+Custom tools and hooks can execute local Python code, so only install Mods from sources you trust.
 
 ## Tools and safety
 
-The default model-facing tools are:
+Code Squid comes with four built-in tools:
 
-- `read_file(path, ranges=None, pages=None, sheet=None, rows=None)` — bounded
-  UTF-8 text reads; optional format readers for DOCX, EPUB, XLSX, ODS, PDF,
-  PNG, JPEG, and WebP. Text ranges, PDF page ranges, and sheet/row selection are
-  format-specific. PDF reads extract text and lazily render selected pages;
-  they do not perform OCR. Image reads require declared vision support,
-  through LM Studio, native Ollama, or OpenRouter models whose catalog declares
-  image input; unsupported or unknown capabilities fail closed.
-- `apply_patch(path, old_text, new_text)` — exact replacement in an existing
-  UTF-8 file, with revalidated candidate selection through `match_id` after a
-  diagnostic. This is not a unified-diff tool.
-- `write_file(path, content)` — create or replace a UTF-8 file.
-- `run_command(command, verification)` — shell execution in the workspace with
-  a timeout and bounded output. The required boolean records whether the model
-  considers the command a verification step.
+| Tool | Purpose |
+| --- | --- |
+| `read_file` | Read code, text files, and supported documents and images |
+| `write_file` | Create or replace files |
+| `apply_patch` | Make targeted changes to existing files |
+| `run_command` | Run shell commands and tests |
 
-File tools require absolute paths. Valid multi-tool replies execute sequentially
-in response order and stop at the first unsuccessful action. Dependent calls
-should be made in a later model turn.
+Custom tools can also be added through Skills and Mods.
 
-`strict` (`always`) asks before every tool; `balanced` (`guarded`) allows file
-actions within the workspace and asks for untrusted commands or actions carrying
-workspace/Hook approval reasons; `yolo` (`never`, the default) runs without
-approval prompts. Balanced mode can remember command identities you approve.
-Press Enter to approve, or enter a comment to reject and steer the model.
+### Approval modes
 
-Approval gates are not a hardened sandbox. Commands and custom code run with
-your user's permissions and can affect real files or external services.
+Code Squid has three approval modes that control when it asks permission before executing tools:
+
+- **Strict:** Ask for approval before every tool action.
+- **Balanced:** Allow file reads, writes, and patches within the workspace. Shell commands require approval, with an option to remember allowed command types, such as `git` or `ls`.
+- **Yolo (default):** Run tools without asking for approval.
+
+You can view or change the approval mode using `/safety`.
+
+Code Squid runs commands with your user's permissions. Approval modes are not a security sandbox, so review what the agent is doing, especially when using Yolo mode.
 
 ## Sessions, undo, and compaction
 
-Workspace sessions live in `.code-squid/sessions/<session-id>/`, with transcript
-and event records in `session.jsonl` and session assets alongside them. Listing,
-showing, and resuming sessions support review and follow-up work.
+Code Squid saves your sessions so you can review previous work, resume unfinished tasks, and continue conversations across multiple sessions. It automatically creates a `.code-squid/sessions/` directory in your workspace to store them.
 
-Undo is latest-run only: starting a run or resuming creates a fresh buffer.
-`write_file` and `apply_patch` snapshot each target's pre-change state. Undo
-restores those files or removes newly created files. Shell commands and custom
-Tools are not automatically undo-protected. Undo is not a substitute for Git.
+Use `/sessions` to browse saved sessions and `/resume` to continue one.
 
-Automatic compaction defaults to 25,000 estimated input tokens, summarizes about
-80% of eligible older history, and preserves at least the newest two chunks.
-The system message and original task remain protected. `/compact-at` changes the
-threshold. Estimates are approximate, and summaries can lose detail.
+Code Squid can also undo file changes made during the latest run using `/undo`. This covers changes made through `write_file` and `apply_patch`, but not shell commands or custom tools. Undo is not a replacement for Git.
+
+For longer conversations, Code Squid uses **context compaction** to summarize older messages and make room for new ones. This helps the agent continue working without exceeding the model's context limit, although some details may be lost during summarization.
 
 ## Local state and privacy
 

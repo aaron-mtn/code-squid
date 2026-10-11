@@ -18,3 +18,5 @@ prune .ruff_cache
 prune htmlcov
 global-exclude __pycache__ *.py[cod] .env .env.* .coverage .coverage.*
 global-exclude filetree.md FILETREE.md dev-log.md provider-extraction.md
+
+recursive-include code_squid/resources/mods/mod-builder *.md *.yaml *.yml *.py *.json *.txt

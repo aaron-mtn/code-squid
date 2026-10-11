@@ -41,7 +41,7 @@ from code_squid.console.ui.banner import (
 )
 from code_squid.console.ui.header_layout import StartupSceneLayout
 from code_squid.settings import Settings
-from squid_core.mods import discover_mods
+from code_squid.mods import discover_mods
 
 
 MAIN_ROWS = ("Provider", "Model", "Safety", "Mod", "Session", "Workspace")

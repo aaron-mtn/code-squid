@@ -1,0 +1,7 @@
+---
+name: skill-only
+description: Answer concise questions without Tools.
+default_skill: skill-only
+accent: cyan
+hooks: []
+---

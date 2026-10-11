@@ -1,0 +1,6 @@
+name: read-mod-authoring-guide
+description: Read the authoritative documentation bundled with the first-party Mod Builder.
+version: "1"
+entrypoint: tool.py
+function: run
+args: {}

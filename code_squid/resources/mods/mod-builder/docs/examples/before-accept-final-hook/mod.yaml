@@ -1,0 +1,8 @@
+---
+name: before-accept-final-hook
+description: Add a deterministic note before accepting a final response.
+default_skill: before-accept-final-hook
+accent: cyan
+hooks:
+  - final-note
+---

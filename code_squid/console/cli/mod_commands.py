@@ -1,7 +1,7 @@
 """Interactive Mod selection and status helpers for the Code Squid CLI."""
 
 from code_squid.app_paths import code_squid_home
-from squid_core.mods import discover_mods
+from code_squid.mods import discover_mods, mod_source_label
 
 
 MOD_COMMAND = "/mod"
@@ -37,7 +37,8 @@ def _format_mod_status(mod_name: str | None) -> str:
     else:
         for mod in mods.values():
             validity = "" if mod.valid else " (invalid)"
-            lines.append(f"- {mod.name}: {mod.description}{validity}")
+            source = mod_source_label(mod.name, code_squid_home())
+            lines.append(f"- {mod.name}: {mod.description}{source}{validity}")
     return "\n".join(lines)
 
 
@@ -73,5 +74,6 @@ def _handle_mod_input(
 
     if skill_name is not None and mod_name is None:
         print(f"Standalone skill {skill_name} cleared by Mod selection.")
-    print(f"Active Mod set to: {mod.name}")
+    source = mod_source_label(mod.name, code_squid_home())
+    print(f"Active Mod set to: {mod.name}{source}")
     return apply_mod_selection(requested_mod, skill_name)

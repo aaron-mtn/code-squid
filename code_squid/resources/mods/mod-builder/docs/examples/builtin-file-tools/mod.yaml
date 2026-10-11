@@ -1,0 +1,7 @@
+---
+name: builtin-file-tools
+description: Inspect and edit workspace text files.
+default_skill: builtin-file-tools
+accent: cyan
+hooks: []
+---

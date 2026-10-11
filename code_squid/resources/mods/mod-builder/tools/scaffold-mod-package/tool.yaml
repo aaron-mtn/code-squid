@@ -1,0 +1,17 @@
+name: scaffold-mod-package
+description: Create a canonical Skill-only Code Squid Mod starter inside the supplied workspace.
+version: "1"
+entrypoint: tool.py
+function: run
+args:
+  package_name:
+    type: string
+    description: Lowercase package and default Skill name.
+    required: true
+  description:
+    type: string
+    description: Short package and Skill description.
+    required: true
+  destination:
+    type: string
+    description: Optional workspace-relative standalone destination; defaults to mods/package-name.

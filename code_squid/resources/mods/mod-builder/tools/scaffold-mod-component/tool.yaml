@@ -1,0 +1,18 @@
+name: scaffold-mod-component
+description: Create a canonical custom Tool or Hook skeleton inside an existing Mod package.
+version: "1"
+entrypoint: tool.py
+function: run
+args:
+  package_path:
+    type: string
+    description: Workspace-relative Mod package path.
+    required: true
+  kind:
+    type: string
+    description: Component kind, either tool or hook.
+    required: true
+  name:
+    type: string
+    description: Lowercase component folder and metadata name.
+    required: true

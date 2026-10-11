@@ -111,7 +111,18 @@ def test_code_squid_application_package_has_expected_layout() -> None:
         "hooks/no_progress.py",
         "hooks/post_verification.py",
         "hooks/too_many_reads.py",
+        "mod_authoring.py",
+        "mods.py",
         "provider_setup.py",
+        "resources/mods/mod-builder/docs/examples/before-accept-final-hook/hooks/final-note/hook.py",
+        "resources/mods/mod-builder/docs/examples/bundled-tool/tools/echo-value/tool.py",
+        "resources/mods/mod-builder/docs/examples/portable-tool-hook/hooks/completion-note/hook.py",
+        "resources/mods/mod-builder/docs/examples/portable-tool-hook/tools/count-text/tool.py",
+        "resources/mods/mod-builder/tools/read-mod-authoring-example/tool.py",
+        "resources/mods/mod-builder/tools/read-mod-authoring-guide/tool.py",
+        "resources/mods/mod-builder/tools/scaffold-mod-component/tool.py",
+        "resources/mods/mod-builder/tools/scaffold-mod-package/tool.py",
+        "resources/mods/mod-builder/tools/validate-mod-package/tool.py",
         "settings.py",
     ]
 

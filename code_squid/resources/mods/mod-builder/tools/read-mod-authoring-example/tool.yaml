@@ -1,0 +1,10 @@
+name: read-mod-authoring-example
+description: Read one allowlisted canonical example bundled with the first-party Mod Builder.
+version: "1"
+entrypoint: tool.py
+function: run
+args:
+  example:
+    type: string
+    description: One of skill-only, builtin-file-tools, bundled-tool, before-accept-final-hook, or portable-tool-hook.
+    required: true
