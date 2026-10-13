@@ -28,33 +28,27 @@ Squid Providers.
 
 ## Installation
 
-Requires Python 3.11+, Git, and a tool-capable model served locally or through a
-supported cloud provider. Code Squid, **Squid Core**, and **Squid Providers** are
-separate distributions. Core owns the reusable runtime, tools, storage, and
-contracts; Providers owns model transports, discovery, and connection defaults;
-Code Squid owns coding policy, settings, and the console interface.
+Code Squid requires Python 3.11+, Git, and a tool-capable model served locally or through a supported cloud provider.
 
-Install all three from their public GitHub repositories into one environment.
-Do not assume `squid-core` or `squid-providers` is available on PyPI. The commands
-use the default branches; use matching release refs when all three v0.1.0 refs
-are available.
+Create a virtual environment and install Code Squid from GitHub:
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-python -m pip install "squid-core @ git+https://github.com/aaron-mtn/squid-core.git" "squid-providers @ git+https://github.com/aaron-mtn/squid-providers.git" "code-squid @ git+https://github.com/aaron-mtn/code-squid.git"
+python -m pip install "git+https://github.com/aaron-mtn/code-squid.git@v0.1.0"
 ```
 
-On macOS/Linux, activate with `source .venv/bin/activate` instead. The same pip
-command then applies. Passing all three sources together supplies the pinned
-`0.1.0` Core and Providers dependencies without fetching them from PyPI. Other
-runtime dependencies are installed normally by pip.
+On Linux, activate the virtual environment with `source .venv/bin/activate` instead.
 
-For document and image readers, replace the Core requirement in that command
-with `"squid-core[documents] @ git+https://github.com/aaron-mtn/squid-core.git"`.
-The extra installs the format libraries; it is not required for ordinary text
-reads, edits, or commands. Image input additionally requires a vision-capable
-model and a supported transport.
+Squid Core and Squid Providers are installed automatically from PyPI as dependencies.
+
+For optional document, spreadsheet, PDF, and image reading support, install:
+
+```powershell
+python -m pip install "squid-core[documents]==0.1.0"
+```
+
+The additional libraries are not required for ordinary text files, code editing, or shell commands. Image reading also requires a vision-capable model and supported provider.
 
 ## Quick start
 
@@ -148,7 +142,7 @@ Use `/help` inside Code Squid for the full command list and keyboard controls.
 
 Code Squid can be customized with Skills, Mods, custom tools, and hooks.
 
-**Skills** change how Code Squid works for a particular kind of task. They can replace or extend specific sections of the system prompt and control which tools are available to the agent. By default, the agent uses Code Squid's normal tools. A Skill can specify an `allowed-tools` list to restrict which built-in and custom tools are available.
+**Skills** change how Code Squid works for a particular kind of task. They can replace or extend specific sections of the system prompt and control which tools are available to the agent. Standalone Skills use Code Squid's default tools unless they specify an `allowed-tools` list. Listing specific tools restricts which built-in and custom tools are available, while an explicit empty list (`allowed-tools: []`) disables all tools. Skills packaged inside Mods must specify their allowed tools.
 
 **Mods** package Skills, custom tools, hooks, and metadata together. A Mod can contain multiple Skills, each with its own instructions and tool permissions. Mods can also define an accent color that changes the appearance of the terminal interface.
 
@@ -206,9 +200,11 @@ Code Squid runs commands with your user's permissions. Approval modes are not a 
 
 ## Sessions, undo, and compaction
 
-Code Squid saves your sessions so you can review previous work, resume unfinished tasks, and continue conversations across multiple sessions. It automatically creates a `.code-squid/sessions/` directory in your workspace to store them.
+Code Squid saves sessions locally under `~/.code-squid/workspaces/`, outside your project directories. Each workspace has its own saved sessions, latest-run undo buffer, and diagnostic logs.
 
 Use `/sessions` to browse saved sessions and `/resume` to continue one.
+
+Sessions are associated with the workspace's location. Moving or renaming a workspace means its previous sessions will not automatically appear under the new path.
 
 Code Squid can also undo file changes made during the latest run using `/undo`. This covers changes made through `write_file` and `apply_patch`, but not shell commands or custom tools. Undo is not a replacement for Git.
 
@@ -216,51 +212,76 @@ For longer conversations, Code Squid uses **context compaction** to summarize ol
 
 ## Local state and privacy
 
-Workspace `.code-squid/` holds sessions, assets, undo snapshots, and diagnostic
-logs. The application home holds settings, resources, a session-index registry,
-and recent workspace paths. These may contain prompts, file contents, command
-output, local paths, and credentials saved in settings. Keep workspace state
-ignored in your own repositories and review state before sharing it.
+Code Squid stores its settings, Mods, Skills, and session data locally in `~/.code-squid/`. Session histories, undo snapshots, and logs are organized by workspace and stored outside your project directories.
 
-Local-first describes workspace/state ownership: selected providers receive the
-model transcript and tool results, including file content and supported images.
-Cloud providers therefore send this data off your machine; local providers use
-the configured local service. Trace output can expose the same sensitive data.
+These files may contain conversation history, source code, command output, and other sensitive information. Keep your Code Squid application directory private, especially when backing up or sharing files.
+
+Code Squid supports both local and cloud models. When using a local model server, requests are sent to that server. When using a cloud provider, prompts and relevant project information are sent to that provider for processing.
+
+Code Squid does not require an account, although cloud providers may require API keys and have their own data handling policies.
 
 ## Known limitations
 
-- Experimental terminal UX; no GUI or multi-agent orchestration.
-- No built-in browser or structured search tool; use shell commands for search.
-- Stdin task input is not implemented; tasks begin at the interactive prompt.
-- Provider/model compatibility and tool-call reliability vary.
-- Format reads do not preserve full document layout or edit those formats;
-  spreadsheets are not recalculated, and PDF OCR is not provided.
-- Approval is not containment; command side effects are not covered by undo.
-- Compaction uses approximate token counts and lossy summaries.
+- Code Squid currently provides a terminal interface. A separate desktop application is in development.
+- Code Squid does not include a built-in web browser or web search tool.
+- Model compatibility and tool-calling reliability vary by provider and model. Smaller local models may require additional guidance.
+- Document and image reading requires optional dependencies and compatible models. These tools extract content but do not provide full document editing or layout preservation.
+- Undo only covers changes made through Code Squid's built-in file-editing tools, not shell commands or custom tools.
+- Context compaction summarizes older conversations, so some details may be lost during longer sessions.
 
 ## Development and testing
 
-For editable development, clone the three repositories side by side as
-`code-squid/`, `squid-core/`, and `squid-providers/`. The sibling layout is a
-convenience for `requirements.txt`, not an installed runtime requirement.
-From the Code Squid checkout, in an activated virtual environment:
+Code Squid is open source and built across three repositories: Code Squid, Squid Core, and Squid Providers.
 
-```bash
-python -m pip install -r requirements.txt pytest build
-python -m pip install -e "../squid-core[documents]"
-python -m pytest tests
-python -m build
-code-squid --help
+To work on the source code, clone all three repositories into the same parent directory:
+
+```text
+projects/
+├── code-squid/
+├── squid-core/
+└── squid-providers/
 ```
 
-The documents extra is needed for reader tests. Run Core and Providers suites
-separately (`python -m pytest ../squid-core/tests` and
-`python -m pytest ../squid-providers/tests`); they can share test module names.
-No live model inference is needed for the Code Squid suite.
+From the Code Squid directory, create a Python virtual environment:
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for ownership, runtime flow, and
-public seams. See [docs/IMPLEMENTATION_NOTES.md](docs/IMPLEMENTATION_NOTES.md)
-for subsystem mechanics, storage layouts, and maintenance details.
+```bash
+python -m venv .venv
+```
+
+Activate it on Windows (PowerShell):
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+Or on Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+Install the three projects in editable mode, along with the development dependencies:
+
+```bash
+python -m pip install -e "../squid-core[documents]"
+python -m pip install -e ../squid-providers
+python -m pip install -e .
+python -m pip install pytest build
+```
+
+Run the tests with:
+
+```bash
+python -m pytest tests
+```
+
+You can also run Code Squid directly from the source repository:
+
+```bash
+python main.py
+```
+
+For more technical details, see [Architecture](docs/ARCHITECTURE.md) and [Implementation Notes](docs/IMPLEMENTATION_NOTES.md).
 
 ## License
 

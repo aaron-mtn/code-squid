@@ -109,8 +109,9 @@ def test_openrouter_public_discovery_without_key_is_not_inference_ready(
 
 
 def test_openrouter_saved_key_is_used_when_default_env_is_absent(tmp_path) -> None:
-    settings_dir = tmp_path / ".code-squid"
-    settings_dir.mkdir()
+    from code_squid.app_paths import code_squid_home
+    settings_dir = code_squid_home()
+    settings_dir.mkdir(exist_ok=True)
     (settings_dir / "settings.json").write_text(
         json.dumps({"model": {"provider": "openrouter"}, "providers": {"openrouter": {"api_key": "saved-secret"}}}),
         encoding="utf-8",

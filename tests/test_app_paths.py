@@ -1,3 +1,5 @@
+"""Application-home paths and workspace identity boundaries."""
+
 from pathlib import Path
 
 from code_squid.app_paths import (
@@ -16,6 +18,7 @@ from code_squid.app_paths import (
     workspace_sessions_dir,
     workspace_state_dir,
     workspace_undo_dir,
+    workspace_id,
 )
 
 
@@ -57,12 +60,12 @@ def test_env_path_expands_user_home(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_workspace_storage_paths_are_application_owned(tmp_path: Path) -> None:
-    root = tmp_path.resolve()
-    assert workspace_state_dir(tmp_path) == root / ".code-squid"
-    assert workspace_sessions_dir(tmp_path) == root / ".code-squid" / "sessions"
-    assert workspace_undo_dir(tmp_path) == root / ".code-squid" / "undo"
+    root = code_squid_home().resolve() / "workspaces" / workspace_id(tmp_path)
+    assert workspace_state_dir(tmp_path) == root
+    assert workspace_sessions_dir(tmp_path) == root / "sessions"
+    assert workspace_undo_dir(tmp_path) == root / "undo"
     assert workspace_error_log_path(tmp_path) == (
-        root / ".code-squid" / "logs" / "latest.log"
+        root / "logs" / "latest.log"
     )
 
 

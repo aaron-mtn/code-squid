@@ -14,6 +14,7 @@ from typing import Callable, Mapping
 from code_squid.agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
 from code_squid import provider_setup
 from code_squid.compaction_context import CodeSquidCompactionContextProvider
+from code_squid.asset_preflight import SessionAssetPreflight
 from code_squid.settings import (
     DEFAULT_BUILT_IN_HOOK_SETTINGS,
     Settings,
@@ -202,6 +203,7 @@ def build_coding_task_run(
     Skill. These namespaces never fall back to each other.
     """
 
+    storage_validated = False
     try:
         if (resolved_skill is None) != (resolved_tools is None):
             raise ValueError("resolved_skill and resolved_tools must be supplied together")
@@ -210,7 +212,10 @@ def build_coding_task_run(
 
         workspace_root = Path(workspace_root).resolve()
         app_home = code_squid_home(app_home)
-        settings = load_settings(workspace_root) if settings is None else settings
+        settings = (
+            load_settings(workspace_root, app_home=app_home)
+            if settings is None else settings
+        )
         runtime_settings = settings.to_runtime_settings()
         provider_settings = settings.to_provider_settings()
         selected_mod: ResolvedMod | None = None
@@ -227,8 +232,9 @@ def build_coding_task_run(
         if model_adapter is None and provider is None:
             provider = provider_setup.build_provider(provider_settings)
         session = session if session is not None else Session(workspace_root=workspace_root)
-        sessions_dir = workspace_sessions_dir(workspace_root)
-        undo_dir = workspace_undo_dir(workspace_root)
+        sessions_dir = workspace_sessions_dir(workspace_root, app_home)
+        undo_dir = workspace_undo_dir(workspace_root, app_home)
+        storage_validated = True
         if session_store is None:
             session_store = (
                 SessionStore.create(sessions_dir, task, workspace_root=workspace_root)
@@ -238,7 +244,7 @@ def build_coding_task_run(
             try:
                 # Cross-workspace discovery is supplementary application policy;
                 # failure must not invalidate the newly created local session.
-                register_session_root(session_indexes_path(), sessions_dir)
+                register_session_root(session_indexes_path(app_home), sessions_dir)
             except Exception:
                 pass
         if undo_store is None and tool_executor is None:
@@ -302,7 +308,13 @@ def build_coding_task_run(
                 mode=settings.runtime.approval_mode,
                 prompter=display if approval_prompter is None else approval_prompter,
                 trusted_commands=settings.runtime.trusted_commands,
-                persist_trusted_command=lambda command: trust_command(workspace_root, command),
+                persist_trusted_command=lambda command: trust_command(
+                    workspace_root, command, app_home=app_home,
+                ),
+            )
+        if action_preflight is None:
+            action_preflight = SessionAssetPreflight(
+                workspace_root, session_store.session_dir, active_tools,
             )
         loop = build_core_agent_loop(
             workspace_root=workspace_root,
@@ -343,7 +355,8 @@ def build_coding_task_run(
     except Exception:
         # Assembly owns the lifecycle even for non-CLI callers. Re-raise the
         # original error; only writes made while already failing are best effort.
-        if session_store is not None:
+        # An ownership rejection must not mutate a supplied session's status.
+        if storage_validated and session_store is not None:
             try:
                 session_store.update_status("failed")
             except Exception:

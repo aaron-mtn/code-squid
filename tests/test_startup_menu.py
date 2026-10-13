@@ -306,8 +306,9 @@ def test_startup_provider_selection_restores_provider_scoped_connection(
     monkeypatch,
     tmp_path,
 ) -> None:
-    settings_dir = tmp_path / ".code-squid"
-    settings_dir.mkdir()
+    from code_squid.app_paths import code_squid_home
+    settings_dir = code_squid_home()
+    settings_dir.mkdir(exist_ok=True)
     (settings_dir / "settings.json").write_text(
         json.dumps(
             {

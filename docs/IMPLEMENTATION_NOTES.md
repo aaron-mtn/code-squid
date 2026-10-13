@@ -546,11 +546,10 @@ Code Squid reads settings from its application home:
 ```
 
 When `CODE_SQUID_HOME` is set, the path is
-`<CODE_SQUID_HOME>/settings.json`. If that file does not exist, the current
-workspace's legacy `.code-squid/settings.json` is adopted best-effort and left
-in place. An existing application-wide file is always authoritative; settings
-from multiple workspaces are never merged. All subsequent writes target only
-the application-wide file.
+`<CODE_SQUID_HOME>/settings.json`. Missing application settings use defaults.
+Workspace-local settings are never loaded, adopted, or merged. Writes target
+only the application-wide file. Run builders also honor an explicit `app_home`
+for settings and command-trust persistence.
 
 Missing settings are allowed. Code Squid chooses LM Studio as its initial
 backend via `code_squid.settings.DEFAULT_PROVIDER`. URL/key defaults belong to
@@ -901,7 +900,7 @@ retries a transient failure from the already-rendered request messages, before
 any assistant message, tool action, or transcript mutation can occur. The CLI
 run orchestration in `code_squid/console/cli/session_runner.py` catches that
 error, marks the session failed, and writes diagnostic traceback details to
-`.code-squid/logs/latest.log`.
+`<app-home>/workspaces/<workspace-id>/logs/latest.log`.
 
 ## Compaction mechanics and diagnostics
 
@@ -1066,7 +1065,7 @@ from the latest successfully applied effective transcript.
 Saved sessions live under:
 
 ```text
-.code-squid/sessions/<session_id>/
+<app-home>/workspaces/<workspace-id>/sessions/<session_id>/
 ```
 
 Each session folder contains:
@@ -1311,7 +1310,7 @@ filtered tools, and prompt overrides used for that run.
 Code Squid calculates the latest undo location as:
 
 ```text
-.code-squid/undo/
+<app-home>/workspaces/<workspace-id>/undo/
 ```
 
 Starting a new run or resume replaces the undo buffer. Before `write_file` or
@@ -1351,8 +1350,8 @@ Handled model request failures return 0 to keep the interactive prompt alive.
 Status updates and diagnostic writes are best effort only while handling an
 existing failure: secondary persistence errors cannot replace its cause or
 prevent user-facing reporting. When writable, the traceback log remains at
-`.code-squid/logs/latest.log`, with existing relative-path presentation and
-specialized model-failure output. The log stores traceback details, not prompts,
+`<app-home>/workspaces/<workspace-id>/logs/latest.log`, with absolute paths outside
+the workspace and specialized model-failure output. The log stores traceback details, not prompts,
 payloads, tool outputs, file contents, headers, or API keys. If a diagnostic write
 fails, the normal run-failure surface renders the original error without a
 saved-log claim. Its log/session paths are optional, and generic errors show

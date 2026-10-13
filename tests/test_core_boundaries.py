@@ -80,6 +80,7 @@ def test_code_squid_application_package_has_expected_layout() -> None:
         "agent/prompts.py",
         "agent_setup.py",
         "app_paths.py",
+        "asset_preflight.py",
         "compaction_context.py",
         "console/__init__.py",
         "console/cli/__init__.py",

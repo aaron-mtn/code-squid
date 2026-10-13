@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from code_squid.app_paths import settings_path
+from code_squid.app_paths import settings_path, code_squid_home
 from code_squid.settings import (
     DEFAULT_BUILT_IN_HOOK_SETTINGS,
     load_settings,
@@ -35,8 +35,8 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def write_settings(workspace_root: Path, settings: dict) -> None:
-    settings_dir = workspace_root / ".code-squid"
-    settings_dir.mkdir()
+    settings_dir = code_squid_home()
+    settings_dir.mkdir(exist_ok=True)
     (settings_dir / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
 
 
@@ -177,8 +177,10 @@ def test_application_settings_survive_workspace_change_and_process_reload(
 
     first_process = load_settings(workspace_a)
     assert json.loads(settings_path().read_text(encoding="utf-8")) == persisted
-    assert (workspace_a / ".code-squid" / "settings.json").exists()
-    write_settings(workspace_b, {"model": {"name": "workspace-owned-model"}})
+    assert not (workspace_a / ".code-squid").exists()
+    legacy = workspace_b / ".code-squid"
+    legacy.mkdir()
+    (legacy / "settings.json").write_text(json.dumps({"model": {"name": "workspace-owned-model"}}), encoding="utf-8")
     after_switch = load_settings(workspace_b)
     after_restart = load_settings(workspace_b)
 
@@ -198,7 +200,9 @@ def test_existing_application_settings_are_authoritative_over_legacy_workspace(
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    write_settings(workspace, {"model": {"name": "legacy-model"}})
+    legacy = workspace / ".code-squid"
+    legacy.mkdir()
+    (legacy / "settings.json").write_text(json.dumps({"model": {"name": "legacy-model"}}), encoding="utf-8")
     settings_path().write_text(
         json.dumps({"model": {"provider": "ollama", "name": "global-model"}}),
         encoding="utf-8",
@@ -258,7 +262,7 @@ def test_environment_connection_overrides_do_not_mutate_scoped_settings(
         },
     }
     write_settings(tmp_path, persisted)
-    settings_path = tmp_path / ".code-squid" / "settings.json"
+    settings_path = code_squid_home() / "settings.json"
     before = settings_path.read_text(encoding="utf-8")
     monkeypatch.setenv("CODE_SQUID_BASE_URL", "https://environment.example/v1")
     monkeypatch.setenv("CODE_SQUID_API_KEY", "environment-secret")
@@ -286,7 +290,7 @@ def test_provider_environment_override_uses_that_providers_saved_connection(
         },
     }
     write_settings(tmp_path, persisted)
-    settings_path = tmp_path / ".code-squid" / "settings.json"
+    settings_path = code_squid_home() / "settings.json"
     before = settings_path.read_text(encoding="utf-8")
     monkeypatch.setenv("CODE_SQUID_PROVIDER", "openrouter")
     monkeypatch.setenv("OPENROUTER_API_KEY", "router-environment-key")
@@ -762,8 +766,8 @@ def test_missing_api_key_env_variable_raises_clearly(tmp_path: Path) -> None:
 
 
 def test_invalid_json_produces_clear_failure(tmp_path: Path) -> None:
-    settings_dir = tmp_path / ".code-squid"
-    settings_dir.mkdir()
+    settings_dir = code_squid_home()
+    settings_dir.mkdir(exist_ok=True)
     (settings_dir / "settings.json").write_text("{", encoding="utf-8")
 
     with pytest.raises(ValueError, match="Invalid settings JSON"):

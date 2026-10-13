@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from code_squid.app_paths import workspace_sessions_dir, workspace_undo_dir, workspace_error_log_path
 from types import SimpleNamespace
 
 import pytest
@@ -294,7 +295,7 @@ def test_undo_command_rejects_buffer_from_different_workspace(
     target = other_workspace / "target.txt"
     target.write_text("before", encoding="utf-8")
     store = UndoStore.create(
-        tmp_path / ".code-squid" / "undo", workspace_root=other_workspace
+        workspace_undo_dir(tmp_path), workspace_root=other_workspace
     )
     store.snapshot_file(str(target))
     target.write_text("after", encoding="utf-8")
@@ -573,12 +574,12 @@ def test_run_loop_handles_model_request_error_with_log_and_status(tmp_path) -> N
         session_store=session_store,
     )
 
-    log_path = tmp_path / ".code-squid" / "logs" / "latest.log"
+    log_path = workspace_error_log_path(tmp_path)
     log_text = log_path.read_text(encoding="utf-8")
 
     assert status == 0
     assert display.starts == 0
-    assert display.failure_path == Path(".code-squid/logs/latest.log")
+    assert display.failure_path == workspace_error_log_path(tmp_path)
     assert display.finished is False
     assert session_store.statuses == ["failed"]
     assert "RuntimeError: provider unavailable" in log_text
@@ -594,7 +595,7 @@ def test_run_loop_handles_unrecoverable_exception_with_log_and_failure_status(
 
     display = FakeDisplay()
     session_store = FakeSessionStore()
-    session_store.session_dir = tmp_path / ".code-squid" / "sessions" / "example"
+    session_store.session_dir = workspace_sessions_dir(tmp_path) / "example"
 
     status = _run_loop(
         tmp_path,
@@ -604,7 +605,7 @@ def test_run_loop_handles_unrecoverable_exception_with_log_and_failure_status(
         session_store=session_store,
     )
 
-    log_text = (tmp_path / ".code-squid" / "logs" / "latest.log").read_text(
+    log_text = (workspace_error_log_path(tmp_path)).read_text(
         encoding="utf-8"
     )
     assert status == 1
@@ -612,8 +613,8 @@ def test_run_loop_handles_unrecoverable_exception_with_log_and_failure_status(
     assert display.run_failure is not None
     error, log_path, session_path = display.run_failure
     assert str(error) == "unexpected run failure"
-    assert log_path == Path(".code-squid/logs/latest.log")
-    assert session_path == Path(".code-squid/sessions/example")
+    assert log_path == workspace_error_log_path(tmp_path)
+    assert session_path == workspace_sessions_dir(tmp_path) / "example"
     assert "RuntimeError: unexpected run failure" in log_text
 
 
@@ -655,7 +656,7 @@ def test_run_loop_persistence_failure_is_concise_and_preserves_original_log(
     class LockedSessionStore(FakeSessionStore):
         def __init__(self) -> None:
             super().__init__()
-            self.session_dir = tmp_path / ".code-squid" / "sessions" / "example"
+            self.session_dir = workspace_sessions_dir(tmp_path) / "example"
 
         def update_status(self, status: str) -> None:
             raise PermissionError(5, "Access is denied", "metadata.json")
@@ -669,7 +670,7 @@ def test_run_loop_persistence_failure_is_concise_and_preserves_original_log(
     )
 
     output = capsys.readouterr().out
-    log_text = (tmp_path / ".code-squid" / "logs" / "latest.log").read_text(
+    log_text = (workspace_error_log_path(tmp_path)).read_text(
         encoding="utf-8"
     )
     assert status == 1
@@ -1267,7 +1268,7 @@ def test_resume_session_help_exits_without_follow_up_or_run(monkeypatch, tmp_pat
     assert displays[0].starts == 1
     assert displays[0].run_starts == 0
     assert session_store.load_messages() == []
-    assert not (tmp_path / ".code-squid" / "undo").exists()
+    assert not (workspace_undo_dir(tmp_path)).exists()
 
 
 def test_resume_session_cancelled_task_exits_without_run(monkeypatch, tmp_path, capsys) -> None:
@@ -1490,7 +1491,7 @@ def test_interactive_model_failure_keeps_session_active_and_accepts_follow_up(
     assert _run_interactive(tmp_path) == 0
     assert session_store.statuses == ["failed"]
     assert follow_up_tasks == [("preserved-session", "retry")]
-    assert display.failure_path == Path(".code-squid/logs/latest.log")
+    assert display.failure_path == workspace_error_log_path(tmp_path)
 
 
 def test_interactive_skill_command_lists_current_and_available_skills(
@@ -1815,7 +1816,7 @@ def test_model_failure_survives_status_error_with_successful_diagnostic(monkeypa
 
     monkeypatch.setattr(store, "update_status", fail_status)
     assert _run_loop(tmp_path, ModelFailingLoop(), display, object(), store) == 0
-    assert display.failure_path == Path(".code-squid/logs/latest.log")
+    assert display.failure_path == workspace_error_log_path(tmp_path)
     log = (tmp_path / display.failure_path).read_text(encoding="utf-8")
     assert "Model request failed" in log
     assert "provider unavailable" in log
@@ -1847,7 +1848,7 @@ def test_new_session_construction_uses_normal_failure_boundary(
     status, session_id = _run_new_session_task(tmp_path, "construction failure", load_settings(tmp_path), display)
     assert status == 1
     assert display.run_failure[0] is original
-    assert display.run_failure[1] == (None if broken_log else Path(".code-squid/logs/latest.log"))
+    assert display.run_failure[1] == (None if broken_log else workspace_error_log_path(tmp_path))
     sessions = workspace_sessions_dir(tmp_path)
     if stage == "provider":
         assert session_id is None
@@ -1860,7 +1861,7 @@ def test_new_session_construction_uses_normal_failure_boundary(
         assert metadata["status"] == "failed"
         assert metadata["task"] == "construction failure"
         assert store.load_messages() == []
-        assert display.run_failure[2] == store.session_dir.relative_to(tmp_path)
+        assert display.run_failure[2] == store.session_dir
 
 
 def test_follow_up_construction_failure_is_failed_and_can_resume(monkeypatch, tmp_path) -> None:

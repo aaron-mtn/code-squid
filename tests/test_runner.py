@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from code_squid.app_paths import session_indexes_path
+from code_squid.app_paths import session_indexes_path, workspace_sessions_dir, workspace_undo_dir, workspace_sessions_dir, workspace_undo_dir
 from code_squid.compaction_context import CodeSquidCompactionContextProvider
 from code_squid.settings import (
     CompactionSettings,
@@ -285,13 +285,13 @@ def test_run_construction_uses_default_storage_factories(monkeypatch, tmp_path: 
     assert calls == [
         (
             "session",
-            tmp_path.resolve() / ".code-squid" / "sessions",
+            workspace_sessions_dir(tmp_path),
             "Store defaults",
             tmp_path.resolve(),
         ),
         (
             "undo",
-            tmp_path.resolve() / ".code-squid" / "undo",
+            workspace_undo_dir(tmp_path),
             run.session_store.session_id,
             tmp_path.resolve(),
         ),
@@ -319,7 +319,7 @@ def test_run_construction_explicitly_registers_new_session(
     assert registrations == [
         (
             session_indexes_path(),
-            tmp_path.resolve() / ".code-squid" / "sessions",
+            workspace_sessions_dir(tmp_path),
         )
     ]
 
@@ -405,7 +405,7 @@ def test_storage_factories_can_be_overridden_independently(monkeypatch, tmp_path
     assert session_run.session_store is custom_session
     assert default_undo_calls == [
         (
-            tmp_path.resolve() / ".code-squid" / "undo",
+            workspace_undo_dir(tmp_path),
             custom_session.session_id,
             tmp_path.resolve(),
         )

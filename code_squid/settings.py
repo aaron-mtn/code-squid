@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from code_squid.app_paths import settings_path as app_settings_path
-from code_squid.app_paths import workspace_state_dir
 from squid_providers.catalog import (
     VALID_PROVIDERS, CONNECTION_FIELDS, resolve_config, validate_config,
 )
@@ -171,27 +170,12 @@ def _read_settings_file(settings_path: Path) -> dict[str, Any]:
     return settings
 
 
-def _read_application_settings(workspace_root: Path) -> tuple[Path, dict[str, Any]]:
-    """Read global settings, adopting this workspace's legacy file once.
-
-    ``workspace_root`` remains an input only so an existing installation can seed the
-    application-wide file. Once that file exists, workspace data is ignored.
-    """
-    settings_path = app_settings_path()
-    if settings_path.exists():
-        return settings_path, _read_settings_file(settings_path)
-
-    legacy_path = workspace_state_dir(workspace_root) / "settings.json"
-    raw_settings = _read_settings_file(legacy_path)
-    if legacy_path.exists():
-        try:
-            settings_path.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_json(settings_path, raw_settings)
-        except OSError:
-            # Adoption is best effort. The current process can still honor the
-            # legacy configuration, while all future writes target app home.
-            pass
-    return settings_path, raw_settings
+def _read_application_settings(
+    workspace_root: Path, app_home: Path | str | None = None,
+) -> tuple[Path, dict[str, Any]]:
+    """Read only application settings; workspace-local state is never imported."""
+    settings_path = app_settings_path(app_home)
+    return settings_path, _read_settings_file(settings_path)
 
 
 def _section(settings: dict[str, Any], name: str, settings_path: Path) -> dict[str, Any]:
@@ -507,8 +491,11 @@ def _provider_connections(
     return providers
 
 
-def load_settings(workspace_root: Path) -> Settings:
-    settings_path, raw_settings = _read_application_settings(workspace_root)
+def load_settings(
+    workspace_root: Path, *, app_home: Path | str | None = None,
+) -> Settings:
+    """Load application preferences and environment overrides, never workspace data."""
+    settings_path, raw_settings = _read_application_settings(workspace_root, app_home)
     model_settings = _section(raw_settings, "model", settings_path)
     display_settings = _section(raw_settings, "display", settings_path)
     runtime_settings = _section(raw_settings, "runtime", settings_path)
@@ -601,14 +588,16 @@ def write_approval_mode(workspace_root: Path, approval_mode: str) -> None:
     atomic_write_json(settings_path, raw_settings)
 
 
-def trust_command(workspace_root: Path, command: str) -> None:
+def trust_command(
+    workspace_root: Path, command: str, *, app_home: Path | str | None = None,
+) -> None:
     """Persist one normalized guarded-mode command identity."""
 
     identity = command.casefold().strip()
     if not identity:
         raise ValueError("command identity must be non-empty")
 
-    settings_path, raw_settings = _read_application_settings(workspace_root)
+    settings_path, raw_settings = _read_application_settings(workspace_root, app_home)
     runtime_settings = _section(raw_settings, "runtime", settings_path)
     trusted_commands = list(_trusted_commands(runtime_settings, settings_path))
     if identity not in trusted_commands:

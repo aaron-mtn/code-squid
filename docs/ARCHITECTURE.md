@@ -36,8 +36,9 @@ model adapter -> Core Agent -> action preflight -> approval -> tools -> transcri
 `AgentLoop -> on_event callback` is an optional observer path for compact
 machine-readable runtime facts.
 
-Repository-local `.code-squid/` directories hold workspace runtime state and
-should be gitignored. Application preferences live in the Code Squid home.
+Private runtime state and application preferences live in the Code Squid home.
+Legacy repository-local `.code-squid/` data is neither loaded nor migrated; keep
+it gitignored until separately handled.
 
 The dependency direction is one-way: Code Squid supplies application defaults
 and runtime wiring to reusable Squid Core components. Those reusable components
@@ -91,18 +92,20 @@ three explicit sources, without assuming Core or Providers is on PyPI.
     and understands only the application's built-in Tool activity,
     direct-mutation, verification, and recoverable-failure semantics.
   - `app_paths.py` owns Code Squid application-home policy, the application-wide
-    settings path, repository-local
-    session/undo/error-log locations, the global session-index and recent-
-    workspace locations, and paths for loose resources and Mods. The recent
+    settings path, centralized per-workspace session/undo/error-log locations
+    and ownership manifests, the global session-index and recent-workspace
+    locations, and paths for loose resources and Mods. The recent
     workspace file is `~/.code-squid/recent-workspaces.json` (or the configured
     application home): a newest-first JSON list of at most ten normalized
     absolute paths. The same app-path module owns its tolerant loading,
     deduplication, and update policy. Reusable Core machinery receives workspace
     paths explicitly and has no knowledge of this product history.
+  - `asset_preflight.py` allows built-in reads of the active session's assets
+    through Core's supplied preflight seam. It preserves Strict approval and
+    Hook reasons without trusting other application state or asset writes.
   - `settings.py` reads the application-home `settings.json`, validates
     supported application input, owns sparse provider-scoped connection
-    persistence and one-time adoption of the current workspace's legacy
-    settings, applies product defaults and optional `CODE_SQUID_*` environment
+    persistence, applies product defaults and optional `CODE_SQUID_*` environment
     overrides, and translates the result to generic Core settings.
     `squid_providers.settings` owns effective `ProviderSettings` validation and
     reasoning-mode values. `Settings.to_provider_settings()` carries selection,
@@ -640,9 +643,63 @@ construction. Direct `AgentLoop(...)` construction remains unchanged.
 
 This seam lets a host persist outside the workspace without teaching Core its
 storage layout, indexes, or adapter types. Code Squid's application setup uses
-`code_squid.app_paths` to supply `<repo>/.code-squid/sessions` and
-`<repo>/.code-squid/undo`, while `workspace_root` separately continues to define tool
-execution. Embedding hosts are not special Core concerns.
+`code_squid.app_paths` to supply `<app-home>/workspaces/<workspace-id>/sessions`
+and `<app-home>/workspaces/<workspace-id>/undo`, while `workspace_root` separately
+continues to define tool execution. Embedding hosts are not special Core concerns.
+
+### Central workspace state
+
+`workspace_id()` returns `<workspace-folder-name>-<short-path-hash>` (for example,
+`code-squid-a3f91c2b`). Both parts use the expanded, resolved absolute workspace
+path: the prefix is its basename, and the suffix is the first eight hexadecimal
+digits of its SHA-256 digest. Native `os.path.normcase` folds Windows case and
+separators; POSIX case is preserved. The prefix replaces Windows-invalid/control
+characters and whitespace with hyphens, removes trailing dots/spaces, and is
+limited to 80 UTF-8 bytes before reserved-device-name protection. Empty/root
+names use `workspace`; reserved Windows names receive a `workspace-` prefix.
+Symlink aliases resolve to the same identity. A rename
+or move selects a new bucket; no move detection or reassociation is implemented.
+IDs are location associations, not persistent identities for replaced projects.
+
+```text
+<app-home>/workspaces/<workspace-id>/
+  workspace.json                 # version 1 and normalized workspace_root
+  sessions/<session-id>/          # unchanged Core format, including assets
+  undo/                          # one latest buffer for this workspace
+  logs/latest.log
+```
+
+All application storage helpers prepare or validate `workspace.json` before
+returning a data path. Discovery can create only the bucket and manifest, not a
+session or undo buffer. Existing missing, malformed, or differently owned
+manifests fail closed; storage and manifest symlink redirection is rejected.
+Short-hash collisions fail against the full normalized path in the manifest
+before any saved data is used or changed; no alternate bucket is selected.
+Old full-hash development directories are untouched and never discovered as a
+fallback. Sessions, undo, and logs all use the same workspace naming resolver.
+Manifest writes use Core's atomic JSON helper. Workspace switching clears the
+active session; tools and undo targets still use the actual workspace root.
+Session IDs remain unique only within their sessions root.
+
+The coding-run builder passes its resolved explicit/environment application home
+to storage, settings, resources, and command-trust persistence. The existing
+`CODE_SQUID_SESSION_INDEXES` override still selects the supplementary registry.
+Supplied stores/factories retain their explicit host-owned locations.
+
+New PDF renders remain under the current session's assets. Code Squid supplies
+`SessionAssetPreflight` to allow only built-in `read_file` access to that resolved
+asset tree, without an outside-workspace prompt in Balanced mode. The ordinary
+approval policy still handles Strict mode and Hook reasons, and only approved
+execution receives Core's external-access flag. Other sessions, application
+settings, custom readers, and writes receive the normal workspace checks.
+
+Legacy workspace sessions, undo, logs, settings, and PDF paths are untouched and
+never imported. Registry entries for legacy roots are not rewritten; Code Squid's
+session UI discovers only the selected workspace's central root. Core's generic
+cross-root helpers continue to inspect whichever roots their caller supplies.
+Keep configured application homes outside projects. Core's storage, replay,
+asset loading, and undo implementation remain application-independent and
+unchanged.
 
 Hosts that already resolved a Skill and its executable tool registry may pass
 them together as `resolved_skill` and `resolved_tools`. Core then skips Skill
@@ -1027,8 +1084,8 @@ provider connections, product defaults, selection, and environment overrides.
 `squid_providers.settings.ProviderSettings` for model/connection controls.
 Core never selects or configures concrete transports.
 
-The application-home file is authoritative. If absent, the current workspace's
-legacy settings can be adopted best-effort; workspaces are never merged.
+Only the application-home settings file is read. Missing settings use defaults;
+legacy workspace settings are never adopted or merged.
 Provider switching preserves other saved connections and the exact configured
 model ID. Environment overrides affect effective process settings without
 being copied into saved configuration. Field-specific writers preserve
@@ -1256,7 +1313,7 @@ memory. See [selection, validation, persistence, replay, and event details](IMPL
 
 ## Sessions, Resume, Undo, And Interruption
 
-Code Squid supplies explicit workspace-local session/undo/log paths to generic
+Code Squid supplies explicit application-home session/undo/log paths to generic
 Core storage. Sessions contain metadata, append-only canonical history,
 model-request observations, a derived readable transcript, and assets when
 needed. Effective replay applies system reconciliation and valid compaction
@@ -1346,7 +1403,7 @@ reading/editing preferences, and final report style. Application wiring imports
 specialization module.
 
 `code_squid/settings.py` owns application-wide settings parsing, persistence,
-Code Squid defaults and selection, legacy workspace adoption, and optional
+Code Squid defaults and selection, and optional
 environment overrides. `code_squid.app_paths` owns the settings path policy.
 The settings module produces `squid_core.settings.RuntimeSettings`; Core owns
 validation of generic runtime semantics and enforcement.
@@ -1403,7 +1460,7 @@ Individual built-in tool behavior stays in `squid_core/tools/builtins/`.
 `squid_core/storage/` owns generic durable session and undo persistence, atomic
 writes, session indexing/discovery, and diagnostic error logging. Every
 filesystem location is explicit. `code_squid/app_paths.py` owns Code Squid's concrete
-`.code-squid` session, undo, index, and error-log locations and passes them into
+application-home session, undo, index, and error-log locations and passes them into
 those mechanisms. In-memory session behavior stays in `squid_core/session.py`;
 live display stays in `code_squid/console/ui/`.
 
