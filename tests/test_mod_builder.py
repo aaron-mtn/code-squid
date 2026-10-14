@@ -70,8 +70,8 @@ def test_application_run_uses_bundled_mod_and_retains_user_home(monkeypatch, tmp
 
 
 def test_user_mods_and_collision_remain_unchanged(monkeypatch, tmp_path):
-    scaffold_mod_package(tmp_path, 'user-mod', 'User Mod')
-    scaffold_mod_package(tmp_path, 'mod-builder', 'User collision')
+    scaffold_mod_package(tmp_path / 'mods', 'user-mod', 'User Mod')
+    scaffold_mod_package(tmp_path / 'mods', 'mod-builder', 'User collision')
     before = {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
     monkeypatch.setenv('CODE_SQUID_HOME', str(tmp_path))
     discovered = mods.discover_mods(tmp_path)
@@ -97,18 +97,55 @@ def test_complete_guide_and_examples(tmp_path):
 
 
 def test_scaffolding_components_and_core_validation(tmp_path):
-    assert execute('scaffold-mod-package', tmp_path, {'package_name': 'starter', 'description': 'Starter'})['path'] == 'mods/starter'
+    assert execute('scaffold-mod-package', tmp_path, {'package_name': 'starter', 'description': 'Starter'})['path'] == 'starter'
     for kind in ('tool', 'hook'):
-        args = {'package_path': 'mods/starter', 'kind': kind, 'name': 'custom-' + kind}
+        args = {'package_path': 'starter', 'kind': kind, 'name': 'custom-' + kind}
         assert execute('scaffold-mod-component', tmp_path, args)['ok']
         assert not execute('scaffold-mod-component', tmp_path, args)['ok']
-    assert execute('validate-mod-package', tmp_path, {'package_path': 'mods/starter'})['ok']
+    assert execute('validate-mod-package', tmp_path, {'package_path': 'starter'})['ok']
     assert not execute('scaffold-mod-package', tmp_path, {'package_name': 'starter', 'description': 'Overwrite'})['ok']
     with pytest.raises(ValueError, match='Protected built-in'):
-        scaffold_mod_component(tmp_path, 'mods/starter', 'tool', 'read_file')
-    skill = tmp_path / 'mods/starter/skills/starter/SKILL.md'
+        scaffold_mod_component(tmp_path, 'starter', 'tool', 'read_file')
+    skill = tmp_path / 'starter/skills/starter/SKILL.md'
     skill.write_text(skill.read_text().replace('allowed-tools: []', 'allowed-tools: ["absent"]'), encoding='utf-8')
-    assert not execute('validate-mod-package', tmp_path, {'package_path': 'mods/starter'})['ok']
+    assert not execute('validate-mod-package', tmp_path, {'package_path': 'starter'})['ok']
+
+
+@pytest.mark.parametrize('workspace_name', ['mods', 'drafts'])
+@pytest.mark.parametrize('destination', [None, 'standalone/starter', 'mods/starter', r'standalone\starter'])
+def test_scaffold_destination_round_trip(tmp_path, workspace_name, destination):
+    workspace = tmp_path / workspace_name
+    args = {'package_name': 'starter', 'description': 'Starter'}
+    if destination is not None:
+        args['destination'] = destination
+    # Exercise the registry used by an actual selected Builder, not just its
+    # Python helper: the active workspace must survive resource-home selection.
+    selected = mods.resolve_mod('mod-builder', tmp_path / 'home', workspace_root=workspace)
+    result = selected.tools['scaffold-mod-package']['execute'](tmp_path / 'ignored', **args)
+    expected_relative = destination.replace('\\', '/') if destination is not None else 'starter'
+    expected = workspace / expected_relative
+    assert result['ok']
+    assert result['path'] == expected_relative
+    assert result['absolute_path'] == str(expected.resolve())
+    assert all((Path(result['absolute_path']) / filename).is_file() for filename in result['files'])
+    if destination is None:
+        assert not (workspace / 'mods').exists()
+    component = execute('scaffold-mod-component', workspace,
+                        {'package_path': result['path'], 'kind': 'hook', 'name': 'custom-hook'})
+    assert component['ok']
+    assert component['path'] == expected_relative + '/hooks/custom-hook'
+    validation = execute('validate-mod-package', workspace, {'package_path': result['path']})
+    assert validation['ok'] and validation['package_path'] == result['path']
+    # A standalone package can also be validated with itself as the boundary.
+    assert execute('validate-mod-package', expected)['ok']
+
+
+@pytest.mark.parametrize('destination', ['', '.', 'standalone/wrong-name'])
+def test_scaffold_rejects_invalid_destination_without_writes(tmp_path, destination):
+    result = execute('scaffold-mod-package', tmp_path,
+                     {'package_name': 'starter', 'description': 'Starter', 'destination': destination})
+    assert not result['ok']
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.parametrize('path', ['../escape', '..\\escape', '/tmp/escape', 'C:\\escape', 'C:escape'])
@@ -138,7 +175,7 @@ def test_missing_or_damaged_bundled_resources(monkeypatch, tmp_path, damage):
     monkeypatch.setattr(mods, 'bundled_mod_home', lambda: home)
     if damage == 'manifest':
         (copied / 'mod.yaml').unlink()
-        scaffold_mod_package(tmp_path / 'user', 'mod-builder', 'Collision')
+        scaffold_mod_package(tmp_path / 'user/mods', 'mod-builder', 'Collision')
         assert not mods.discover_mods(tmp_path / 'user')['mod-builder'].valid
         with pytest.raises(ModResolutionError):
             mods.resolve_mod('mod-builder', tmp_path / 'user')

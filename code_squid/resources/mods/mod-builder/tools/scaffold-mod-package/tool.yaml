@@ -14,4 +14,4 @@ args:
     required: true
   destination:
     type: string
-    description: Optional workspace-relative standalone destination; defaults to mods/package-name.
+    description: Optional workspace-relative destination; defaults to package-name directly under the workspace. Result path is workspace-relative for helpers; absolute_path is for file tools.

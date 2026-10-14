@@ -792,6 +792,15 @@ workspace. The guide lives in structured `data.guide` so Core's top-level string
 bounds do not truncate the authoring contract. Readers report missing, invalid
 UTF-8, and incomplete canonical resources as unavailable. Test coverage lives
 in `tests/test_mod_builder.py` alongside existing Mod integration tests.
+The CLI-selected workspace passes unchanged through `agent_setup` and Core's
+Tool context; selecting the bundled Builder changes its resource home, not the
+authoring workspace. Package scaffolding defaults to `<workspace>/<package-name>`.
+Explicit destinations, component `package_path`, and validation `package_path`
+are relative to that same workspace and share resolved containment checks;
+there is no implicit `mods/` prefix or folder-name inference. Scaffold results
+provide workspace-relative `path` for helper calls, resolved `absolute_path`
+for built-in file Tools, and package-relative `files`. Installed user Mods still
+live under `<app-home>/mods/`; authoring does not change discovery or loading.
 Custom Mod Tools keep their implementation in `tools/<name>/`; the selected
 Skill's `allowed-tools` activates them, and `mod.yaml` selects Mod-wide Hooks.
 Core preserves accent metadata but does not interpret its presentation.

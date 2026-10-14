@@ -34,16 +34,20 @@ def _inside(workspace, candidate):
 
 
 def scaffold_mod_package(workspace, package_name, description, destination=None):
-    """Create only the canonical, valid Skill-only starter package."""
+    """Create a Skill-only starter at a workspace-relative destination.
+
+    By default the package is a direct child of the workspace. The result's
+    path is workspace-relative for authoring helpers; absolute_path is for
+    built-in file tools, which require absolute paths.
+    """
     if not isinstance(package_name, str) or not SAFE_NAME.fullmatch(package_name):
         raise ValueError("Package name must use lowercase letters, numbers, and hyphens")
     description = " ".join(str(description or "").splitlines()).strip()
     if not description:
         raise ValueError("Description is required")
-    # Omitted destination is the first-party Builder's normal CODE_SQUID_HOME
-    # workflow. Keep that deterministic in this authoritative implementation;
-    # callers request an intentional standalone layout by passing destination.
-    package_destination = destination if destination is not None else Path("mods") / package_name
+    # The execution workspace is an authoring boundary, not an application
+    # home. Do not append an installation folder or infer one from its basename.
+    package_destination = destination if destination is not None else package_name
     root, package_dir = _inside(workspace, package_destination)
     if package_dir == root:
         raise ValueError("Package destination must be below the supplied workspace")
@@ -78,6 +82,7 @@ def scaffold_mod_package(workspace, package_name, description, destination=None)
         "ok": True,
         "package": package_name,
         "path": str(package_dir.relative_to(root)).replace("\\", "/"),
+        "absolute_path": str(package_dir),
         "files": ["mod.yaml", f"skills/{package_name}/SKILL.md"],
     }
 
@@ -187,7 +192,7 @@ def validate_mod_package(workspace, package_path="."):
     manifest_path = package_dir / "mod.yaml"
     if not manifest_path.is_file():
         _error(errors, "manifest.missing", package_dir, manifest_path, "Missing mod.yaml")
-        return {"ok": False, "package_path": str(package_dir.relative_to(root)), "errors": errors}
+        return {"ok": False, "package_path": str(package_dir.relative_to(root)).replace("\\", "/"), "errors": errors}
     proposal = None
     mod = {"name": package_dir.name}
     try:
