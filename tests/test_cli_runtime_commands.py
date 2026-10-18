@@ -685,6 +685,31 @@ def test_runtime_changes_are_used_by_subsequent_runs_without_restart(
     assert run_settings == [("ollama", "qwen-new", "always")]
 
 
+@pytest.mark.parametrize("resume", [False, True])
+def test_hooks_command_refreshes_new_and_resumed_run_settings(tmp_path, monkeypatch, resume):
+    """The normal command loop carries settings into each run, including resume."""
+    saved = _saved_session(tmp_path, "Saved") if resume else None
+    captured = []
+    def run_new(workspace_root, task, settings, display, skill_name=None, **kwargs):
+        captured.append(settings.runtime.built_in_hook_settings)
+        return 0, "active-session"
+    def run_followup(workspace_root, session_id, task, settings, display, skill_name=None, **kwargs):
+        captured.append(settings.runtime.built_in_hook_settings)
+        return 0, session_id
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_display", lambda *a: QuietDisplay())
+    commands = (["/resume latest"] if saved else []) + ["First", "/hooks", "Second", "/exit"]
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._prompt_task", _prompt_sequence(commands))
+    answers = iter(["1", ""])
+    monkeypatch.setattr("code_squid.console.cli.runtime_commands.prompt_multiline_input", lambda *a: next(answers))
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_new_session_task", run_new)
+    monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_follow_up_task", run_followup)
+    assert _run_interactive(tmp_path) == 0
+    assert captured == [
+        {"too_many_reads": True, "post_verification": True, "repeated_failure": False},
+        {"too_many_reads": False, "post_verification": True, "repeated_failure": False},
+    ]
+
+
 def _saved_session(workspace_root: Path, task: str) -> SessionStore:
     store = SessionStore.create(
         workspace_sessions_dir(workspace_root),

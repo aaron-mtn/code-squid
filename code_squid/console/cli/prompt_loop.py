@@ -80,6 +80,7 @@ Runtime:
   /model shows the effective model; /model <name> selects its exact ID.
   /safety shows or changes the safety mode (strict, balanced, yolo).
   /reasoning [show|hide] reports or changes reasoning display.
+  /hooks opens individual application-wide built-in hook controls.
   /compact-at <tokens> sets the automatic compaction trigger (for example, 30k).
 
 Sessions and workspace:

@@ -439,3 +439,37 @@ def test_disabled_saved_hook_is_not_run(
     )
 
     assert "DISK_DISABLED_MARKER" not in _message_text(messages)
+
+
+@pytest.mark.parametrize("disabled_id", list(DEFAULT_BUILT_IN_HOOK_SETTINGS))
+def test_persisted_hook_choices_apply_per_run_and_continuation(monkeypatch, tmp_path, disabled_id):
+    from code_squid.settings import load_settings, write_built_in_hook_enabled
+    _install_runner_fakes(monkeypatch)
+    # Start with all enabled to prove each switch leaves every sibling active,
+    # including the hook whose application default is disabled.
+    for hook_id in DEFAULT_BUILT_IN_HOOK_SETTINGS:
+        write_built_in_hook_enabled(tmp_path, hook_id, True)
+    package_hook = ManualContextHook("PACKAGE_MARKER")
+    def build(settings, **kwargs):
+        return build_coding_task_run(workspace_root=tmp_path, task="Task", settings=settings,
+                                     display=FakeDisplay(), hooks=[package_hook], **kwargs)
+    first = build(load_settings(tmp_path))
+    first_hooks = list(first.loop.hook_runner.hooks)
+    write_built_in_hook_enabled(tmp_path, disabled_id, False)
+    # Explicit settings snapshots remain authoritative, even on continuations.
+    captured = load_settings(tmp_path)
+    second = build(captured, session=first.session, session_store=first.session_store)
+    types = {"too_many_reads": TooManyReadsNudge, "post_verification": PostVerificationNudge,
+             "repeated_failure": RepeatedFailureNudge}
+    assert [type(h) for h in second.loop.hook_runner.hooks] == [
+        ManualContextHook, *(kind for name, kind in types.items() if name != disabled_id),
+    ]
+    assert second.loop.hook_runner.hooks[0] is package_hook
+    assert first.loop.hook_runner.hooks == first_hooks
+    assert len(first_hooks) == 4
+    assert second.session is first.session
+    third = build(captured)
+    assert [type(h) for h in third.loop.hook_runner.hooks] == [type(h) for h in second.loop.hook_runner.hooks]
+    write_built_in_hook_enabled(tmp_path, disabled_id, True)
+    retained = build(captured, session=first.session, session_store=first.session_store)
+    assert [type(h) for h in retained.loop.hook_runner.hooks] == [type(h) for h in second.loop.hook_runner.hooks]

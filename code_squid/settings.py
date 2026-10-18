@@ -608,6 +608,27 @@ def trust_command(
         atomic_write_json(settings_path, raw_settings)
 
 
+def write_built_in_hook_enabled(workspace_root: Path, hook_id: str, enabled: bool) -> None:
+    """Atomically save one application hook override, preserving all peers.
+
+    Validate existing hook overrides too: a partial edit must not silently repair
+    or overwrite malformed user settings. No Mod or user-hook metadata is touched.
+    """
+    if not isinstance(hook_id, str) or hook_id not in DEFAULT_BUILT_IN_HOOK_SETTINGS:
+        raise ValueError(f"Unknown built-in hook: {hook_id}")
+    if not isinstance(enabled, bool):
+        raise ValueError("enabled must be a boolean")
+    settings_path, raw_settings = _read_application_settings(workspace_root)
+    runtime = _section(raw_settings, "runtime", settings_path)
+    _built_in_hook_settings(runtime, settings_path)
+    overrides = dict(runtime.get("built_in_hook_settings", {}))
+    overrides[hook_id] = enabled
+    runtime["built_in_hook_settings"] = overrides
+    raw_settings["runtime"] = runtime
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(settings_path, raw_settings)
+
+
 def write_show_reasoning(workspace_root: Path, show_reasoning: bool) -> None:
     """Persist the reasoning presentation preference without changing the model."""
 

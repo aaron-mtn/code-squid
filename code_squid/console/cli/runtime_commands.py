@@ -6,6 +6,8 @@ from pathlib import Path
 import re
 
 from code_squid.console.ui.banner import FRIENDLY_APPROVAL_MODES
+from code_squid.built_in_hooks import built_in_hooks_payload
+from code_squid.console.ui.prompt_input import prompt_multiline_input
 from code_squid.provider_setup import (
     PROVIDER_PROFILES,
     active_environment_overrides,
@@ -23,6 +25,7 @@ from code_squid.settings import (
     write_approval_mode,
     write_compaction_trigger_input_tokens,
     write_show_reasoning,
+    write_built_in_hook_enabled,
 )
 from squid_core.compaction.compaction_status import format_token_count
 
@@ -59,11 +62,14 @@ def handle_runtime_command(
         "/safety",
         "/compact-at",
         "/reasoning",
+        "/hooks",
     }:
         return False, settings
 
     try:
-        if parts[0] == "/provider":
+        if parts[0] == "/hooks":
+            _handle_hooks(workspace_root, parts[1:])
+        elif parts[0] == "/provider":
             _handle_provider(workspace_root, parts[1:], settings)
         elif parts[0] == "/model":
             _handle_model(workspace_root, parts[1:])
@@ -83,6 +89,42 @@ def handle_runtime_command(
         # feedback while retaining the last known-good in-memory settings.
         print(f"Settings change failed: {error}")
         return True, settings
+
+
+def _handle_hooks(workspace_root: Path, args: list[str]) -> None:
+    """Toggle individual global hooks using the existing CLI input surface.
+
+    Save each selection immediately and reload before displaying the next list.
+    Cancellation leaves previously saved choices intact, as other settings do.
+    """
+    if args:
+        print("Usage: /hooks")
+        return
+    while True:
+        hooks = built_in_hooks_payload(load_settings(workspace_root))["hooks"]
+        print("Built-in Code Squid hooks (application-wide; future tasks and follow-ups):")
+        for number, hook in enumerate(hooks, 1):
+            state = "enabled" if hook["enabled"] else "disabled"
+            default = "enabled" if hook["default_enabled"] else "disabled"
+            print(f"  {number}. {hook['name']}: {state} (default: {default})")
+            print(f"     {hook['description']}")
+        try:
+            choice = prompt_multiline_input("Hook number to toggle; Enter to return: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            return
+        if not choice:
+            return
+        if not choice.isascii() or not choice.isdigit() or not 1 <= int(choice) <= len(hooks):
+            print("Choose a listed hook number, or Enter to return.")
+            continue
+        hook = hooks[int(choice) - 1]
+        try:
+            write_built_in_hook_enabled(workspace_root, hook["id"], not hook["enabled"])
+        except (OSError, ValueError) as error:
+            # Earlier choices were already saved. Return through the normal
+            # reload so a later failure cannot restore stale settings in memory.
+            print(f"Settings change failed: {error}")
+            return
 
 
 def _handle_reasoning(workspace_root: Path, args: list[str]) -> None:

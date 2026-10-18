@@ -497,6 +497,18 @@ HookRunner inputs remain separate from built-in enablement. Hooks never infer
 semantic task completion or force a final response. See [behavioral Hook state
 and thresholds](IMPLEMENTATION_NOTES.md#built-in-behavioral-hooks).
 
+`code_squid.built_in_hooks` exposes presentation metadata and effective states
+for these three stable IDs; it does not construct hooks or change their order.
+CLI `/hooks` and Desktop's Hooks tab use this same inventory and
+`settings.write_built_in_hook_enabled` to persist one validated override through
+the existing atomic JSON writer in application-wide settings. Absent overrides
+retain individual defaults. These controls do not edit user `hook.yaml` flags,
+Mod selections, bundled components, or `mod.yaml`. Desktop labels their global
+scope inline and saves immediately, independently of the Mod's Save action.
+Existing per-run settings remain authoritative: Desktop reloads at each run
+submission (including resumed-session follow-ups), and CLI carries its effective
+settings into new and resumed runs. Saving never mutates a constructed runner.
+
 Core retains `read_result_trimmed` as a generic notification of source ranges
 left visible by request-only trimming. It also retains `compaction_applied` for
 host hooks that track model-visible context. Neither notification installs a
