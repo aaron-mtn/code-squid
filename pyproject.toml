@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "code-squid"
-version = "0.1.1"
+version = "0.1.2"
 description = "A small local-first command-line coding agent for repository work"
 readme = "README.md"
 license = "MIT"
