@@ -705,8 +705,8 @@ def test_hooks_command_refreshes_new_and_resumed_run_settings(tmp_path, monkeypa
     monkeypatch.setattr("code_squid.console.cli.prompt_loop._run_follow_up_task", run_followup)
     assert _run_interactive(tmp_path) == 0
     assert captured == [
-        {"too_many_reads": True, "post_verification": True, "repeated_failure": False},
         {"too_many_reads": False, "post_verification": True, "repeated_failure": False},
+        {"too_many_reads": True, "post_verification": True, "repeated_failure": False},
     ]
 
 

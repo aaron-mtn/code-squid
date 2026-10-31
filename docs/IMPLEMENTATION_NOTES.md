@@ -421,8 +421,8 @@ metadata used by hosts; it does not control prompt rendering.
 Code Squid owns `RepeatedFailureNudge`, `TooManyReadsNudge`, and
 `PostVerificationNudge` in `code_squid/hooks/`, importing only generic lifecycle
 contracts from Core. Its composition order is `TooManyReadsNudge`,
-`PostVerificationNudge`, then `RepeatedFailureNudge`. The first two default to
-enabled; repeated-failure guidance defaults to disabled.
+`PostVerificationNudge`, then `RepeatedFailureNudge`. Only post-verification
+guidance defaults to enabled; read and repeated-failure guidance default to disabled.
 `TooManyReadsNudge` counts successful `read_file` results and the source lines
 they returned since the last successful `write_file` or `edit_file`.
 Commands, other Tools, and all failed results are neutral: they neither
@@ -449,12 +449,13 @@ behavioral counters intentionally survive transcript compaction; only a
 successful built-in mutation or `before_run` resets them. A successful mutation
 also clears any armed read warning before the model boundary, so an earlier
 sibling read cannot describe state that the later edit reset. The thresholds
-remain constructor arguments in Code Squid, which enables the Hook by
-default. Application settings expose the small
+remain constructor arguments in Code Squid; the Hook runs only when explicitly
+enabled. Application settings expose the small
 `runtime.built_in_hook_settings` mapping, whose stable IDs are
-`too_many_reads`, `post_verification`, and `repeated_failure`. The first two
-default to enabled;
-`repeated_failure` defaults to disabled.
+`too_many_reads`, `post_verification`, and `repeated_failure`. Only `post_verification`
+defaults to enabled; `too_many_reads` and `repeated_failure` default to disabled.
+Enable read guidance through CLI `/hooks`, Desktop's Hooks tab, or an explicit
+`true` value for `runtime.built_in_hook_settings.too_many_reads` in application JSON.
 `code_squid.agent_setup` consults those IDs while assembling a run and omits
 each disabled built-in from the `HookRunner`; the application Hook
 implementations do not know about application enablement. Caller-supplied,

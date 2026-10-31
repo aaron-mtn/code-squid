@@ -115,19 +115,20 @@ def test_invalid_model_request_retry_settings_raise(
         load_settings(tmp_path)
 
 
-def test_built_in_hooks_can_be_disabled_in_runtime_settings(
-    tmp_path: Path,
+@pytest.mark.parametrize("enabled", [False, True])
+def test_read_guidance_explicit_setting_overrides_default(
+    tmp_path: Path, enabled: bool,
 ) -> None:
     write_settings(
         tmp_path,
-        {"runtime": {"built_in_hook_settings": {"too_many_reads": False}}},
+        {"runtime": {"built_in_hook_settings": {"too_many_reads": enabled}}},
     )
 
     settings = load_settings(tmp_path)
 
     assert settings.runtime.built_in_hook_settings == {
         **DEFAULT_BUILT_IN_HOOK_SETTINGS,
-        "too_many_reads": False,
+        "too_many_reads": enabled,
     }
 
 

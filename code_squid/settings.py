@@ -44,8 +44,9 @@ DEFAULT_MAX_TOOL_STEPS = None
 DEFAULT_STREAM_ASSISTANT_TEXT = False
 # Stable application-level IDs keep enablement policy out of the generic Hook
 # implementations and let future Mod/user configuration target one built-in.
+# Read guidance is opt-in; saved choices continue to override these defaults.
 DEFAULT_BUILT_IN_HOOK_SETTINGS = {
-    "too_many_reads": True,
+    "too_many_reads": False,
     "post_verification": True,
     "repeated_failure": False,
 }

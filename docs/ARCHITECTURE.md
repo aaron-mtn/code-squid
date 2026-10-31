@@ -496,9 +496,11 @@ state at `before_model_turn`, so a later sibling edit cannot leave stale advice
 armed. Event-specific recovery guidance remains on `tool_result`.
 
 Application setup owns composition, enablement, thresholds, and guidance texts.
-The default order is reads, verification, then repeated failures; the first two
-are enabled and repeated failures are disabled. Caller, Mod, user, and explicit
-HookRunner inputs remain separate from built-in enablement. Hooks never infer
+The composition order is reads, verification, then repeated failures; only
+verification is enabled by default. Read guidance and repeated failures are opt-in.
+CLI, Desktop, and Chat Squid inherit these application defaults; explicit saved
+choices and per-run settings retain their existing precedence. Caller, Mod, user,
+and explicit HookRunner inputs remain separate from built-in enablement. Hooks never infer
 semantic task completion or force a final response. See [behavioral Hook state
 and thresholds](IMPLEMENTATION_NOTES.md#built-in-behavioral-hooks).
 

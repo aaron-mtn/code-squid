@@ -15,15 +15,17 @@ from code_squid.settings import (
 def test_defaults_and_individual_writes_preserve_peers(tmp_path):
     before = load_settings(tmp_path)
     rows = built_in_hooks_payload(before)["hooks"]
-    assert {row["id"]: row["enabled"] for row in rows} == DEFAULT_BUILT_IN_HOOK_SETTINGS
+    assert {row["id"]: row["enabled"] for row in rows} == {
+        "too_many_reads": False, "post_verification": True, "repeated_failure": False,
+    }
     assert {row["id"]: row["default_enabled"] for row in rows} == DEFAULT_BUILT_IN_HOOK_SETTINGS
     path = settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"custom": [1], "runtime": {"max_tool_steps": 12}}))
-    write_built_in_hook_enabled(tmp_path, "too_many_reads", False)
+    write_built_in_hook_enabled(tmp_path, "too_many_reads", True)
     write_built_in_hook_enabled(tmp_path, "repeated_failure", True)
     assert load_settings(tmp_path).runtime.built_in_hook_settings == {
-        "too_many_reads": False, "post_verification": True, "repeated_failure": True,
+        "too_many_reads": True, "post_verification": True, "repeated_failure": True,
     }
     raw = json.loads(path.read_text())
     assert raw["custom"] == [1]
@@ -70,11 +72,11 @@ def test_cli_interactive_toggle_reload_and_defaults(monkeypatch, tmp_path, capsy
     handled, settings = runtime_commands.handle_runtime_command(tmp_path, "/hooks", load_settings(tmp_path))
     assert handled
     assert settings.runtime.built_in_hook_settings == {
-        "too_many_reads": False, "post_verification": True, "repeated_failure": True,
+        "too_many_reads": True, "post_verification": True, "repeated_failure": True,
     }
     output = capsys.readouterr().out
-    assert "Read activity guidance: enabled (default: enabled)" in output
-    assert "Read activity guidance: disabled (default: enabled)" in output
+    assert "Read activity guidance: enabled (default: disabled)" in output
+    assert "Read activity guidance: disabled (default: disabled)" in output
     assert "Repeated failure guidance: disabled (default: disabled)" in output
     assert "Repeated failure guidance: enabled (default: disabled)" in output
     assert settings == load_settings(tmp_path)
@@ -110,6 +112,6 @@ def test_cli_later_write_failure_retains_earlier_saved_choice(monkeypatch, tmp_p
         write_built_in_hook_enabled(workspace, hook_id, enabled)
     monkeypatch.setattr(runtime_commands, "write_built_in_hook_enabled", save)
     _, settings = runtime_commands.handle_runtime_command(tmp_path, "/hooks", load_settings(tmp_path))
-    assert settings.runtime.built_in_hook_settings["too_many_reads"] is False
+    assert settings.runtime.built_in_hook_settings["too_many_reads"] is True
     assert settings.runtime.built_in_hook_settings["post_verification"] is True
     assert settings == load_settings(tmp_path)

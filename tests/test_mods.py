@@ -219,7 +219,6 @@ def test_one_session_switches_default_mods_and_back_as_coherent_runs(
         (
             "hook-a",
             "Code Squid",
-            "Code Squid",
         ),
     )
     assert observed[1][:3] == (
@@ -228,13 +227,11 @@ def test_one_session_switches_default_mods_and_back_as_coherent_runs(
         (
             "hook-b",
             "Code Squid",
-            "Code Squid",
         ),
     )
     assert observed[2][0] is None
     assert set(observed[2][1]) == set(TOOLS)
     assert observed[2][2] == (
-        "Code Squid",
         "Code Squid",
     )
     for _, _, _, messages in observed:
@@ -302,7 +299,7 @@ def test_session_switches_packaged_skills_and_mods(tmp_path: Path, reopen: bool)
         assert list(current.loop.tool_executor.tools) == [tool]
         assert [item["function"]["name"] for item in definitions] == [tool]
         assert [item.source for item in current.loop.hook_runner.hooks] == [
-            hook, "Code Squid", "Code Squid",
+            hook, "Code Squid",
         ]
         persisted = current.session_store.load_messages()
         assert sum(message["role"] == "system" for message in persisted) == 1

@@ -267,11 +267,26 @@ def test_default_runner_behavior_does_not_load_user_hooks(
 def test_code_squid_enables_configured_built_in_hooks_by_default() -> None:
     runner = build_hook_runner()
 
-    assert [type(hook) for hook in runner.hooks] == [
-        TooManyReadsNudge,
-        PostVerificationNudge,
-    ]
+    assert [type(hook) for hook in runner.hooks] == [PostVerificationNudge]
     assert all(hook.source == "Code Squid" for hook in runner.hooks)
+
+
+@pytest.mark.parametrize("enabled", [None, True, False])
+def test_coding_task_read_guidance_is_opt_in(monkeypatch, tmp_path, enabled):
+    """Default construction omits read guidance; a partial override enables it."""
+    _install_runner_fakes(monkeypatch)
+    settings = _settings({} if enabled is None else {"too_many_reads": enabled})
+    run = build_coding_task_run(
+        workspace_root=tmp_path,
+        task="Inspect the workspace",
+        display=FakeDisplay(),
+        settings=settings,
+    )
+
+    expected = [PostVerificationNudge]
+    if enabled:
+        expected.insert(0, TooManyReadsNudge)
+    assert [type(hook) for hook in run.loop.hook_runner.hooks] == expected
 
 
 @pytest.mark.parametrize(
@@ -347,6 +362,7 @@ def test_coding_task_settings_select_built_in_hooks(
         runtime=RuntimeSettings(
             built_in_hook_settings={
                 **DEFAULT_BUILT_IN_HOOK_SETTINGS,
+                "too_many_reads": True,
                 "post_verification": False,
                 "repeated_failure": True,
             }
