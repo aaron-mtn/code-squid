@@ -181,7 +181,7 @@ Code Squid comes with four built-in tools:
 | --- | --- |
 | `read_file` | Read code, text files, and supported documents and images |
 | `write_file` | Create or replace files |
-| `apply_patch` | Make targeted changes to existing files |
+| `edit_file` | Make targeted changes to existing files |
 | `run_command` | Run shell commands and tests |
 
 Custom tools can also be added through Skills and Mods.
@@ -206,7 +206,7 @@ Use `/sessions` to browse saved sessions and `/resume` to continue one.
 
 Sessions are associated with the workspace's location. Moving or renaming a workspace means its previous sessions will not automatically appear under the new path.
 
-Code Squid can also undo file changes made during the latest run using `/undo`. This covers changes made through `write_file` and `apply_patch`, but not shell commands or custom tools. Undo is not a replacement for Git.
+Code Squid can also undo file changes made during the latest run using `/undo`. This covers changes made through `write_file` and `edit_file`, but not shell commands or custom tools. Undo is not a replacement for Git.
 
 For longer conversations, Code Squid uses **context compaction** to summarize older messages and make room for new ones. This helps the agent continue working without exceeding the model's context limit, although some details may be lost during summarization.
 

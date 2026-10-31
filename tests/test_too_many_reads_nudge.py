@@ -87,7 +87,7 @@ def test_fifth_successful_read_renders_first_nudge_at_model_boundary() -> None:
     assert _guidance(hook) == ""
 
 
-@pytest.mark.parametrize("mutation", ["apply_patch", "write_file"])
+@pytest.mark.parametrize("mutation", ["edit_file", "write_file"])
 def test_later_mutation_discards_armed_read_guidance(mutation: str) -> None:
     hook = TooManyReadsNudge()
     _successful_reads(hook, DEFAULT_FIRST_NUDGE_READS)
@@ -193,7 +193,7 @@ def test_successful_mutation_resets_returned_line_volume() -> None:
     broad_result = {"start_line": 1, "end_line": 1_000}
 
     assert _result(hook, "read_file", result_metadata=broad_result) is None
-    assert _result(hook, "apply_patch") is None
+    assert _result(hook, "edit_file") is None
     assert _result(hook, "read_file", result_metadata=broad_result) is None
 
 
@@ -206,7 +206,7 @@ def test_neutral_commands_do_not_make_reads_consecutive() -> None:
     assert _guidance(hook) == TOO_MANY_READS_GUIDANCE
 
 
-@pytest.mark.parametrize("mutation", ["apply_patch", "write_file"])
+@pytest.mark.parametrize("mutation", ["edit_file", "write_file"])
 def test_successful_mutation_resets_read_count(mutation: str) -> None:
     hook = TooManyReadsNudge()
     _successful_reads(hook, DEFAULT_FIRST_NUDGE_READS - 1)
@@ -222,7 +222,7 @@ def test_successful_mutation_resets_read_count(mutation: str) -> None:
 def test_failed_mutation_does_not_reset_read_count() -> None:
     hook = TooManyReadsNudge()
     _successful_reads(hook, DEFAULT_FIRST_NUDGE_READS - 1)
-    assert _result(hook, "apply_patch", ok=False) is None
+    assert _result(hook, "edit_file", ok=False) is None
 
     assert _result(hook, "read_file") is None
     assert _guidance(hook) == TOO_MANY_READS_GUIDANCE

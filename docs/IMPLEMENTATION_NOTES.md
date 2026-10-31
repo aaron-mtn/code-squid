@@ -403,7 +403,7 @@ strings. Concrete shell and launch classes use shell/environment guidance;
 timeouts use separate deadline guidance. Ordinary completed-process failures
 (`process_failed`) and cancellations remain diagnostics without a broad
 command-recovery nudge. A changed failure class, a successful command, or a
-successful built-in `write_file`/`apply_patch` resets the command streak, while
+successful built-in `write_file`/`edit_file` resets the command streak, while
 unrelated discovery Tools are neutral. Successful file results are currently
 the best mutation fact exposed to Hooks and can include no-op success; actual
 change/no-op distinction is intentionally deferred. Approval, schema, and
@@ -424,7 +424,7 @@ contracts from Core. Its composition order is `TooManyReadsNudge`,
 `PostVerificationNudge`, then `RepeatedFailureNudge`. The first two default to
 enabled; repeated-failure guidance defaults to disabled.
 `TooManyReadsNudge` counts successful `read_file` results and the source lines
-they returned since the last successful `write_file` or `apply_patch`.
+they returned since the last successful `write_file` or `edit_file`.
 Commands, other Tools, and all failed results are neutral: they neither
 increment nor reset either counter. Its `tool_result` handler updates those
 counters without emitting state-dependent text. At the next
@@ -481,7 +481,7 @@ identity semantics: once verification is current, another successful explicit
 verification is continued post-verification activity rather than a fresh window.
 A failed verification leaves verification non-current so the agent can address
 the new, actionable failure normally.
-Successful `write_file` and `apply_patch` results invalidate all facts tied to
+Successful `write_file` and `edit_file` results invalidate all facts tied to
 the prior implementation. The Hook starts empty for every run and is not
 persisted.
 
@@ -511,7 +511,7 @@ later successful mutation in the same batch invalidates verification and clears
 all verification guidance before it can be shown. A host-transformed result
 marked `already_covered` still advances the count without arming stacked
 post-verification guidance on that result. This policy deliberately
-recognizes only the built-in `write_file` and `apply_patch` mutation Tools; it
+recognizes only the built-in `write_file` and `edit_file` mutation Tools; it
 does not infer workspace changes from command text or filesystem observation.
 
 ## Historical Tool-result trimming
@@ -982,8 +982,8 @@ than the synthetic in-memory summary.
 
 For that canonical prefix, the provider pairs Tool calls with their JSON results
 and reports mechanical successful/failed call counts for `read_file`,
-`apply_patch`, `write_file`, and `run_command`; the latest successful known
-direct `apply_patch`/`write_file` mutation or an explicit absence; the latest
+`edit_file`, `write_file`, and `run_command`; the latest successful known
+direct `edit_file`/`write_file` mutation or an explicit absence; the latest
 explicitly marked verification or an explicit absence; whether a later known
 direct mutation makes that verification stale; and the latest concrete Tool
 failure not clearly superseded by a later success. It does not infer changes
@@ -1194,7 +1194,7 @@ exposes selected-page metadata, extracted text, and each durable rendered PNG
 path without pretending PDF pages are text line ranges or injecting the PNGs
 into the current request.
 `run_command` exposes command, exit status, concise failure metadata, and an
-output block; `apply_patch` keeps recovery IDs, ranges, and current candidate
+output block; `edit_file` keeps recovery IDs, ranges, and current candidate
 text; successful `write_file` results contain only status and path. Assistant
 Tool calls and their Tool messages retain the original `tool_call_id` pairing.
 Unknown tools retain their canonical serialization because Core cannot infer
@@ -1314,7 +1314,7 @@ Code Squid calculates the latest undo location as:
 ```
 
 Starting a new run or resume replaces the undo buffer. Before `write_file` or
-`apply_patch` mutates a target, `ToolExecutor` asks `UndoStore` to snapshot the
+`edit_file` mutates a target, `ToolExecutor` asks `UndoStore` to snapshot the
 file's pre-change state. Repeated writes or patches to the same path keep the
 first pre-change snapshot. `python main.py undo` restores existing-file
 snapshots and deletes files that did not exist before the write. Restore is a
@@ -1374,7 +1374,7 @@ The protected built-in Tool surface is:
 
 - `read_file(path, ranges=None, pages=None, sheet=None, rows=None)`
 - `write_file(path, content)`
-- `apply_patch(path, old_text, new_text)` or candidate selection with `match_id`
+- `edit_file(path, old_text, new_text)` or candidate selection with `match_id`
 - `run_command(command, verification)`
 
 The model-facing `squid_core/tools/builtins/read_file.py` adapter owns the
@@ -1396,7 +1396,7 @@ class hierarchy.
 
 ### Patch schema
 
-The `apply_patch` JSON schema declares all four arguments in the top-level
+The `edit_file` JSON schema declares all four arguments in the top-level
 object `properties`; its `anyOf` branches carry only the two alternative
 required-field sets. This permits candidate-selection retries to repeat normal
 fields while remaining acceptable to OpenAI-compatible providers that require
@@ -1528,7 +1528,7 @@ root-level properties.
 
 ### Exact patches and candidate revalidation
 
-`apply_patch`:
+`edit_file`:
 
 - requires an absolute path for a normal patch request; a known run-local
   `match_id` selects candidate mode, while an empty or unknown ID falls back to
@@ -1550,7 +1550,7 @@ root-level properties.
 - accepts a redundant path only when it identifies the stored target and ignores
   redundant old and new text so stored candidate values remain authoritative
 - invalidates all outstanding candidates for a file after any successful
-  `write_file` or `apply_patch` mutation of that file, while other-file and
+  `write_file` or `edit_file` mutation of that file, while other-file and
   failed mutations leave them available
 - returns affected before/after line ranges, the existing compact
   character-count metadata, and exact replacement previews after success;

@@ -138,7 +138,7 @@ def _panel_action_line(
 ) -> str:
     tool_name = action.get("tool", "")
     args = action.get("args", {})
-    if tool_name in {"read_file", "write_file", "apply_patch"}:
+    if tool_name in {"read_file", "write_file", "edit_file"}:
         value = short_path(single_line(args.get("path", "")), display_root)
         return _panel_line("Path", value, inner_width, approval_line)
     if tool_name == "run_command":

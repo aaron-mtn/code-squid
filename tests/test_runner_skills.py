@@ -127,7 +127,7 @@ def test_skill_with_omitted_tools_keeps_full_tool_default(monkeypatch, tmp_path:
     selected_skill, tools = resolve_skill_tools("legacy")
 
     assert selected_skill is skill
-    assert list(tools) == ["read_file", "write_file", "apply_patch", "run_command"]
+    assert list(tools) == ["read_file", "write_file", "edit_file", "run_command", "list_files", "find_files", "search_for_text"]
 
 
 def test_no_selected_skill_preserves_full_tool_behavior(monkeypatch, tmp_path: Path) -> None:
@@ -140,7 +140,7 @@ def test_no_selected_skill_preserves_full_tool_behavior(monkeypatch, tmp_path: P
     names = [definition["function"]["name"] for definition in agent.tool_definitions()]
 
     assert skill is None
-    assert names == ["read_file", "write_file", "apply_patch", "run_command"]
+    assert names == ["read_file", "write_file", "edit_file", "run_command", "list_files", "find_files", "search_for_text"]
 
 
 def test_skill_listing_user_tool_activates_it(monkeypatch, tmp_path: Path) -> None:
@@ -372,9 +372,12 @@ def test_build_coding_task_run_records_default_run_context(
     assert entries[0]["type"] == "run_context"
     assert entries[0]["skill_name"] is None
     assert entries[0]["allowed_tools"] == [
-        "apply_patch",
+        "edit_file",
+        "find_files",
+        "list_files",
         "read_file",
         "run_command",
+        "search_for_text",
         "write_file",
     ]
     assert entries[0]["prompt_overrides"] == []

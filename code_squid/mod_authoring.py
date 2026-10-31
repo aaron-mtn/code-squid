@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
-BUILTIN_TOOL_NAMES = ("read_file", "write_file", "apply_patch", "run_command")
+BUILTIN_TOOL_NAMES = ("read_file", "write_file", "edit_file", "run_command", "list_files", "find_files", "search_for_text")
 SAFE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SAFE_COMPONENT_NAME = re.compile(r"^[a-z0-9_-]+$")
 

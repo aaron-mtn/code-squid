@@ -25,7 +25,7 @@ from squid_core.tools.user_tools import execute_user_tool, load_user_tool
 
 EXAMPLES = ('skill-only', 'builtin-file-tools', 'bundled-tool', 'before-accept-final-hook', 'portable-tool-hook')
 HELPERS = ('read-mod-authoring-guide', 'read-mod-authoring-example', 'scaffold-mod-package', 'scaffold-mod-component', 'validate-mod-package')
-EXPECTED_TOOLS = ('read_file', 'write_file', 'apply_patch', 'run_command', *HELPERS)
+EXPECTED_TOOLS = ('read_file', 'write_file', 'edit_file', 'run_command', *HELPERS)
 
 
 def builder_dir():
@@ -106,6 +106,12 @@ def test_scaffolding_components_and_core_validation(tmp_path):
     assert not execute('scaffold-mod-package', tmp_path, {'package_name': 'starter', 'description': 'Overwrite'})['ok']
     with pytest.raises(ValueError, match='Protected built-in'):
         scaffold_mod_component(tmp_path, 'starter', 'tool', 'read_file')
+    with pytest.raises(ValueError, match='Protected built-in'):
+        scaffold_mod_component(tmp_path, 'starter', 'tool', 'list_files')
+    with pytest.raises(ValueError, match='Protected built-in'):
+        scaffold_mod_component(tmp_path, 'starter', 'tool', 'find_files')
+    with pytest.raises(ValueError, match='Protected built-in'):
+        scaffold_mod_component(tmp_path, 'starter', 'tool', 'search_for_text')
     skill = tmp_path / 'starter/skills/starter/SKILL.md'
     skill.write_text(skill.read_text().replace('allowed-tools: []', 'allowed-tools: ["absent"]'), encoding='utf-8')
     assert not execute('validate-mod-package', tmp_path, {'package_path': 'starter'})['ok']

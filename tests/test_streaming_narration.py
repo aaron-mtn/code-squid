@@ -322,7 +322,7 @@ def test_tool_preparing_retains_narration_and_starts_tool_pulse(monkeypatch) -> 
     [
         ("read_file", "Reading..."),
         ("write_file", "Writing..."),
-        ("apply_patch", "Patching..."),
+        ("edit_file", "Patching..."),
         ("run_command", "Running..."),
         ("custom_tool", "Using tool..."),
     ],

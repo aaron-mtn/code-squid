@@ -259,7 +259,7 @@ def test_session_switches_packaged_skills_and_mods(tmp_path: Path, reopen: bool)
     selections = (
         ("mod-a", "skill-one", "read_file", "hook-a"),
         ("mod-a", "skill-two", "run_command", "hook-a"),
-        ("mod-b", "skill-one", "apply_patch", "hook-b"),
+        ("mod-b", "skill-one", "edit_file", "hook-b"),
     )
     for mod_name, skill_name, tool, hook in selections:
         mod_dir = home / "mods" / mod_name
@@ -343,7 +343,7 @@ def test_cli_selects_skills_only_within_active_mod(monkeypatch, tmp_path: Path, 
     monkeypatch.setenv("CODE_SQUID_HOME", str(home))
     mod_a = _write_mod(home, "mod-a", skill_name="skill-one", tools=("read_file",))
     _write_skill(mod_a / "skills" / "skill-two" / "SKILL.md", "skill-two", ("run_command",), "Second")
-    _write_mod(home, "mod-b", skill_name="skill-one", tools=("apply_patch",))
+    _write_mod(home, "mod-b", skill_name="skill-one", tools=("edit_file",))
     _write_skill(home / "skills" / "loose" / "SKILL.md", "loose", (), "Standalone")
 
     mod, skill = _handle_mod_input("/mod mod-a", None, "loose")

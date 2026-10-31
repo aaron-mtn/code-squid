@@ -66,11 +66,11 @@ def _verification(
 def _mutation(call_id: str, path: str = "script.js") -> list[dict]:
     return _tool_event(
         call_id,
-        "apply_patch",
+        "edit_file",
         {"path": path},
         {
             "ok": True,
-            "tool": "apply_patch",
+            "tool": "edit_file",
             "path": path,
             "replacements": 1,
             "start_line": 2,
@@ -103,7 +103,7 @@ def test_provider_removes_matching_canonical_suffix() -> None:
     context = provider(preserved)
 
     assert context is not None
-    assert "apply_patch: 1 successful, 0 failed" in context
+    assert "edit_file: 1 successful, 0 failed" in context
     assert "Latest verification:\n\n- No verification occurred." in context
     assert "`pytest`" not in context
 
@@ -121,7 +121,7 @@ def test_read_only_history_reports_activity_and_explicit_none_states() -> None:
 
     assert context is not None
     assert "read_file: 2 successful, 1 failed" in context
-    assert "apply_patch: 0 successful, 0 failed" in context
+    assert "edit_file: 0 successful, 0 failed" in context
     assert "write_file: 0 successful, 0 failed" in context
     assert "run_command: 0 successful, 0 failed" in context
     assert "No known direct mutation occurred." in context
@@ -141,7 +141,7 @@ def test_preserved_recent_tool_activity_is_excluded_from_facts() -> None:
 
     assert context is not None
     assert "read_file: 1 successful, 0 failed" in context
-    assert "apply_patch: 0 successful, 0 failed" in context
+    assert "edit_file: 0 successful, 0 failed" in context
     assert "recent.py" not in context
     assert "No known direct mutation occurred." in context
 
@@ -363,11 +363,11 @@ def test_later_verification_supersedes_earlier_verification() -> None:
 def test_successful_retry_removes_recovered_tool_failure() -> None:
     failed = _tool_event(
         "patch-1",
-        "apply_patch",
+        "edit_file",
         {"path": "script.js"},
         {
             "ok": False,
-            "tool": "apply_patch",
+            "tool": "edit_file",
             "path": "script.js",
             "error": "old_text_not_found",
         },
@@ -388,3 +388,16 @@ def test_context_does_not_claim_filesystem_truth_or_task_state() -> None:
     assert "changed files" not in context.lower()
     assert "task complete" not in context.lower()
     assert "next step" not in context.lower()
+
+
+def test_historical_edit_preserves_mutation_and_verification_facts() -> None:
+    messages = [
+        *_verification("verify", "pytest", ok=True),
+        *_tool_event("old-edit", "apply_patch", {"path": "old.py"},
+                     {"ok": True, "tool": "apply_patch", "path": "old.py",
+                      "replacements": 1, "start_line": 2, "end_line_after": 3}),
+    ]
+    context = authoritative_compaction_context(messages)
+    assert "apply_patch: 1 successful, 0 failed" in context
+    assert "apply_patch on `old.py` succeeded (1 replacement; result lines 2-3)" in context
+    assert "mutation occurred after this verification" in context

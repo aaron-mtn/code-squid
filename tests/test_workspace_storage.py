@@ -326,7 +326,7 @@ def test_asset_exception_is_read_only_and_session_scoped(tmp_path):
     one, two = make_run(tmp_path / "one"), make_run(tmp_path / "two")
     own = one.session_store.assets_dir / "image.png"
     foreign = two.session_store.assets_dir / "image.png"
-    for tool, path in [("write_file", own), ("apply_patch", own), ("read_file", foreign), ("read_file", settings_path())]:
+    for tool, path in [("write_file", own), ("edit_file", own), ("read_file", foreign), ("read_file", settings_path())]:
         decision = one.loop.action_preflight.check({"tool": tool, "args": {"path": str(path)}})
         assert decision.approval_action.get("approval_reason")
         assert not ApprovalPolicy("guarded").check(decision.approval_action).approved

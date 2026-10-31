@@ -110,6 +110,11 @@ three explicit sources, without assuming Core or Providers is on PyPI.
     `squid_providers.settings` owns effective `ProviderSettings` validation and
     reasoning-mode values. `Settings.to_provider_settings()` carries selection,
     model, URL/key, shared sampling/reasoning controls, and provider-owned config;
+    programmatic `ModelSettings` generation overrides include temperature, top P,
+    top K, min P, repeat penalty, maximum output tokens and seed. Desktop stores
+    per-model overrides itself and supplies an immutable application snapshot;
+    `to_provider_settings()` forwards all seven to Providers for validation and
+    transport serialization, without introducing Desktop persistence into Core;
     `to_runtime_settings()` carries only generic execution settings.
   - `console/cli/` owns launch dispatch, the persistent fresh/resumed prompt
     loop, runtime and control commands, session-run orchestration, and Mod/Skill
@@ -1283,7 +1288,7 @@ execution. It applies to:
 
 - `read_file`
 - `write_file`
-- `apply_patch`
+- `edit_file`
 
 For those tools, an absolute `path` is considered outside the workspace when
 its resolved path is not under the resolved workspace root selected by `--cwd`
@@ -1370,7 +1375,7 @@ The protected built-ins are:
 
 - `read_file(path, ranges=None, pages=None, sheet=None, rows=None)`
 - `write_file(path, content)`
-- `apply_patch(path, old_text, new_text)` or candidate selection with `match_id`
+- `edit_file(path, old_text, new_text)` or candidate selection with `match_id`
 - `run_command(command, verification)`
 
 Core's `ToolExecutor` dispatches one normalized action, tracks side effects,
@@ -1538,3 +1543,52 @@ narration is encouraged by prompts.
 - Prefer accurate boring descriptions over aspirational architecture.
 
 Small, inspectable, stupid simple.
+
+
+## Immediate directory inspection
+
+Code Squid's default tool registry now includes Core's `list_files` alongside
+`read_file`, `write_file`, `edit_file`, and `run_command`. Application tool
+usage guidance prefers `list_files` for immediate directory inspection;
+`run_command` remains available for other shell operations. Core owns listing,
+limits, and workspace containment. Mod authoring protects `list_files` from
+bundled-tool shadowing, and existing Skill filtering controls exposure unchanged.
+
+
+## Filename search integration
+
+The default Core registry also exposes `find_files`. Application guidance uses
+`list_files` for immediate directory inspection, `find_files` to locate unknown
+paths by filename, and `read_file` to inspect known files. `run_command` remains
+available for other operations, including content searches and verification.
+Core owns bounded traversal and containment. Mod authoring protects the new name
+from bundled-tool shadowing; existing Skill filtering and execution policies
+are unchanged. No recursive text-search tool has been added.
+
+
+## Literal text exploration
+
+Core's default registry now also includes `search_for_text`. Code Squid guidance
+prefers dedicated tools for directory browsing (`list_files`), filename discovery
+(`find_files`), literal content/symbol discovery (`search_for_text`), and known-file
+reads (`read_file`). `run_command` remains available for other operations and
+verification. Mod authoring protects the new built-in name. Core owns streaming
+reads, traversal, budgets, and containment; existing hooks, read-count nudges,
+verification policy, and the agent loop remain unchanged.
+
+
+### Current editing tool and historical records
+
+Core's editing tool is `edit_file`, implemented in
+`squid_core/tools/builtins/edit_file.py`. Code Squid consumes the seven-tool Core
+registry and uses that name in guidance, Mod protections/resources, file approval
+presentation, editing hooks, verification nudges, and compaction facts. Arguments,
+matching, approval policy, and execution ownership remain in their existing layers.
+There is no executable `apply_patch` alias.
+
+Stored calls/results keep their original names. The compaction facts reader
+recognizes completed historical `apply_patch` mutations as historical activity,
+so earlier verification is not incorrectly presented as current. This is a reader
+convention, not dispatch compatibility. Core repairs trailing interrupted calls
+as interrupted results rather than executing them; continuing an old edit requires
+a fresh `edit_file` request. Run-local candidate IDs do not survive a new executor.

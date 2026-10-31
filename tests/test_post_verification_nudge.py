@@ -95,7 +95,7 @@ def test_failed_explicit_verification_disables_tracking() -> None:
     assert _guidance(runner) == ""
 
 
-@pytest.mark.parametrize("tool", ["apply_patch", "write_file"])
+@pytest.mark.parametrize("tool", ["edit_file", "write_file"])
 def test_successful_mutation_invalidates_verification(tool: str) -> None:
     runner, nudge = _runner()
     _observe(
@@ -115,7 +115,7 @@ def test_failed_mutation_does_not_invalidate_verification() -> None:
         runner,
         _context("run_command", command="pytest focused.py", verification=True),
     )
-    _observe(runner, _context("apply_patch", ok=False))
+    _observe(runner, _context("edit_file", ok=False))
     assert nudge._verification_current is True
     assert nudge._post_verification_action_count == 0
 
@@ -202,7 +202,7 @@ def test_immediate_state_does_not_consume_stronger_guidance_threshold() -> None:
     assert nudge._post_verification_action_count == 0
 
 
-@pytest.mark.parametrize("mutation", ["apply_patch", "write_file"])
+@pytest.mark.parametrize("mutation", ["edit_file", "write_file"])
 def test_later_mutation_discards_armed_post_verification_guidance(
     mutation: str,
 ) -> None:
@@ -268,7 +268,7 @@ def test_verification_after_mutation_starts_fresh_window() -> None:
     )
     _observe(runner, verification)
     _observe(runner, _context("read_file"))
-    _observe(runner, _context("apply_patch"))
+    _observe(runner, _context("edit_file"))
 
     response = _observe(runner, verification)
 

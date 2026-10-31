@@ -84,7 +84,7 @@ PANEL_CONTENT_WIDTH = RUN_PANEL_CONTENT_WIDTH
 TOOL_PREPARING_LABELS = {
     "read_file": "Reading...",
     "write_file": "Writing...",
-    "apply_patch": "Patching...",
+    "edit_file": "Patching...",
     "run_command": "Running...",
 }
 

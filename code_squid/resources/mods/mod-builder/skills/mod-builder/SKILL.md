@@ -4,7 +4,7 @@ description: Create and edit complete Code Squid Mod packages using the bundled 
 allowed-tools:
   - read_file
   - write_file
-  - apply_patch
+  - edit_file
   - run_command
   - read-mod-authoring-guide
   - read-mod-authoring-example

@@ -1019,7 +1019,7 @@ def test_follow_up_records_current_skill_run_context(
     session_store = SessionStore.create(tmp_path, "original task")
     session_store.append_run_context(
         skill_name=None,
-        allowed_tools=["apply_patch", "read_file", "run_command", "write_file"],
+        allowed_tools=["edit_file", "read_file", "run_command", "write_file"],
         prompt_overrides=[],
     )
 
@@ -1044,7 +1044,7 @@ def test_follow_up_records_current_skill_run_context(
     assert session_id == session_store.session_id
     assert contexts[0]["skill_name"] is None
     assert contexts[0]["allowed_tools"] == [
-        "apply_patch",
+        "edit_file",
         "read_file",
         "run_command",
         "write_file",

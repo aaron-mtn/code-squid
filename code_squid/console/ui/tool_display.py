@@ -18,7 +18,7 @@ from squid_core.image_content import image_descriptor, image_marker
 
 COMMAND_LABEL_MAX = 64
 APPROVAL_COMMAND_LABEL_MAX = 120
-FILE_TOOLS = {"read_file", "write_file", "apply_patch"}
+FILE_TOOLS = {"read_file", "write_file", "edit_file"}
 
 
 def action_label(action: dict, phase: str, display_root: Path) -> str:
@@ -40,7 +40,7 @@ def action_label(action: dict, phase: str, display_root: Path) -> str:
             return f"{formatting.RECOVERABLE_STATUS_ICON} Write failed: {path}"
         return f"📝 Write: {path}"
 
-    if tool_name == "apply_patch":
+    if tool_name == "edit_file":
         path = short_path(args.get("path", ""), display_root)
         if phase == "success":
             return f"🩹 Patched: {path}"
@@ -284,7 +284,7 @@ def debug_tool_result_lines(
         )
         return lines
 
-    if tool_name == "apply_patch":
+    if tool_name == "edit_file":
         if args.get("path"):
             lines.append(f"path: {short_path(str(args['path']), display_root)}")
         if not result.get("ok", False) and result.get("error"):

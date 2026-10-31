@@ -57,13 +57,13 @@ TOOL_USAGE_GUIDANCE = """
 
 ### Reading files
 
-- Use read_file to check a text file's contents.
+- Use read_file to check a text file's contents. Use it to read known files after locating their paths.
 - You can read ranges of lines from a file to inspect specific sections.
 - If a read is truncated, use returned_line_ranges to understand what was actually returned.
 
 ### Applying patches
 
-- Use apply_patch for focused edits to existing files. old_text must exactly match current source and identify the intended location; include enough surrounding context to make it unique.
+- Use edit_file for focused edits to existing files. old_text must exactly match current source and identify the intended location; include enough surrounding context to make it unique.
 - If a failure returns selectable candidates, use their location and context to choose the intended match_id. Reread only when the diagnostics are insufficient.
 
 ### Writing files
@@ -73,10 +73,13 @@ TOOL_USAGE_GUIDANCE = """
 
 ### Commands and project discovery
 
-- Use run_command for shell commands (ls, grep, find, etc.)
+- Use list_files for simple directory inspection instead of run_command, ls, dir, or Get-ChildItem. It lists immediate files and folders without recursion; omit path for the selected workspace root.
+- Use find_files to locate files recursively by exact filename or a case-sensitive filename pattern such as *.py or *session*. It searches names, not contents; omit path for the workspace root.
+- Use search_for_text to locate literal text or code symbols inside files instead of grep, rg, or Select-String. It returns paths, line numbers, and excerpts; use read_file for larger sections.
+- Use run_command for other shell operations, tests, and environment inspection.
 - HIGH PRIORITY:Every run_command call must set verification. Choose verification=true for tests, builds, lint, type or syntax checks, validation, and commands rerun to confirm a fix. Choose verification=false for discovery, searches, setup, environment inspection, and ordinary execution.
 - Use read_file to check files instead of commands like cat, sed, head, tail, type, or Get-Content.
-- Use apply_patch to edit a file instead of sed -i, perl, PowerShell replacements, or inline Python scripts.
+- Use edit_file to edit a file instead of sed -i, perl, PowerShell replacements, or inline Python scripts.
 - Use write_file instead of commands like echo, printf, heredocs, Set-Content, or Out-File when creating or fully rewriting files.
 - Normal file-tool paths are absolute; candidate-selection patches use only match_id.
 

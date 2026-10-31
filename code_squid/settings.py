@@ -73,6 +73,13 @@ class ModelSettings:
     reasoning_mode: str | None = DEFAULT_REASONING_MODE
     reasoning_token_budget: int | None = DEFAULT_REASONING_TOKEN_BUDGET
     provider_config: dict[str, Any] = field(default_factory=dict)
+    # Programmatic application overrides; Providers owns validation and wire format.
+    top_p: float | None = None
+    top_k: int | None = None
+    min_p: float | None = None
+    repeat_penalty: float | None = None
+    max_output_tokens: int | None = None
+    seed: int | None = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +137,12 @@ class Settings:
             base_url=config["base_url"],
             api_key=config["api_key"],
             temperature=self.model.temperature,
+            top_p=self.model.top_p,
+            top_k=self.model.top_k,
+            min_p=self.model.min_p,
+            repeat_penalty=self.model.repeat_penalty,
+            max_output_tokens=self.model.max_output_tokens,
+            seed=self.model.seed,
             reasoning_mode=self.model.reasoning_mode,
             reasoning_token_budget=self.model.reasoning_token_budget,
             config=config,

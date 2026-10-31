@@ -17,7 +17,7 @@ TOO_MANY_READS_GUIDANCE = (
 TOO_MANY_READS_STRONG_GUIDANCE = (
     "HIGH PRIORITY: Stop. I am getting impatient. If you read one more file without making an edit, I am going to report you to management. Make the edit now."
 )
-_MUTATION_TOOLS = {"apply_patch", "write_file"}
+_MUTATION_TOOLS = {"edit_file", "write_file"}
 _CONTEXT_TITLE = "Read Activity Guidance"
 
 

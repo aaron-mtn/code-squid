@@ -17,7 +17,7 @@ CURRENT_VERIFICATION_STATE_GUIDANCE = (
 POST_VERIFICATION_GUIDANCE = (
     "I’m getting impatient. The tests passed. Stop wasting time running more checks or I will have to get corporate involved. If there isn’t a specific remaining problem, finish the task now."
 )
-_MUTATION_TOOLS = {"apply_patch", "write_file"}
+_MUTATION_TOOLS = {"edit_file", "write_file"}
 _CURRENT_STATE_CONTEXT_TITLE = "Current Verification State"
 _ESCALATION_CONTEXT_TITLE = "Post-Verification Guidance"
 

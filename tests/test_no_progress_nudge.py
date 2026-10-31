@@ -209,8 +209,8 @@ def test_successful_file_mutation_breaks_command_failure_streak() -> None:
     # distinguish a real content change from a no-op; H6 owns that refinement.
     hook.tool_result(
         _Context(
-            action={"tool": "apply_patch", "args": {"path": "a.py"}},
-            result={"ok": True, "tool": "apply_patch", "path": "a.py"},
+            action={"tool": "edit_file", "args": {"path": "a.py"}},
+            result={"ok": True, "tool": "edit_file", "path": "a.py"},
         )
     )
 

@@ -1469,7 +1469,7 @@ def test_tests_passed_line_is_green_in_tty(
             "Write failed: locked.py - permission denied",
         ),
         (
-            {"tool": "apply_patch", "args": {"path": "changed.py"}},
+            {"tool": "edit_file", "args": {"path": "changed.py"}},
             {"ok": False, "error": "old_text_not_found"},
             "Patch failed: changed.py - old_text_not_found",
         ),
@@ -1548,7 +1548,7 @@ def test_recoverable_patch_failure_line_is_dim_in_tty(
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
 
     TerminalDisplay().tool_result(
-        {"tool": "apply_patch", "args": {"path": "skateboard-game/game.js"}},
+        {"tool": "edit_file", "args": {"path": "skateboard-game/game.js"}},
         {"ok": False, "error": "old_text_not_found"},
     )
 
@@ -1568,7 +1568,7 @@ def test_debug_recoverable_status_styling_is_unchanged_in_tty(
 
     display.reply_rejected("empty_final_reply")
     display.tool_result(
-        {"tool": "apply_patch", "args": {"path": "skateboard-game/game.js"}},
+        {"tool": "edit_file", "args": {"path": "skateboard-game/game.js"}},
         {"ok": False, "error": "old_text_not_found"},
     )
 
@@ -1582,7 +1582,7 @@ def test_debug_recoverable_status_styling_is_unchanged_in_tty(
     )
     rail = f"{SOFT_CYAN_STYLE}│{RESET_STYLE}"
     assert f"{rail} ok: false" in output
-    assert f"{rail} tool: apply_patch" in output
+    assert f"{rail} tool: edit_file" in output
     assert f"{rail} error: old_text_not_found" in output
 
 

@@ -9,7 +9,7 @@ from squid_core.hooks import HookResponse
 
 
 DEFAULT_REPEATED_FAILURE_THRESHOLD = 3
-_MUTATION_TOOLS = {"apply_patch", "write_file"}
+_MUTATION_TOOLS = {"edit_file", "write_file"}
 _SHELL_OR_LAUNCH_FAILURES = {
     "command_not_found",
     "path_not_found",

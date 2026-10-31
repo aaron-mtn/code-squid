@@ -4,7 +4,7 @@ description: Inspect and edit workspace text files.
 allowed-tools:
   - read_file
   - write_file
-  - apply_patch
+  - edit_file
 ---
 
 # Instructions

@@ -68,5 +68,5 @@ def test_default_code_squid_prompt_preserves_coding_policy() -> None:
                     CODING_RESPONSE_EXAMPLES, TOOL_USAGE_GUIDANCE, FINAL_SUMMARY_REQUIREMENTS):
         assert section in prompt
     assert "Use read_file to check files instead of commands" in prompt
-    assert "Use apply_patch to edit a file instead of" in prompt
+    assert "Use edit_file to edit a file instead of" in prompt
     assert "Prefer dedicated file tools for source reading and editing" in prompt

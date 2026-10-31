@@ -235,7 +235,7 @@ def test_failure_message_for_invalid_replies_includes_reason_and_explanation() -
     }
 
 
-def test_tool_definition_exposes_apply_patch_through_coding_agent() -> None:
+def test_tool_definition_exposes_edit_file_through_coding_agent() -> None:
     agent = Agent("demo task")
 
     names = [
@@ -243,7 +243,7 @@ def test_tool_definition_exposes_apply_patch_through_coding_agent() -> None:
         for definition in agent.tool_definitions()
     ]
 
-    assert names == ["read_file", "write_file", "apply_patch", "run_command"]
+    assert names == ["read_file", "write_file", "edit_file", "run_command", "list_files", "find_files", "search_for_text"]
 
 
 def test_empty_final_correction_mentions_final_content() -> None:
@@ -309,7 +309,7 @@ def test_initial_prompt_includes_selected_skill_instructions() -> None:
         name="bug-fix",
         description="Fix bugs with small targeted edits.",
         instructions="Prefer small patches.",
-        allowed_tools=("read_file", "apply_patch", "run_command"),
+        allowed_tools=("read_file", "edit_file", "run_command"),
         path=Path("SKILL.md"),
     )
 
@@ -325,6 +325,10 @@ def test_default_tool_usage_guidance_is_used_without_skill() -> None:
 
 
 def test_read_guidance_explains_targeted_and_truncated_reads() -> None:
+    assert "Use list_files for simple directory inspection instead of run_command" in TOOL_USAGE_GUIDANCE
+    assert "Use search_for_text to locate literal text" in TOOL_USAGE_GUIDANCE
+    assert "Use find_files to locate files recursively" in TOOL_USAGE_GUIDANCE
+    assert "case-sensitive filename pattern" in TOOL_USAGE_GUIDANCE
     assert "Use read_file to check a text file's contents." in TOOL_USAGE_GUIDANCE
     assert "read ranges of lines from a file" in TOOL_USAGE_GUIDANCE
     assert "If a read is truncated, use returned_line_ranges" in TOOL_USAGE_GUIDANCE
@@ -351,7 +355,7 @@ def test_baseline_policy_requires_explicit_run_command_verification_intent() -> 
     assert "environment inspection, and ordinary execution" in TOOL_USAGE_GUIDANCE
 
 
-def test_apply_patch_guidance_prefers_diagnostics_over_unconditional_rereads() -> None:
+def test_edit_file_guidance_prefers_diagnostics_over_unconditional_rereads() -> None:
     assert "If a failure returns selectable candidates" in TOOL_USAGE_GUIDANCE
     assert "choose the intended match_id" in TOOL_USAGE_GUIDANCE
     assert "Reread only when the diagnostics are insufficient." in TOOL_USAGE_GUIDANCE
@@ -360,7 +364,7 @@ def test_apply_patch_guidance_prefers_diagnostics_over_unconditional_rereads() -
 
 def test_tool_guidance_prevents_shell_workarounds_for_editing_tool_failures() -> None:
     assert "Use read_file to check files instead of commands" in TOOL_USAGE_GUIDANCE
-    assert "Use apply_patch to edit a file instead of" in TOOL_USAGE_GUIDANCE
+    assert "Use edit_file to edit a file instead of" in TOOL_USAGE_GUIDANCE
     assert "Use write_file instead of commands" in TOOL_USAGE_GUIDANCE
 
 
@@ -423,7 +427,7 @@ def test_active_skill_without_tool_usage_guidance_keeps_default_guidance_from_sy
         name="bug-fix",
         description="Fix bugs with small targeted edits.",
         instructions="Prefer small patches.",
-        allowed_tools=("read_file", "apply_patch", "run_command"),
+        allowed_tools=("read_file", "edit_file", "run_command"),
         path=Path("SKILL.md"),
     )
 

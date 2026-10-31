@@ -7,10 +7,11 @@ from dataclasses import dataclass
 from typing import Callable
 
 
-_DIRECT_MUTATION_TOOLS = {"apply_patch", "write_file"}
+# This reader also describes completed historical edits; it never dispatches tools.
+_DIRECT_MUTATION_TOOLS = {"edit_file", "write_file", "apply_patch"}
 _BUILT_IN_ACTIVITY_TOOLS = (
     "read_file",
-    "apply_patch",
+    "edit_file",
     "write_file",
     "run_command",
 )
@@ -111,7 +112,10 @@ def authoritative_compaction_context(messages: list[dict]) -> str | None:
 def _render_activity(events: list[_ToolEvent]) -> list[str]:
     """Render mechanical success/failure counts for Code Squid's built-ins."""
     lines = []
-    for tool in _BUILT_IN_ACTIVITY_TOOLS:
+    tools = _BUILT_IN_ACTIVITY_TOOLS
+    if any(event.tool == "apply_patch" for event in events):
+        tools = (*tools, "apply_patch")
+    for tool in tools:
         tool_events = [event for event in events if event.tool == tool]
         successful = sum(event.result.get("ok") is True for event in tool_events)
         failed = sum(event.result.get("ok") is False for event in tool_events)
@@ -205,7 +209,7 @@ def _field(event: _ToolEvent, name: str):
 def _render_mutation(event: _ToolEvent) -> str:
     path = _field(event, "path") or "unknown target"
     details = []
-    if event.tool == "apply_patch":
+    if event.tool in {"edit_file", "apply_patch"}:
         if isinstance(event.result.get("replacements"), int):
             count = event.result["replacements"]
             details.append(f"{count} replacement{'s' if count != 1 else ''}")

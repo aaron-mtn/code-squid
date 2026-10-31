@@ -59,11 +59,11 @@ Skill prompt customization uses body headings `## AGENT_IDENTITY append`, `## TO
 
 ## 4. Select or bundle components
 
-The built-in Tool names are `read_file`, `write_file`, `apply_patch`, and `run_command`.
+The built-in Tool names are `read_file`, `write_file`, `edit_file`, `run_command`, `list_files`, `find_files`, and `search_for_text`.
 
 - Select `read_file` when the Skill must inspect workspace files.
 - Select `write_file` when it must create a file or intentionally replace a complete small file.
-- Select `apply_patch` when it must make focused changes to existing text files.
+- Select `edit_file` when it must make focused changes to existing text files.
 - Select `run_command` when it must run tests, compilers, version-control inspection, or other workspace commands.
 
 These selections describe the generated Mod at runtime. The Mod Builder may use `run_command` to author and test a package without adding it to the generated Mod. Do not carry build-time Tools into `allowed-tools` unless the finished workflow actually calls them.
@@ -183,7 +183,7 @@ Core owns persisted Mod parsing and validation via `squid_core.mods.load_mod` / 
 Complete machine-loaded copies are owned by this first-party package and available only through `read-mod-authoring-example`. They contain no developer paths. Read `bundled-tool` or `portable-tool-hook` before writing a Tool, and read `before-accept-final-hook` or `portable-tool-hook` before writing a Hook.
 
 - `examples/skill-only`: Skill-only Mod (`allowed-tools: []` in its Skill and `hooks: []` in its manifest).
-- `examples/builtin-file-tools`: selects `read_file`, `write_file`, and `apply_patch` in identical order without bundling them.
+- `examples/builtin-file-tools`: selects `read_file`, `write_file`, and `edit_file` in identical order without bundling them.
 - `examples/bundled-tool`: bundles and selects `echo-value`; its required `value` and optional `prefix` demonstrate flattened args.
 - `examples/before-accept-final-hook`: bundles and selects a Hook returning `HookResponse` from `before_accept_final`.
 - `examples/portable-tool-hook`: portable package containing and selecting both a custom Tool and Hook.

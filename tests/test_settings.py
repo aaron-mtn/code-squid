@@ -910,3 +910,14 @@ def test_valid_selectors_and_exact_model_name_round_trip(tmp_path):
 def test_selector_writes_reject_unhashable_values(tmp_path, writer, value):
     with pytest.raises(ValueError):
         writer(tmp_path, value)
+
+
+def test_programmatic_generation_overrides_reach_provider_settings(tmp_path):
+    """Desktop supplies validated model overrides; Providers owns serialization."""
+    from dataclasses import replace
+    settings = load_settings(tmp_path)
+    generation = dict(temperature=0.12345, top_p=0.87654, top_k=37, min_p=0.03456,
+                      repeat_penalty=1.12345, max_output_tokens=2048, seed=4294967295)
+    settings = replace(settings, model=replace(settings.model, **generation))
+    projected = settings.to_provider_settings()
+    assert all(getattr(projected, key) == value for key, value in generation.items())
