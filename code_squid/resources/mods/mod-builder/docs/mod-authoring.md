@@ -55,7 +55,31 @@ Read the relevant workspace file and answer the user's question.
 
 Use `allowed-tools: []` when no Tools are needed. Instructions start after the closing delimiter. Each Skill declares its own unique allowed Tool names; two Skills within a Mod may use different permissions. Exactly one Skill is active. The union of references across all Skills is dependency validation metadata only, never runtime permissions. Explicitly select every built-in needed by the workflow; mentioning a Tool in prose does not select it.
 
-Skill prompt customization uses body headings `## AGENT_IDENTITY append`, `## TOOL_USAGE_GUIDANCE replace`, or `## FINAL_SUMMARY_REQUIREMENTS append`; each of these three sections supports `append` and `replace`. Content after an override heading belongs to that section until the next override heading. Put ordinary instructions before overrides. Other prompt sections are not customizable. No additional frontmatter is needed for prompt customization.
+Skill prompt customization uses body headings `## AGENT_IDENTITY append`, `## TOOL_USAGE_GUIDANCE replace`, or `## FINAL_SUMMARY_REQUIREMENTS append`; each of these three sections supports `append` and `replace`. Content after an override heading belongs to that section until the next override heading. Put ordinary instructions before overrides. Other prompt sections cannot be replaced or appended. The optional omission directive below can omit additional host-defined sections. No additional frontmatter is needed for prompt customization.
+
+
+Optional prompt omission uses this exact, unindented body heading and dash list:
+
+```markdown
+## DISABLE_PROMPT_SECTIONS
+
+- BASELINE_CODING_POLICY
+- VISIBLE_NARRATION_GUIDANCE
+- CODING_RESPONSE_EXAMPLES
+```
+
+Code Squid accepts those three application-defined targets plus `AGENT_IDENTITY`,
+`TOOL_USAGE_GUIDANCE`, and `FINAL_SUMMARY_REQUIREMENTS`. Omit the directive to
+inherit exactly the existing prompt. A directive ends at the next Markdown
+heading or end of file; put ordinary instructions before it and overrides after
+it. The directive is metadata and is not sent as model instructions. Duplicate
+entries/directives, unknown or protected Core sections, malformed list items,
+and disabling a section also declared with `append` or `replace` are errors.
+There is no `disable` override mode. Existing append/replace semantics remain
+unchanged. Fenced examples and differently spelled headings are ordinary text.
+Disabling text does not change allowed-tools, approvals, or runtime validation.
+The Mod Builder preserves the list and existing override modes when saving or
+cloning; edit the directive in SKILL.md to change the list.
 
 ## 4. Select or bundle components
 

@@ -186,6 +186,7 @@ def validate_mod_package(workspace, package_path="."):
     only from the explicitly supplied workspace/application home.
     """
     from squid_core.mods import load_mod
+    from code_squid.agent.prompts import SUPPORTED_DISABLE_SECTIONS
 
     root, package_dir = _inside(workspace, package_path)
     errors = []
@@ -207,7 +208,7 @@ def validate_mod_package(workspace, package_path="."):
                     shared = root / kind
                     if shared.is_dir():
                         _copy_contained_tree(root, shared, home / kind)
-            metadata = load_mod(package_dir.name, home)
+            metadata = load_mod(package_dir.name, home, supported_disable_sections=SUPPORTED_DISABLE_SECTIONS)
             tool_references = {tool for skill in metadata.skills.values() for tool in skill.allowed_tools}
             mod = {"name": metadata.name, "hooks": list(metadata.hooks)}
             for message in metadata.errors:

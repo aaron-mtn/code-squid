@@ -1,7 +1,7 @@
 """Code Squid application prompt defaults and system-prompt assembly."""
 
 from squid_core.platform_context import PlatformContext
-from squid_core.skills import Skill
+from squid_core.skills import Skill, SUPPORTED_PROMPT_SECTIONS
 from squid_core.agent.prompts import (
     PromptDefaults,
     system_prompt as core_system_prompt,
@@ -37,8 +37,8 @@ I fixed the issue and ran the tests. Everything is green. Interactive behavior w
 """.strip()
 
 
-# Keep coding discipline and the moved source preferences outside replaceable
-# sections; a custom Skill must not erase behavior previously protected by Core.
+# Coding policy belongs to this application. Skills may explicitly omit it,
+# independently of Core's protected protocol and runtime tool permissions.
 BASELINE_CODING_POLICY = """
 ## Baseline coding policy
 
@@ -97,15 +97,24 @@ Keep the final response concise and appropriate to the task. State the important
 """.strip()
 
 
+BASELINE_SECTIONS = {
+    "BASELINE_CODING_POLICY": BASELINE_CODING_POLICY,
+    "VISIBLE_NARRATION_GUIDANCE": VISIBLE_NARRATION_GUIDANCE,
+    "CODING_RESPONSE_EXAMPLES": CODING_RESPONSE_EXAMPLES,
+}
+SUPPORTED_DISABLE_SECTIONS = frozenset(SUPPORTED_PROMPT_SECTIONS | BASELINE_SECTIONS.keys())
+
+
 CODE_SQUID_PROMPT_DEFAULTS = PromptDefaults(
     agent_name="Code Squid",
     agent_identity=AGENT_IDENTITY,
-    # Keep narration and coding examples outside Skill-replaceable sections.
+    # Retain the combined public default for callers inspecting this field.
     baseline_policy="\n\n".join((
         BASELINE_CODING_POLICY, VISIBLE_NARRATION_GUIDANCE, CODING_RESPONSE_EXAMPLES,
     )),
     tool_usage_guidance=TOOL_USAGE_GUIDANCE,
     final_summary_requirements=FINAL_SUMMARY_REQUIREMENTS,
+    baseline_sections=BASELINE_SECTIONS,
 )
 
 

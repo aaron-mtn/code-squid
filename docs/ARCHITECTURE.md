@@ -950,8 +950,16 @@ file tools. The resolved Agent registry is passed to prompt assembly.
 reading and editing preferences, Windows shell-discovery preferences, final
 report style, and coding-specific response examples. Narration and coding
 examples and source/shell-discovery preferences are included in the
-non-replaceable application baseline policy, so
-replacing any fixed section preserves them. Tool guidance and final report style
+application baseline policy. Its components are independently named
+`BASELINE_CODING_POLICY`, `VISIBLE_NARRATION_GUIDANCE`, and `CODING_RESPONSE_EXAMPLES`
+through `PromptDefaults.baseline_sections`; the combined `baseline_policy` field
+remains intact for existing consumers. An optional `## DISABLE_PROMPT_SECTIONS`
+dash list can omit those names or any of the three fixed override slots.
+Code Squid supplies `SUPPORTED_DISABLE_SECTIONS` to Core's Skill and Mod loaders,
+including CLI selection and authoring validation. Unknown/protected/duplicate names
+and disable/override conflicts fail validation. The default prompt text, ordering,
+and separators are unchanged. Core protocol and runtime permissions are unaffected.
+Replacing a fixed section alone still preserves the baseline components. Tool guidance and final report style
 retain their existing append/replace behavior. Exact patch diagnostics and
 selectable candidates remain preferred before rereading, and shell edits remain
 an inappropriate workaround for a failed dedicated editing tool.

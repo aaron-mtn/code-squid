@@ -2,7 +2,8 @@
 
 from code_squid.app_paths import code_squid_home
 from code_squid.mods import load_mod
-from squid_core.skills import Skill, discover_skills
+from squid_core.skills import Skill
+from code_squid.agent_setup import discover_skills_for_app as discover_skills
 
 
 SKILL_COMMAND = "/skill"

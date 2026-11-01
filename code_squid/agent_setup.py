@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping
 
-from code_squid.agent.prompts import CODE_SQUID_PROMPT_DEFAULTS
+from code_squid.agent.prompts import CODE_SQUID_PROMPT_DEFAULTS, SUPPORTED_DISABLE_SECTIONS
 from code_squid import provider_setup
 from code_squid.compaction_context import CodeSquidCompactionContextProvider
 from code_squid.asset_preflight import SessionAssetPreflight
@@ -416,6 +416,11 @@ def build_hook_runner(
     return HookRunner(combined_hooks)
 
 
+def discover_skills_for_app(*, app_home):
+    """Keep standalone discovery aligned with this application's prompt contract."""
+    return discover_skills(app_home=app_home, supported_disable_sections=SUPPORTED_DISABLE_SECTIONS)
+
+
 def resolve_skill_tools(
     skill_name: str | None,
     *,
@@ -427,7 +432,7 @@ def resolve_skill_tools(
         return None, TOOLS
 
     app_home = code_squid_home(app_home)
-    skills = discover_skills(app_home=app_home)
+    skills = discover_skills(app_home=app_home, supported_disable_sections=SUPPORTED_DISABLE_SECTIONS)
     skill = skills.get(skill_name)
     if skill is None:
         available = ", ".join(sorted(skills)) or "none"

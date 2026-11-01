@@ -14,6 +14,8 @@ from squid_core.mods import discover_mods as discover_user_mods
 from squid_core.mods import load_mod as load_core_mod
 from squid_core.mods import resolve_mod as resolve_core_mod
 
+from code_squid.agent.prompts import SUPPORTED_DISABLE_SECTIONS
+
 
 BUILTIN_MOD_NAMES = frozenset({"mod-builder"})
 
@@ -33,12 +35,15 @@ def bundled_mod_home() -> Path:
 
 def load_mod(name: str, app_home: Path | str, **kwargs) -> Mod:
     """Prefer the reserved bundled identity, even when its resources are damaged."""
+    # Forward the same host-owned text targets through discovery and execution.
+    kwargs.setdefault("supported_disable_sections", SUPPORTED_DISABLE_SECTIONS)
     home = bundled_mod_home() if name in BUILTIN_MOD_NAMES else app_home
     return load_core_mod(name, home, **kwargs)
 
 
 def discover_mods(app_home: Path | str, **kwargs) -> dict[str, Mod]:
     """Merge metadata without executing components or modifying user packages."""
+    kwargs.setdefault("supported_disable_sections", SUPPORTED_DISABLE_SECTIONS)
     mods = discover_user_mods(app_home, **kwargs)
     for name in sorted(BUILTIN_MOD_NAMES):
         try:
@@ -56,6 +61,8 @@ def discover_mods(app_home: Path | str, **kwargs) -> dict[str, Mod]:
 
 def resolve_mod(name: str, app_home: Path | str, **kwargs):
     """Resolve with Core; only the selected package home changes for built-ins."""
+    # Forward the same host-owned text targets through discovery and execution.
+    kwargs.setdefault("supported_disable_sections", SUPPORTED_DISABLE_SECTIONS)
     home = bundled_mod_home() if name in BUILTIN_MOD_NAMES else app_home
     return resolve_core_mod(name, home, **kwargs)
 
