@@ -63,8 +63,8 @@ convenient editable-development checkout layout is:
 Below, `squid_core/` and `squid_providers/` paths refer to their respective
 repositories. Neither source package is bundled into Code Squid. Installed
 packages do not require sibling directories. `requirements.txt` supports the
-editable layout above; README documents public GitHub installation with all
-three explicit sources, without assuming Core or Providers is on PyPI.
+editable layout above; README documents installing the app from its GitHub
+release and resolving Core and Providers from PyPI.
 
 ## Component Layout
 
@@ -297,13 +297,15 @@ three explicit sources, without assuming Core or Providers is on PyPI.
   - Squid Core's `pyproject.toml` builds only Core, without mandatory transport
     dependencies. Its `documents` extra supplies document/image reader libraries.
   - `../squid-providers/pyproject.toml` builds only Providers, requiring Core,
-    OpenAI, and httpx. Code Squid pins Core and Providers to `0.1.0`; source
-    installation supplies those distributions explicitly from GitHub or checkouts.
+    OpenAI, and httpx. Code Squid pins Core `0.2.0` and Providers `0.2.0`; source
+    installation supplies those distributions from PyPI and the app from GitHub.
+  - `CHANGELOG.md` records user-facing release changes and is included in source
+    distributions.
   - `README.md`, `docs/ARCHITECTURE.md`, and `docs/IMPLEMENTATION_NOTES.md`
     are the public documentation.
     Private development history and the historical extraction record stay local,
     untracked and excluded by `MANIFEST.in`; generated file trees are local too.
-  - Code Squid `0.1.0` metadata declares Python 3.11+, Aaron Slater, the README,
+  - Code Squid `0.1.2` metadata declares Python 3.11+, Aaron Slater, the README,
     and MIT licensing. `code-squid` dispatches to `main:main`. Package discovery
     is limited to `code_squid` and its subpackages plus the `main` module;
     `include-package-data = false` keeps local resource data out of the wheel.

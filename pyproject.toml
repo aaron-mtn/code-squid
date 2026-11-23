@@ -11,7 +11,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{name = "Aaron Slater"}]
 requires-python = ">=3.11"
-dependencies = ["squid-core==0.1.0", "squid-providers==0.1.1", "prompt_toolkit", "wcwidth"]
+dependencies = ["squid-core==0.2.0", "squid-providers==0.2.0", "prompt_toolkit", "wcwidth"]
 
 [project.scripts]
 code-squid = "main:main"

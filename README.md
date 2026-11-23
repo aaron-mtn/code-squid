@@ -35,7 +35,7 @@ Create a virtual environment and install Code Squid from GitHub:
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-python -m pip install "git+https://github.com/aaron-mtn/code-squid.git@v0.1.0"
+python -m pip install "git+https://github.com/aaron-mtn/code-squid.git@v0.1.2"
 ```
 
 On Linux, activate the virtual environment with `source .venv/bin/activate` instead.
@@ -45,7 +45,7 @@ Squid Core and Squid Providers are installed automatically from PyPI as dependen
 For optional document, spreadsheet, PDF, and image reading support, install:
 
 ```powershell
-python -m pip install "squid-core[documents]==0.1.0"
+python -m pip install "squid-core[documents]==0.2.0"
 ```
 
 The additional libraries are not required for ordinary text files, code editing, or shell commands. Image reading also requires a vision-capable model and supported provider.
